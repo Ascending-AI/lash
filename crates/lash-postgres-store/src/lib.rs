@@ -182,7 +182,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 51 adds durable runtime-owned tool-intent first-submission rows and
 // process-parent teardown retention. Lash-managed version-50 stores take the
 // explicit 50 -> 51 creation-only migration at open.
-const SCHEMA_VERSION: i32 = 51;
+// Version 52 adds the attachment GC fence's per-digest condemnation table.
+// Lash-managed version-51 stores take the explicit 51 -> 52 creation-only
+// migration at open.
+const SCHEMA_VERSION: i32 = 52;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -441,11 +444,12 @@ impl PostgresStorage {
     /// `lash_schema_versions`.
     ///
     /// The component schema is normally a reject-and-recreate boundary. This
-    /// build has one explicit exception: Lash-managed `Enforce` mode can apply
-    /// the creation-only migration from the published component-50 shape to 51
-    /// after an exact source-shape preflight. A component-50 stamp over
-    /// version-51 artifacts is ledger/schema divergence and is refused with an
-    /// inspect-and-recreate remedy; other mismatches are rejected at open.
+    /// build has two explicit exceptions: Lash-managed `Enforce` mode can apply
+    /// the creation-only migrations from the published component-50 or
+    /// component-51 shapes to 52 after an exact source-shape preflight. An older
+    /// stamp over newer artifacts is ledger/schema divergence and is refused
+    /// with an inspect-and-recreate remedy; other mismatches are rejected at
+    /// open.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
@@ -1357,6 +1361,128 @@ mod tests {
             .delete_session(&session_id)
             .await
             .expect("delete checkpoint counter session");
+    }
+
+    /// The whole attachment GC fence state machine against PostgreSQL: every
+    /// transition is a conditional statement under the per-digest advisory key,
+    /// and none of them reads a clock.
+    ///
+    /// Multi-threaded on purpose: the manifest surface is synchronous, so each
+    /// call blocks its thread on a detached runtime while the pool's IO driver
+    /// must keep running on another.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn attachment_gc_fence_state_machine_is_durable_and_clockless() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping Postgres attachment fence proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect attachment fence database");
+        let session_id = format!("postgres-attachment-fence:{}", std::process::id());
+        let store = storage.session_store(&session_id);
+        let factory = storage.session_store_factory();
+        let attachment_id = lash_core::AttachmentId::new(format!("fence-{}", std::process::id()));
+        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
+            .bind(attachment_id.as_str())
+            .execute(storage.pool())
+            .await
+            .expect("clear condemnation fixture");
+        let intent = || lash_core::AttachmentIntent {
+            attachment_id: attachment_id.clone(),
+            session_id: session_id.clone(),
+            canonical_uri: format!("lash-attachment://sha256/{attachment_id}"),
+            intent_at_epoch_ms: 1,
+            owner_kind: None,
+            owner_id: None,
+        };
+
+        // A recorded intent is a root: the condemn CAS refuses.
+        assert!(matches!(
+            lash_core::AttachmentManifest::begin_attachment_write(&store, intent())
+                .expect("first fenced write"),
+            lash_core::AttachmentWriteFence::Granted
+        ));
+        assert_eq!(
+            lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+                .await
+                .expect("condemn a rooted digest"),
+            lash_core::AttachmentCondemnation::RootPresent
+        );
+
+        // Drop the root and the digest becomes condemnable — once.
+        lash_core::AttachmentManifest::forget(&store, &session_id, &attachment_id)
+            .expect("forget the ref");
+        assert_eq!(
+            lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+                .await
+                .expect("condemn"),
+            lash_core::AttachmentCondemnation::Condemned
+        );
+        assert_eq!(
+            lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+                .await
+                .expect("second condemn"),
+            lash_core::AttachmentCondemnation::AlreadyCondemned,
+            "a peer sweeper's condemnation is skipped, never waited on"
+        );
+
+        // A writer revokes the condemnation, so the delete can no longer be armed.
+        assert!(matches!(
+            lash_core::AttachmentManifest::begin_attachment_write(&store, intent())
+                .expect("write against a condemned digest"),
+            lash_core::AttachmentWriteFence::Granted
+        ));
+        assert_eq!(
+            lash_core::AttachmentRootSet::arm_attachment_delete(&factory, &attachment_id)
+                .await
+                .expect("arm after revocation"),
+            lash_core::AttachmentDeleteArming::Revoked
+        );
+
+        // Armed: a writer parks instead of writing bytes into an in-flight
+        // delete, and the release is what lets it through.
+        lash_core::AttachmentManifest::forget(&store, &session_id, &attachment_id)
+            .expect("forget the ref again");
+        assert_eq!(
+            lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+                .await
+                .expect("re-condemn"),
+            lash_core::AttachmentCondemnation::Condemned
+        );
+        assert_eq!(
+            lash_core::AttachmentRootSet::arm_attachment_delete(&factory, &attachment_id)
+                .await
+                .expect("arm"),
+            lash_core::AttachmentDeleteArming::Armed
+        );
+        assert!(matches!(
+            lash_core::AttachmentManifest::begin_attachment_write(&store, intent())
+                .expect("write against an armed digest"),
+            lash_core::AttachmentWriteFence::ReclamationInFlight
+        ));
+        assert!(
+            !lash_core::AttachmentManifest::holds_ref(&store, &session_id, &attachment_id)
+                .expect("holds_ref"),
+            "a parked writer must record no intent"
+        );
+        lash_core::AttachmentRootSet::release_attachment_condemnation(&factory, &attachment_id)
+            .await
+            .expect("release");
+        assert!(matches!(
+            lash_core::AttachmentManifest::begin_attachment_write(&store, intent())
+                .expect("write after the release"),
+            lash_core::AttachmentWriteFence::Granted
+        ));
+
+        lash_core::AttachmentManifest::forget(&store, &session_id, &attachment_id)
+            .expect("clean up the ref");
+        factory
+            .delete_session(&session_id)
+            .await
+            .expect("delete fence session");
     }
 
     #[tokio::test]

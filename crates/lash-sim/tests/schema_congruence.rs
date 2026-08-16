@@ -10,6 +10,7 @@ const SHAPE_CHANGED_TABLES: &[(&str, &str)] = &[
     ("process_parent_end_plans", "lash_process_parent_end_plans"),
     ("tool_intent_submissions", "lash_tool_intent_submissions"),
     ("queued_work_batches", "lash_queued_work_batches"),
+    ("attachment_condemnations", "lash_attachment_condemnations"),
 ];
 
 fn consume_keyword<'a>(source: &'a str, keyword: &str) -> Option<&'a str> {
@@ -124,12 +125,12 @@ fn sqlite_and_postgres_table_sets_are_congruent() {
 
     assert_eq!(
         sqlite.len(),
-        38,
+        39,
         "SQLite schema table count changed; update the explicit cross-backend mapping"
     );
     assert_eq!(
         postgres_raw.len(),
-        39,
+        40,
         "Postgres schema table count changed; update the explicit cross-backend mapping"
     );
     assert!(

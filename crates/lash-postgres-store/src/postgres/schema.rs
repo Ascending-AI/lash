@@ -17,24 +17,17 @@ struct SchemaMigration {
     statements: &'static [&'static str],
 }
 
-const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
-    from: 50,
-    to: 51,
-    source_missing_tables: &[
-        "lash_process_parent_end_plans",
-        "lash_tool_intent_submissions",
-    ],
-    introduced_relations: &[
-        "lash_process_parent_end_plans",
-        "lash_tool_intent_submissions",
-        "idx_lash_tool_intent_submissions_scope",
-    ],
-    statements: &[
-        r#"CREATE TABLE lash_process_parent_end_plans (
+const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_condemnations (
+            attachment_id TEXT PRIMARY KEY,
+            phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))
+        )"#;
+
+const PROCESS_PARENT_END_PLANS_DDL: &str = r#"CREATE TABLE lash_process_parent_end_plans (
             process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
             actions_json TEXT NOT NULL
-        )"#,
-        r#"CREATE TABLE lash_tool_intent_submissions (
+        )"#;
+
+const TOOL_INTENT_SUBMISSIONS_DDL: &str = r#"CREATE TABLE lash_tool_intent_submissions (
             replay_key TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
             execution_scope_id TEXT NOT NULL,
@@ -43,14 +36,51 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
             kind TEXT NOT NULL,
             payload_hash TEXT NOT NULL,
             submission_json TEXT NOT NULL
-        )"#,
-        r#"CREATE INDEX idx_lash_tool_intent_submissions_scope
-            ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index)"#,
-        r#"UPDATE lash_schema_versions
-           SET version = 51
-         WHERE component = 'lash-postgres-store' AND version = 50"#,
-    ],
-}];
+        )"#;
+
+const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_intent_submissions_scope
+            ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index)"#;
+
+const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        from: 51,
+        to: 52,
+        source_missing_tables: &["lash_attachment_condemnations"],
+        introduced_relations: &["lash_attachment_condemnations"],
+        statements: &[
+            ATTACHMENT_CONDEMNATIONS_DDL,
+            r#"UPDATE lash_schema_versions
+               SET version = 52
+             WHERE component = 'lash-postgres-store' AND version = 51"#,
+        ],
+    },
+    // Component-50 stores skipped the 51 generation entirely; they take one
+    // creation-only migration that lands both generations at once.
+    SchemaMigration {
+        from: 50,
+        to: 52,
+        source_missing_tables: &[
+            "lash_attachment_condemnations",
+            "lash_process_parent_end_plans",
+            "lash_tool_intent_submissions",
+        ],
+        introduced_relations: &[
+            "lash_attachment_condemnations",
+            "lash_process_parent_end_plans",
+            "lash_tool_intent_submissions",
+            "idx_lash_tool_intent_submissions_scope",
+        ],
+        statements: &[
+            PROCESS_PARENT_END_PLANS_DDL,
+            TOOL_INTENT_SUBMISSIONS_DDL,
+            TOOL_INTENT_SUBMISSIONS_INDEX_DDL,
+            ATTACHMENT_CONDEMNATIONS_DDL,
+            r#"UPDATE lash_schema_versions
+               SET version = 52
+             WHERE component = 'lash-postgres-store' AND version = 50"#,
+        ],
+    },
+];
 
 /// How one open should treat the database's schema.
 #[derive(Clone, Copy, Debug, Default)]
@@ -550,9 +580,10 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     };
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
-         The component schema is normally a reject-and-recreate boundary. This build has one \
-         explicit Lash-managed migration from the published component-50 shape to 51; it runs \
-         only under SchemaCheck::Enforce after an exact source-shape preflight. This mismatch \
+         The component schema is normally a reject-and-recreate boundary. This build has \
+         explicit Lash-managed migrations from the published component-50 and component-51 \
+         shapes to 52; they run only under SchemaCheck::Enforce after an exact source-shape \
+         preflight. This mismatch \
          has no applicable migration. Drain affected sessions and recreate the whole Lash trust \
          domain with this version: provision \
          the database from this build's schema.sql artifact, and reset the tombstones, await-event \

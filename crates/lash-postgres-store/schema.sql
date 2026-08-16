@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 51.
+-- lash-postgres-store schema, component version 52.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -236,6 +236,13 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_uncommitted
     WHERE committed_at_ms IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_owner
     ON lash_attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
+
+-- Attachment GC fence state, one row per condemned digest. Deliberately
+-- timestampless: the protocol is CAS transitions only, never an expiry.
+CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
+    attachment_id TEXT PRIMARY KEY,
+    phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))
+);
 
 CREATE TABLE IF NOT EXISTS lash_process_change_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
@@ -482,7 +489,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 51)
+VALUES ('lash-postgres-store', 52)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

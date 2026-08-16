@@ -1141,7 +1141,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 51")
+                && rendered.contains("expected 52")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
@@ -1149,10 +1149,10 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
     scratch.cleanup().await;
 }
 
-/// Main's published component-50 shape upgrades through the single explicit
-/// 50 -> 51 migration before the creation-only target DDL is evaluated.
+/// Main's published component-50 shape upgrades through the explicit 50 -> 52
+/// migration before the creation-only target DDL is evaluated.
 #[tokio::test]
-async fn main_component_50_store_upgrades_cleanly_to_51() {
+async fn main_component_50_store_upgrades_cleanly_to_52() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-50 migration law: database URL is not set");
         return;
@@ -1160,7 +1160,8 @@ async fn main_component_50_store_upgrades_cleanly_to_51() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "DROP TABLE lash_tool_intent_submissions;
+            "DROP TABLE lash_attachment_condemnations;
+             DROP TABLE lash_tool_intent_submissions;
              DROP TABLE lash_process_parent_end_plans;
              UPDATE lash_schema_versions
                 SET version = 50
@@ -1177,7 +1178,7 @@ async fn main_component_50_store_upgrades_cleanly_to_51() {
         },
     )
     .await
-    .expect("the exact published component-50 shape migrates to 51");
+    .expect("the exact published component-50 shape migrates to 52");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1185,8 +1186,9 @@ async fn main_component_50_store_upgrades_cleanly_to_51() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 51);
+    assert_eq!(version, 52);
     for table in [
+        "lash_attachment_condemnations",
         "lash_process_parent_end_plans",
         "lash_tool_intent_submissions",
     ] {
@@ -1198,6 +1200,52 @@ async fn main_component_50_store_upgrades_cleanly_to_51() {
                 .expect("read migrated table");
         assert!(present, "migration omitted {table}");
     }
+    scratch.cleanup().await;
+}
+
+/// The published component-51 shape upgrades through the explicit 51 -> 52
+/// migration that introduces the attachment GC fence's condemnation table.
+#[tokio::test]
+async fn main_component_51_store_upgrades_cleanly_to_52() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-51 migration law: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "DROP TABLE lash_attachment_condemnations;
+             UPDATE lash_schema_versions
+                SET version = 51
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::LashManaged,
+            schema_check: SchemaCheck::Enforce,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("the exact published component-51 shape migrates to 52");
+
+    let version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read migrated component version");
+    assert_eq!(version, 52);
+    let present: bool =
+        sqlx::query_scalar("SELECT to_regclass(current_schema() || '.' || $1) IS NOT NULL")
+            .bind("lash_attachment_condemnations")
+            .fetch_one(&scratch.pool)
+            .await
+            .expect("read migrated table");
+    assert!(present, "migration omitted lash_attachment_condemnations");
     scratch.cleanup().await;
 }
 
@@ -1229,7 +1277,8 @@ async fn component_50_migration_stays_in_the_anchored_namespace() {
         .expect("provision current schema in anchored namespace");
     admin
         .execute(
-            "DROP TABLE lash_tool_intent_submissions;
+            "DROP TABLE lash_attachment_condemnations;
+             DROP TABLE lash_tool_intent_submissions;
              DROP TABLE lash_process_parent_end_plans;
              UPDATE lash_schema_versions
                 SET version = 50
@@ -1309,12 +1358,12 @@ async fn component_50_migration_stays_in_the_anchored_namespace() {
     }
 }
 
-/// A component-50 stamp on a component-51 catalog is not a migration source.
+/// A component-50 stamp on a current-generation catalog is not a migration source.
 /// It is evidence that the version ledger and live schema diverged, so Lash
 /// must refuse before running any migration DDL rather than guessing which
 /// parts of an apparently newer catalog are trustworthy.
 #[tokio::test]
-async fn component_50_stamp_with_51_artifacts_is_refused_without_mutation() {
+async fn component_50_stamp_with_newer_artifacts_is_refused_without_mutation() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-50 divergence law: database URL is not set");
         return;
@@ -1340,6 +1389,7 @@ async fn component_50_stamp_with_51_artifacts_is_refused_without_mutation() {
     )
     .bind(vec![
         "idx_lash_tool_intent_submissions_scope",
+        "lash_attachment_condemnations",
         "lash_process_parent_end_plans",
         "lash_tool_intent_submissions",
     ])
@@ -1348,8 +1398,8 @@ async fn component_50_stamp_with_51_artifacts_is_refused_without_mutation() {
     .expect("probe divergent migration artifacts before open");
     assert_eq!(
         before.len(),
-        3,
-        "the fixture must retain all version-51 artifacts"
+        4,
+        "the fixture must retain every newer-generation artifact"
     );
 
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
@@ -1364,12 +1414,15 @@ async fn component_50_stamp_with_51_artifacts_is_refused_without_mutation() {
         .await
         .err()
         .unwrap_or_else(|| {
-            panic!("a component-50 stamp over version-51 artifacts must be refused under {check:?}")
+            panic!(
+                "a component-50 stamp over newer-generation artifacts must be refused under \
+                 {check:?}"
+            )
         });
         let rendered = error.to_string();
         for fragment in [
             "has version 50",
-            "expected 51",
+            "expected 52",
             "schema artifacts newer than the recorded version",
             "lash_process_parent_end_plans",
             "inspect and recreate",
@@ -1404,6 +1457,7 @@ async fn component_50_stamp_with_51_artifacts_is_refused_without_mutation() {
     )
     .bind(vec![
         "idx_lash_tool_intent_submissions_scope",
+        "lash_attachment_condemnations",
         "lash_process_parent_end_plans",
         "lash_tool_intent_submissions",
     ])
@@ -1439,7 +1493,8 @@ async fn drifted_component_50_source_is_refused_before_migration_ddl() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "DROP TABLE lash_tool_intent_submissions;
+            "DROP TABLE lash_attachment_condemnations;
+             DROP TABLE lash_tool_intent_submissions;
              DROP TABLE lash_process_parent_end_plans;
              DROP TABLE lash_processes CASCADE;
              UPDATE lash_schema_versions
@@ -1462,7 +1517,7 @@ async fn drifted_component_50_source_is_refused_before_migration_ddl() {
     let rendered = error.to_string();
     for fragment in [
         "has version 50",
-        "expected 51",
+        "expected 52",
         "does not match the published component-50 migration source shape",
         "lash_processes: table is missing",
         "inspect and recreate",
@@ -1514,7 +1569,8 @@ async fn warn_only_refuses_component_50_before_process_workers_can_open() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(
-            "DROP TABLE lash_tool_intent_submissions;
+            "DROP TABLE lash_attachment_condemnations;
+             DROP TABLE lash_tool_intent_submissions;
              DROP TABLE lash_process_parent_end_plans;
              UPDATE lash_schema_versions
                 SET version = 50
@@ -1540,7 +1596,7 @@ async fn warn_only_refuses_component_50_before_process_workers_can_open() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 50")
-                && rendered.contains("expected 51")
+                && rendered.contains("expected 52")
                 && rendered.contains("does not relax it"),
             "typed version refusal was lost for {provisioning:?}: {rendered}"
         );
@@ -1782,7 +1838,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 51 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 52 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1913,7 +1969,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(51)", "finding_total=0"],
+        &["found_version=Some(52)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -2085,7 +2141,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=51"]
+    for field in ["component=lash-postgres-store", "expected_version=52"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)
