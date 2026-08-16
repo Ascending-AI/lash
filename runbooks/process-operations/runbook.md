@@ -70,13 +70,14 @@ cargo test -p lash-restate \
   --locked -- --nocapture --test-threads=1
 ```
 
-The PostgreSQL law must reach the public durable worker path for both segmented Lashlang and
-`ToolCall` parents. It must retain two literal cancel actions at terminal commit, survive the
-side-effect/outcome and outcome/plan-clear crash intervals, tolerate another actor cancelling a
-child, settle concurrent startup scans, and make a post-clear redrive issue no command. The
-Restate law must replay a committed tool-intent batch, crash after the first child cancellation
-but before its typed outcome is journaled, and then record both literal command frames and both
-literal `Cancelled` outcomes exactly once.
+The PostgreSQL law must reach the public durable worker path for a `ToolCall` parent with a
+retained cancel action. It must settle concurrent startup scans by ensuring racing workers observe
+the literal `Cancelled` outcome, the pending plan clears, exactly one `process.cancel_requested`
+event is appended to the child, and no provider calls occur during settlement. (Coverage for
+segmented Lashlang parents, mid-plan crash intervals, and post-clear redrive is not implemented in
+this law; that honest gap is recorded in History). The Restate law must replay a committed
+tool-intent batch, crash after the child cancellation but before its typed outcome is journaled,
+and then record the literal command frame and literal `Cancelled` outcome exactly once.
 
 **Fail if:** PostgreSQL is skipped, either law uses a private registration runner, expected
 identities or outcomes are derived from observed production values, the pending plan clears
@@ -285,6 +286,11 @@ model/host boundary or manufacturing success after a crash?
 
 ## History
 
+- **FIG-1402**: Fixed FIG-1292 parent-end preflight prose to claim exactly what the PostgreSQL
+  law file (`process_parent_atomicity.rs`) tests: a `ToolCall` parent with a single child
+  cancellation settled across concurrent startup scanners. Recorded the honest gap that tests for
+  segmented Lashlang parents, crash intervals, and post-clear redrive are not yet implemented in
+  that law suite.
 - **FIG-1402**: Re-targeted FIG-1293 migrated-tool atomicity judgments away from host-affecting
   `shell.*` authorities to deterministic world-tool and process authorities on the Agent
   Workbench, and targeted protocol `batch` on `slack-clone` where the standard protocol is
