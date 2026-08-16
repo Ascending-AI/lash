@@ -4,8 +4,8 @@
 > tokens and adds only the RLM cell-boundary gates.
 
 **Purpose.** Prove that a live Workbench RLM turn sends no provider stop
-sequences, records caller-stop suppression honestly, accepts the first complete
-Lashlang cell, and never executes content after that boundary.
+sequences, records stop-sequence disposition honestly (`not_requested`), accepts
+the first complete Lashlang cell, and never executes content after that boundary.
 
 ## Scenario-specific golden rules
 
@@ -99,3 +99,14 @@ Stop everything started by this run and confirm teardown. Record PASS/FAIL for:
 | Suffix never executed | | rendered activity + trajectory |
 | Typed abort evidence and observed usage retained | | `02-boundary-trace.json` |
 | Automated adversarial split laws green | | exact test commands and exits |
+
+---
+
+## History
+
+- **FIG-1306 / FIG-1402**: Re-anchored unreachable live gates onto what the Workbench
+  can honestly observe: gated on `not_requested` stop disposition rather than unreachable
+  `suppressed_protocol_owned` (since the Workbench exposes no caller stop-sequence controls),
+  gated on `body_len` + `body_sha256` and size-limit omission rather than requiring full
+  request JSON when exceeding `MAX_PROVIDER_REQUEST_BODY_JSON_BYTES`, and delegated caller-stop
+  suppression to deterministic laws per ADR 0047 disposition honesty.

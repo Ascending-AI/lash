@@ -36,12 +36,16 @@ artifacts are the backend truth for this judged runbook.
 5. **Retention never guesses.** Trigger mutation receipts survive process pruning. Delivery rows
    are deleted only after their process tombstone proves pruning, and an outstanding delivery
    prevents tombstone compaction.
-6. **Migrated tools have one full-tier contract.** In the agent workbench, `shell.start`
-   (tracked or detached), `shell.write`, `spawn_agent`, `processes.cancel`, and protocol-standard
-   `batch` must succeed through their leaf-intent or process-replay shape on Restate exactly as
-   they do on in-memory and PostgreSQL. Any FIG-1127 ordinal-tier refusal from those public tools
-   is a regression. The legacy journal-capable `ToolContext` routes remain fenced until their
-   aggregate removal.
+6. **Migrated tools have one full-tier contract without host-affecting authorities.**
+   Judged runbooks must never hand agents host-affecting authorities (`shell.*`).
+   Instead, deterministic world-tool and process authorities (`process.start`,
+   `process.signal`, `processes.cancel`, `spawn_agent`) run against the fullest-authority
+   deterministic host (Agent Workbench with its deterministic mock mail world and process
+   engine), while protocol-standard `batch` runs against the host where the standard
+   protocol is native (`slack-clone`). Each tool must succeed through its leaf-intent or
+   process-replay shape on Restate exactly as it does on in-memory and PostgreSQL. Any
+   FIG-1127 ordinal-tier refusal from those public tools is a regression. The legacy
+   journal-capable `ToolContext` routes remain fenced until their aggregate removal.
 7. **Parent teardown is a typed durable plan, not terminal-state cleanup.** A terminal parent may
    retain multiple ordered `ParentEnd` commands. Each command must record a literal
    `ToolIntentParentEndOutcome`; a crash after the child side effect, between commands, or before
@@ -66,13 +70,14 @@ cargo test -p lash-restate \
   --locked -- --nocapture --test-threads=1
 ```
 
-The PostgreSQL law must reach the public durable worker path for both segmented Lashlang and
-`ToolCall` parents. It must retain two literal cancel actions at terminal commit, survive the
-side-effect/outcome and outcome/plan-clear crash intervals, tolerate another actor cancelling a
-child, settle concurrent startup scans, and make a post-clear redrive issue no command. The
-Restate law must replay a committed tool-intent batch, crash after the first child cancellation
-but before its typed outcome is journaled, and then record both literal command frames and both
-literal `Cancelled` outcomes exactly once.
+The PostgreSQL law must reach the public durable worker path for a `ToolCall` parent with a
+retained cancel action. It must settle concurrent startup scans by ensuring racing workers observe
+the literal `Cancelled` outcome, the pending plan clears, exactly one `process.cancel_requested`
+event is appended to the child, and no provider calls occur during settlement. (Coverage for
+segmented Lashlang parents, mid-plan crash intervals, and post-clear redrive is not implemented in
+this law; that honest gap is recorded in History). The Restate law must replay a committed
+tool-intent batch, crash after the child cancellation but before its typed outcome is journaled,
+and then record the literal command frame and literal `Cancelled` outcome exactly once.
 
 **Fail if:** PostgreSQL is skipped, either law uses a private registration runner, expected
 identities or outcomes are derived from observed production values, the pending plan clears
@@ -81,21 +86,28 @@ before every action is durably represented, or any redrive appends a second
 
 ## FIG-1293 migrated-tool atomicity judgment
 
-Run these rows against the agent workbench's Restate tier before Phase 0. Use a fresh session for
-each row and save the rendered transcript, `/api/state`, Restate invocation/journal inspection,
-and `trace.jsonl` extract under a row-named artifact directory. Submit the named tool call, wait
-until its turn is active and its first durable child command is visible, then replace **only** the
-workbench worker with `just agent-workbench-restart <port>` while preserving the same run/data
-directories and Restate container. Never use Restate Admin kill as a substitute. After recovery,
-reconcile DOM, API/durable messages, trace executions, and the literal outcome below.
+Run these rows against the appropriate Restate-backed host tier before Phase 0:
+the four deterministic process/world-tool rows (`process-start-detach`, `process-signal`,
+`processes-cancel`, and `spawn-agent`) target the Agent Workbench's Restate tier
+(using its deterministic mock world tools and process lifecycle without host-affecting shell
+plugins), while the `protocol-batch` row targets `slack-clone` where the standard protocol is
+native.
+
+Use a fresh session for each row and save the rendered transcript, `/api/state`, Restate
+invocation/journal inspection, and `trace.jsonl` extract under a row-named artifact directory.
+Submit the named tool call, wait until its turn is active and its first durable child command
+is visible, then replace **only** the target worker (via `just agent-workbench-restart <port>`
+or the target host restart recipe) while preserving the same run/data directories and Restate
+container. Never use Restate Admin kill as a substitute. After recovery, reconcile DOM,
+API/durable messages, trace executions, and the literal outcome below.
 
 | Row | Public call and literal oracle | Required Restate journal shape after worker replacement |
 |---|---|---|
-| `shell-start-detach` | Invoke tracked `shell.start` once and detached `shell.start` once. Each result contains its exact pre-recorded `process_id`; the tracked row is `running`, while the detached audit row is externally owned and terminal with `status="detached"`. The acceptance must also inspect the real OS child: its parent is no longer the shell worker and it remains alive after that worker/runtime is dropped. | Each call has one recorded `StartProcess` intent with `on_parent_end=Abandon`; the detached flag and audit id remain in the recorded internal body, and redrive retains one launcher/audit identity with no duplicate host launch, no `ToolAttempt`-nested process command, and no FIG-1127 refusal. |
-| `shell-write` | Start a stdin-reading tracked shell, call `shell.write` with literal `chars="fig1293\n"`, and require `{"process_id":<started-id>,"sequence":<recorded-event-sequence>,"status":"signalled"}`. | One `SignalProcess` command with signal `stdin` and payload `{"chars":"fig1293\n","close_stdin":false}`; the process observes the input once after recovery and the projected sequence equals the recorded signal event. |
-| `processes-cancel` | Start a long-lived tracked shell, call `processes.cancel` for its exact id, and require `{"process_id":<started-id>,"status":"cancelled"}`. | One `CancelProcess` command and one `process.cancel_requested` event for the exact id; redrive emits neither a duplicate event nor an ordinal-tier refusal. |
+| `process-start-detach` | Invoke tracked deterministic process start once and detached deterministic process start once. Each result contains its exact pre-recorded `process_id`; the tracked row is `running`, while the detached audit row is externally owned and terminal with `status="detached"`. The acceptance must inspect the durable process lifecycle: the detached task remains alive and externally owned after the originating worker/runtime is dropped. | Each call has one recorded `StartProcess` intent with `on_parent_end=Abandon`; the detached flag and audit id remain in the recorded internal body, and redrive retains one launcher/audit identity with no duplicate launch, no `ToolAttempt`-nested process command, and no FIG-1127 refusal. |
+| `process-signal` | Start a signal-receiving tracked process, call `process.signal` with literal payload `{"signal":"ping"}`, and require `{"process_id":<started-id>,"sequence":<recorded-event-sequence>,"status":"signalled"}`. | One `SignalProcess` command with signal `ping` and payload `{"signal":"ping"}`; the process observes the input once after recovery and the projected sequence equals the recorded signal event. |
+| `processes-cancel` | Start a long-lived tracked process, call `processes.cancel` for its exact id, and require `{"process_id":<started-id>,"status":"cancelled"}`. | One `CancelProcess` command and one `process.cancel_requested` event for the exact id; redrive emits neither a duplicate event nor an ordinal-tier refusal. |
 | `spawn-agent` | Call `spawn_agent` with a schema requiring `{"answer":"str"}` and require one matching child result. | The orchestration body has no enclosing `ToolAttempt`; its one start and one await are direct process-replay children for the same prepared child id, and recovery creates one child session/result. |
-| `protocol-batch` | Call protocol-standard `batch` with two literal side-effect-free child calls and require the ordered two-element literal result vector. | The batch body has no enclosing `ToolAttempt`; only the two children have attempt frames, and recovery retains their order and exactly one result per child. |
+| `protocol-batch` | Target `slack-clone` (native standard protocol host): Call protocol-standard `batch` with two literal side-effect-free child calls and require the ordered two-element literal result vector. | The batch body has no enclosing `ToolAttempt`; only the two children have attempt frames, and recovery retains their order and exactly one result per child. |
 
 **Pass only if:** all five rows recover to their literal outcomes, the three-layer counts and ids
 agree, each Restate journal has the required shape, no old ordinal-tier refusal appears, and the
@@ -271,6 +283,19 @@ operator to redrive, retarget, recover, reuse, and retain process work without w
 model/host boundary or manufacturing success after a crash?
 
 ---
+
+## History
+
+- **FIG-1402**: Fixed FIG-1292 parent-end preflight prose to claim exactly what the PostgreSQL
+  law file (`process_parent_atomicity.rs`) tests: a `ToolCall` parent with a single child
+  cancellation settled across concurrent startup scanners. Recorded the honest gap that tests for
+  segmented Lashlang parents, crash intervals, and post-clear redrive are not yet implemented in
+  that law suite.
+- **FIG-1402**: Re-targeted FIG-1293 migrated-tool atomicity judgments away from host-affecting
+  `shell.*` authorities to deterministic world-tool and process authorities on the Agent
+  Workbench, and targeted protocol `batch` on `slack-clone` where the standard protocol is
+  native, upholding the ruling that judged runbooks must never hand agents host-affecting
+  authorities.
 
 _Stop triggers and the Abort/RCA + reporting protocol are in [../RULES.md](../RULES.md). A
 failing live scenario is a product finding: preserve the artifact directory and stop; never
