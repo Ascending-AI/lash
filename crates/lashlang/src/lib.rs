@@ -87,9 +87,10 @@ pub use runtime::{
 #[doc(hidden)]
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, TYPESCRIPT_REGEXP_EXECUTION_FUEL,
-    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
-    TypeScriptRegExpValidationError, validate_canonical_messagepack_structure,
-    validate_typescript_regexp, validate_typescript_regexp_shape,
+    TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION, TYPESCRIPT_REGEXP_MAX_NESTING,
+    TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS, TypeScriptRegExpValidationError,
+    validate_canonical_messagepack_structure, validate_typescript_regexp,
+    validate_typescript_regexp_shape,
 };
 pub use runtime::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,

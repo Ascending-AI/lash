@@ -316,3 +316,95 @@ fn regexp_fuel_is_deterministic_and_uncatchable() {
             if limit == lashlang::TYPESCRIPT_REGEXP_EXECUTION_FUEL
     ));
 }
+
+/// A host with an instruction budget bounds regexp work too.
+///
+/// The per-call fuel bounds one match; nothing bounded a program that made a
+/// lot of them, so N instructions bought N million regexp steps and the only
+/// bound a host had on total work said nothing about the engine. Each granted
+/// allowance is now charged to the instruction budget, so a regexp-heavy loop
+/// runs out of budget instead of running unbounded.
+struct BudgetedHost {
+    instructions: std::num::NonZeroU64,
+}
+
+impl ExecutionHost for BudgetedHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected budgeted ability")),
+        }
+    }
+
+    fn execution_bounds(&self) -> lashlang::ExecutionBounds {
+        lashlang::ExecutionBounds::new(
+            lashlang::ExecutionBound::Bounded(self.instructions),
+            lashlang::ExecutionBound::Unbounded,
+            lashlang::ExecutionBound::Bounded(lashlang::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
+        )
+    }
+}
+
+fn execute_budgeted(source: &str, instructions: u64) -> Result<ExecutionOutcome, RuntimeError> {
+    let program = lash_typescript::compile(source)
+        .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
+    let host = BudgetedHost {
+        instructions: std::num::NonZeroU64::new(instructions).expect("nonzero budget"),
+    };
+    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+}
+
+#[test]
+fn a_regexp_heavy_loop_exhausts_the_instruction_budget() {
+    // Each iteration matches trivially and returns instantly, so nothing here
+    // trips the per-call fuel: only the charge links this loop to the budget.
+    let budget = 5_000;
+    let loop_body = |work: &str| {
+        format!(
+            "let hits = 0;\nfor (let i = 0; i < 100; i++) {{\n  if ({work}) {{ hits++; }}\n}}\nfinish(hits);"
+        )
+    };
+
+    // The control: the same loop, same budget, without the regexp. It has to
+    // complete, or this test would be measuring the loop rather than the
+    // regexp charge.
+    assert_eq!(
+        execute_budgeted(&loop_body("'xxabbbc'.includes('abbbc')"), budget)
+            .expect("the same loop without a regexp must fit the budget"),
+        ExecutionOutcome::Finished(Value::Number(100.0))
+    );
+
+    assert!(
+        matches!(
+            execute_budgeted(&loop_body("/ab+c/.test('xxabbbc')"), budget),
+            Err(RuntimeError::InstructionBudgetExceeded { limit }) if limit == budget
+        ),
+        "a regexp loop must be bounded by the instruction budget"
+    );
+
+    // The charge is a ratio, not a ban: the same loop finishes when the budget
+    // covers the regexp work it asks for.
+    assert_eq!(
+        execute_budgeted(&loop_body("/ab+c/.test('xxabbbc')"), 1_000_000)
+            .expect("a sufficient budget must complete"),
+        ExecutionOutcome::Finished(Value::Number(100.0))
+    );
+}
+
+/// The charge is exactly the granted allowance over the documented ratio, so
+/// two runs of the same program spend the same budget on every replay.
+#[test]
+fn the_regexp_charge_is_the_documented_ratio() {
+    let per_call = lashlang::TYPESCRIPT_REGEXP_EXECUTION_FUEL
+        / lashlang::TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION;
+    let source = "finish(/ab+c/.test('xxabbbc'));";
+    // One call costs its charge plus the handful of instructions the cell's own
+    // opcodes cost, and cannot cost less than the charge.
+    assert!(
+        matches!(
+            execute_budgeted(source, per_call - 1),
+            Err(RuntimeError::InstructionBudgetExceeded { .. })
+        ),
+        "one regexp call must cost at least the documented charge of {per_call}"
+    );
+}

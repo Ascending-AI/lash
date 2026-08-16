@@ -9,6 +9,22 @@ pub const TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS: usize = 4_096;
 pub const TYPESCRIPT_REGEXP_MAX_NESTING: usize = 32;
 pub const TYPESCRIPT_REGEXP_EXECUTION_FUEL: u64 = 1_000_000;
 
+/// How much regexp fuel one unit of the instruction budget buys.
+///
+/// The per-call fuel above bounds one match, not a program: a loop of a million
+/// `test` calls was a million independent million-step allowances, so the
+/// instruction budget — a host's only bound on total work — said nothing about
+/// the regexp engine. Charging each granted allowance back to that budget links
+/// the two, bounding total regexp work at `instruction_budget * this`.
+///
+/// `regress` reports only that an allowance was exhausted, never how much a
+/// match consumed, so the charge is the granted allowance: an upper bound,
+/// identical on every replay, which is what a durable budget needs. 10_000
+/// makes one call cost 100 instructions — steep enough to bound the
+/// amplification at ten thousand rather than a million, cheap enough that a
+/// cell which uses regexps at all stays affordable.
+pub const TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION: u64 = 10_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TypeScriptRegExpValidationError {
     PatternTooLong,
@@ -394,6 +410,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         honor_sticky: bool,
         max_matches: Option<usize>,
     ) -> Result<Vec<CapturedMatch>, RuntimeError> {
+        let fuel = self.grant_regexp_fuel();
         let program = self.regexp_program(receiver)?;
         let unicode = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => regexp.flags.contains('u'),
@@ -403,9 +420,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             && matches!(self.heap.get(receiver)?, HeapObject::RegExp(re) if re.flags.contains('y'));
         if unicode {
             let matches = if sticky {
-                program.try_find_from_utf16_anchored(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                program.try_find_from_utf16_anchored(input, start, fuel)
             } else {
-                program.try_find_from_utf16(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                program.try_find_from_utf16(input, start, fuel)
             };
             collect_bounded_regress_matches(
                 &self.heap,
@@ -418,9 +435,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             )
         } else {
             let matches = if sticky {
-                program.try_find_from_ucs2_anchored(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                program.try_find_from_ucs2_anchored(input, start, fuel)
             } else {
-                program.try_find_from_ucs2(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                program.try_find_from_ucs2(input, start, fuel)
             };
             collect_bounded_regress_matches(
                 &self.heap,
@@ -434,6 +451,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
+    /// Grants one regexp execution its fuel, charging the instruction budget
+    /// for the whole allowance first: the allowance is spent the moment it is
+    /// handed out, so the link holds even for a match that never returns.
+    fn grant_regexp_fuel(&mut self) -> u64 {
+        self.instructions_executed = self.instructions_executed.saturating_add(
+            TYPESCRIPT_REGEXP_EXECUTION_FUEL.div_ceil(TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION),
+        );
+        TYPESCRIPT_REGEXP_EXECUTION_FUEL
+    }
+
     fn first_regexp_match(
         &mut self,
         receiver: HeapId,
@@ -441,26 +468,27 @@ impl<H: ExecutionHost> Vm<'_, H> {
         start: usize,
         sticky: bool,
     ) -> Result<Option<CapturedMatch>, RuntimeError> {
+        let fuel = self.grant_regexp_fuel();
         let program = self.regexp_program(receiver)?;
         let unicode = matches!(self.heap.get(receiver)?, HeapObject::RegExp(regexp) if regexp.flags.contains('u'));
         let found = if unicode && sticky {
             program
-                .try_find_from_utf16_anchored(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                .try_find_from_utf16_anchored(input, start, fuel)
                 .next()
                 .transpose()
         } else if unicode {
             program
-                .try_find_from_utf16(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                .try_find_from_utf16(input, start, fuel)
                 .next()
                 .transpose()
         } else if sticky {
             program
-                .try_find_from_ucs2_anchored(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                .try_find_from_ucs2_anchored(input, start, fuel)
                 .next()
                 .transpose()
         } else {
             program
-                .try_find_from_ucs2(input, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL)
+                .try_find_from_ucs2(input, start, fuel)
                 .next()
                 .transpose()
         }
@@ -685,16 +713,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ));
         }
         let units = bounded_utf16_input(&self.heap, input)?;
+        let fuel = self.grant_regexp_fuel();
         let program = self.regexp_program(receiver)?;
         if unicode && sticky {
             self.collect_match_all_values(
                 input,
                 &units,
-                program.try_find_from_utf16_anchored(
-                    &units,
-                    start,
-                    TYPESCRIPT_REGEXP_EXECUTION_FUEL,
-                ),
+                program.try_find_from_utf16_anchored(&units, start, fuel),
                 unicode,
                 sticky,
                 start,
@@ -703,7 +728,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.collect_match_all_values(
                 input,
                 &units,
-                program.try_find_from_utf16(&units, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL),
+                program.try_find_from_utf16(&units, start, fuel),
                 unicode,
                 sticky,
                 start,
@@ -712,11 +737,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.collect_match_all_values(
                 input,
                 &units,
-                program.try_find_from_ucs2_anchored(
-                    &units,
-                    start,
-                    TYPESCRIPT_REGEXP_EXECUTION_FUEL,
-                ),
+                program.try_find_from_ucs2_anchored(&units, start, fuel),
                 unicode,
                 sticky,
                 start,
@@ -725,7 +746,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.collect_match_all_values(
                 input,
                 &units,
-                program.try_find_from_ucs2(&units, start, TYPESCRIPT_REGEXP_EXECUTION_FUEL),
+                program.try_find_from_ucs2(&units, start, fuel),
                 unicode,
                 sticky,
                 start,
@@ -818,6 +839,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             push_utf16_range_bounded(&self.heap, &mut output, &units, 0..end, &mut pending_bytes)?;
             return Ok(Value::List(output.into()));
         }
+        let fuel = self.grant_regexp_fuel();
         let program = self.regexp_program(*receiver)?;
         let unicode = matches!(
             self.heap.get(*receiver)?,
@@ -827,13 +849,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.collect_split_values(
                 &units,
                 limit as usize,
-                program.try_find_from_utf16(&units, 0, TYPESCRIPT_REGEXP_EXECUTION_FUEL),
+                program.try_find_from_utf16(&units, 0, fuel),
             )
         } else {
             self.collect_split_values(
                 &units,
                 limit as usize,
-                program.try_find_from_ucs2(&units, 0, TYPESCRIPT_REGEXP_EXECUTION_FUEL),
+                program.try_find_from_ucs2(&units, 0, fuel),
             )
         }
     }

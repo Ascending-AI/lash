@@ -41,9 +41,9 @@ use control::{VmMode, VmStep};
 use effects::VmEffect;
 use exceptions::{ExceptionHandler, FinallyCompletion, FinallyState};
 pub use javascript_regexp::{
-    TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_MAX_NESTING,
-    TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS, TypeScriptRegExpValidationError,
-    validate_typescript_regexp, validate_typescript_regexp_shape,
+    TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
+    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
+    TypeScriptRegExpValidationError, validate_typescript_regexp, validate_typescript_regexp_shape,
 };
 
 use super::heap::same_value_zero;
