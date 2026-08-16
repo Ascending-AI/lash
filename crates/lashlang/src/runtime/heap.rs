@@ -9,7 +9,12 @@ mod reference_assignment;
 mod url_objects;
 mod validation;
 
-use object::compound_identity;
+#[cfg(test)]
+use object::COLLECTION_ENTRY_BYTES;
+use object::{
+    OBJECT_HEADER_BYTES, RECORD_FIELD_BYTES, VALUE_SLOT_BYTES, compound_identity,
+    value_logical_bytes,
+};
 
 pub use id::HeapId;
 #[cfg(test)]
@@ -28,14 +33,13 @@ use super::{
     Value, add_values, coerce_string, record_with_capacity, resolve_existing_list_assignment_index,
 };
 
-pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 1;
+/// Which byte-charge schedule a persisted heap's `live_logical_bytes` was
+/// computed under. Version 2 charges a measured `VALUE_SLOT_BYTES`; version 1
+/// charged a quarter of it. A heap restored under a foreign schedule is refused
+/// by name rather than failing its own byte-counter cross-check.
+pub const HEAP_SIZE_SCHEDULE_VERSION: u32 = 2;
 pub const HEAP_GC_ALLOCATION_INTERVAL: u64 = 1_024;
 pub const DEFAULT_HEAP_LOGICAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
-
-const OBJECT_HEADER_BYTES: u64 = 16;
-const VALUE_SLOT_BYTES: u64 = 16;
-const RECORD_FIELD_BYTES: u64 = 8;
-const COLLECTION_ENTRY_BYTES: u64 = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HeapObject {
@@ -51,35 +55,6 @@ pub(crate) enum HeapObject {
     Error(ErrorObject),
     Url(UrlObject),
     UrlSearchParams(UrlSearchParamsObject),
-}
-
-fn value_logical_bytes(value: &Value) -> u64 {
-    VALUE_SLOT_BYTES.saturating_add(match value {
-        Value::Null | Value::Undefined => 1,
-        Value::Bool(_) => 1,
-        Value::Number(_) => 8,
-        Value::String(value) => value.len() as u64,
-        Value::Image(value) => 24_u64
-            .saturating_add(value.id.len() as u64)
-            .saturating_add(value.label.len() as u64),
-        Value::Resource(value) => 8_u64
-            .saturating_add(value.resource_type.len() as u64)
-            .saturating_add(value.alias.len() as u64),
-        Value::Ref(_) => 8,
-        Value::Tuple(values) | Value::List(values) => values
-            .iter()
-            .map(value_logical_bytes)
-            .fold(OBJECT_HEADER_BYTES, u64::saturating_add),
-        Value::Record(record) => record
-            .iter()
-            .fold(OBJECT_HEADER_BYTES, |total, (key, value)| {
-                total
-                    .saturating_add(RECORD_FIELD_BYTES)
-                    .saturating_add(key.len() as u64)
-                    .saturating_add(value_logical_bytes(value))
-            }),
-        Value::Projected(_) => VALUE_SLOT_BYTES,
-    })
 }
 
 #[derive(Clone, Debug, PartialEq)]

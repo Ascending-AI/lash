@@ -304,3 +304,37 @@ fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
         ));
     }
 }
+
+/// The budget's per-slot charge is the real slot size, not a guess that
+/// happened to be four times too small.
+#[test]
+fn value_slot_bytes_covers_the_real_value_slot() {
+    assert!(
+        std::mem::size_of::<Value>() as u64 <= VALUE_SLOT_BYTES,
+        "VALUE_SLOT_BYTES ({VALUE_SLOT_BYTES}) must charge at least what a Value slot really \
+         costs ({}); a variant grew the enum, so raise the charge with it",
+        std::mem::size_of::<Value>(),
+    );
+}
+
+/// The array pre-charge and the charge the committed list actually carries are
+/// the same arithmetic. They are written twice — once ahead of building the
+/// `Vec`, once from the built object — and a drift between them is either a
+/// pre-charge that lets an over-budget array through or one that refuses an
+/// array the heap would have accepted.
+#[test]
+fn the_list_pre_charge_matches_what_the_committed_list_is_charged() {
+    let mut heap = Heap::default();
+    for len in [0_usize, 1, 7, 64] {
+        let committed = HeapObject::List(vec![Value::Undefined; len]).logical_bytes();
+        let limit = heap.live_logical_bytes().saturating_add(committed);
+        heap.set_limit(limit);
+        heap.ensure_list_allocation_len(len)
+            .unwrap_or_else(|error| panic!("len {len} must pre-charge within {limit}: {error}"));
+        heap.set_limit(limit.saturating_sub(1));
+        assert!(
+            heap.ensure_list_allocation_len(len).is_err(),
+            "len {len} must not pre-charge under the exact committed charge"
+        );
+    }
+}

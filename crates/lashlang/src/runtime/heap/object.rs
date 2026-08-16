@@ -1,5 +1,53 @@
 use super::*;
 
+pub(super) const OBJECT_HEADER_BYTES: u64 = 16;
+/// What one `Value` slot costs the budget.
+///
+/// It is `size_of::<Value>()` — measured, not estimated, and pinned by
+/// `value_slot_bytes_covers_the_real_value_slot` so a variant that grows the
+/// enum cannot silently make every charge an under-count again. It was 16 for
+/// as long as nobody measured it, which under-charged every list element by
+/// four times: a host that budgeted 64 MiB of logical bytes could be holding
+/// 256 MiB of real ones, and array pre-charges — the guard between
+/// `Array.from({ length })` and the OOM killer — were computed against the same
+/// wrong number.
+///
+/// It deliberately does not model `Vec` capacity slack or allocator rounding.
+/// Those make the real figure larger still, never smaller, so the charge stays
+/// a lower bound on reality, which is the direction a budget must err in.
+pub(super) const VALUE_SLOT_BYTES: u64 = 64;
+pub(super) const RECORD_FIELD_BYTES: u64 = 8;
+pub(super) const COLLECTION_ENTRY_BYTES: u64 = 8;
+
+pub(super) fn value_logical_bytes(value: &Value) -> u64 {
+    VALUE_SLOT_BYTES.saturating_add(match value {
+        Value::Null | Value::Undefined => 1,
+        Value::Bool(_) => 1,
+        Value::Number(_) => 8,
+        Value::String(value) => value.len() as u64,
+        Value::Image(value) => 24_u64
+            .saturating_add(value.id.len() as u64)
+            .saturating_add(value.label.len() as u64),
+        Value::Resource(value) => 8_u64
+            .saturating_add(value.resource_type.len() as u64)
+            .saturating_add(value.alias.len() as u64),
+        Value::Ref(_) => 8,
+        Value::Tuple(values) | Value::List(values) => values
+            .iter()
+            .map(value_logical_bytes)
+            .fold(OBJECT_HEADER_BYTES, u64::saturating_add),
+        Value::Record(record) => record
+            .iter()
+            .fold(OBJECT_HEADER_BYTES, |total, (key, value)| {
+                total
+                    .saturating_add(RECORD_FIELD_BYTES)
+                    .saturating_add(key.len() as u64)
+                    .saturating_add(value_logical_bytes(value))
+            }),
+        Value::Projected(_) => VALUE_SLOT_BYTES,
+    })
+}
+
 /// Two heaps are equal when they hold the same live objects under the same IDs
 /// and the same meters.
 ///
