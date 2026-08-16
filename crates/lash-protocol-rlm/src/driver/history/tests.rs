@@ -257,3 +257,120 @@ fn legacy_unredacted_trajectory_errors_render_verbatim() {
     let messages = render(&[event]);
     assert!(observation_text(&messages[1]).contains("/legacy/worker/private.txt"));
 }
+
+fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord {
+    SessionHistoryRecord::Protocol(rlm_protocol_event(
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(lash_rlm_types::RlmTrajectoryEntry {
+            id: id.to_string(),
+            protocol_iteration: 0,
+            code: code.to_string(),
+            output: Vec::new(),
+            images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
+            error: Some(error.to_string()),
+            final_output: None,
+        }),
+    ))
+}
+
+fn protocol_feedback(id: &str, text: &str) -> SessionHistoryRecord {
+    SessionHistoryRecord::Conversation(ConversationRecord {
+        id: id.to_string(),
+        role: MessageRole::System,
+        parts: vec![Part::prose(format!("{id}.p0"), text.to_string(), None)].into(),
+        origin: Some(MessageOrigin::Plugin {
+            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            transient: false,
+        }),
+    })
+}
+
+fn rendered_text(messages: &[lash_core::llm::types::LlmMessage]) -> String {
+    messages
+        .iter()
+        .map(observation_text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Leg 2 of the retry-hygiene triple: a failed cell has to be visible to the
+/// model that must repair it. This is the leg the driver already had — pinned
+/// because it is the one a scrub is most likely to break.
+#[test]
+fn a_failed_cell_stays_visible_for_the_repair_turn() {
+    let transcript = rendered_text(&render(&[
+        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        protocol_feedback("s1", "That step failed; retry with a corrected program."),
+    ]));
+
+    assert!(transcript.contains("print undefined_name"), "{transcript}");
+    assert!(transcript.contains("unknown name"), "{transcript}");
+    assert!(
+        transcript.contains("retry with a corrected program"),
+        "{transcript}"
+    );
+}
+
+/// Leg 3: once a later cell runs clean, the dead end goes — cell, error
+/// observation, folded prose, and the repair instruction alike. A model
+/// re-reading its own discarded attempts re-attempts them.
+#[test]
+fn a_repaired_failure_is_scrubbed_after_the_next_success() {
+    let transcript = rendered_text(&render(&[
+        assistant_reasoning_event(&[], "Trying the direct read."),
+        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        protocol_feedback("s1", "That step failed; retry with a corrected program."),
+        step_event("print 1"),
+    ]));
+
+    assert!(!transcript.contains("undefined_name"), "{transcript}");
+    assert!(!transcript.contains("unknown name"), "{transcript}");
+    assert!(
+        !transcript.contains("retry with a corrected program"),
+        "{transcript}"
+    );
+    assert!(
+        !transcript.contains("Trying the direct read."),
+        "prose folded into a scrubbed cell must not reattach to the next one: {transcript}"
+    );
+    assert!(transcript.contains("print 1"), "{transcript}");
+}
+
+/// The scrub is scoped to the run of cells between turn boundaries. A user
+/// message opens new work, so a success after it has repaired nothing that came
+/// before and the earlier failure is still the model's own live context.
+#[test]
+fn a_failure_before_a_user_turn_survives_a_later_success() {
+    let transcript = rendered_text(&render(&[
+        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        SessionHistoryRecord::Conversation(ConversationRecord {
+            id: "u1".to_string(),
+            role: MessageRole::User,
+            parts: vec![Part::prose(
+                "u1.p0".to_string(),
+                "Now try something else.".to_string(),
+                None,
+            )]
+            .into(),
+            origin: None,
+        }),
+        step_event("print 1"),
+    ]));
+
+    assert!(transcript.contains("undefined_name"), "{transcript}");
+}
+
+/// Two failures then a success: both dead ends go, not just the last one.
+#[test]
+fn every_failure_in_the_repaired_run_is_scrubbed() {
+    let transcript = rendered_text(&render(&[
+        failed_step_event("lashlang_step_0", "print first_bad", "unknown name"),
+        failed_step_event("lashlang_step_1", "print second_bad", "unknown name"),
+        step_event("print 1"),
+    ]));
+
+    assert!(!transcript.contains("first_bad"), "{transcript}");
+    assert!(!transcript.contains("second_bad"), "{transcript}");
+    assert!(transcript.contains("print 1"), "{transcript}");
+}
