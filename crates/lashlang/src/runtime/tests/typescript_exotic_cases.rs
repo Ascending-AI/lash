@@ -1360,6 +1360,72 @@ async fn global_set_does_not_weaken_closure_session_persistence_policy() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_trip() {
+    let program = Program::block(vec![
+        ts_assign(
+            "object",
+            Expr::Record(vec![
+                (
+                    "removed".into(),
+                    Expr::Record(vec![("child".into(), Expr::Number(1.0))]),
+                ),
+                ("kept".into(), Expr::Number(2.0)),
+            ]),
+        ),
+        ts_assign("alias", Expr::Variable("object".into())),
+        ts_assign(
+            "deleted",
+            private_builtin(
+                "__typescript_heap_delete_member",
+                vec![
+                    Expr::Variable("object".into()),
+                    Expr::String("removed".into()),
+                ],
+            ),
+        ),
+        Expr::Print(Box::new(Expr::String("park after member deletion".into()))),
+        Expr::Finish(Box::new(Expr::List(vec![
+            Expr::Variable("deleted".into()),
+            private_builtin(
+                "__typescript_stdlib",
+                vec![
+                    Expr::String("Object.hasOwn".into()),
+                    Expr::Variable("alias".into()),
+                    Expr::String("removed".into()),
+                ],
+            ),
+            field("alias", "kept"),
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Bool(true), Value::Bool(false), Value::Number(2.0)].into()
+        ))
+    );
+
+    let array_delete = Program::block(vec![
+        ts_assign("array", Expr::List(vec![Expr::Number(1.0)])),
+        Expr::Finish(Box::new(private_builtin(
+            "__typescript_heap_delete_member",
+            vec![Expr::Variable("array".into()), Expr::Number(0.0)],
+        ))),
+    ]);
+    let compiled = compile_ast_with_dialect(&array_delete, CompilationDialect::Typescript)
+        .expect("compile dense-array deletion probe");
+    let error = execute(&compiled, &mut State::new(), &Host)
+        .await
+        .expect_err("deleting a present dense-array index must reject");
+    assert!(
+        error
+            .to_string()
+            .contains("TS_DELETE_ARRAY_INDEX_UNSUPPORTED")
+            && error.to_string().contains("splice"),
+        "{error}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn reserved_global_names_are_rejected_by_all_root_intrinsics() {
     for intrinsic in ["__typescript_global_delete", "__typescript_global_has"] {
         for name in ["undefined", "NaN", "Infinity"] {

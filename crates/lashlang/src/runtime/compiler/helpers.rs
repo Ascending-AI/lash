@@ -30,6 +30,7 @@ fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
         "__typescript_stdlib" => IntrinsicOp::JavaScriptStdlib(argc),
         "__typescript_heap_new" => IntrinsicOp::JavaScriptHeapNew(argc),
         "__typescript_heap_instanceof" => IntrinsicOp::JavaScriptHeapInstanceOf,
+        "__typescript_heap_delete_member" => IntrinsicOp::JavaScriptHeapDeleteMember,
         "__typescript_global_delete" => IntrinsicOp::JavaScriptGlobalDelete,
         "__typescript_global_has" => IntrinsicOp::JavaScriptGlobalHas,
         "__typescript_global_set" => IntrinsicOp::JavaScriptGlobalSet,

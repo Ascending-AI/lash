@@ -1309,6 +1309,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptStdlib(argc) => self.execute_javascript_stdlib(argc)?,
             IntrinsicOp::JavaScriptHeapNew(argc) => self.execute_javascript_heap_new(argc)?,
             IntrinsicOp::JavaScriptHeapInstanceOf => self.execute_javascript_instanceof()?,
+            IntrinsicOp::JavaScriptHeapDeleteMember => {
+                self.execute_javascript_heap_delete_member()?
+            }
             IntrinsicOp::JavaScriptGlobalDelete => self.execute_javascript_global_delete()?,
             IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
             IntrinsicOp::JavaScriptGlobalSet => self.execute_javascript_global_set()?,

@@ -116,6 +116,7 @@ pub(super) fn instruction_heap_plan(
             | IntrinsicOp::JavaScriptStdlib(_)
             | IntrinsicOp::JavaScriptHeapNew(_)
             | IntrinsicOp::JavaScriptHeapInstanceOf
+            | IntrinsicOp::JavaScriptHeapDeleteMember
             | IntrinsicOp::JavaScriptGlobalDelete
             | IntrinsicOp::JavaScriptGlobalHas
             | IntrinsicOp::JavaScriptGlobalSet

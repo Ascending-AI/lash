@@ -2,6 +2,82 @@ use super::*;
 use crate::runtime::javascript_array_index_key;
 
 impl Heap {
+    pub(crate) fn delete_javascript_member(
+        &mut self,
+        receiver: &Value,
+        key: &Value,
+    ) -> Result<bool, RuntimeError> {
+        let Value::Ref(target_id) = receiver else {
+            return match receiver {
+                Value::Null | Value::Undefined => Err(RuntimeError::ValidationFailed {
+                    reason: "TypeError: Cannot convert undefined or null to object".to_string(),
+                }),
+                _ => Ok(true),
+            };
+        };
+        let key = coerce_string(key)?;
+        let slot =
+            self.id_to_slot
+                .get(target_id)
+                .copied()
+                .ok_or(RuntimeError::DanglingHeapReference {
+                    id: target_id.get(),
+                })?;
+        let old_object = self.slots[slot]
+            .as_ref()
+            .ok_or(RuntimeError::DanglingHeapReference {
+                id: target_id.get(),
+            })?
+            .object
+            .clone();
+        let mut new_object = old_object.clone();
+        let deleted = match &mut new_object {
+            HeapObject::Record(record) => record.remove(key.as_ref()).is_some(),
+            HeapObject::List(values) => {
+                if key.as_ref() == "length" {
+                    return Ok(false);
+                }
+                if let Some(index) = javascript_array_index(&Value::String(key.as_ref().into())) {
+                    if index < values.len() {
+                        return Err(RuntimeError::ValidationFailed {
+                            reason: format!(
+                                "TS_DELETE_ARRAY_INDEX_UNSUPPORTED: delete on dense array index {index} would create a hole; use splice({index}, 1)"
+                            ),
+                        });
+                    }
+                }
+                false
+            }
+            HeapObject::Tuple(_) => return Ok(false),
+            object => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: format!(
+                        "TS_DELETE_EXOTIC_MEMBER_UNSUPPORTED: delete on {} members is unsupported",
+                        object.kind_name()
+                    ),
+                });
+            }
+        };
+        if !deleted {
+            return Ok(true);
+        }
+        let old_bytes = old_object.logical_bytes();
+        let new_bytes = new_object.logical_bytes();
+        let old_children = old_object.child_refs();
+        let new_children = new_object.child_refs();
+        let entry = self.slots[slot].as_mut().expect("heap slot exists");
+        entry.object = new_object;
+        entry.logical_bytes = new_bytes;
+        self.live_logical_bytes = self
+            .live_logical_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
+        self.retarget_parent_edges(*target_id, &old_children, &new_children);
+        self.invalidate_materialized_reaching(*target_id);
+        self.debug_assert_byte_accounting();
+        Ok(true)
+    }
+
     pub(crate) fn assign_path_reference(
         &mut self,
         root: &Value,

@@ -200,6 +200,10 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
         arity: Arity::Exact(2),
     },
     Builtin {
+        name: "__typescript_heap_delete_member",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
         name: "__typescript_global_delete",
         arity: Arity::Exact(1),
     },
@@ -268,6 +272,7 @@ mod tests {
         let advertised = names().collect::<Vec<_>>();
         for (name, arity) in [
             ("__typescript_heap_instanceof", Arity::Exact(2)),
+            ("__typescript_heap_delete_member", Arity::Exact(2)),
             ("__typescript_global_delete", Arity::Exact(1)),
             ("__typescript_global_has", Arity::Exact(1)),
             ("__typescript_call_dynamic", Arity::Exact(2)),

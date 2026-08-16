@@ -170,6 +170,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    pub(super) fn execute_javascript_heap_delete_member(&mut self) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("JavaScript member deletion")?;
+        let key = self.pop_stack()?;
+        let receiver = self.pop_stack()?;
+        let deleted = self.heap.delete_javascript_member(&receiver, &key)?;
+        self.stack.push(Value::Bool(deleted));
+        Ok(())
+    }
+
     pub(super) fn execute_javascript_global_delete(&mut self) -> Result<(), RuntimeError> {
         self.require_typescript_intrinsic("global deletion")?;
         let name = self.pop_stack()?;
