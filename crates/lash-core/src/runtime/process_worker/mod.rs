@@ -1505,7 +1505,11 @@ impl DurableProcessWorker {
         });
         let mut builder = EmbeddedRuntimeBuilder::new(
             self.config.runtime_host.durability.commit_budget,
-            self.config.runtime_host.durability.queued_work_batching,
+            self.config
+                .runtime_host
+                .durability
+                .queued_work_batching
+                .clone(),
             self.config.lease_owner.clone(),
         )
         .with_session_id(session_id.to_string())

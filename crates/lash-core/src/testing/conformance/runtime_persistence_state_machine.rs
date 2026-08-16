@@ -2102,7 +2102,7 @@ async fn law_reclaim_mediates_supersession(
             )
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .is_none(),
+            .acquired_no_rows(),
         "the rejected predecessor commit released the successor-owned batch"
     );
     store

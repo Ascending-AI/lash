@@ -391,7 +391,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let selected_len = crate::store::queued_work::select_turn_work_claim_prefix(
             &candidates,
             boundary,
-            policy,
+            &policy,
             now,
         )?;
         if selected_len == 0 {

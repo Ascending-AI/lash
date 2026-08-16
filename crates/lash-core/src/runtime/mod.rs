@@ -26,6 +26,7 @@ mod process_worker;
 pub(crate) use process_worker::{
     ensure_process_execution_permit, release_process_execution_permit_while,
 };
+mod queued_drain_policy;
 mod queued_work_driver;
 pub mod scenario_contracts;
 mod session_api;
@@ -374,6 +375,10 @@ pub use process_worker::{
     ProcessDrainDeferred, ProcessDrainReport, ProcessExecutionConcurrencyError,
     ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
 };
+pub use queued_drain_policy::{
+    DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection, default_queued_drain_policy,
+};
 #[cfg(any(test, feature = "testing"))]
 pub use queued_work_driver::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
 pub use queued_work_driver::{
@@ -718,7 +723,7 @@ impl TurnContext {
         self.enforce_selected_queued_work_reserve = true;
     }
 
-    pub(crate) fn enforces_selected_queued_work_reserve(&self) -> bool {
+    pub(crate) fn enforces_selected_queued_work_cost_bound(&self) -> bool {
         self.enforce_selected_queued_work_reserve
     }
 

@@ -163,7 +163,7 @@ async fn assert_no_parallel_reclaim(
             )
             .await
             .expect("probe a second pre-settlement reclaim")
-            .is_none(),
+            .acquired_no_rows(),
         "durably claimed work must not be delivered again before settlement"
     );
 }

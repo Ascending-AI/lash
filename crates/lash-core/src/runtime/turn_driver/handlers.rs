@@ -1,12 +1,28 @@
 use super::*;
 
 impl RuntimeTurnDriver<'_> {
-    async fn ensure_queued_work_fits_projected_request(
+    /// Refuse a selected drain whose model-context cost Lash cannot bound.
+    ///
+    /// FIG-1313: this seam once also refused any selected drain whose complete
+    /// conservative projection (prompt, tools, retained history, and the queued
+    /// rows together) exceeded the window. That hardwired guard was a law no
+    /// ordinary turn had to obey, and it wedged every host under roughly 28k
+    /// tokens: the queue could never drain even one row. Drain size is now a
+    /// host policy ([`QueuedDrainPolicy`](crate::QueuedDrainPolicy), defaulting
+    /// to one row per drain) and the irreducible residue — a single row larger
+    /// than the whole window — is refused as a typed outcome at claim time.
+    /// Everything in between is the provider's judgement, exactly as for an
+    /// ordinary turn.
+    ///
+    /// What remains here is the one cost Lash genuinely cannot project: an
+    /// external or provider-file attachment, whose model-context weight is not
+    /// bounded by any bytes Lash can measure.
+    async fn ensure_queued_work_cost_is_bounded(
         &self,
         request: &LlmRequest,
     ) -> Result<(), RuntimeError> {
         if self.pending_queue_claims.is_empty()
-            || !self.turn_context.enforces_selected_queued_work_reserve()
+            || !self.turn_context.enforces_selected_queued_work_cost_bound()
         {
             return Ok(());
         }
@@ -38,63 +54,7 @@ impl RuntimeTurnDriver<'_> {
             ));
         }
 
-        // A selected drain is admitted as one exact host-requested composition.
-        // The claim-time store can only see queued rows; this is the first seam
-        // where retained history, system prompt, tools, attachments, generation
-        // controls, and the request envelope have all been projected together.
-        // Automatic background drains retain their established unrestricted
-        // execution contract and do not enter this selected-drain check.
-        // One serialized UTF-8 byte is charged as one token, matching the
-        // conservative tokenizer-independent upper bound used by queue claims.
-        let serialized_bytes = serde_json::to_vec(&request).map_err(|err| {
-            RuntimeError::new(
-                RuntimeErrorCode::QueuedWork,
-                format!("failed to measure the complete projected queued-work request: {err}"),
-            )
-        })?;
-        let stored_attachment_bytes = request
-            .resolved_stored
-            .values()
-            .fold(0usize, |total, bytes| total.saturating_add(bytes.len()));
-        let projected_tokens = serialized_bytes
-            .len()
-            .saturating_add(stored_attachment_bytes);
-        let max_context_tokens = self.policy.context_window_tokens();
-        let action_token_reserve = self
-            .host
-            .core
-            .durability
-            .queued_work_batching
-            .action_token_reserve();
-        let admitted = projected_tokens.saturating_add(action_token_reserve) <= max_context_tokens;
-        let claim_ids = self
-            .pending_queue_claims
-            .iter()
-            .map(|claim| claim.claim_id.as_str())
-            .collect::<Vec<_>>();
-        tracing::info!(
-            target: "lash::queued_work_batching",
-            session_id = %self.session_id,
-            turn_id = %self.turn_id,
-            ?claim_ids,
-            projected_tokens,
-            action_token_reserve,
-            max_context_tokens,
-            outcome = if admitted { "admitted_full_projection" } else { "refused_full_projection" },
-            "full projected queued-work request admission decision"
-        );
-        if admitted {
-            return Ok(());
-        }
-
-        Err(RuntimeError::new(
-            RuntimeErrorCode::QueuedWork,
-            format!(
-                "complete projected request requires at most {projected_tokens} conservative \
-                 tokens plus queued-work action reserve {action_token_reserve}, exceeding model \
-                 context window {max_context_tokens}; queued rows remain pending"
-            ),
-        ))
+        Ok(())
     }
 
     fn handle_machine_response(
@@ -148,8 +108,7 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         }
-        self.ensure_queued_work_fits_projected_request(&request)
-            .await?;
+        self.ensure_queued_work_cost_is_bounded(&request).await?;
         let (result, text_streamed, call_record) = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx, cancel)
             .await

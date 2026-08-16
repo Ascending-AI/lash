@@ -128,7 +128,7 @@ impl RuntimePerfSessionExecutionLease {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum RuntimePerfQueuedWorkClaimKind {
     LeadingSessionCommand,
     TurnWork {
@@ -290,7 +290,7 @@ impl RuntimePerfStore {
         owner: &LeaseOwnerIdentity,
         kind: RuntimePerfQueuedWorkClaimKind,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        let max_batches = match kind {
+        let max_batches = match &kind {
             RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => 1,
             RuntimePerfQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
@@ -346,7 +346,7 @@ impl RuntimePerfStore {
                 store::queued_work::select_turn_work_claim_indices(
                     &candidates,
                     boundary,
-                    policy,
+                    &policy,
                     now,
                 )?
                 .into_iter()
@@ -1437,7 +1437,7 @@ impl QueuedWorkStore for RuntimePerfStore {
             })
             .collect::<Vec<_>>();
         let selected_len =
-            store::queued_work::select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
+            store::queued_work::select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
         if selected_len == 0 {
             return Ok(SelectedQueuedWorkClaimOutcome::new(
                 None,

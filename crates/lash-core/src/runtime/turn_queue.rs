@@ -156,11 +156,38 @@ impl QueuedWorkAuthority {
 /// The action reserve is required and has no Lash default. Row count and
 /// maximum pending age retain Lash defaults because a poor choice affects
 /// batching efficiency rather than context-window correctness.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// How much of the legal, FIFO-ordered claimable prefix actually drains on one
+/// wake is a separate, explicitly named host policy: the
+/// [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) selected by
+/// [`with_drain_mode`](Self::with_drain_mode) or
+/// [`with_drain_policy`](Self::with_drain_policy), defaulting to
+/// [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime).
+#[derive(Clone, Debug)]
 pub struct QueuedWorkBatchingConfig {
     action_token_reserve: std::num::NonZeroUsize,
     max_rows: std::num::NonZeroUsize,
     max_pending_age: std::time::Duration,
+    /// `None` selects the documented Lash default,
+    /// [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime), so the
+    /// configuration stays `const`-constructible.
+    drain_policy: Option<std::sync::Arc<dyn crate::QueuedDrainPolicy>>,
+}
+
+impl PartialEq for QueuedWorkBatchingConfig {
+    /// Compares the scalar bounds and the *identity* of the configured drain
+    /// policy: two hosts sharing one policy instance compare equal, while
+    /// separately built custom policies never claim equality Lash cannot prove.
+    fn eq(&self, other: &Self) -> bool {
+        self.action_token_reserve == other.action_token_reserve
+            && self.max_rows == other.max_rows
+            && self.max_pending_age == other.max_pending_age
+            && match (self.drain_policy.as_ref(), other.drain_policy.as_ref()) {
+                (None, None) => true,
+                (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
+                _ => false,
+            }
+    }
 }
 
 impl QueuedWorkBatchingConfig {
@@ -195,7 +222,37 @@ impl QueuedWorkBatchingConfig {
             max_rows: std::num::NonZeroUsize::new(Self::DEFAULT_MAX_ROWS)
                 .expect("default queued-work row bound is non-zero"),
             max_pending_age: Self::DEFAULT_MAX_PENDING_AGE,
+            drain_policy: None,
         }
+    }
+
+    /// Selects one of the two shipped drain shapes.
+    ///
+    /// Unset, Lash uses [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime):
+    /// one queued row per drain, strict FIFO, no token arithmetic.
+    pub fn with_drain_mode(mut self, mode: crate::DrainMode) -> Self {
+        self.drain_policy = Some(std::sync::Arc::new(crate::DrainModePolicy::new(mode)));
+        self
+    }
+
+    /// Installs a fully custom [`QueuedDrainPolicy`](crate::QueuedDrainPolicy).
+    ///
+    /// This is the escape hatch for hosts wanting selection Lash deliberately
+    /// does not ship, such as window-fitted prefix selection.
+    pub fn with_drain_policy(
+        mut self,
+        drain_policy: std::sync::Arc<dyn crate::QueuedDrainPolicy>,
+    ) -> Self {
+        self.drain_policy = Some(drain_policy);
+        self
+    }
+
+    /// Returns the configured drain policy, or the Lash default when the host
+    /// selected none.
+    pub fn drain_policy(&self) -> std::sync::Arc<dyn crate::QueuedDrainPolicy> {
+        self.drain_policy
+            .clone()
+            .unwrap_or_else(crate::default_queued_drain_policy)
     }
 
     /// Sets the maximum number of compatible rows coalesced into one fresh
@@ -234,7 +291,7 @@ impl QueuedWorkBatchingConfig {
     /// Fresh coalescing stops before it would consume this reserve. A single
     /// row may use the reserve only when it still fits the model context; a row
     /// larger than the entire context is refused and left pending.
-    pub const fn action_token_reserve(self) -> usize {
+    pub const fn action_token_reserve(&self) -> usize {
         self.action_token_reserve.get()
     }
 
@@ -242,7 +299,7 @@ impl QueuedWorkBatchingConfig {
     ///
     /// This does not split an interrupted claim whose complete composition
     /// must be redriven atomically.
-    pub const fn max_rows(self) -> usize {
+    pub const fn max_rows(&self) -> usize {
         self.max_rows.get()
     }
 
@@ -250,27 +307,33 @@ impl QueuedWorkBatchingConfig {
     ///
     /// This is a batching-latency bound, not a queue expiry: reaching it does
     /// not discard the row.
-    pub const fn max_pending_age(self) -> std::time::Duration {
+    pub const fn max_pending_age(&self) -> std::time::Duration {
         self.max_pending_age
     }
 
-    pub(crate) fn claim_policy(self, max_context_tokens: usize) -> QueuedWorkClaimPolicy {
+    pub(crate) fn claim_policy(&self, max_context_tokens: usize) -> QueuedWorkClaimPolicy {
         QueuedWorkClaimPolicy {
             max_context_tokens,
             action_token_reserve: self.action_token_reserve(),
             max_rows: self.max_rows(),
             max_pending_age_ms: u64::try_from(self.max_pending_age.as_millis()).unwrap_or(u64::MAX),
+            drain_policy: self.drain_policy(),
         }
     }
 }
 
-/// Complete claim-time bounds passed to durable store implementations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Complete claim-time bounds and drain policy passed to durable store
+/// implementations.
+///
+/// Stores apply the shared claim laws and then defer to `drain_policy` for how
+/// much of the legal FIFO prefix this wake takes.
+#[derive(Clone, Debug)]
 pub struct QueuedWorkClaimPolicy {
     pub max_context_tokens: usize,
     pub action_token_reserve: usize,
     pub max_rows: usize,
     pub max_pending_age_ms: u64,
+    pub drain_policy: std::sync::Arc<dyn crate::QueuedDrainPolicy>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

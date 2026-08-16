@@ -34,12 +34,18 @@ use crate::{
 
 /// Generous claim bounds for store/runtime conformance tests whose subject is
 /// not batching policy. Batching-specific tests construct exact policies.
+///
+/// The drain policy is deliberately [`DrainMode::All`](crate::DrainMode::All)
+/// rather than the shipped one-row default: these suites exercise the store's
+/// coalescing laws, and a one-row drain would hide them. Tests whose subject is
+/// the drain policy itself set it explicitly.
 pub fn queued_work_claim_policy(max_rows: usize) -> crate::QueuedWorkClaimPolicy {
     crate::QueuedWorkClaimPolicy {
         max_context_tokens: usize::MAX / 4,
         action_token_reserve: 1,
         max_rows,
         max_pending_age_ms: u64::MAX,
+        drain_policy: std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All)),
     }
 }
 

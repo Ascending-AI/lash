@@ -72,7 +72,7 @@ impl InMemorySessionExecutionLease {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum InMemoryQueuedWorkClaimKind {
     LeadingSessionCommand,
     TurnWork {
@@ -499,7 +499,7 @@ impl InMemorySessionStore {
         kind: InMemoryQueuedWorkClaimKind,
         now: u64,
     ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
-        let max_batches = match kind {
+        let max_batches = match &kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => 1,
             InMemoryQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
@@ -554,7 +554,7 @@ impl InMemorySessionStore {
                 crate::store::queued_work::select_turn_work_claim_indices(
                     &candidates,
                     boundary,
-                    policy,
+                    &policy,
                     now,
                 )?
                 .into_iter()

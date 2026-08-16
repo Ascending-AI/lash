@@ -1636,7 +1636,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .zip(selected_batches.iter())
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
+        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
         if selected_len == 0 {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
@@ -1982,7 +1982,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .zip(selected_batches.iter())
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
+        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
         if selected_len == 0 {
             tx.rollback().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
@@ -2822,7 +2822,7 @@ async fn claim_ready_queued_work_postgres_tx(
         .zip(selected_batches.iter())
         .map(|(row, batch)| claim_candidate_from_row(row, batch))
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, policy, now)?;
+    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
     if selected_len == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }

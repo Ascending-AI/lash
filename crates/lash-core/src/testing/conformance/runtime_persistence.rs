@@ -592,6 +592,7 @@ where
     .await;
     queued_work_redrive_obeys_delivery_boundary_before_identity(make("redrive-boundary")).await;
     queued_work_redrive_ignores_successor_row_limit(make("redrive-row-limit")).await;
+    queued_work_redrive_ignores_a_changed_drain_policy(make("redrive-drain-policy")).await;
     queued_work_selected_multi_identity_validation_and_abandon_restore(make(
         "selected-multi-identity",
     ))
@@ -2282,6 +2283,7 @@ async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn Ru
                 action_token_reserve: 1,
                 max_rows: 10,
                 max_pending_age_ms: 30_000,
+                drain_policy: crate::default_queued_drain_policy(),
             },
         )
         .await
@@ -4700,7 +4702,7 @@ async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimeP
             )
             .await
             .expect("boundary-gated exact claim")
-            .is_none(),
+            .acquired_no_rows(),
         "exact selection must preserve the delivery boundary gate"
     );
     let exclusive_prefix = store
@@ -6283,6 +6285,88 @@ async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
             .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
+    );
+    release_session_execution_lease_for_test(&store, &successor_lease).await;
+}
+
+/// FIG-1313: a journaled drain composition outlives the policy that chose it.
+///
+/// The predecessor generation coalesced three rows under a host policy that
+/// drains everything. A successor booting with the shipped one-row default must
+/// still redrive that exact committed composition: the policy runs pre-request
+/// and its selection is journaled with the claim, so replay serves history
+/// instead of re-deciding it.
+async fn queued_work_redrive_ignores_a_changed_drain_policy(store: Arc<dyn RuntimePersistence>) {
+    let session_id = "interrupted-batch-drain-policy";
+    for (source_key, label) in [
+        ("policy-w1", "w1"),
+        ("policy-w2", "w2"),
+        ("policy-w3", "w3"),
+    ] {
+        store
+            .enqueue_queued_work(
+                queued_draft(session_id, label, DeliveryPolicy::EarliestSafeBoundary)
+                    .with_source_key(source_key)
+                    .with_merge_key("policy-key"),
+            )
+            .await
+            .expect("enqueue drain-policy redrive row");
+    }
+    let expected = vec![
+        (Some("policy-w1"), 1),
+        (Some("policy-w2"), 2),
+        (Some("policy-w3"), 3),
+    ];
+
+    let first_owner = lease_owner("policy-owner-a");
+    let first_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &first_owner.owner_id).await;
+    let mut coalescing_policy = crate::testing::queued_work_claim_policy(64);
+    coalescing_policy.drain_policy = Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
+    let first_claim = store
+        .claim_ready_queued_work(
+            session_id,
+            &first_lease.fence(),
+            &first_owner,
+            QueuedWorkClaimBoundary::Idle,
+            coalescing_policy,
+        )
+        .await
+        .expect("claim three-row predecessor")
+        .expect("three-row predecessor exists");
+    assert_eq!(
+        first_claim
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    release_session_execution_lease_for_test(&store, &first_lease).await;
+
+    let successor = lease_owner("policy-owner-b");
+    let successor_lease =
+        claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
+    let mut one_at_a_time = crate::testing::queued_work_claim_policy(64);
+    one_at_a_time.drain_policy = crate::default_queued_drain_policy();
+    let redriven = store
+        .claim_ready_queued_work(
+            session_id,
+            &successor_lease.fence(),
+            &successor,
+            QueuedWorkClaimBoundary::Idle,
+            one_at_a_time,
+        )
+        .await
+        .expect("redrive under a one-row successor policy")
+        .expect("predecessor composition survives a changed drain policy");
+    assert_eq!(
+        redriven
+            .batches
+            .iter()
+            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .collect::<Vec<_>>(),
+        expected
     );
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
