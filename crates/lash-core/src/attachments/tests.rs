@@ -946,6 +946,11 @@ async fn unfenced_root_authority_reports_best_effort_and_detects_the_window_loss
 type WindowHook =
     Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
+/// Join handle for a facade `put` started from inside a sweep window.
+type WindowWriterHandle = tokio::task::JoinHandle<Result<AttachmentRef, String>>;
+/// Slot a window hook drops its writer's handle into for the test to await.
+type WindowWriterSlot = Arc<Mutex<Option<WindowWriterHandle>>>;
+
 /// Backend wrapper that runs a hook the first time the sweep calls `head` (the
 /// digest is condemned but no delete is issued) or `delete` (the delete is in
 /// flight) — the two instants a concurrent same-content write can land in.
@@ -1056,7 +1061,7 @@ fn window_writer(
     session: Arc<SessionAttachmentStore>,
     bytes: Vec<u8>,
     attempts: Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<AttachmentWriteFence>>>,
-    handle_slot: Arc<Mutex<Option<tokio::task::JoinHandle<Result<AttachmentRef, String>>>>>,
+    handle_slot: WindowWriterSlot,
 ) -> WindowHook {
     Arc::new(move || {
         let session = Arc::clone(&session);
@@ -1065,7 +1070,7 @@ fn window_writer(
         let handle_slot = Arc::clone(&handle_slot);
         Box::pin(async move {
             let (put_done, put_done_rx) = tokio::sync::oneshot::channel();
-            let handle = tokio::spawn(async move {
+            let handle = crate::task::spawn(async move {
                 let outcome = session
                     .put(bytes, meta())
                     .await
@@ -1178,10 +1183,11 @@ async fn same_content_put_inside_the_delete_window_survives() {
         .await
         .expect("sweep");
 
-    let reference = handle_slot
+    let writer = handle_slot
         .lock_recover()
         .take()
-        .expect("the window writer was started")
+        .expect("the window writer was started");
+    let reference = writer
         .await
         .expect("writer task")
         .expect("the write completes rather than failing on the fence");
@@ -1235,10 +1241,11 @@ async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
         .await
         .expect("sweep");
 
-    handle_slot
+    let writer = handle_slot
         .lock_recover()
         .take()
-        .expect("the window writer was started")
+        .expect("the window writer was started");
+    writer
         .await
         .expect("writer task")
         .expect("a writer in the condemned window is granted immediately");
