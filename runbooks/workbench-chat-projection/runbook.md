@@ -52,8 +52,13 @@ reconciled them:
   [`chat_projection.rs`](../../examples/agent-workbench/src/main_sections/chat_projection.rs)
   now admits the last plugin-authored assistant prose message of each turn — abandoning it
   the moment an ordinary assistant message follows, because that copy is then the reply.
-  This is the mirror defect of FIG-984 and needs the same referee: **zero** rendered agent
-  rows over a committed reply is as much a projection failure as two.
+  Turns are separated there by a **turn change**, not by turn inputs: a wake or drain
+  commits only its typed `Event` cause, and an input injected into a running turn commits a
+  turn input carrying that same turn's id. So Phase 2b is load-bearing twice over — its
+  cumulative counts also catch the mirror failure, where the wake's own reply arrives and
+  an **earlier** turn's reply disappears from the projection. This is the mirror defect of
+  FIG-984 and needs the same referee: **zero** rendered agent rows over a committed reply
+  is as much a projection failure as two, whenever it happens.
 
 Both defects share one shape: **two id namespaces projecting one logical message**. The
 gate is therefore not "does the reply look right" but "does every layer agree on how many
@@ -351,7 +356,9 @@ committed as `m_rlm_<turn_id>_<iteration>_assistant_response` carrying `Reasonin
 `Prose` text appears verbatim in exactly one rendered agent row and in
 `/api/state.messages` — a `reasoning` disclosure with no agent row over a committed
 `assistant_response` node is the FIG-1406 defect, not a quiet model. Record which writer
-held the copy in `03-red-press-store.json`. Count rows by role; never gate on a particular id being present, or
+held the copy in `03-red-press-store.json`. Re-read the **earlier** turns' rows here too:
+the wake is a turn boundary that commits no turn input, and an earlier reply that was
+rendered in Phase 1 or 2a and is missing now fails this phase exactly as a duplicate would. Count rows by role; never gate on a particular id being present, or
 the gate fails on correct behavior. Two id-level traps here: `/api/state.messages` carries the
 runtime id for this turn while the two composer turns carry workbench ids, and the
 product-event log still lists `message:workbench-assistant:<wake_turn_id>` — that is the

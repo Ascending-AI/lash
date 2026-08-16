@@ -184,24 +184,51 @@ fn is_rlm_assistant_prose_message(message: &lash::messages::Message) -> bool {
 /// transcript in commit order and keeps, per turn, the final plugin-authored
 /// assistant prose message — abandoning the candidate as soon as an ordinary
 /// assistant message follows it, because that runtime or workbench copy is then
-/// the reply and the plugin message behind it is superseded context. Turns are
-/// delimited by their typed `MessageOrigin::TurnInput`, never by parsing a
-/// message id (FIG-972/984).
+/// the reply and the plugin message behind it is superseded context.
 ///
-/// A *running* turn's trailing candidate is withheld: while the turn runs its
-/// live workbench-owned row speaks for the answer, and admitting a mid-turn
+/// What settles a candidate is a *turn change*, and a turn input is neither
+/// necessary nor sufficient to mark one. A cause-only turn — a process wake or
+/// a queued drain — commits no input at all, only its typed cause as an `Event`
+/// message; reading turn inputs alone as boundaries would fold that wake's
+/// prose into the previous turn and retract an answer the user already read.
+/// An input injected into a *running* turn, conversely, commits a turn input
+/// carrying that turn's own id and opens nothing, so it is skipped: settling
+/// there would render the turn's mid-turn prose alongside its answer, one turn
+/// as two agent rows. The open turn is therefore tracked by the typed `turn_id`
+/// the runtime publishes, never by parsing a message id (FIG-972/984). A cause
+/// delivered into a running turn is indistinguishable from one that opens a
+/// turn, and settling the candidate is the safe reading of the two: an extra
+/// durable row is a smaller injury than an answer that disappears.
+///
+/// A running turn's *own* trailing candidate is withheld: while the turn runs
+/// its live workbench-owned row speaks for the answer, and admitting a mid-turn
 /// copy underneath it is the two-namespaces-one-message defect FIG-984 closed.
-/// It renders once the turn settles and its live row retires.
+/// It renders once that turn settles and its live row retires. The test is
+/// per-turn on purpose — the active-turn registry is persistent and is written
+/// before the next turn's input commits, so a session-wide test would blink the
+/// previous answer out on every send and hide it for good behind an entry whose
+/// process died mid-turn.
 fn durable_rlm_reply_message_ids(
     messages: &[lash::messages::Message],
-    a_turn_is_running: bool,
+    running_turn_ids: &BTreeSet<String>,
 ) -> BTreeSet<String> {
     let mut replies = BTreeSet::new();
     let mut candidate: Option<String> = None;
+    // The turn the walk is inside, when the transcript names it. A cause-only
+    // turn never does, and its candidate is judged as an unnamed turn's.
+    let mut open_turn_id: Option<String> = None;
     for message in messages {
         match message.origin.as_ref() {
-            Some(lash::messages::MessageOrigin::TurnInput { .. }) => {
+            Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => {
+                if open_turn_id.as_deref() == Some(turn_id.as_str()) {
+                    continue;
+                }
                 replies.extend(candidate.take());
+                open_turn_id = Some(turn_id.clone());
+            }
+            _ if lash::message_role(message) == "event" => {
+                replies.extend(candidate.take());
+                open_turn_id = None;
             }
             _ if is_rlm_assistant_prose_message(message) => {
                 candidate = Some(message.id.clone());
@@ -212,7 +239,10 @@ fn durable_rlm_reply_message_ids(
             _ => {}
         }
     }
-    if !a_turn_is_running {
+    let candidate_turn_is_running = open_turn_id
+        .as_ref()
+        .is_some_and(|turn_id| running_turn_ids.contains(turn_id));
+    if !candidate_turn_is_running {
         replies.extend(candidate);
     }
     replies
@@ -370,7 +400,11 @@ fn project_chat(
         .collect::<BTreeMap<_, _>>();
     let user_replacements = ui_owned_turn_input_replacements(read_view, &ui_user_rows);
     let protocol_state_message_ids = continue_as_protocol_state_message_ids(read_view);
-    let rlm_reply_ids = durable_rlm_reply_message_ids(read_view.messages(), !active_turns.is_empty());
+    let running_turn_ids = active_turns
+        .iter()
+        .map(|address| address.turn_id.clone())
+        .collect::<BTreeSet<_>>();
+    let rlm_reply_ids = durable_rlm_reply_message_ids(read_view.messages(), &running_turn_ids);
     let replaced_committed_ids = user_replacements.keys().cloned().collect::<BTreeSet<_>>();
     let historical_ui_rows = product_messages
         .iter()

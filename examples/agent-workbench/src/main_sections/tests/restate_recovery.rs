@@ -758,7 +758,7 @@ fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messag
     // Settled: no turn of this session is running any more, so a protocol-owned
     // reply would be admitted here if one stood as this turn's answer. The
     // workbench's own committed copy follows it, so none does (FIG-1406).
-    let rlm_reply_ids = durable_rlm_reply_message_ids(messages, false);
+    let rlm_reply_ids = durable_rlm_reply_message_ids(messages, &BTreeSet::new());
     let messages = messages
         .iter()
         .filter_map(|message| project_committed_chat_message(message, &rlm_reply_ids))
