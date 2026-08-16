@@ -408,12 +408,13 @@ fn parse_stack_size(source_bytes: usize) -> usize {
 
 fn guard_source_size(source: &str) -> Result<(), Diagnostic> {
     if source.len() > MAX_SOURCE_BYTES {
-        return Err(Diagnostic::new(
+        return Err(Diagnostic::with_repair(
             DiagnosticCode::SourceTooLarge,
             format!(
-                "TypeScript source is {} bytes, over the {MAX_SOURCE_BYTES}-byte limit; split the cell",
+                "TypeScript source is {} bytes, over the {MAX_SOURCE_BYTES}-byte limit",
                 source.len()
             ),
+            "split the work across several cells",
             None,
         ));
     }

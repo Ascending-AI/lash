@@ -71,7 +71,7 @@ fn unresolved_reads_and_arguments_reject_before_execution() {
         arguments.code,
         lash_typescript::DiagnosticCode::ThisUnsupported
     );
-    assert!(arguments.message.contains("...rest"));
+    assert!(arguments.to_string().contains("...rest"), "{arguments}");
 }
 
 #[test]

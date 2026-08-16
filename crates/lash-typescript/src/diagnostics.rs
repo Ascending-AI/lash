@@ -150,6 +150,122 @@ impl DiagnosticCode {
         Self::LinkError,
     ];
 
+    /// The accepted in-dialect idiom for a construct this code refuses.
+    ///
+    /// Lashlang has carried a repair channel since it shipped: `parse_hint` and
+    /// `runtime_hint` match on the *error variant* and return the rewrite, and
+    /// `format_source_diagnostic` renders it on its own `hint:` line. The
+    /// TypeScript dialect regressed that — its rejections are a code plus one
+    /// sentence, and where a rewrite exists at all it is glued onto the end of
+    /// the refusal, where a model has to parse English to find it.
+    ///
+    /// This is the same seam, keyed the same way. A code that refuses a
+    /// construct owes the reader the construct that replaces it; a code that
+    /// reports a resource limit or a plain syntax error owes nothing, because
+    /// there is no other way to write the program. `every_unsupported_code_
+    /// names_the_accepted_idiom` holds the first half of that to account.
+    ///
+    /// Site-specific rewrites (which method, which constructor) do not belong
+    /// here — they arrive with the diagnostic. See [`Diagnostic::new`].
+    pub const fn accepted_idiom(self) -> Option<&'static str> {
+        Some(match self {
+            Self::ClassUnsupported => {
+                "use a factory function returning a plain object; for coded errors use `Object.assign(new Error(message), { code })`"
+            }
+            Self::GeneratorUnsupported => {
+                "build the whole list and return it, or drive the work with `for...of`"
+            }
+            Self::AsyncUnsupported => {
+                "declare the function `async` where the dialect allows it, or move the awaited work to the caller"
+            }
+            Self::WithUnsupported => "name the object and read its properties explicitly",
+            Self::EvalUnsupported => "write the code in the cell; there is no dynamic evaluation",
+            Self::FunctionConstructorUnsupported => {
+                "write a function declaration or arrow function in the cell"
+            }
+            Self::LabelUnsupported => {
+                "extract the labeled region into a helper function and `return` from it"
+            }
+            Self::RegexFlagUnsupported => "use only the `g`, `i`, `m`, `s`, `u`, and `y` flags",
+            Self::RegexIndicesFlagUnsupported => {
+                "drop the `d` flag and use the match index and matched text"
+            }
+            Self::RegexUnicodeSetsFlagUnsupported => {
+                "use `u` with ordinary Unicode character classes"
+            }
+            Self::AccessorUnsupported => {
+                "expose a plain data property, or a function that computes the value"
+            }
+            Self::PrototypeMutationUnsupported => {
+                "return a new object with the properties you want instead of reaching through the prototype"
+            }
+            Self::ThisUnsupported => {
+                "pass the value in as a parameter; `globalThis.name` holds durable session state"
+            }
+            Self::NamespaceUnsupported => "declare the values at the top level of the cell",
+            Self::DecoratorUnsupported => "call the wrapper function explicitly",
+            Self::DynamicImportUnsupported => {
+                "call the host tools already in scope; a cell imports nothing"
+            }
+            Self::JsxUnsupported => "build strings or plain objects instead of JSX elements",
+            Self::ImportExportUnsupported => {
+                "a cell is not a module: reference the bound variables and host tools already in scope"
+            }
+            Self::UsingUnsupported => "release the resource explicitly in a `finally` block",
+            Self::NewUnsupported => {
+                "only the Error family, `Map`, `Set`, `Date`, `RegExp`, `URL`, and `URLSearchParams` are constructible"
+            }
+            Self::ForUnsupported => {
+                "write `for (let i = 0; i < end; i++)`, or iterate with `for...of`"
+            }
+            Self::ForOfUnsupported => "iterate a materialized array with plain `for...of`",
+            Self::AwaitUnsupported => {
+                "await at the top level of the cell or inside an `async` function"
+            }
+            Self::AwaitRequired => "add `await` — the call returns a promise",
+            Self::YieldUnsupported => "collect the values into an array and return it",
+            Self::TaggedTemplateUnsupported => {
+                "call the function with an ordinary template literal argument"
+            }
+            Self::SuperUnsupported => "call the helper function directly",
+            Self::MetaPropertyUnsupported => {
+                "a cell has no module or construction context; read what you need from the bound variables"
+            }
+            Self::BigIntUnsupported => "use `number`, or carry the value as a decimal string",
+            Self::PrivateNameUnsupported => {
+                "keep the field in a plain object and do not export it from the factory"
+            }
+            Self::SequenceUnsupported => "put each expression on its own statement line",
+            Self::InstanceOfUnsupported => {
+                "check `err.name`, or use `Array.isArray(value)`; `instanceof` accepts only built-in constructors"
+            }
+            Self::DebuggerUnsupported => "use `console.log` to inspect values",
+            Self::LoneSurrogateLiteralUnsupported => {
+                "write the character as a complete code point escape"
+            }
+            Self::DeclareUnsupported => "declare the value with an initializer",
+            Self::MutualRecursionUnsupported => {
+                "restructure the functions so one calls the other, or drive the recursion with an explicit work list"
+            }
+            Self::MutableCaptureUnsupported => {
+                "pass the value into the function as a parameter and return the new value"
+            }
+            Self::ProcessConfigFieldUnsupported => {
+                "a `defineProcess` config accepts `name`, `signals`, and `run`"
+            }
+            Self::ProcessCaptureUnsupported => {
+                "pass the value to the process through its `run` arguments"
+            }
+            Self::MethodUnsupported => {
+                "use a method the dialect's standard-library contract lists for this receiver"
+            }
+            Self::UnsupportedStatement | Self::UnsupportedExpression => {
+                "rewrite with the constructs the dialect prompt lists"
+            }
+            _ => return None,
+        })
+    }
+
     /// The stable machine-readable diagnostic name.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -234,27 +350,105 @@ pub struct SourceSpan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub code: DiagnosticCode,
+    /// What the dialect refused. The refusal only.
     pub message: String,
     pub span: Option<SourceSpan>,
+    /// What to write instead: the structured repair channel.
+    ///
+    /// A rejection a model cannot act on costs a whole turn. The dialect has
+    /// always known the accepted idiom — it was just written into the middle of
+    /// `message`, where reading it means parsing English. This is the same
+    /// content on a channel a consumer can find: the message holds the refusal,
+    /// these hold the rewrite, and no text appears in both.
+    pub suggestions: Vec<String>,
 }
 
 impl Diagnostic {
+    /// Builds a diagnostic, splitting any repair text the message carries into
+    /// [`Diagnostic::suggestions`].
+    ///
+    /// The crate's rejections were authored as `"Unsupported: <refusal>.
+    /// <rewrite>"` — one string, two jobs. Splitting here rather than at 34 call
+    /// sites keeps the convention in one place and makes the migration total:
+    /// there is no way to author a repair-carrying message that *keeps* its
+    /// repair text in `message`. Codes whose messages carry no rewrite fall back
+    /// to [`DiagnosticCode::accepted_idiom`], so the reject-helper rejections
+    /// — the ones that said only "X are not in the TypeScript dialect" — gain
+    /// one too.
     pub(crate) fn new(
         code: DiagnosticCode,
         message: impl Into<String>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        let message = message.into();
+        let (message, suggestion) = split_inline_repair(message);
+        let suggestions = suggestion
+            .or_else(|| code.accepted_idiom().map(str::to_string))
+            .into_iter()
+            .collect();
+        Self {
+            code,
+            message,
+            span,
+            suggestions,
+        }
+    }
+
+    /// Builds a diagnostic whose refusal and rewrite are authored separately.
+    ///
+    /// For rejections that never adopted the `"Unsupported: "` convention and
+    /// whose repair text therefore has no sentence break to split on. Passing
+    /// the two halves is always preferable to writing one string and hoping the
+    /// splitter finds the seam.
+    pub(crate) fn with_repair(
+        code: DiagnosticCode,
+        message: impl Into<String>,
+        repair: impl Into<String>,
         span: Option<SourceSpan>,
     ) -> Self {
         Self {
             code,
             message: message.into(),
             span,
+            suggestions: vec![repair.into()],
         }
     }
 }
 
+/// Splits `"Unsupported: <refusal>. <rewrite>"` into its two halves.
+///
+/// Only the authored `Unsupported: ` convention is split, and only at the first
+/// sentence break: the leading clause names the construct, everything after it
+/// is the repair. A message without that shape is returned whole — guessing at
+/// sentence boundaries in arbitrary prose would move refusals into the hint
+/// line, which is worse than leaving them where they are.
+fn split_inline_repair(message: String) -> (String, Option<String>) {
+    const PREFIX: &str = "Unsupported: ";
+    if !message.starts_with(PREFIX) {
+        return (message, None);
+    }
+    let Some(break_at) = message[PREFIX.len()..]
+        .find(". ")
+        .map(|offset| PREFIX.len() + offset)
+    else {
+        return (message, None);
+    };
+    let repair = message[break_at + ". ".len()..].trim().to_string();
+    if repair.is_empty() {
+        return (message, None);
+    }
+    (message[..break_at].to_string(), Some(repair))
+}
+
 impl fmt::Display for Diagnostic {
+    /// The model-facing one-liner: code, refusal, then each rewrite on its own
+    /// `hint:` line, exactly as Lashlang renders its own hint channel.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}: {}", self.code.as_str(), self.message)
+        write!(formatter, "{}: {}", self.code.as_str(), self.message)?;
+        for suggestion in &self.suggestions {
+            write!(formatter, "\nhint: {suggestion}")?;
+        }
+        Ok(())
     }
 }
 
@@ -306,6 +500,70 @@ mod tests {
             listed.len(),
             DiagnosticCode::ALL.len(),
             "DiagnosticCode::ALL repeats a variant"
+        );
+    }
+
+    /// The repair channel is only worth having if a model can rely on it, and
+    /// the codes it can rely on are the ones that refuse a construct: those all
+    /// have an in-dialect replacement, by definition of being a *dialect*
+    /// restriction rather than a resource limit or a typo.
+    #[test]
+    fn every_unsupported_code_names_the_accepted_idiom() {
+        let silent = DiagnosticCode::ALL
+            .iter()
+            .filter(|code| code.as_str().ends_with("_UNSUPPORTED"))
+            .filter(|code| code.accepted_idiom().is_none())
+            .map(|code| code.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            silent.is_empty(),
+            "these refuse a construct without naming its replacement: {silent:?}"
+        );
+    }
+
+    /// The channel exists to *move* repair text, not to copy it. A suggestion
+    /// repeated inside the message is the pre-FIG-1411 shape wearing a new
+    /// field, and it costs the reader the same second parse.
+    #[test]
+    fn a_suggestion_is_never_repeated_in_the_message() {
+        for (source, label) in [
+            ("class A {}", "class"),
+            ("const r = /x/v;", "regex flag"),
+            ("label: while (true) { break; }", "label"),
+            ("const x = arguments;", "arguments"),
+        ] {
+            let error = crate::validate(source).expect_err(label);
+            assert!(!error.suggestions.is_empty(), "{label}: {error:?}");
+            for suggestion in &error.suggestions {
+                assert!(
+                    !error.message.contains(suggestion.as_str()),
+                    "{label}: `{suggestion}` is in both the message and the hint"
+                );
+            }
+        }
+    }
+
+    /// The authored `"Unsupported: <refusal>. <rewrite>"` convention is the
+    /// whole migration, so the split has to hold at its edges as well as its
+    /// middle.
+    #[test]
+    fn only_the_unsupported_convention_is_split() {
+        assert_eq!(
+            super::split_inline_repair("Unsupported: classes. Use functions.".to_string()),
+            (
+                "Unsupported: classes".to_string(),
+                Some("Use functions.".to_string())
+            )
+        );
+        assert_eq!(
+            super::split_inline_repair("Unsupported: classes.".to_string()),
+            ("Unsupported: classes.".to_string(), None),
+            "a refusal with no rewrite keeps its trailing period"
+        );
+        assert_eq!(
+            super::split_inline_repair("classes. Use functions.".to_string()),
+            ("classes. Use functions.".to_string(), None),
+            "prose outside the convention is never guessed at"
         );
     }
 

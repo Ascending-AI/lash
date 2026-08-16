@@ -164,9 +164,10 @@ impl Lowerer {
                 return self.lower_constructor(name, &args);
             }
             return match (name.as_str(), args) {
-                ("finish", [_]) if self.process_depth > 0 => Err(Diagnostic::new(
+                ("finish", [_]) if self.process_depth > 0 => Err(Diagnostic::with_repair(
                     DiagnosticCode::UnsupportedExpression,
-                    "finish is cell-only; return from defineProcess.run so enclosing finally blocks execute",
+                    "finish is cell-only",
+                    "return from defineProcess.run so enclosing finally blocks execute",
                     None,
                 )),
                 ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
@@ -602,9 +603,10 @@ impl Lowerer {
             }
             if method == "hasOwnProperty" {
                 let [key] = args else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::with_repair(
                         DiagnosticCode::UnsupportedExpression,
-                        "hasOwnProperty expects exactly one key; use Object.hasOwn(object, key)",
+                        "hasOwnProperty expects exactly one key",
+                        "use Object.hasOwn(object, key)",
                         None,
                     ));
                 };

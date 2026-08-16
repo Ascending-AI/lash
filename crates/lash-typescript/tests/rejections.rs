@@ -45,8 +45,9 @@ fn retained_match_all_iterator_has_a_sink_repair() {
     let error = lash_typescript::validate("const matches = 'a'.matchAll(/a/g);")
         .expect_err("matchAll must be consumed directly");
     assert_eq!(error.code, Code::RegexIteratorPosition);
+    assert_eq!(error.suggestions, ["wrap: [...text.matchAll(regexp)]"]);
     assert!(
-        error.message.contains("[...text.matchAll(regexp)]"),
+        error.to_string().contains("[...text.matchAll(regexp)]"),
         "{error}"
     );
 }
@@ -283,8 +284,8 @@ fn base64_globals_keep_the_dom_exception_repair_diagnostic() {
             error.code,
             lash_typescript::DiagnosticCode::MethodUnsupported
         );
-        assert!(error.message.contains("DOMException"), "{error}");
-        assert!(error.message.contains("host tool"), "{error}");
+        assert!(error.to_string().contains("DOMException"), "{error}");
+        assert!(error.to_string().contains("host tool"), "{error}");
     }
 }
 

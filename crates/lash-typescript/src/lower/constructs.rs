@@ -1276,11 +1276,10 @@ impl Lowerer {
                         | Expr::Function(_)
                 ) {
                     let label = if index == 0 { "pattern" } else { "flags" };
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::with_repair(
                         DiagnosticCode::NewUnsupported,
-                        format!(
-                            "new RegExp {label} must be a string or undefined; pass an explicit string"
-                        ),
+                        format!("new RegExp {label} must be a string or undefined"),
+                        "pass an explicit string",
                         None,
                     ));
                 }

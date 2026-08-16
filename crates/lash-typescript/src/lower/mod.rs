@@ -1518,9 +1518,10 @@ fn reject_mutual_recursion(
         .map(display)
         .collect::<Vec<_>>()
         .join(" -> ");
-    Err(Diagnostic::new(
+    Err(Diagnostic::with_repair(
         DiagnosticCode::MutualRecursionUnsupported,
         format!("mutually recursive function declarations are not supported in v1; cycle: {cycle}"),
+        "restructure so one function calls the other, or drive the recursion with an explicit work list",
         None,
     ))
 }
