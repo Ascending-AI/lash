@@ -61,7 +61,10 @@ pub use lashlang_graph::{
 /// Version 5 adds the `composition_changed` event.
 /// Version 6 adds the `provider_replay_dropped` event with typed minting and
 /// serving LLM Provider routes.
-pub const TRACE_SCHEMA_VERSION: u32 = 6;
+/// Version 7 renames the Lashlang execution records to language-tagged ones:
+/// `language_execution` carries the language id, and the graph, identity, node
+/// and status payloads lose their Lashlang-specific names.
+pub const TRACE_SCHEMA_VERSION: u32 = 7;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
