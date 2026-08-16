@@ -605,10 +605,11 @@ shared AST's generic limit, which no accepted-grammar source can reach.
 The Node differential table carries 546 rows, of which 473 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 448 unique rows rather than of 521 distinct behaviours. Both counts
-are pinned against the table by `committed_row_counts_match_the_register`, and
-the generator pins each lane's own row count, so neither this paragraph nor a
-lane can drift from the corpus in silence.
+that of those 473 unique expressions rather than of all 546 rows. Every count in
+this paragraph is pinned against the table by
+`committed_row_counts_match_the_register`, and the generator pins each lane's
+own row count, so neither this paragraph nor a lane can drift from the corpus in
+silence.
 
 The curated test262-derived slice and its selection rule live under
 `tests/test262/`.
