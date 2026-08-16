@@ -21,6 +21,7 @@ use rustc_hash::FxHashMap;
 mod continuation;
 mod control;
 mod effects;
+mod exceptions;
 mod heap_plan;
 
 #[cfg(test)]
@@ -28,12 +29,14 @@ use continuation::TestSuspension;
 #[cfg(test)]
 pub(crate) use continuation::VM_CONTINUATION_FORMAT_VERSION;
 pub use continuation::{
-    ContinuationError, VmContinuation, VmHeapContinuation, VmIteratorContinuation,
-    VmIteratorCursor, VmProfileContinuation, VmRunOutcome,
+    ContinuationError, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
+    VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
 };
 pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 use control::{VmMode, VmStep};
 use effects::VmEffect;
+use exceptions::{ExceptionHandler, FinallyCompletion, FinallyState};
 
 use super::host::{ExecutionMode, ProcessEventKind, SleepKind};
 use super::record::{Record, record_with_capacity};
@@ -226,6 +229,8 @@ pub struct Vm<'a, H> {
     iter_stack: Vec<IterState>,
     active_function: Option<usize>,
     frames: Vec<CallFrame>,
+    handlers: Vec<ExceptionHandler>,
+    finally_stack: Vec<FinallyState>,
     lashlang_execution_occurrences: FxHashMap<String, u64>,
     profile: Option<ProfileAccumulator>,
     validation_plans: FxHashMap<usize, (Arc<Record>, ValidationPlan)>,
@@ -270,102 +275,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 
     pub(crate) fn enable_profile(&mut self) {
         self.profile = Some(ProfileAccumulator::default());
-    }
-
-    fn lashlang_execution_site_at(&self, instruction_ip: usize) -> Option<&LashlangExecutionSite> {
-        self.chunk
-            .lashlang_execution_sites
-            .get(instruction_ip)
-            .and_then(Option::as_ref)
-    }
-
-    fn begin_lashlang_execution(
-        &mut self,
-        instruction_ip: usize,
-    ) -> Option<ActiveLashlangExecutionNode> {
-        let site = self.lashlang_execution_site_at(instruction_ip)?.clone();
-        Some(self.begin_lashlang_execution_site(site))
-    }
-
-    pub(super) fn begin_lashlang_execution_site(
-        &mut self,
-        site: LashlangExecutionSite,
-    ) -> ActiveLashlangExecutionNode {
-        let occurrence = self
-            .lashlang_execution_occurrences
-            .entry(site.node_id.clone())
-            .and_modify(|value| *value += 1)
-            .or_insert(1);
-        let occurrence = *occurrence;
-        self.host
-            .observe_lashlang_execution(LashlangExecutionObservation::NodeStarted {
-                site: site.clone(),
-                occurrence,
-            });
-        ActiveLashlangExecutionNode { site, occurrence }
-    }
-
-    pub(super) fn complete_lashlang_execution(&self, active: &ActiveLashlangExecutionNode) {
-        self.host
-            .observe_lashlang_execution(LashlangExecutionObservation::NodeCompleted {
-                site: active.site.clone(),
-                occurrence: active.occurrence,
-            });
-    }
-
-    pub(super) fn fail_lashlang_execution(
-        &self,
-        active: &ActiveLashlangExecutionNode,
-        error: impl Into<String>,
-    ) {
-        self.host
-            .observe_lashlang_execution(LashlangExecutionObservation::NodeFailed {
-                site: active.site.clone(),
-                occurrence: active.occurrence,
-                error: error.into(),
-            });
-    }
-
-    pub(super) fn observe_child_started(
-        &self,
-        active: &ActiveLashlangExecutionNode,
-        child: LashlangExecutionChild,
-    ) {
-        self.host
-            .observe_lashlang_execution(LashlangExecutionObservation::ChildStarted {
-                site: active.site.clone(),
-                occurrence: active.occurrence,
-                child,
-            });
-    }
-
-    fn observe_branch_selection(
-        &mut self,
-        instruction_ip: usize,
-        selected: ProcessBranchSelection,
-    ) {
-        let Some(site) = self.lashlang_execution_site_at(instruction_ip).cloned() else {
-            return;
-        };
-        let Some(branch) = site.branch.as_ref() else {
-            return;
-        };
-        let occurrence = self
-            .lashlang_execution_occurrences
-            .entry(site.node_id.clone())
-            .and_modify(|value| *value += 1)
-            .or_insert(1);
-        let edge_id = match selected {
-            ProcessBranchSelection::Then => branch.then_edge_id.clone(),
-            ProcessBranchSelection::Else => branch.else_edge_id.clone(),
-        };
-        self.host
-            .observe_lashlang_execution(LashlangExecutionObservation::BranchSelected {
-                site,
-                occurrence: *occurrence,
-                edge_id,
-                selected,
-            });
     }
 
     fn current_instruction_ip(&self) -> usize {
@@ -544,7 +453,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         .collect::<Result<Vec<_>, _>>()?,
                     value => {
                         return Err(RuntimeError::ShapingListRequired {
-                            builtin: "map",
+                            builtin: "map".into(),
                             actual: super::value_type_name(&value).to_string(),
                         });
                     }
@@ -563,6 +472,49 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
             }
             Instruction::Return => self.return_from_function()?,
+            Instruction::PushHandler {
+                handler,
+                finally,
+                catches,
+            } => self.push_exception_handler(handler, finally, catches),
+            Instruction::PopHandler => self.pop_exception_handler()?,
+            Instruction::EnterFinally { finally, resume } => {
+                self.enter_finally(finally, resume);
+            }
+            Instruction::AbandonFinally => self.abandon_finally()?,
+            Instruction::EndFinally => {
+                if let Some(escape) = self.finish_finally()? {
+                    // A cleanup chain that ends with nothing catching it
+                    // re-raises what it was unwinding. Only a value thrown by
+                    // an explicit `throw` becomes an `UncaughtException`; a
+                    // routed runtime failure keeps its variant, and its
+                    // attribution is restored so the trap still points at the
+                    // failing expression rather than the cleanup block.
+                    return Err(match escape.origin {
+                        Some(origin) => {
+                            self.pending_error_span = origin.span.or_else(|| {
+                                self.chunk
+                                    .spans
+                                    .get(origin.instruction_ip)
+                                    .copied()
+                                    .flatten()
+                            });
+                            origin.error
+                        }
+                        None => RuntimeError::UncaughtException {
+                            value: self.heap.export(&escape.value)?,
+                        },
+                    });
+                }
+            }
+            Instruction::Throw => {
+                let value = self.pop_stack()?;
+                if !self.throw_value(value.clone(), None)? {
+                    return Err(RuntimeError::UncaughtException {
+                        value: self.heap.export(&value)?,
+                    });
+                }
+            }
             Instruction::Binary(op) => {
                 if self.stack.len() < 2
                     || self.stack[self.stack.len() - 2..]
@@ -818,7 +770,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessWaitSignal { name } => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "wait_signal",
+                        keyword: "wait_signal".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::WaitSignal { name })));
@@ -832,7 +784,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessYield => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "yield",
+                        keyword: "yield".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::ProcessEvent(
@@ -842,7 +794,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessWake => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "wake",
+                        keyword: "wake".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::ProcessEvent(
@@ -852,7 +804,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ProcessFail => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "fail",
+                        keyword: "fail".into(),
                     });
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::Fail)));
@@ -1183,7 +1135,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::Print => {
                 if self.mode == VmMode::Process {
-                    return Err(RuntimeError::ForegroundControlInsideProcess { keyword: "print" });
+                    return Err(RuntimeError::ForegroundControlInsideProcess {
+                        keyword: "print".into(),
+                    });
                 }
                 return Ok(VmStep::Effect(VmEffect::Print));
             }
@@ -1292,7 +1246,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::MakeClosure { .. }
             | Instruction::Call { .. }
             | Instruction::Map
-            | Instruction::Return => {
+            | Instruction::Return
+            | Instruction::PushHandler { .. }
+            | Instruction::PopHandler
+            | Instruction::EnterFinally { .. }
+            | Instruction::EndFinally
+            | Instruction::AbandonFinally
+            | Instruction::Throw => {
                 unreachable!("opcode is always completed by step_instruction_fast")
             }
         }
@@ -1432,7 +1392,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let argc =
                     op.fixed_argc()
                         .ok_or(RuntimeError::ContextDependentIntrinsicMisdispatch {
-                            context: "intrinsic dispatch",
+                            context: "intrinsic dispatch".into(),
                         })?;
                 let start = self
                     .stack
@@ -1583,5 +1543,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 include!("functions.rs");
 include!("assignment.rs");
 include!("iteration.rs");
+include!("observations.rs");
 include!("roots.rs");
 include!("state_boundary.rs");

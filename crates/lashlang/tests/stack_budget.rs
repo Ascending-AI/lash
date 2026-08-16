@@ -1,7 +1,7 @@
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    LashlangAbilities, LashlangHostEnvironment, Record, State, Value, compile_linked, execute,
-    parse,
+    AbilityOp, AbilityResult, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
+    Expr, LashlangAbilities, LashlangHostEnvironment, Program, Record, State, TryExpr, Value,
+    compile_linked, execute, parse,
 };
 use std::sync::Arc;
 
@@ -80,8 +80,8 @@ fn stack_budget_lashlang_max_nesting_depth_parse_link_compile_execute() {
     run_on_stack_budget("stack-budget-lashlang-max-nesting", || {
         let deepest = deepest_accepted_nesting();
         assert!(
-            deepest >= 39,
-            "expected the parser to accept at least 39 nested levels, got {deepest}; \
+            deepest >= 29,
+            "expected the parser to accept at least 29 nested levels, got {deepest}; \
              if MAX_NESTING_DEPTH moved on purpose, move this floor with it"
         );
 
@@ -108,6 +108,126 @@ fn stack_budget_lashlang_max_nesting_depth_parse_link_compile_execute() {
             serde_json::json!({ "leaf": 0 })
         );
     });
+}
+
+/// `depth` levels of AST-only `try/catch/finally` around a constant. The parser
+/// has no production for these nodes, so nothing about the source grammar
+/// bounds how deep a dialect can build them.
+fn nested_try_program(depth: usize) -> Program {
+    let mut expr = Expr::Number(7.0);
+    for level in 0..depth {
+        expr = Expr::Try(Box::new(TryExpr {
+            body: Box::new(expr),
+            catch: Some(CatchClause {
+                binding: format!("error_{level}").into(),
+                body: Box::new(Expr::Number(-1.0)),
+            }),
+            finally: Some(Box::new(Expr::Null)),
+        }));
+    }
+    Program::block(vec![Expr::Finish(Box::new(expr))])
+}
+
+fn stack_budget_environment() -> LashlangHostEnvironment {
+    LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::all(),
+    )
+}
+
+/// The AST cap is only sound if the *most expensive* per-level AST variant
+/// meets the 2 MiB budget at exactly that depth. Nested `try`/`catch`/`finally`
+/// is that variant — it first aborts ten levels above the cap, where the
+/// cheapest block-bodied shape first aborts thirteen above — so this is the
+/// test that earns the constant. The other budget tests cover cheaper shapes.
+#[test]
+fn stack_budget_most_expensive_ast_variant_at_the_nesting_cap() {
+    run_on_stack_budget("stack-budget-ast-cap", || {
+        // The deepest try chain the cap admits, found rather than assumed so
+        // the test tracks the constant instead of restating its arithmetic.
+        let depth = (1..lashlang::MAX_AST_NESTING_DEPTH)
+            .take_while(|depth| {
+                lashlang::check_ast_nesting_depth(&nested_try_program(*depth)).is_ok()
+            })
+            .last()
+            .expect("some try depth is admitted");
+        assert!(
+            lashlang::check_ast_nesting_depth(&nested_try_program(depth + 1)).is_err(),
+            "depth {depth} must be the deepest the cap admits"
+        );
+        let program = nested_try_program(depth);
+        let linked =
+            lashlang::LinkedModule::link(program, stack_budget_environment()).expect("links");
+        let compiled = compile_linked(&linked);
+        let mut state = State::new();
+        let outcome = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(execute(&compiled, &mut state, &StackBudgetHost))
+            .expect("program executes");
+        assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(7.0)));
+    });
+}
+
+/// The AST-only exception nodes must meet the same 2 MiB budget as parsed
+/// shapes at the depth the parser admits.
+#[test]
+fn stack_budget_ast_try_finally_at_parser_max_depth() {
+    run_on_stack_budget("stack-budget-ast-try-finally", || {
+        let program = nested_try_program(deepest_accepted_nesting());
+        let linked =
+            lashlang::LinkedModule::link(program, stack_budget_environment()).expect("links");
+        let compiled = compile_linked(&linked);
+        let mut state = State::new();
+        let outcome = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(execute(&compiled, &mut state, &StackBudgetHost))
+            .expect("program executes");
+        assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(7.0)));
+    });
+}
+
+/// AST-only nodes have no source grammar to bound them, so the depth cap has to
+/// live on the AST-construction entry points. Without it a dialect that lowers
+/// a deeply nested `try` aborts the host process on a stack overflow instead of
+/// returning a typed error, which a child process is the only way to observe.
+#[test]
+fn ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort() {
+    if std::env::var("LASH_STACK_BUDGET_AST_DEPTH").is_ok() {
+        let depth: usize = std::env::var("LASH_STACK_BUDGET_AST_DEPTH")
+            .expect("depth")
+            .parse()
+            .expect("depth parses");
+        run_on_stack_budget("stack-budget-ast-depth-child", move || {
+            let program = nested_try_program(depth);
+            let error = lashlang::LinkedModule::link(program.clone(), stack_budget_environment())
+                .expect_err("linking must refuse the nesting");
+            assert!(error.to_string().contains("nesting too deep"), "{error}");
+            let error =
+                lashlang::compile_ast(&program).expect_err("compiling must refuse the nesting");
+            assert!(error.to_string().contains("nesting too deep"), "{error}");
+        });
+        return;
+    }
+    let exe = std::env::current_exe().expect("test binary");
+    for depth in [72usize, 96, 128] {
+        let status = std::process::Command::new(&exe)
+            .args([
+                "ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("LASH_STACK_BUDGET_AST_DEPTH", depth.to_string())
+            .status()
+            .expect("spawn the child process");
+        assert!(
+            status.success(),
+            "depth {depth} did not fail closed: {status}"
+        );
+    }
 }
 
 /// Walks up until the parser refuses, so the guard tracks the real cap rather

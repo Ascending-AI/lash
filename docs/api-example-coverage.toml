@@ -15,46 +15,142 @@ schema_version = 1
 # their explicit dispositions here so that "not host-facing" never becomes
 # "not inventoried".
 [[low_level_api]]
+symbol = "lashlang::MAX_AST_NESTING_DEPTH"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:125#for _ in 0..MAX_AST_NESTING_DEPTH {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:132#limit: MAX_AST_NESTING_DEPTH"
+
+[[low_level_api]]
+symbol = "lashlang::check_ast_nesting_depth"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:121#assert_eq!(check_ast_nesting_depth(&shallow), Ok(()));"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:121#assert_eq!(check_ast_nesting_depth(&shallow), Ok(()));"
+
+[[low_level_api]]
+symbol = "lashlang::validate_ast"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:122#assert_eq!(validate_ast(&shallow), Ok(()));"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:122#assert_eq!(validate_ast(&shallow), Ok(()));"
+
+[[low_level_api]]
+symbol = "lashlang::NestingTooDeep"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:131#Err(NestingTooDeep {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:131#Err(NestingTooDeep {"
+
+[[low_level_api]]
+symbol = "lashlang::InvalidAst"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:137#Some(InvalidAst::NestingTooDeep {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:147#Some(InvalidAst::LoopControlOutsideLoop { keyword: \"break\" })"
+
+[[low_level_api]]
+symbol = "lashlang::RuntimeError::code"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:155#assert_eq!(RuntimeError::LenUnsupported.code(), \"LenUnsupported\");"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:155#assert_eq!(RuntimeError::LenUnsupported.code(), \"LenUnsupported\");"
+
+[[low_level_api]]
+symbol = "lashlang::RuntimeError::taxonomy"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:157#RuntimeError::LenUnsupported.taxonomy(),"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:158#ErrorTaxonomy::Catchable"
+
+[[low_level_api]]
+symbol = "lashlang::ErrorTaxonomy"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:162#ErrorTaxonomy::UncatchableTerminal"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:162#ErrorTaxonomy::UncatchableTerminal"
+
+[[low_level_api]]
+symbol = "lashlang::VmHandlerContinuation"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:206#let handler: &VmHandlerContinuation = continuation"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:210#assert!(handler.catches);"
+
+[[low_level_api]]
+symbol = "lashlang::VmFinallyContinuation"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:212#let finally: &VmFinallyContinuation = continuation"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:222#assert_eq!(origin.error, RuntimeError::LenUnsupported);"
+
+[[low_level_api]]
+symbol = "lashlang::VmFinallyCompletionContinuation"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:216#let VmFinallyCompletionContinuation::Throw { origin, .. } = &finally.completion else {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:222#assert_eq!(origin.error, RuntimeError::LenUnsupported);"
+
+[[low_level_api]]
+symbol = "lashlang::VmPendingErrorOriginContinuation"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:219#let origin: &VmPendingErrorOriginContinuation ="
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:222#assert_eq!(origin.error, RuntimeError::LenUnsupported);"
+
+[[low_level_api]]
+symbol = "lashlang::CatchClause"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:98#catch: Some(CatchClause {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:111#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
+symbol = "lashlang::TryExpr"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:96#let recovered = Expr::Try(Box::new(TryExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:111#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
+symbol = "lashlang::Expr::Try"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:96#let recovered = Expr::Try(Box::new(TryExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:111#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
+symbol = "lashlang::Expr::Throw"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:97#body: Box::new(Expr::Throw(Box::new(Expr::String(\"original\".into())))),"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:111#ExecutionOutcome::Finished(Value::String(\"original\".into()))"
+
+[[low_level_api]]
 symbol = "lashlang::FunctionExpr"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:33#Expr::Function(Box::new(FunctionExpr {"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:36#Expr::Function(Box::new(FunctionExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:70#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
 
 [[low_level_api]]
 symbol = "lashlang::Expr::Function"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:33#Expr::Function(Box::new(FunctionExpr {"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:36#Expr::Function(Box::new(FunctionExpr {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:70#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
 
 [[low_level_api]]
 symbol = "lashlang::Expr::Call"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:75#Expr::Finish(Box::new(Expr::Call {"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:86#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:78#Expr::Finish(Box::new(Expr::Call {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:90#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
 
 [[low_level_api]]
 symbol = "lashlang::Expr::Map"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:56#Expr::Finish(Box::new(Expr::Map {"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:59#Expr::Finish(Box::new(Expr::Map {"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:70#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
 
 [[low_level_api]]
 symbol = "lashlang::DEFAULT_MAX_VM_FRAME_DEPTH"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:87#lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get()"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:87#assert_eq!(lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get(), 1_024);"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:91#lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get()"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:91#assert_eq!(lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get(), 1_024);"
 
 [[low_level_api]]
 symbol = "lashlang::compile_ast"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:61#let compiled = compile_ast(&program);"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:67#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:64#let compiled = compile_ast(&program).expect(\"program nesting is within the cap\");"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:70#ExecutionOutcome::Finished(Value::List(vec![Value::Number(17.0)].into()))"
 
 [[low_level_api]]
 symbol = "lashlang::VmContinuation::frame_depth"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:86#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:86#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
+usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:90#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:90#assert_eq!(vm.suspend().expect(\"function checkpoint\").frame_depth(), 1);"
 
 [[api]]
 symbol = "lash::AdvancedToolAdmin"

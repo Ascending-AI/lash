@@ -172,11 +172,27 @@ REACHABLE_KINDS = {"enum", "struct", "trait", "type_alias", "union"}
 # but additions made for FIG-1302 still require an explicit, checked
 # disposition in the same registry.
 REQUIRED_LOW_LEVEL_API = {
+    "lashlang::CatchClause",
     "lashlang::DEFAULT_MAX_VM_FRAME_DEPTH",
+    "lashlang::ErrorTaxonomy",
+    "lashlang::InvalidAst",
+    "lashlang::MAX_AST_NESTING_DEPTH",
+    "lashlang::NestingTooDeep",
+    "lashlang::RuntimeError::code",
+    "lashlang::RuntimeError::taxonomy",
+    "lashlang::VmFinallyCompletionContinuation",
+    "lashlang::VmFinallyContinuation",
+    "lashlang::VmHandlerContinuation",
+    "lashlang::VmPendingErrorOriginContinuation",
+    "lashlang::check_ast_nesting_depth",
+    "lashlang::validate_ast",
     "lashlang::Expr::Call",
     "lashlang::Expr::Function",
     "lashlang::Expr::Map",
+    "lashlang::Expr::Throw",
+    "lashlang::Expr::Try",
     "lashlang::FunctionExpr",
+    "lashlang::TryExpr",
     "lashlang::VmContinuation::frame_depth",
     "lashlang::compile_ast",
 }
@@ -770,13 +786,24 @@ def refresh() -> int:
     Line numbers move whenever an example file is edited above an anchor; the
     recorded source text is the durable identity. Anything whose text is gone is
     reported and left untouched — deleting or rewriting evidence is a reviewed
-    decision, not a refresh."""
+    decision, not a refresh.
+
+    Both inventory tables are covered. `low_level_api` rows anchor into the same
+    example files and drift for the same reasons, so leaving them out made the
+    one section that has to be maintained by hand the only one a refresh could
+    not repair."""
     text = INVENTORY.read_text(encoding="utf-8")
     stale: list[str] = []
     replaced = 0
     with INVENTORY.open("rb") as handle:
         inventory = tomllib.load(handle)
-    for entry in inventory.get("api", []):
+    entries = [*inventory.get("api", []), *inventory.get("low_level_api", [])]
+    # Several symbols legitimately cite the same line of an example, so
+    # rewrites are collected before they are applied: rewriting per entry would
+    # replace every occurrence on the first hit and then report the rest as
+    # unrewritable.
+    rewrites: dict[str, str] = {}
+    for entry in entries:
         for field in ("usage", "assertion"):
             reference = entry.get(field, "")
             if not reference or reference_exists(reference):
@@ -785,13 +812,15 @@ def refresh() -> int:
             if corrected is None:
                 stale.append(f"{entry.get('symbol')}: {field} evidence gone: {reference!r}")
                 continue
-            escaped_old = toml_escape(reference)
-            escaped_new = toml_escape(corrected)
-            if escaped_old in text:
-                text = text.replace(escaped_old, escaped_new)
-                replaced += 1
-            else:
-                stale.append(f"{entry.get('symbol')}: could not rewrite {field} reference")
+            rewrites[reference] = corrected
+    for reference, corrected in rewrites.items():
+        escaped_old = toml_escape(reference)
+        escaped_new = toml_escape(corrected)
+        if escaped_old not in text:
+            stale.append(f"could not rewrite reference {reference!r}")
+            continue
+        text = text.replace(escaped_old, escaped_new)
+        replaced += 1
     INVENTORY.write_text(text, encoding="utf-8")
     print(f"refreshed {replaced} evidence anchors")
     for line in stale:

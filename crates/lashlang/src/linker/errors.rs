@@ -1,5 +1,10 @@
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum LinkError {
+    #[error(transparent)]
+    InvalidAst {
+        #[from]
+        source: crate::ast::InvalidAst,
+    },
     #[error("duplicate declaration `{name}`")]
     DuplicateDeclaration { name: String, span: Option<Span> },
     #[error("duplicate process parameter `{name}`")]
@@ -232,7 +237,7 @@ impl LinkError {
             | Self::IncompatibleBinaryOperands { span, .. }
             | Self::IncompatibleBuiltinOperands { span, .. }
             | Self::IncompatibleIterationTarget { span, .. } => *span,
-            Self::ModuleHash { .. } => None,
+            Self::ModuleHash { .. } | Self::InvalidAst { .. } => None,
         }
     }
 }

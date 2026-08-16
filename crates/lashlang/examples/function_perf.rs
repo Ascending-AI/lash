@@ -85,7 +85,7 @@ fn main() {
         .build()
         .expect("tokio runtime");
     let program = function_benchmark_program(scenario);
-    let compiled = compile_ast(&program);
+    let compiled = compile_ast(&program).expect("benchmark program nesting is within the cap");
     ALLOCATIONS.store(0, Ordering::Relaxed);
     ALLOCATED_BYTES.store(0, Ordering::Relaxed);
     let started = Instant::now();

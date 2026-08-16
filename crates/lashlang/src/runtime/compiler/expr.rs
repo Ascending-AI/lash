@@ -117,20 +117,29 @@ impl Compiler {
             } => self.compile_for_expr(binding, iterable, body, true),
             Expr::While { condition, body } => self.compile_while_expr(condition, body, true),
             Expr::Break => {
+                let scope_depth = self
+                    .loop_contexts
+                    .last()
+                    .expect("validate_ast rejects `break` outside loops")
+                    .handler_scope_depth;
+                self.emit_exception_scope_exit(scope_depth);
                 let jump = self.emit_jump();
                 self.loop_contexts
                     .last_mut()
-                    .expect("parser rejects `break` outside loops")
+                    .expect("validate_ast rejects `break` outside loops")
                     .break_jumps
                     .push(jump);
                 self.clear_const_slots();
             }
             Expr::Continue => {
-                let continue_target = self
-                    .loop_contexts
-                    .last()
-                    .expect("parser rejects `continue` outside loops")
-                    .continue_target;
+                let (continue_target, scope_depth) = {
+                    let context = self
+                        .loop_contexts
+                        .last()
+                        .expect("validate_ast rejects `continue` outside loops");
+                    (context.continue_target, context.handler_scope_depth)
+                };
+                self.emit_exception_scope_exit(scope_depth);
                 self.code.push(Instruction::Jump(continue_target));
                 self.clear_const_slots();
             }
@@ -292,6 +301,11 @@ impl Compiler {
                 self.compile_expr(function);
                 self.code.push(Instruction::Map);
             }
+            Expr::Try(scope) => self.compile_try_expr(scope),
+            Expr::Throw(value) => {
+                self.compile_expr(value);
+                self.code.push(Instruction::Throw);
+            }
             Expr::Field { target, field } => {
                 if let Expr::Variable(name) = target.as_ref() {
                     let slot = self.push_slot(name);
@@ -447,6 +461,178 @@ impl Compiler {
                     self.code.push(Instruction::Binary(*op));
                 }
             },
+        }
+    }
+
+    fn compile_try_expr(&mut self, scope: &crate::ast::TryExpr) {
+        if scope.catch.is_none() && scope.finally.is_none() {
+            self.compile_expr(&scope.body);
+            return;
+        }
+
+        let handler_push = self.code.len();
+        self.code.push(Instruction::PushHandler {
+            handler: usize::MAX,
+            finally: None,
+            catches: scope.catch.is_some(),
+        });
+        let finally_sites = scope.finally.as_ref().map(|_| {
+            self.pending_finally_sites.push(Vec::new());
+            self.pending_finally_sites.len() - 1
+        });
+        self.handler_scopes
+            .push(HandlerScope::Protected { finally_sites });
+        self.compile_expr(&scope.body);
+        self.handler_scopes
+            .pop()
+            .expect("the try body's scope is popped once");
+        self.code.push(Instruction::PopHandler);
+
+        let normal_exit = self.code.len();
+        if scope.finally.is_some() {
+            self.code.push(Instruction::EnterFinally {
+                finally: usize::MAX,
+                resume: usize::MAX,
+            });
+        } else {
+            self.code.push(Instruction::Jump(usize::MAX));
+        }
+
+        let catch_ip = self.code.len();
+        let mut catch_cleanup = None;
+        let mut catch_exit = None;
+        if let Some(catch) = &scope.catch {
+            let binding = self.push_slot(&catch.binding);
+            self.code.push(Instruction::StoreName(binding));
+            if scope.finally.is_some() {
+                catch_cleanup = Some(self.code.len());
+                self.code.push(Instruction::PushHandler {
+                    handler: usize::MAX,
+                    finally: None,
+                    catches: false,
+                });
+                self.handler_scopes
+                    .push(HandlerScope::Protected { finally_sites });
+            }
+            self.compile_expr(&catch.body);
+            if scope.finally.is_some() {
+                self.handler_scopes
+                    .pop()
+                    .expect("the catch body's cleanup scope is popped once");
+                self.code.push(Instruction::PopHandler);
+                catch_exit = Some(self.code.len());
+                self.code.push(Instruction::EnterFinally {
+                    finally: usize::MAX,
+                    resume: usize::MAX,
+                });
+            }
+        }
+
+        let finally_ip = self.code.len();
+        if let Some(finally) = &scope.finally {
+            self.handler_scopes.push(HandlerScope::FinallyBody);
+            self.compile_expr(finally);
+            self.handler_scopes
+                .pop()
+                .expect("the finally body's scope is popped once");
+            self.code.push(Instruction::EndFinally);
+        }
+        let end_ip = self.code.len();
+
+        let handler_ip = if scope.catch.is_some() {
+            catch_ip
+        } else {
+            finally_ip
+        };
+        self.code[handler_push] = Instruction::PushHandler {
+            handler: handler_ip,
+            finally: scope.finally.as_ref().map(|_| finally_ip),
+            catches: scope.catch.is_some(),
+        };
+        self.handler_scope_extents.push(HandlerScopeExtent {
+            push_ip: handler_push,
+            handler_ip,
+            finally_ip: scope.finally.as_ref().map(|_| finally_ip),
+            catches: scope.catch.is_some(),
+            end_ip,
+        });
+        if scope.finally.is_some() {
+            self.code[normal_exit] = Instruction::EnterFinally {
+                finally: finally_ip,
+                resume: end_ip,
+            };
+            if let Some(catch_cleanup) = catch_cleanup {
+                self.code[catch_cleanup] = Instruction::PushHandler {
+                    handler: finally_ip,
+                    finally: Some(finally_ip),
+                    catches: false,
+                };
+                // The catch body's cleanup scope protects the catch body only;
+                // the try scope's own handler is already gone by then, so the
+                // two never sit on the handler stack together.
+                self.handler_scope_extents.push(HandlerScopeExtent {
+                    push_ip: catch_cleanup,
+                    handler_ip: finally_ip,
+                    finally_ip: Some(finally_ip),
+                    catches: false,
+                    end_ip: finally_ip,
+                });
+            }
+            if let Some(catch_exit) = catch_exit {
+                self.code[catch_exit] = Instruction::EnterFinally {
+                    finally: finally_ip,
+                    resume: end_ip,
+                };
+            }
+            let sites = self
+                .pending_finally_sites
+                .pop()
+                .expect("a try with a finally owns exactly one patch bucket");
+            debug_assert_eq!(finally_sites, Some(self.pending_finally_sites.len()));
+            for site in sites {
+                let Instruction::EnterFinally { resume, .. } = self.code[site] else {
+                    unreachable!("a pending finally site is an EnterFinally")
+                };
+                self.code[site] = Instruction::EnterFinally {
+                    finally: finally_ip,
+                    resume,
+                };
+            }
+        } else {
+            self.code[normal_exit] = Instruction::Jump(end_ip);
+        }
+        self.clear_const_slots();
+    }
+
+    /// Emits the instructions a jump edge owes the exception scopes it leaves.
+    ///
+    /// `break` and `continue` are abrupt completions: per ECMA-262 they run
+    /// every pending `finally` between the jump and its target loop, innermost
+    /// first, and every handler they cross has to come off the VM's handler
+    /// stack on the way. `target_depth` is the scope depth the target loop was
+    /// entered at, so nested loops unwind only as far as their own loop.
+    fn emit_exception_scope_exit(&mut self, target_depth: usize) {
+        for index in (target_depth..self.handler_scopes.len()).rev() {
+            match self.handler_scopes[index] {
+                HandlerScope::Protected { finally_sites } => {
+                    self.code.push(Instruction::PopHandler);
+                    if let Some(bucket) = finally_sites {
+                        let site = self.code.len();
+                        // The finally target is patched by `compile_try_expr`
+                        // once the block has been emitted; the resume site is
+                        // the rest of this jump edge, which is known now.
+                        self.code.push(Instruction::EnterFinally {
+                            finally: usize::MAX,
+                            resume: site + 1,
+                        });
+                        self.pending_finally_sites[bucket].push(site);
+                    }
+                }
+                // The pending completion of the `finally` being left is
+                // replaced by the jump completion, so it is discarded rather
+                // than resumed or rethrown.
+                HandlerScope::FinallyBody => self.code.push(Instruction::AbandonFinally),
+            }
         }
     }
 }

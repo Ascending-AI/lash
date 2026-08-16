@@ -385,7 +385,9 @@ async fn foreground_rejects_programmatic_processes() {
             .expect_err("foreground mode should reject process admins");
         assert_eq!(
             err,
-            RuntimeError::SessionProcessAdminOutsideProcess { keyword }
+            RuntimeError::SessionProcessAdminOutsideProcess {
+                keyword: keyword.into()
+            }
         );
     }
 }
@@ -436,7 +438,9 @@ async fn process_mode_rejects_programmatic_foreground_controls() {
             .expect_err("process mode should reject foreground controls");
         assert_eq!(
             err,
-            RuntimeError::ForegroundControlInsideProcess { keyword }
+            RuntimeError::ForegroundControlInsideProcess {
+                keyword: keyword.into()
+            }
         );
     }
 }

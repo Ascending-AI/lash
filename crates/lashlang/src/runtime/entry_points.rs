@@ -34,9 +34,13 @@ pub fn compile(source: &str) -> Result<CompiledProgram, crate::parser::ParseErro
 /// Compiles a program assembled through the AST API.
 ///
 /// This is the entry point for AST-only nodes such as user functions, calls,
-/// and callback-driven maps, which intentionally have no source syntax.
-pub fn compile_ast(program: &Program) -> CompiledProgram {
-    compile_program_internal(program)
+/// callback-driven maps and structured exception scopes, which intentionally
+/// have no source syntax — and therefore no parser to bound how deeply a caller
+/// nests them. The depth cap is applied here instead, so an over-deep tree is a
+/// typed error rather than a stack overflow in a later AST walk.
+pub fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::ast::InvalidAst> {
+    crate::ast::validate_ast(program)?;
+    Ok(compile_program_internal(program))
 }
 
 pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
@@ -63,6 +67,11 @@ pub fn compile_process(
     program: &Program,
     process_name: &str,
 ) -> Result<CompiledProgram, RuntimeError> {
+    crate::ast::check_ast_nesting_depth(program).map_err(|error| {
+        RuntimeError::ValidationFailed {
+            reason: error.to_string(),
+        }
+    })?;
     let process = program
         .process(process_name)
         .ok_or_else(|| RuntimeError::UnknownProcess {

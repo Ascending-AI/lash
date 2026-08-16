@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn nesting_within_limit_still_parses() {
         // Well below MAX_NESTING_DEPTH — a realistic program must keep working.
-        let source = format!("x = {}1{}", "(".repeat(32), ")".repeat(32));
+        let source = format!("x = {}1{}", "(".repeat(24), ")".repeat(24));
         parse(&source).expect("nesting within the limit should parse");
     }
 

@@ -327,6 +327,12 @@ pub trait ExecutionHost: Sync {
         ExecutionBounds::unbounded()
     }
 
+    /// Cheap cooperative cancellation probe. Like execution bounds, this is a
+    /// host terminal and therefore bypasses guest exception handlers.
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+
     /// Deterministic GC stress mode used by the conformance suite.
     fn collect_heap_every_allocation(&self) -> bool {
         false
@@ -452,6 +458,10 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
         self.execution_bounds
     }
 
+    fn is_cancelled(&self) -> bool {
+        self.host.is_cancelled()
+    }
+
     fn take_scratch(&self) -> Option<ExecutionScratch> {
         self.scratch.lock_recover().take()
     }
@@ -475,7 +485,7 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
     }
 }
 
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[error("{message}")]
 pub struct ExecutionHostError {
     message: String,

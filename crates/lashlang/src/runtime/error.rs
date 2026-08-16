@@ -1,3 +1,7 @@
+use std::borrow::Cow;
+
+use serde::{Deserialize, Serialize};
+
 use crate::{ModuleRef, ProcessRef};
 use thiserror::Error;
 
@@ -5,7 +9,7 @@ use super::ExecutionHostError;
 
 /// A failure while interpolating arguments into a format template.
 #[non_exhaustive]
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FormatError {
     /// The template contains an opening brace without a matching closing brace.
     #[error("unmatched `{{` in format string")]
@@ -32,7 +36,7 @@ pub enum FormatError {
 
 /// A typed failure raised while executing compiled Lashlang code.
 #[non_exhaustive]
-#[derive(Clone, Debug, Error, PartialEq)]
+#[derive(Clone, Debug, Error, PartialEq, Serialize, Deserialize)]
 pub enum RuntimeError {
     /// Guest recursion exceeded the configured VM frame-depth limit.
     #[error("lashlang frame depth limit of {limit} frames was exceeded")]
@@ -73,6 +77,10 @@ pub enum RuntimeError {
         "lashlang logical memory limit of {limit} bytes exceeded (allocation would reach {attempted} bytes)"
     )]
     MemoryLimitExceeded { limit: u64, attempted: u64 },
+    /// The host cancelled this VM execution. Cancellation is an execution
+    /// terminal and is never presented to guest handlers.
+    #[error("lashlang execution was cancelled by the host")]
+    HostCancelled,
     /// A heap reference named an object that has already been swept.
     #[error("dangling lashlang heap reference {id}")]
     DanglingHeapReference { id: u64 },
@@ -85,7 +93,7 @@ pub enum RuntimeError {
     /// error is the backstop for an opcode that forgets to declare what it
     /// reads: the cell fails, the process lives.
     #[error("lashlang heap reference {id} reached {context} before it was exported")]
-    UnexportedHeapReference { id: u64, context: &'static str },
+    UnexportedHeapReference { id: u64, context: Cow<'static, str> },
     /// A host boundary cannot represent cyclic heap values.
     #[error("lashlang heap value contains a cycle through object {id}")]
     CyclicHostValue { id: u64 },
@@ -97,10 +105,10 @@ pub enum RuntimeError {
     NonListIteration,
     /// A process-administration keyword was used outside a process body.
     #[error("`{keyword}` can only be used inside a process body")]
-    SessionProcessAdminOutsideProcess { keyword: &'static str },
+    SessionProcessAdminOutsideProcess { keyword: Cow<'static, str> },
     /// A foreground-only control keyword was used inside a process body.
     #[error("`{keyword}` can't be used inside a process body")]
-    ForegroundControlInsideProcess { keyword: &'static str },
+    ForegroundControlInsideProcess { keyword: Cow<'static, str> },
     /// Execution referenced a builtin that is not defined.
     #[error("unknown builtin `{name}`")]
     UnknownBuiltin { name: String },
@@ -194,34 +202,34 @@ pub enum RuntimeError {
     /// A shaping builtin received a value that is not a list or tuple.
     #[error("`{builtin}` requires a list or tuple, got {actual}")]
     ShapingListRequired {
-        builtin: &'static str,
+        builtin: Cow<'static, str>,
         actual: String,
     },
     /// A text-shaping builtin received a non-text argument.
     #[error("`{builtin}` {argument} must be text, got {actual}")]
     ShapingTextRequired {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
         actual: String,
     },
     /// A numeric aggregation encountered a non-number list element.
     #[error("`{builtin}` item {index} must be a number, got {actual}")]
     ShapingNumberRequired {
-        builtin: &'static str,
+        builtin: Cow<'static, str>,
         index: usize,
         actual: String,
     },
     /// An ordering builtin encountered a value that cannot share one ordering.
     #[error("`{builtin}` item {index} ({actual}) is not comparable with item 0 ({reference})")]
     ShapingComparableRequired {
-        builtin: &'static str,
+        builtin: Cow<'static, str>,
         index: usize,
         reference: String,
         actual: String,
     },
     /// An extrema builtin received an empty list.
     #[error("`{builtin}` requires a non-empty list")]
-    ShapingEmptyList { builtin: &'static str },
+    ShapingEmptyList { builtin: Cow<'static, str> },
     /// `sort_by` received an item that was not a record.
     #[error("`sort_by` item {index} must be a record, got {actual}")]
     SortByRecordRequired { index: usize, actual: String },
@@ -240,14 +248,14 @@ pub enum RuntimeError {
     /// Integer division received an argument that is not a finite integer.
     #[error("`{builtin}` {argument} must be a finite integer")]
     InvalidIntegerDivisionArgument {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
     },
     /// Integer division received an argument of an unsupported value type.
     #[error("`{builtin}` {argument} must be a finite integer, got {actual}")]
     InvalidIntegerDivisionArgumentType {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
         actual: String,
     },
     /// A numeric operation received a value that is not numeric.
@@ -265,8 +273,8 @@ pub enum RuntimeError {
     /// A character index was not a non-negative integer.
     #[error("`{builtin}` {argument} must be a non-negative integer")]
     InvalidCharacterIndex {
-        builtin: &'static str,
-        argument: &'static str,
+        builtin: Cow<'static, str>,
+        argument: Cow<'static, str>,
     },
     /// Concatenation mixed list and tuple values.
     #[error("can't concatenate list and tuple")]
@@ -316,7 +324,7 @@ pub enum RuntimeError {
     RangeTooLarge { limit: i128 },
     /// Integer division received a zero divisor.
     #[error("`{builtin}` divisor must not be 0")]
-    IntegerDivisionByZero { builtin: &'static str },
+    IntegerDivisionByZero { builtin: Cow<'static, str> },
     /// Process execution referenced an unknown process name.
     #[error("unknown process `{name}`")]
     UnknownProcess { name: String },
@@ -403,7 +411,289 @@ pub enum RuntimeError {
     MissingLoopState,
     /// A context-dependent intrinsic reached a generic path without an explicit arm.
     #[error("context-dependent intrinsic reached generic {context}")]
-    ContextDependentIntrinsicMisdispatch { context: &'static str },
+    ContextDependentIntrinsicMisdispatch { context: Cow<'static, str> },
+    /// An explicitly thrown value escaped every handler.
+    #[error("uncaught lashlang exception: {value}")]
+    UncaughtException { value: super::Value },
+    /// Bytecode violated the structured handler/finally stack discipline.
+    #[error("invalid lashlang exception state: {reason}")]
+    InvalidExceptionState { reason: Cow<'static, str> },
+}
+
+impl RuntimeError {
+    /// Terminals which are structurally forbidden from consulting guest
+    /// handlers. This is intentionally the only taxonomy classification used
+    /// by the VM's error exit.
+    /// Which taxonomy row this error belongs to.
+    ///
+    /// The match is exhaustive on purpose: the taxonomy decides whether an
+    /// error bypasses guest handlers and whether the host classifies it as an
+    /// effect failure, and a new variant that silently defaulted to "catchable
+    /// runtime error" is exactly the hand-maintained-parallel-list defect this
+    /// layer exists to avoid. Adding a variant fails to compile until it
+    /// declares its class here.
+    pub fn taxonomy(&self) -> ErrorTaxonomy {
+        match self {
+            Self::FrameDepthExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::FunctionIndexOverflow => ErrorTaxonomy::Catchable,
+            Self::NonFunctionCall { .. } => ErrorTaxonomy::Catchable,
+            Self::FunctionArgumentCount { .. } => ErrorTaxonomy::Catchable,
+            Self::UnknownFunction { .. } => ErrorTaxonomy::Catchable,
+            Self::ClosureCaptureCountMismatch { .. } => ErrorTaxonomy::Catchable,
+            Self::FunctionValueAtHostBoundary => ErrorTaxonomy::Catchable,
+            Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
+            Self::InstructionBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::ExecutionDeadlineExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::MemoryLimitExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::HostCancelled => ErrorTaxonomy::UncatchableTerminal,
+            Self::DanglingHeapReference { .. } => ErrorTaxonomy::Catchable,
+            Self::HeapIdExhausted => ErrorTaxonomy::Catchable,
+            Self::UnexportedHeapReference { .. } => ErrorTaxonomy::Catchable,
+            Self::CyclicHostValue { .. } => ErrorTaxonomy::Catchable,
+            Self::UndefinedVariable { .. } => ErrorTaxonomy::Catchable,
+            Self::NonListIteration => ErrorTaxonomy::Catchable,
+            Self::SessionProcessAdminOutsideProcess { .. } => ErrorTaxonomy::Catchable,
+            Self::ForegroundControlInsideProcess { .. } => ErrorTaxonomy::Catchable,
+            Self::UnknownBuiltin { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotReadField { .. } => ErrorTaxonomy::Catchable,
+            Self::ToolResultExpected { .. } => ErrorTaxonomy::Catchable,
+            Self::ToolResultMissingValue => ErrorTaxonomy::Catchable,
+            Self::ToolResultInvalidOk => ErrorTaxonomy::Catchable,
+            Self::CannotIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::ImmutableImageFields => ErrorTaxonomy::Catchable,
+            Self::ImmutableImageFieldsThrough => ErrorTaxonomy::Catchable,
+            Self::ImmutableTupleIndexes => ErrorTaxonomy::Catchable,
+            Self::ImmutableTupleIndexesThrough => ErrorTaxonomy::Catchable,
+            Self::CannotAssignField { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotAssignThroughField { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotAssignIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::CannotAssignThroughIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidListAssignmentIndex => ErrorTaxonomy::Catchable,
+            Self::InvalidArgumentCount { .. } => ErrorTaxonomy::Catchable,
+            Self::EmptyUnsupported => ErrorTaxonomy::Catchable,
+            Self::KeysUnsupported => ErrorTaxonomy::Catchable,
+            Self::ValuesUnsupported => ErrorTaxonomy::Catchable,
+            Self::SliceUnsupported => ErrorTaxonomy::Catchable,
+            Self::FormatTemplateMissing => ErrorTaxonomy::Catchable,
+            Self::FormatTemplateInvalid { .. } => ErrorTaxonomy::Catchable,
+            Self::LenUnsupported => ErrorTaxonomy::Catchable,
+            Self::ContainsUnsupported => ErrorTaxonomy::Catchable,
+            Self::InUnsupported => ErrorTaxonomy::Catchable,
+            Self::JoinUnsupported => ErrorTaxonomy::Catchable,
+            Self::PushUnsupported => ErrorTaxonomy::Catchable,
+            Self::ShapingListRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingTextRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingNumberRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingComparableRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::ShapingEmptyList { .. } => ErrorTaxonomy::Catchable,
+            Self::SortByRecordRequired { .. } => ErrorTaxonomy::Catchable,
+            Self::SortByEmptyPath => ErrorTaxonomy::Catchable,
+            Self::SortByMissingPath { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidRangeBound => ErrorTaxonomy::Catchable,
+            Self::InvalidRangeBoundType { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidIntegerDivisionArgument { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidIntegerDivisionArgumentType { .. } => ErrorTaxonomy::Catchable,
+            Self::ExpectedNumber => ErrorTaxonomy::Catchable,
+            Self::ExpectedNumberType { .. } => ErrorTaxonomy::Catchable,
+            Self::ExpectedText { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidIndex => ErrorTaxonomy::Catchable,
+            Self::InvalidCharacterIndex { .. } => ErrorTaxonomy::Catchable,
+            Self::IncompatibleSequenceConcatenation => ErrorTaxonomy::Catchable,
+            Self::ReadOnlyProjectedBinding { .. } => ErrorTaxonomy::Catchable,
+            Self::ValidateTypeLiteralRequired => ErrorTaxonomy::Catchable,
+            Self::NotTypeValue { .. } => ErrorTaxonomy::Catchable,
+            Self::UnwrappedToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::UnwrappedModuleOperationFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::MissingAssignmentIndex => ErrorTaxonomy::Catchable,
+            Self::MissingAssignmentField { .. } => ErrorTaxonomy::Catchable,
+            Self::MissingAssignmentKey { .. } => ErrorTaxonomy::Catchable,
+            Self::ListAssignmentIndexOutOfBounds => ErrorTaxonomy::Catchable,
+            Self::InvalidJson { .. } => ErrorTaxonomy::Catchable,
+            Self::EmptyGrepNeedle => ErrorTaxonomy::Catchable,
+            Self::Format(_) => ErrorTaxonomy::Catchable,
+            Self::ZeroRangeStep => ErrorTaxonomy::Catchable,
+            Self::RangeTooLarge { .. } => ErrorTaxonomy::Catchable,
+            Self::IntegerDivisionByZero { .. } => ErrorTaxonomy::Catchable,
+            Self::UnknownProcess { .. } => ErrorTaxonomy::Catchable,
+            Self::ProcessNotExported { .. } => ErrorTaxonomy::Catchable,
+            Self::ProcessRefNotExported { .. } => ErrorTaxonomy::Catchable,
+            Self::ArtifactProcessMissing { .. } => ErrorTaxonomy::Catchable,
+            Self::ValidationFailed { .. } => ErrorTaxonomy::Catchable,
+            Self::StartSiteMissing => ErrorTaxonomy::Catchable,
+            Self::LinkedArtifactMissing => ErrorTaxonomy::Catchable,
+            Self::LinkedProcessNotExported { .. } => ErrorTaxonomy::Catchable,
+            Self::ProcessStartFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::SleepFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::WaitSignalFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::SignalRunFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::CancelFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::ProcessEventFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::PrintFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::FinishFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::FailFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::ResourceBatchReceiverOutOfRange => ErrorTaxonomy::Catchable,
+            Self::ResourceBatchArgumentOutOfRange => ErrorTaxonomy::Catchable,
+            Self::InvalidResourceBatchResult => ErrorTaxonomy::Catchable,
+            Self::ResourceBatchFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::ResourceBatchResultCount { .. } => ErrorTaxonomy::Catchable,
+            Self::AggregateAwaitLeafOutOfRange => ErrorTaxonomy::Catchable,
+            Self::AggregateAwaitValueOutOfRange => ErrorTaxonomy::Catchable,
+            Self::InvalidAggregateAwaitRecordShape => ErrorTaxonomy::Catchable,
+            Self::VmStackUnderflow => ErrorTaxonomy::Catchable,
+            Self::MissingLoopState => ErrorTaxonomy::Catchable,
+            Self::ContextDependentIntrinsicMisdispatch { .. } => ErrorTaxonomy::Catchable,
+            Self::UncaughtException { .. } => ErrorTaxonomy::Catchable,
+            Self::InvalidExceptionState { .. } => ErrorTaxonomy::UncatchableTerminal,
+        }
+    }
+
+    /// Stable guest-visible identity for a catchable runtime failure.
+    ///
+    /// Guest code branches on this string, so it is an explicit table rather
+    /// than anything derived from Rust identifiers: renaming a variant must be
+    /// a deliberate change to the guest contract, not a side effect. The
+    /// pinning test in this module enumerates every code.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::FrameDepthExceeded { .. } => "FrameDepthExceeded",
+            Self::FunctionIndexOverflow => "FunctionIndexOverflow",
+            Self::NonFunctionCall { .. } => "NonFunctionCall",
+            Self::FunctionArgumentCount { .. } => "FunctionArgumentCount",
+            Self::UnknownFunction { .. } => "UnknownFunction",
+            Self::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
+            Self::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
+            Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            Self::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
+            Self::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
+            Self::HostCancelled => "HostCancelled",
+            Self::DanglingHeapReference { .. } => "DanglingHeapReference",
+            Self::HeapIdExhausted => "HeapIdExhausted",
+            Self::UnexportedHeapReference { .. } => "UnexportedHeapReference",
+            Self::CyclicHostValue { .. } => "CyclicHostValue",
+            Self::UndefinedVariable { .. } => "UndefinedVariable",
+            Self::NonListIteration => "NonListIteration",
+            Self::SessionProcessAdminOutsideProcess { .. } => "SessionProcessAdminOutsideProcess",
+            Self::ForegroundControlInsideProcess { .. } => "ForegroundControlInsideProcess",
+            Self::UnknownBuiltin { .. } => "UnknownBuiltin",
+            Self::CannotReadField { .. } => "CannotReadField",
+            Self::ToolResultExpected { .. } => "ToolResultExpected",
+            Self::ToolResultMissingValue => "ToolResultMissingValue",
+            Self::ToolResultInvalidOk => "ToolResultInvalidOk",
+            Self::CannotIndex { .. } => "CannotIndex",
+            Self::ImmutableImageFields => "ImmutableImageFields",
+            Self::ImmutableImageFieldsThrough => "ImmutableImageFieldsThrough",
+            Self::ImmutableTupleIndexes => "ImmutableTupleIndexes",
+            Self::ImmutableTupleIndexesThrough => "ImmutableTupleIndexesThrough",
+            Self::CannotAssignField { .. } => "CannotAssignField",
+            Self::CannotAssignThroughField { .. } => "CannotAssignThroughField",
+            Self::CannotAssignIndex { .. } => "CannotAssignIndex",
+            Self::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
+            Self::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
+            Self::InvalidArgumentCount { .. } => "InvalidArgumentCount",
+            Self::EmptyUnsupported => "EmptyUnsupported",
+            Self::KeysUnsupported => "KeysUnsupported",
+            Self::ValuesUnsupported => "ValuesUnsupported",
+            Self::SliceUnsupported => "SliceUnsupported",
+            Self::FormatTemplateMissing => "FormatTemplateMissing",
+            Self::FormatTemplateInvalid { .. } => "FormatTemplateInvalid",
+            Self::LenUnsupported => "LenUnsupported",
+            Self::ContainsUnsupported => "ContainsUnsupported",
+            Self::InUnsupported => "InUnsupported",
+            Self::JoinUnsupported => "JoinUnsupported",
+            Self::PushUnsupported => "PushUnsupported",
+            Self::ShapingListRequired { .. } => "ShapingListRequired",
+            Self::ShapingTextRequired { .. } => "ShapingTextRequired",
+            Self::ShapingNumberRequired { .. } => "ShapingNumberRequired",
+            Self::ShapingComparableRequired { .. } => "ShapingComparableRequired",
+            Self::ShapingEmptyList { .. } => "ShapingEmptyList",
+            Self::SortByRecordRequired { .. } => "SortByRecordRequired",
+            Self::SortByEmptyPath => "SortByEmptyPath",
+            Self::SortByMissingPath { .. } => "SortByMissingPath",
+            Self::InvalidRangeBound => "InvalidRangeBound",
+            Self::InvalidRangeBoundType { .. } => "InvalidRangeBoundType",
+            Self::InvalidIntegerDivisionArgument { .. } => "InvalidIntegerDivisionArgument",
+            Self::InvalidIntegerDivisionArgumentType { .. } => "InvalidIntegerDivisionArgumentType",
+            Self::ExpectedNumber => "ExpectedNumber",
+            Self::ExpectedNumberType { .. } => "ExpectedNumberType",
+            Self::ExpectedText { .. } => "ExpectedText",
+            Self::InvalidIndex => "InvalidIndex",
+            Self::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
+            Self::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
+            Self::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
+            Self::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
+            Self::NotTypeValue { .. } => "NotTypeValue",
+            Self::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+            Self::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
+            Self::MissingAssignmentIndex => "MissingAssignmentIndex",
+            Self::MissingAssignmentField { .. } => "MissingAssignmentField",
+            Self::MissingAssignmentKey { .. } => "MissingAssignmentKey",
+            Self::ListAssignmentIndexOutOfBounds => "ListAssignmentIndexOutOfBounds",
+            Self::InvalidJson { .. } => "InvalidJson",
+            Self::EmptyGrepNeedle => "EmptyGrepNeedle",
+            Self::Format(_) => "Format",
+            Self::ZeroRangeStep => "ZeroRangeStep",
+            Self::RangeTooLarge { .. } => "RangeTooLarge",
+            Self::IntegerDivisionByZero { .. } => "IntegerDivisionByZero",
+            Self::UnknownProcess { .. } => "UnknownProcess",
+            Self::ProcessNotExported { .. } => "ProcessNotExported",
+            Self::ProcessRefNotExported { .. } => "ProcessRefNotExported",
+            Self::ArtifactProcessMissing { .. } => "ArtifactProcessMissing",
+            Self::ValidationFailed { .. } => "ValidationFailed",
+            Self::StartSiteMissing => "StartSiteMissing",
+            Self::LinkedArtifactMissing => "LinkedArtifactMissing",
+            Self::LinkedProcessNotExported { .. } => "LinkedProcessNotExported",
+            Self::ProcessStartFailed { .. } => "ProcessStartFailed",
+            Self::SleepFailed { .. } => "SleepFailed",
+            Self::WaitSignalFailed { .. } => "WaitSignalFailed",
+            Self::SignalRunFailed { .. } => "SignalRunFailed",
+            Self::CancelFailed { .. } => "CancelFailed",
+            Self::ProcessEventFailed { .. } => "ProcessEventFailed",
+            Self::PrintFailed { .. } => "PrintFailed",
+            Self::FinishFailed { .. } => "FinishFailed",
+            Self::FailFailed { .. } => "FailFailed",
+            Self::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
+            Self::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
+            Self::InvalidResourceBatchResult => "InvalidResourceBatchResult",
+            Self::ResourceBatchFailed { .. } => "ResourceBatchFailed",
+            Self::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
+            Self::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
+            Self::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
+            Self::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
+            Self::VmStackUnderflow => "VmStackUnderflow",
+            Self::MissingLoopState => "MissingLoopState",
+            Self::ContextDependentIntrinsicMisdispatch { .. } => {
+                "ContextDependentIntrinsicMisdispatch"
+            }
+            Self::UncaughtException { .. } => "UncaughtException",
+            Self::InvalidExceptionState { .. } => "InvalidExceptionState",
+        }
+    }
+
+    pub(crate) fn is_uncatchable_terminal(&self) -> bool {
+        matches!(self.taxonomy(), ErrorTaxonomy::UncatchableTerminal)
+    }
+
+    pub(crate) fn is_effect_failure(&self) -> bool {
+        matches!(self.taxonomy(), ErrorTaxonomy::EffectFailure)
+    }
+}
+
+/// How the VM and its host must treat a [`RuntimeError`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorTaxonomy {
+    /// A host, execution-bound or internal-invariant terminal: it ends
+    /// execution and bypasses every guest handler. `InvalidExceptionState`
+    /// belongs here because it is raised *by* the exception machinery, and
+    /// routing it back through a handler stack that has already been shown
+    /// inconsistent is the one place a catchable classification cannot be
+    /// defended.
+    UncatchableTerminal,
+    /// A failure raised by a host effect. Catchable, and reported to the guest
+    /// as an `EffectError`.
+    EffectFailure,
+    /// An ordinary catchable runtime failure.
+    Catchable,
 }
 
 impl RuntimeError {
@@ -452,8 +742,12 @@ mod tests {
                 name: "name".into(),
             },
             RuntimeError::NonListIteration,
-            RuntimeError::SessionProcessAdminOutsideProcess { keyword: "finish" },
-            RuntimeError::ForegroundControlInsideProcess { keyword: "print" },
+            RuntimeError::SessionProcessAdminOutsideProcess {
+                keyword: "finish".into(),
+            },
+            RuntimeError::ForegroundControlInsideProcess {
+                keyword: "print".into(),
+            },
             RuntimeError::UnknownBuiltin {
                 name: "builtin".into(),
             },
@@ -507,26 +801,28 @@ mod tests {
             RuntimeError::JoinUnsupported,
             RuntimeError::PushUnsupported,
             RuntimeError::ShapingListRequired {
-                builtin: "sort",
+                builtin: "sort".into(),
                 actual: "text".into(),
             },
             RuntimeError::ShapingTextRequired {
-                builtin: "replace",
-                argument: "needle",
+                builtin: "replace".into(),
+                argument: "needle".into(),
                 actual: "int".into(),
             },
             RuntimeError::ShapingNumberRequired {
-                builtin: "sum",
+                builtin: "sum".into(),
                 index: 1,
                 actual: "text".into(),
             },
             RuntimeError::ShapingComparableRequired {
-                builtin: "sort",
+                builtin: "sort".into(),
                 index: 1,
                 reference: "number".into(),
                 actual: "string".into(),
             },
-            RuntimeError::ShapingEmptyList { builtin: "min" },
+            RuntimeError::ShapingEmptyList {
+                builtin: "min".into(),
+            },
             RuntimeError::SortByRecordRequired {
                 index: 2,
                 actual: "number".into(),
@@ -541,12 +837,12 @@ mod tests {
                 actual: "text".into(),
             },
             RuntimeError::InvalidIntegerDivisionArgument {
-                builtin: "floor_div",
-                argument: "dividend",
+                builtin: "floor_div".into(),
+                argument: "dividend".into(),
             },
             RuntimeError::InvalidIntegerDivisionArgumentType {
-                builtin: "floor_div",
-                argument: "divisor",
+                builtin: "floor_div".into(),
+                argument: "divisor".into(),
                 actual: "text".into(),
             },
             RuntimeError::ExpectedNumber,
@@ -558,8 +854,8 @@ mod tests {
             },
             RuntimeError::InvalidIndex,
             RuntimeError::InvalidCharacterIndex {
-                builtin: "char_at",
-                argument: "index",
+                builtin: "char_at".into(),
+                argument: "index".into(),
             },
             RuntimeError::IncompatibleSequenceConcatenation,
             RuntimeError::ReadOnlyProjectedBinding {
@@ -595,7 +891,7 @@ mod tests {
             RuntimeError::ZeroRangeStep,
             RuntimeError::RangeTooLarge { limit: 100 },
             RuntimeError::IntegerDivisionByZero {
-                builtin: "floor_div",
+                builtin: "floor_div".into(),
             },
             RuntimeError::UnknownProcess {
                 name: "process".into(),
@@ -663,9 +959,49 @@ mod tests {
             RuntimeError::VmStackUnderflow,
             RuntimeError::MissingLoopState,
             RuntimeError::ContextDependentIntrinsicMisdispatch {
-                context: "heap planning",
+                context: "heap planning".into(),
+            },
+            RuntimeError::MemoryLimitExceeded {
+                limit: 64,
+                attempted: 128,
+            },
+            RuntimeError::HostCancelled,
+            RuntimeError::DanglingHeapReference { id: 7 },
+            RuntimeError::HeapIdExhausted,
+            RuntimeError::UnexportedHeapReference {
+                id: 7,
+                context: "string formatting".into(),
+            },
+            RuntimeError::CyclicHostValue { id: 7 },
+            RuntimeError::UncaughtException {
+                value: crate::Value::Null,
+            },
+            RuntimeError::InvalidExceptionState {
+                reason: "test".into(),
             },
         ];
+
+        for error in &errors {
+            assert_eq!(error.code(), expected_code(error), "{error:?}");
+        }
+        // The exhaustive match in `expected_code` forces a new variant to
+        // declare a code, but nothing forces it into `errors`, so a variant
+        // could be classified and never instantiated. Counting distinct codes
+        // against the arm count closes that: a variant that is never built here
+        // fails this assertion.
+        let mut observed: Vec<&'static str> = errors.iter().map(RuntimeError::code).collect();
+        observed.sort_unstable();
+        observed.dedup();
+        assert_eq!(
+            observed.len(),
+            RUNTIME_ERROR_VARIANT_COUNT,
+            "every RuntimeError variant must be constructed and asserted here; \
+             missing: {:?}",
+            RUNTIME_ERROR_CODES
+                .iter()
+                .filter(|code| !observed.contains(code))
+                .collect::<Vec<_>>()
+        );
 
         for error in errors {
             let expected = match &error {
@@ -696,16 +1032,19 @@ mod tests {
                     "lashlang execution deadline of 20ms exceeded"
                 }
                 RuntimeError::MemoryLimitExceeded { .. } => {
-                    "lashlang logical memory limit exceeded"
+                    "lashlang logical memory limit of 64 bytes exceeded (allocation would reach 128 bytes)"
                 }
-                RuntimeError::DanglingHeapReference { .. } => "dangling lashlang heap reference",
+                RuntimeError::HostCancelled => "lashlang execution was cancelled by the host",
+                RuntimeError::DanglingHeapReference { .. } => "dangling lashlang heap reference 7",
                 RuntimeError::HeapIdExhausted => {
                     "lashlang heap allocation identity space exhausted"
                 }
                 RuntimeError::UnexportedHeapReference { .. } => {
-                    "lashlang heap reference 7 reached string formatting"
+                    "lashlang heap reference 7 reached string formatting before it was exported"
                 }
-                RuntimeError::CyclicHostValue { .. } => "lashlang heap value contains a cycle",
+                RuntimeError::CyclicHostValue { .. } => {
+                    "lashlang heap value contains a cycle through object 7"
+                }
                 RuntimeError::UndefinedVariable { .. } => "unknown name `name`",
                 RuntimeError::NonListIteration => "`for` expects a list or tuple",
                 RuntimeError::SessionProcessAdminOutsideProcess { .. } => {
@@ -916,9 +1255,256 @@ mod tests {
                 RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {
                     "context-dependent intrinsic reached generic heap planning"
                 }
+                RuntimeError::UncaughtException { .. } => "uncaught lashlang exception: null",
+                RuntimeError::InvalidExceptionState { .. } => {
+                    "invalid lashlang exception state: test"
+                }
             };
 
             assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    /// Every guest-facing code, in declaration order. The list is the pin's
+    /// completeness half: `expected_code` forces each variant to declare one,
+    /// this forces each declared one to be exercised.
+    const RUNTIME_ERROR_CODES: [&str; 110] = [
+        "FrameDepthExceeded",
+        "FunctionIndexOverflow",
+        "NonFunctionCall",
+        "FunctionArgumentCount",
+        "UnknownFunction",
+        "ClosureCaptureCountMismatch",
+        "FunctionValueAtHostBoundary",
+        "EffectInBuiltinCallback",
+        "InstructionBudgetExceeded",
+        "ExecutionDeadlineExceeded",
+        "MemoryLimitExceeded",
+        "HostCancelled",
+        "DanglingHeapReference",
+        "HeapIdExhausted",
+        "UnexportedHeapReference",
+        "CyclicHostValue",
+        "UndefinedVariable",
+        "NonListIteration",
+        "SessionProcessAdminOutsideProcess",
+        "ForegroundControlInsideProcess",
+        "UnknownBuiltin",
+        "CannotReadField",
+        "ToolResultExpected",
+        "ToolResultMissingValue",
+        "ToolResultInvalidOk",
+        "CannotIndex",
+        "ImmutableImageFields",
+        "ImmutableImageFieldsThrough",
+        "ImmutableTupleIndexes",
+        "ImmutableTupleIndexesThrough",
+        "CannotAssignField",
+        "CannotAssignThroughField",
+        "CannotAssignIndex",
+        "CannotAssignThroughIndex",
+        "InvalidListAssignmentIndex",
+        "InvalidArgumentCount",
+        "EmptyUnsupported",
+        "KeysUnsupported",
+        "ValuesUnsupported",
+        "SliceUnsupported",
+        "FormatTemplateMissing",
+        "FormatTemplateInvalid",
+        "LenUnsupported",
+        "ContainsUnsupported",
+        "InUnsupported",
+        "JoinUnsupported",
+        "PushUnsupported",
+        "ShapingListRequired",
+        "ShapingTextRequired",
+        "ShapingNumberRequired",
+        "ShapingComparableRequired",
+        "ShapingEmptyList",
+        "SortByRecordRequired",
+        "SortByEmptyPath",
+        "SortByMissingPath",
+        "InvalidRangeBound",
+        "InvalidRangeBoundType",
+        "InvalidIntegerDivisionArgument",
+        "InvalidIntegerDivisionArgumentType",
+        "ExpectedNumber",
+        "ExpectedNumberType",
+        "ExpectedText",
+        "InvalidIndex",
+        "InvalidCharacterIndex",
+        "IncompatibleSequenceConcatenation",
+        "ReadOnlyProjectedBinding",
+        "ValidateTypeLiteralRequired",
+        "NotTypeValue",
+        "UnwrappedToolResultFailed",
+        "UnwrappedModuleOperationFailed",
+        "MissingAssignmentIndex",
+        "MissingAssignmentField",
+        "MissingAssignmentKey",
+        "ListAssignmentIndexOutOfBounds",
+        "InvalidJson",
+        "EmptyGrepNeedle",
+        "Format",
+        "ZeroRangeStep",
+        "RangeTooLarge",
+        "IntegerDivisionByZero",
+        "UnknownProcess",
+        "ProcessNotExported",
+        "ProcessRefNotExported",
+        "ArtifactProcessMissing",
+        "ValidationFailed",
+        "StartSiteMissing",
+        "LinkedArtifactMissing",
+        "LinkedProcessNotExported",
+        "ProcessStartFailed",
+        "SleepFailed",
+        "WaitSignalFailed",
+        "SignalRunFailed",
+        "CancelFailed",
+        "ProcessEventFailed",
+        "PrintFailed",
+        "FinishFailed",
+        "FailFailed",
+        "ResourceBatchReceiverOutOfRange",
+        "ResourceBatchArgumentOutOfRange",
+        "InvalidResourceBatchResult",
+        "ResourceBatchFailed",
+        "ResourceBatchResultCount",
+        "AggregateAwaitLeafOutOfRange",
+        "AggregateAwaitValueOutOfRange",
+        "InvalidAggregateAwaitRecordShape",
+        "VmStackUnderflow",
+        "MissingLoopState",
+        "ContextDependentIntrinsicMisdispatch",
+        "UncaughtException",
+        "InvalidExceptionState",
+    ];
+
+    const RUNTIME_ERROR_VARIANT_COUNT: usize = RUNTIME_ERROR_CODES.len();
+
+    /// Guest-facing codes are a durable contract, so they are pinned here
+    /// exhaustively: renaming a variant breaks this match and forces the
+    /// author to decide, deliberately, whether the code the guest branches on
+    /// changes with it.
+    fn expected_code(error: &RuntimeError) -> &'static str {
+        match error {
+            RuntimeError::FrameDepthExceeded { .. } => "FrameDepthExceeded",
+            RuntimeError::FunctionIndexOverflow => "FunctionIndexOverflow",
+            RuntimeError::NonFunctionCall { .. } => "NonFunctionCall",
+            RuntimeError::FunctionArgumentCount { .. } => "FunctionArgumentCount",
+            RuntimeError::UnknownFunction { .. } => "UnknownFunction",
+            RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
+            RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
+            RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
+            RuntimeError::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
+            RuntimeError::HostCancelled => "HostCancelled",
+            RuntimeError::DanglingHeapReference { .. } => "DanglingHeapReference",
+            RuntimeError::HeapIdExhausted => "HeapIdExhausted",
+            RuntimeError::UnexportedHeapReference { .. } => "UnexportedHeapReference",
+            RuntimeError::CyclicHostValue { .. } => "CyclicHostValue",
+            RuntimeError::UndefinedVariable { .. } => "UndefinedVariable",
+            RuntimeError::NonListIteration => "NonListIteration",
+            RuntimeError::SessionProcessAdminOutsideProcess { .. } => {
+                "SessionProcessAdminOutsideProcess"
+            }
+            RuntimeError::ForegroundControlInsideProcess { .. } => "ForegroundControlInsideProcess",
+            RuntimeError::UnknownBuiltin { .. } => "UnknownBuiltin",
+            RuntimeError::CannotReadField { .. } => "CannotReadField",
+            RuntimeError::ToolResultExpected { .. } => "ToolResultExpected",
+            RuntimeError::ToolResultMissingValue => "ToolResultMissingValue",
+            RuntimeError::ToolResultInvalidOk => "ToolResultInvalidOk",
+            RuntimeError::CannotIndex { .. } => "CannotIndex",
+            RuntimeError::ImmutableImageFields => "ImmutableImageFields",
+            RuntimeError::ImmutableImageFieldsThrough => "ImmutableImageFieldsThrough",
+            RuntimeError::ImmutableTupleIndexes => "ImmutableTupleIndexes",
+            RuntimeError::ImmutableTupleIndexesThrough => "ImmutableTupleIndexesThrough",
+            RuntimeError::CannotAssignField { .. } => "CannotAssignField",
+            RuntimeError::CannotAssignThroughField { .. } => "CannotAssignThroughField",
+            RuntimeError::CannotAssignIndex { .. } => "CannotAssignIndex",
+            RuntimeError::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
+            RuntimeError::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
+            RuntimeError::InvalidArgumentCount { .. } => "InvalidArgumentCount",
+            RuntimeError::EmptyUnsupported => "EmptyUnsupported",
+            RuntimeError::KeysUnsupported => "KeysUnsupported",
+            RuntimeError::ValuesUnsupported => "ValuesUnsupported",
+            RuntimeError::SliceUnsupported => "SliceUnsupported",
+            RuntimeError::FormatTemplateMissing => "FormatTemplateMissing",
+            RuntimeError::FormatTemplateInvalid { .. } => "FormatTemplateInvalid",
+            RuntimeError::LenUnsupported => "LenUnsupported",
+            RuntimeError::ContainsUnsupported => "ContainsUnsupported",
+            RuntimeError::InUnsupported => "InUnsupported",
+            RuntimeError::JoinUnsupported => "JoinUnsupported",
+            RuntimeError::PushUnsupported => "PushUnsupported",
+            RuntimeError::ShapingListRequired { .. } => "ShapingListRequired",
+            RuntimeError::ShapingTextRequired { .. } => "ShapingTextRequired",
+            RuntimeError::ShapingNumberRequired { .. } => "ShapingNumberRequired",
+            RuntimeError::ShapingComparableRequired { .. } => "ShapingComparableRequired",
+            RuntimeError::ShapingEmptyList { .. } => "ShapingEmptyList",
+            RuntimeError::SortByRecordRequired { .. } => "SortByRecordRequired",
+            RuntimeError::SortByEmptyPath => "SortByEmptyPath",
+            RuntimeError::SortByMissingPath { .. } => "SortByMissingPath",
+            RuntimeError::InvalidRangeBound => "InvalidRangeBound",
+            RuntimeError::InvalidRangeBoundType { .. } => "InvalidRangeBoundType",
+            RuntimeError::InvalidIntegerDivisionArgument { .. } => "InvalidIntegerDivisionArgument",
+            RuntimeError::InvalidIntegerDivisionArgumentType { .. } => {
+                "InvalidIntegerDivisionArgumentType"
+            }
+            RuntimeError::ExpectedNumber => "ExpectedNumber",
+            RuntimeError::ExpectedNumberType { .. } => "ExpectedNumberType",
+            RuntimeError::ExpectedText { .. } => "ExpectedText",
+            RuntimeError::InvalidIndex => "InvalidIndex",
+            RuntimeError::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
+            RuntimeError::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
+            RuntimeError::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
+            RuntimeError::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
+            RuntimeError::NotTypeValue { .. } => "NotTypeValue",
+            RuntimeError::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+            RuntimeError::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
+            RuntimeError::MissingAssignmentIndex => "MissingAssignmentIndex",
+            RuntimeError::MissingAssignmentField { .. } => "MissingAssignmentField",
+            RuntimeError::MissingAssignmentKey { .. } => "MissingAssignmentKey",
+            RuntimeError::ListAssignmentIndexOutOfBounds => "ListAssignmentIndexOutOfBounds",
+            RuntimeError::InvalidJson { .. } => "InvalidJson",
+            RuntimeError::EmptyGrepNeedle => "EmptyGrepNeedle",
+            RuntimeError::Format(_) => "Format",
+            RuntimeError::ZeroRangeStep => "ZeroRangeStep",
+            RuntimeError::RangeTooLarge { .. } => "RangeTooLarge",
+            RuntimeError::IntegerDivisionByZero { .. } => "IntegerDivisionByZero",
+            RuntimeError::UnknownProcess { .. } => "UnknownProcess",
+            RuntimeError::ProcessNotExported { .. } => "ProcessNotExported",
+            RuntimeError::ProcessRefNotExported { .. } => "ProcessRefNotExported",
+            RuntimeError::ArtifactProcessMissing { .. } => "ArtifactProcessMissing",
+            RuntimeError::ValidationFailed { .. } => "ValidationFailed",
+            RuntimeError::StartSiteMissing => "StartSiteMissing",
+            RuntimeError::LinkedArtifactMissing => "LinkedArtifactMissing",
+            RuntimeError::LinkedProcessNotExported { .. } => "LinkedProcessNotExported",
+            RuntimeError::ProcessStartFailed { .. } => "ProcessStartFailed",
+            RuntimeError::SleepFailed { .. } => "SleepFailed",
+            RuntimeError::WaitSignalFailed { .. } => "WaitSignalFailed",
+            RuntimeError::SignalRunFailed { .. } => "SignalRunFailed",
+            RuntimeError::CancelFailed { .. } => "CancelFailed",
+            RuntimeError::ProcessEventFailed { .. } => "ProcessEventFailed",
+            RuntimeError::PrintFailed { .. } => "PrintFailed",
+            RuntimeError::FinishFailed { .. } => "FinishFailed",
+            RuntimeError::FailFailed { .. } => "FailFailed",
+            RuntimeError::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
+            RuntimeError::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
+            RuntimeError::InvalidResourceBatchResult => "InvalidResourceBatchResult",
+            RuntimeError::ResourceBatchFailed { .. } => "ResourceBatchFailed",
+            RuntimeError::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
+            RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
+            RuntimeError::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
+            RuntimeError::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
+            RuntimeError::VmStackUnderflow => "VmStackUnderflow",
+            RuntimeError::MissingLoopState => "MissingLoopState",
+            RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {
+                "ContextDependentIntrinsicMisdispatch"
+            }
+            RuntimeError::UncaughtException { .. } => "UncaughtException",
+            RuntimeError::InvalidExceptionState { .. } => "InvalidExceptionState",
         }
     }
 }

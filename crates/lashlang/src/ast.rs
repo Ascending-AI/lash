@@ -19,6 +19,141 @@ pub struct Program {
     pub expression_source_spans: Vec<ExpressionSourceSpan>,
 }
 
+/// The nesting limit an AST must satisfy, whether it came from source or was
+/// built directly.
+///
+/// `Try`, `Throw`, `Function` and the other AST-only shapes have no source
+/// grammar to bound them, so every AST-construction entry point applies this
+/// explicitly and the whole pipeline (link, compile, execute) keeps the 2 MiB
+/// stack contract the parsed path already had.
+///
+/// The value is derived from measurement, not arithmetic. On a 2 MiB thread the
+/// full link/compile/execute pipeline first aborts at an AST depth of 74 for the
+/// most expensive per-level variant (nested `try`/`catch`/`finally`) and at 77
+/// for the cheapest block-bodied one, so 64 keeps ten levels of margin under
+/// the tighter cliff. `tests/stack_budget.rs` pins that margin with the most
+/// expensive variant at exactly this depth.
+///
+/// The parser's own cap is set so that no program it accepts can exceed this:
+/// a syntactic level is not an AST level, and block-bodied constructs
+/// (`if`/`while`/`for`) build an `Expr::Block` inside them and cost two.
+/// `tests/nesting_cap.rs` is what pins that relation — walking a family of
+/// parsed shapes to the parser's refusal point and requiring every accepted
+/// program to pass this check and to link — rather than a constant comparison,
+/// which cannot see the per-level cost difference.
+pub const MAX_AST_NESTING_DEPTH: usize = 64;
+
+/// An AST that nests deeper than [`MAX_AST_NESTING_DEPTH`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("expression nesting too deep (limit {limit}); flatten the program")]
+pub struct NestingTooDeep {
+    pub limit: usize,
+}
+
+/// An AST that cannot be compiled as written.
+///
+/// AST-only nodes have no parser to reject them out of place, so the checks a
+/// parsed program gets for free are applied at the AST-construction entry
+/// points instead.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidAst {
+    /// The tree nests deeper than [`MAX_AST_NESTING_DEPTH`].
+    #[error(transparent)]
+    NestingTooDeep {
+        #[from]
+        source: NestingTooDeep,
+    },
+    /// A `break` or `continue` appears with no enclosing loop in the same
+    /// function body. The parser rejects this in source; a host-built tree has
+    /// to be told.
+    #[error("`{keyword}` is used outside a loop")]
+    LoopControlOutsideLoop { keyword: &'static str },
+}
+
+/// Rejects an AST the compiler cannot lower as written.
+///
+/// This is the AST-construction counterpart of the parser's own validation: it
+/// runs before any recursive walk, so an over-deep or ill-formed tree becomes a
+/// typed error rather than a stack overflow or a panic deeper in the compiler.
+pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
+    check_ast_nesting_depth(program)?;
+    check_loop_control(&program.main)?;
+    for declaration in &program.declarations {
+        if let Declaration::Process(process) = declaration {
+            check_loop_control(&process.body)?;
+        }
+    }
+    Ok(())
+}
+
+/// Walks one function body, tracking whether a loop encloses each node.
+///
+/// Loop bodies are the only place `break` and `continue` are legal, and a
+/// nested `Expr::Function` starts a fresh body: the compiler saves and restores
+/// its loop contexts across one, so an enclosing loop outside the function does
+/// not reach in.
+fn check_loop_control(root: &Expr) -> Result<(), InvalidAst> {
+    let mut pending: Vec<(&Expr, bool)> = vec![(root, false)];
+    while let Some((expr, in_loop)) = pending.pop() {
+        match expr {
+            Expr::Break if !in_loop => {
+                return Err(InvalidAst::LoopControlOutsideLoop { keyword: "break" });
+            }
+            Expr::Continue if !in_loop => {
+                return Err(InvalidAst::LoopControlOutsideLoop {
+                    keyword: "continue",
+                });
+            }
+            Expr::For { iterable, body, .. } => {
+                pending.push((iterable, in_loop));
+                pending.push((body, true));
+                continue;
+            }
+            Expr::While { condition, body } => {
+                pending.push((condition, in_loop));
+                pending.push((body, true));
+                continue;
+            }
+            Expr::Function(function) => {
+                pending.push((&function.body, false));
+                continue;
+            }
+            _ => {}
+        }
+        for child in expr.children() {
+            pending.push((child, in_loop));
+        }
+    }
+    Ok(())
+}
+
+/// Rejects an AST whose expression nesting exceeds [`MAX_AST_NESTING_DEPTH`].
+///
+/// The walk is iterative on purpose: a recursive measurement would overflow on
+/// exactly the inputs this exists to refuse. It descends through
+/// [`Expr::children`], which is exhaustive over the variants, so a new AST node
+/// is covered the moment it is added.
+pub fn check_ast_nesting_depth(program: &Program) -> Result<(), NestingTooDeep> {
+    let mut pending: Vec<(&Expr, usize)> = Vec::new();
+    pending.push((&program.main, 1));
+    for declaration in &program.declarations {
+        if let Declaration::Process(process) = declaration {
+            pending.push((&process.body, 1));
+        }
+    }
+    while let Some((expr, depth)) = pending.pop() {
+        if depth > MAX_AST_NESTING_DEPTH {
+            return Err(NestingTooDeep {
+                limit: MAX_AST_NESTING_DEPTH,
+            });
+        }
+        for child in expr.children() {
+            pending.push((child, depth + 1));
+        }
+    }
+    Ok(())
+}
+
 impl Program {
     pub fn block(expressions: Vec<Expr>) -> Self {
         Self {
@@ -226,6 +361,11 @@ pub enum Expr {
         items: Box<Expr>,
         function: Box<Expr>,
     },
+    /// AST-only structured exception scope. The parser intentionally has no
+    /// production for this node; dialects construct it directly.
+    Try(Box<TryExpr>),
+    /// AST-only explicit throw. The thrown value is transferred unchanged.
+    Throw(Box<Expr>),
     Field {
         target: Box<Expr>,
         field: AstString,
@@ -254,6 +394,21 @@ pub struct FunctionExpr {
     pub params: Vec<AstString>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captures: Vec<AstString>,
+    pub body: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TryExpr {
+    pub body: Box<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catch: Option<CatchClause>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finally: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CatchClause {
+    pub binding: AstString,
     pub body: Box<Expr>,
 }
 
@@ -361,6 +516,16 @@ impl Expr {
                 buffer.push(items);
                 buffer.push(function);
             }
+            Expr::Try(scope) => {
+                buffer.push(&scope.body);
+                if let Some(catch) = &scope.catch {
+                    buffer.push(&catch.body);
+                }
+                if let Some(finally) = &scope.finally {
+                    buffer.push(finally);
+                }
+            }
+            Expr::Throw(value) => buffer.push(value),
             Expr::Field { target, .. } => buffer.push(target),
             Expr::Index { target, index } => {
                 buffer.push(target);
@@ -556,6 +721,17 @@ where
             items: Box::new(folder.fold_expr(*items)),
             function: Box::new(folder.fold_expr(*function)),
         },
+        Expr::Try(scope) => Expr::Try(Box::new(TryExpr {
+            body: Box::new(folder.fold_expr(*scope.body)),
+            catch: scope.catch.map(|catch| CatchClause {
+                binding: catch.binding,
+                body: Box::new(folder.fold_expr(*catch.body)),
+            }),
+            finally: scope
+                .finally
+                .map(|finally| Box::new(folder.fold_expr(*finally))),
+        })),
+        Expr::Throw(value) => Expr::Throw(Box::new(folder.fold_expr(*value))),
         Expr::Field { target, field } => Expr::Field {
             target: Box::new(folder.fold_expr(*target)),
             field,

@@ -99,6 +99,7 @@ pub(super) fn instruction_heap_plan(
         | I::Call { .. }
         | I::Map
         | I::Return
+        | I::Throw
         | I::BuildTuple(_)
         | I::BuildList(_)
         | I::BuildRecord(_) => InstructionHeapPlan::heap_native(),
@@ -120,7 +121,12 @@ pub(super) fn instruction_heap_plan(
         | I::Jump(_)
         | I::IterNext { .. }
         | I::EndIter
-        | I::ObserveStep => InstructionHeapPlan::stack(Top(0)),
+        | I::ObserveStep
+        | I::PushHandler { .. }
+        | I::PopHandler
+        | I::EnterFinally { .. }
+        | I::EndFinally
+        | I::AbandonFinally => InstructionHeapPlan::stack(Top(0)),
 
         // Single-operand opcodes.
         I::Field(_)
@@ -209,7 +215,7 @@ pub(super) fn instruction_heap_plan(
         // touches no slot. The three that do carry a slot are declared above.
         I::Intrinsic(op) => InstructionHeapPlan::stack(Top(op.fixed_argc().ok_or(
             RuntimeError::ContextDependentIntrinsicMisdispatch {
-                context: "heap planning",
+                context: "heap planning".into(),
             },
         )?)),
     };

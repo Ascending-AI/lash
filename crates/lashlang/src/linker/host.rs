@@ -362,6 +362,7 @@ impl LinkedModule {
         program: Program,
         surface: impl Borrow<LashlangHostEnvironment>,
     ) -> Result<Self, LinkError> {
+        crate::ast::validate_ast(&program)?;
         let surface = surface.borrow();
         let mut linker = Linker::new(&program, surface);
         let program = linker.link_program()?;

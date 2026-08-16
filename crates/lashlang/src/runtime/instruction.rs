@@ -33,7 +33,48 @@ pub(crate) struct Chunk {
     pub(crate) assign_paths: Vec<CompiledAssignPath>,
     pub(crate) resource_operation_batches: Vec<CompiledResourceOperationBatch>,
     pub(crate) functions: Vec<CompiledFunction>,
+    /// Every structured-exception scope the compiler emitted a `PushHandler`
+    /// for, sorted by handler target. It is what makes an impossible durable
+    /// handler stack unrepresentable: a restored handler must name one of
+    /// these scopes, and consecutive handlers in one frame must be a strictly
+    /// nested chain of them.
+    pub(crate) handler_scopes: Vec<HandlerScopeExtent>,
     pub(crate) root_code_len: usize,
+}
+
+/// The bytecode extent of one `try` scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HandlerScopeExtent {
+    /// The `PushHandler` that installs the scope.
+    pub(crate) push_ip: usize,
+    /// Where a throw transfers to: the catch entry, or the finally entry for a
+    /// cleanup-only scope.
+    pub(crate) handler_ip: usize,
+    /// The scope's `finally` entry, when it has one.
+    pub(crate) finally_ip: Option<usize>,
+    /// Whether the scope catches, as opposed to only running cleanup.
+    pub(crate) catches: bool,
+    /// One past the last instruction the scope protects.
+    pub(crate) end_ip: usize,
+}
+
+impl Chunk {
+    /// Looks up the scope a durable handler record names. The handler target is
+    /// the scope's identity: no two scopes share one, so a record that does not
+    /// match exactly names no scope the compiler emitted.
+    pub(crate) fn handler_scope(
+        &self,
+        handler_ip: usize,
+        finally_ip: Option<usize>,
+        catches: bool,
+    ) -> Option<&HandlerScopeExtent> {
+        let index = self
+            .handler_scopes
+            .binary_search_by_key(&handler_ip, |scope| scope.handler_ip)
+            .ok()?;
+        let scope = &self.handler_scopes[index];
+        (scope.finally_ip == finally_ip && scope.catches == catches).then_some(scope)
+    }
 }
 
 #[derive(Clone)]
@@ -250,6 +291,22 @@ pub(crate) enum Instruction {
     },
     Map,
     Return,
+    PushHandler {
+        handler: usize,
+        finally: Option<usize>,
+        catches: bool,
+    },
+    PopHandler,
+    EnterFinally {
+        finally: usize,
+        resume: usize,
+    },
+    EndFinally,
+    /// Discards the pending completion of the `finally` body being left by an
+    /// abrupt completion (`break` / `continue`), per ECMA-262 completion
+    /// replacement.
+    AbandonFinally,
+    Throw,
     AddAssign(usize),
     // Retained after measurement: indexed_assignment/large_data regress when
     // numeric add-assign paths route through generic stack/path assignment.
@@ -406,6 +463,12 @@ impl Instruction {
             Instruction::Call { .. } => InstructionProfileTag::Call,
             Instruction::Map => InstructionProfileTag::Callback,
             Instruction::Return => InstructionProfileTag::Return,
+            Instruction::PushHandler { .. }
+            | Instruction::PopHandler
+            | Instruction::EnterFinally { .. }
+            | Instruction::EndFinally
+            | Instruction::AbandonFinally
+            | Instruction::Throw => InstructionProfileTag::Exception,
             Instruction::AddAssign(_)
             | Instruction::AddAssignNumber { .. }
             | Instruction::AddAssignSlot { .. }
@@ -562,9 +625,10 @@ pub(crate) enum InstructionProfileTag {
     Call,
     Callback,
     Return,
+    Exception,
 }
 
-const INSTRUCTION_PROFILE_COUNT: usize = InstructionProfileTag::Return as usize + 1;
+const INSTRUCTION_PROFILE_COUNT: usize = InstructionProfileTag::Exception as usize + 1;
 
 #[derive(Clone, Copy)]
 #[repr(usize)]
@@ -681,6 +745,7 @@ const INSTRUCTION_PROFILE_NAMES: [&str; INSTRUCTION_PROFILE_COUNT] = [
     "call",
     "callback",
     "return",
+    "exception",
 ];
 
 const BUILTIN_PROFILE_NAMES: [&str; BUILTIN_PROFILE_COUNT] = [
