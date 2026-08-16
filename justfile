@@ -94,6 +94,7 @@ agent-service-restate-e2e:
 
   cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true
+    lash_gate_cleanup
   }
   trap cleanup EXIT
 
@@ -153,6 +154,7 @@ agent-workbench-restate-e2e:
     docker rm -f "$container" >/dev/null 2>&1 || true
     docker rm -f "$postgres_container" >/dev/null 2>&1 || true
     rm -f "$test_output"
+    lash_gate_cleanup
   }
   trap cleanup EXIT
 

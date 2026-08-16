@@ -45,6 +45,7 @@ cleanup() {
   if (( owns_postgres )); then
     docker rm -fv "$postgres_container" >/dev/null 2>&1 || true
   fi
+  lash_gate_cleanup
 }
 trap cleanup EXIT
 

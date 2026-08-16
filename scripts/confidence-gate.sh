@@ -229,6 +229,7 @@ cleanup_mutation_postgres() {
 finish_confidence_gate() {
   cleanup_mutation_postgres
   finish_current_step
+  lash_gate_cleanup
 }
 
 trap finish_confidence_gate EXIT

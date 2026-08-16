@@ -51,6 +51,7 @@ cleanup() {
       teardown_status=1
     fi
   done
+  lash_gate_cleanup
   if [[ "$status" -eq 0 && "$teardown_status" -ne 0 ]]; then
     status=1
   fi

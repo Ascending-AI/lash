@@ -19,6 +19,7 @@ started_at="$SECONDS"
 
 cleanup() {
   docker rm -f "$postgres_container" "$minio_container" "$restate_container" >/dev/null 2>&1 || true
+  lash_gate_cleanup
 }
 trap cleanup EXIT
 

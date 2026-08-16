@@ -34,6 +34,7 @@ cleanup() {
   status=$?
   docker rm -f "$crash_container" >/dev/null 2>&1 || true
   "${compose[@]}" --profile crash down -v --remove-orphans >/dev/null 2>&1 || true
+  lash_gate_cleanup
   if [ "$status" -ne 0 ]; then
     echo "process-operations E2E failed with status $status; artifacts: $artifact_dir" >&2
   fi

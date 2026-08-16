@@ -58,6 +58,7 @@ cleanup() {
     echo "teardown left port $port reachable" >>"$artifact_dir/teardown.log"
     status=1
   fi
+  lash_gate_cleanup
   if [[ "$status" -ne 0 ]]; then
     echo "slack-clone live-model E2E failed with status $status; artifacts: $artifact_dir" >&2
   fi

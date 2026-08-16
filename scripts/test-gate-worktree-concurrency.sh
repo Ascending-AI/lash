@@ -52,6 +52,7 @@ cleanup() {
   if [ -n "$compose_leftover_container" ]; then
     docker rm -f "$compose_leftover_container" >/dev/null 2>&1 || true
   fi
+  lash_gate_cleanup
 }
 trap cleanup EXIT
 

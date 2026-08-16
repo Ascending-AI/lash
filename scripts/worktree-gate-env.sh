@@ -226,15 +226,76 @@ lash_gate_acquire_locks() {
   export LASH_GATE_LOCK_SLUG="$LASH_GATE_WORKTREE_SLUG"
 }
 
+lash_gate_cleanup() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+  local attached
+  if docker network inspect "$LASH_E2E_NETWORK" >/dev/null 2>&1; then
+    attached="$(docker network inspect -f '{{len .Containers}}' "$LASH_E2E_NETWORK" 2>/dev/null || true)"
+    if [ "$attached" = "0" ]; then
+      docker network rm "$LASH_E2E_NETWORK" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+lash_gate_prune_orphaned_networks() {
+  local net_name attached net_root net_slug wt_line wt_path wt_slug
+  local -A live_slugs=()
+
+  if [ -d "$LASH_GATE_WORKTREE_ROOT" ]; then
+    live_slugs["$LASH_GATE_WORKTREE_SLUG"]="$LASH_GATE_WORKTREE_ROOT"
+  fi
+
+  while IFS= read -r wt_line; do
+    if [[ "$wt_line" =~ ^worktree[[:space:]]+(.*)$ ]]; then
+      wt_path="${BASH_REMATCH[1]}"
+      if [ -d "$wt_path" ]; then
+        wt_slug="$(lash_gate_slug_for_root "$wt_path" 2>/dev/null || true)"
+        if [ -n "$wt_slug" ]; then
+          live_slugs["$wt_slug"]="$wt_path"
+        fi
+      fi
+    fi
+  done < <(git -C "$LASH_GATE_WORKTREE_ROOT" worktree list --porcelain 2>/dev/null || true)
+
+  while IFS= read -r net_name; do
+    [ -n "$net_name" ] || continue
+    [[ "$net_name" == lash-e2e-* ]] || continue
+
+    attached="$(docker network inspect -f '{{len .Containers}}' "$net_name" 2>/dev/null || true)"
+    [ "$attached" = "0" ] || continue
+
+    net_root="$(docker network inspect -f '{{index .Labels "com.lash.e2e.worktree.root"}}' "$net_name" 2>/dev/null || true)"
+    if [ -n "$net_root" ] && [ "$net_root" != "<no value>" ]; then
+      if [ ! -d "$net_root" ]; then
+        docker network rm "$net_name" >/dev/null 2>&1 || true
+      fi
+      continue
+    fi
+
+    net_slug="$(docker network inspect -f '{{index .Labels "com.lash.e2e.worktree"}}' "$net_name" 2>/dev/null || true)"
+    if [ -z "$net_slug" ] || [ "$net_slug" = "<no value>" ]; then
+      net_slug="${net_name#lash-e2e-}"
+    fi
+
+    if [ -n "$net_slug" ] && [ -z "${live_slugs[$net_slug]:-}" ]; then
+      docker network rm "$net_name" >/dev/null 2>&1 || true
+    fi
+  done < <(docker network ls --format '{{.Name}}' 2>/dev/null || true)
+}
+
 lash_gate_prepare_docker() {
   if [ "${LASH_GATE_ACQUIRED_HERE:-0}" != "1" ]; then
     return
   fi
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     lash_gate_refuse_leftovers || return
+    lash_gate_prune_orphaned_networks
     docker network inspect "$LASH_E2E_NETWORK" >/dev/null 2>&1 \
       || docker network create \
         --label "$LASH_GATE_LABEL" \
+        --label "com.lash.e2e.worktree.root=${LASH_GATE_WORKTREE_ROOT}" \
         "$LASH_E2E_NETWORK" >/dev/null
   fi
 }

@@ -61,6 +61,7 @@ cleanup() {
   fi
   if [ "${LASH_E2E_KEEP:-0}" != "1" ]; then
     "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+    lash_gate_cleanup
   fi
   rm -f "$test_output"
   exit "$status"
