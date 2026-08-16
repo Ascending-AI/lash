@@ -216,7 +216,9 @@ language semantics:
   deterministic matcher steps** per operation; exhaustion is the uncatchable
   `RegExpBudgetExceeded` execution-bound error. The pinned `regress` 0.11.1
   engine is patched locally to charge bytecode dispatch and backtrack
-  transitions; [upstream issue placeholder](https://github.com/ridiculousfish/regress/issues/PLACEHOLDER).
+  transitions. The patch has not been filed upstream; until it is, the vendored
+  copy is the only place the charge exists, and a version bump has to carry it
+  forward by hand.
 - RegExp flags `d` and `v` reject as `TS_REGEX_INDICES_FLAG_UNSUPPORTED` and
   `TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED`: match indices and Unicode-set syntax
   are not in the accepted surface. Use `match.index` plus capture lengths

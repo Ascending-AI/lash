@@ -57,6 +57,14 @@ than by construct list:
   durable agent surface. The async array driver executes callbacks
   sequentially — a registered deviation (`TS_ASYNC_MAP_SEQUENTIAL_V1`), not a
   quiet approximation.
+- **Nondeterministic reads are journaled, not banned.** `Date.now()`, argless
+  `new Date()`, and `Math.random()` are host effects recorded at the same
+  journal boundary as every other effect, so a replayed turn draws the same
+  values it drew the first time. Journaled is replay-deterministic, which is
+  the property a durable program actually needs; banning them would have
+  bought nothing and cost the most ordinary idioms in the language. An earlier
+  revision of this ADR listed `Math.random` among the rejected constructs,
+  which it has never been.
 - **The stdlib** is the full glue-code working set, each optional argument an
   explicit signature-table entry, with `ryu-js` at the single
   number-to-string choke point because Rust's native formatting is not
@@ -90,12 +98,15 @@ aspirational:
 2. **A named deviation register.** Where the dialect deliberately diverges,
    the divergence has a name, a rationale, and tests: UTC-pinned dates with a
    loud error on string coercion, sequential async callbacks, ToLength at
-   `lastIndex` write, lone-surrogate match output, dense arrays, snapshot
-   `forEach` iteration, cycle preflight before stringify replacers. Silent
-   divergence remains the one forbidden outcome.
+   `lastIndex` write, lone-surrogate match output, dense arrays, no prototype
+   chain, value trees at the durable boundary, cycle preflight before
+   stringify replacers. Silent divergence remains the one forbidden outcome.
+   `forEach` is **not** on this list: it iterates live and node-exact across
+   arrays, `Map`, `Set`, and `URLSearchParams`, and an earlier revision of this
+   ADR claimed a snapshot deviation the code does not have.
 3. **Repair-carrying rejection.** Everything still rejected — classes,
    generators as a protocol, getters/setters, prototype surgery, `eval`,
-   labels, locale surfaces, `Math.random`, timers, `Promise.race`/`any`
+   labels, locale surfaces, timers, `Promise.race`/`any`
    until first-settlement durability exists (FIG-1416) — rejects with a
    diagnostic that names the construct and the in-dialect rewrite. The
    rejected set shrinks only by evidence: observed collision traffic
@@ -109,10 +120,11 @@ host memory pressure; it is treated as a P0 wherever found.
 
 ## Consequences
 
-- Durable formats moved once, as one coordinated clean cutover (bytecode 8,
-  continuation 6, VM ABI v6, snapshot 5). Older parked state does not resume
-  across the boundary; deployments drain first. Per ADR 0055 there is no
-  migration decoder.
+- Durable formats moved once, as one coordinated clean cutover. The versions
+  in tree at this revision are bytecode 9, VM continuation 7, snapshot 6, VM
+  ABI `lashlang-vm-abi-v6`, RLM snapshot envelope 12, and Lashlang segment
+  handover 3. Older parked state does not resume across the boundary;
+  deployments drain first. Per ADR 0055 there is no migration decoder.
 - The accepted surface is now large enough that its integrity depends on the
   census and the register, not on reviewers' memory. A change that widens or
   narrows the surface must move the census, the register, the prompt
