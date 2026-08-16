@@ -1630,30 +1630,13 @@ async fn uri_codec_intrinsics_match_node_and_throw_real_uri_errors() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn map_and_set_for_each_use_a_durable_cloned_snapshot() {
-    fn seen_name(variable: &str) -> Expr {
-        Expr::JavaScriptBinary {
-            left: Box::new(Expr::String("seen-".into())),
-            op: crate::JavaScriptBinaryOp::Add,
-            right: Box::new(Expr::Variable(variable.into())),
-        }
-    }
-
+async fn map_and_set_for_each_use_a_live_durable_cursor() {
     let map_callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         params: vec!["value".into(), "key".into(), "receiver".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::Variable("value".into()))),
-            private_builtin(
-                "__typescript_stdlib",
-                vec![
-                    Expr::String("set".into()),
-                    Expr::Variable("receiver".into()),
-                    seen_name("key"),
-                    Expr::Bool(true),
-                ],
-            ),
             Expr::If {
                 condition: Box::new(Expr::JavaScriptBinary {
                     left: Box::new(Expr::Variable("key".into())),
@@ -1698,7 +1681,7 @@ async fn map_and_set_for_each_use_a_durable_cloned_snapshot() {
         ts_assign("callback", map_callback),
         heap_method("forEach", "map", vec![Expr::Variable("callback".into())]),
         Expr::Finish(Box::new(Expr::List(
-            ["seen-a", "seen-b", "seen-c"]
+            ["a", "b", "c"]
                 .into_iter()
                 .map(|key| heap_method("has", "map", vec![Expr::String(key.into())]))
                 .collect(),
@@ -1707,7 +1690,7 @@ async fn map_and_set_for_each_use_a_durable_cloned_snapshot() {
     assert_eq!(
         run_typescript_ast_across_every_effect(map_program).await,
         ExecutionOutcome::Finished(Value::List(
-            vec![Value::Bool(true), Value::Bool(true), Value::Bool(false)].into()
+            vec![Value::Bool(true), Value::Bool(false), Value::Bool(true)].into()
         ))
     );
 
@@ -1717,14 +1700,6 @@ async fn map_and_set_for_each_use_a_durable_cloned_snapshot() {
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
             Expr::Print(Box::new(Expr::Variable("value".into()))),
-            private_builtin(
-                "__typescript_stdlib",
-                vec![
-                    Expr::String("add".into()),
-                    Expr::Variable("receiver".into()),
-                    seen_name("value"),
-                ],
-            ),
             Expr::If {
                 condition: Box::new(Expr::JavaScriptBinary {
                     left: Box::new(Expr::Variable("value".into())),
@@ -1768,7 +1743,7 @@ async fn map_and_set_for_each_use_a_durable_cloned_snapshot() {
         ts_assign("callback", set_callback),
         heap_method("forEach", "set", vec![Expr::Variable("callback".into())]),
         Expr::Finish(Box::new(Expr::List(
-            ["seen-a", "seen-b", "seen-c"]
+            ["a", "b", "c"]
                 .into_iter()
                 .map(|value| heap_method("has", "set", vec![Expr::String(value.into())]))
                 .collect(),
@@ -1777,7 +1752,7 @@ async fn map_and_set_for_each_use_a_durable_cloned_snapshot() {
     assert_eq!(
         run_typescript_ast_across_every_effect(set_program).await,
         ExecutionOutcome::Finished(Value::List(
-            vec![Value::Bool(true), Value::Bool(true), Value::Bool(false)].into()
+            vec![Value::Bool(true), Value::Bool(false), Value::Bool(true)].into()
         ))
     );
 }
