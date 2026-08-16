@@ -99,9 +99,20 @@ list, not by sleeping blind.
 ## Phase 4 — The agent operates an inbox
 
 Back in the chat tab, ask the agent to send a message into the **work** inbox with a
-title you choose (e.g. `Standup notes`). Gates: `GET /api/accounts/work/inbox` contains a
-message with exactly that title; the work inbox card shows it. This proves the
-`inbox.work` authority is live in the session. Screenshot `04-agent-mail.png`.
+title you choose (e.g. `Standup notes`). Gates:
+
+1. `GET /api/accounts/work/inbox` contains a message with exactly that title, and the
+   work inbox card shows it. This proves the `inbox.work` authority is live in the
+   session.
+2. **The turn's tool outcome agrees.** Read the send turn's tool call in
+   `GET /api/state` (transcript) and require both halves of the send in one outcome:
+   the tool result succeeded, and it carries an executed `emit_trigger` intent outcome
+   for this call. The inbox row alone is not the gate — the row and the `mail.received`
+   emission are committed as one thing, and a row whose turn shows no executed
+   `emit_trigger` outcome is a partial effect, not a successful send. That is a
+   finding: the concierge in Phase 6 has nothing to fire on.
+
+Screenshot `04-agent-mail.png`.
 
 ## Phase 5 — Register the forwarding concierge
 
