@@ -763,20 +763,23 @@ fn recorded_trigger_intents() -> crate::ToolIntents {
     )])
 }
 
-/// The atomic-emission law: a recorded `EmitTrigger` declaration reaches the
-/// trigger router only after the attempt result commits, and a crash between
-/// that commit and the drain still ingests exactly one occurrence and reserves
-/// exactly one delivery.
-#[tokio::test]
-async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
-    use crate::TriggerStore as _;
+/// Drives one recorded `EmitTrigger` declaration, crashes the coordinator at
+/// `pause`, and redrives it. Returns the store, the registered subscription and
+/// the redriven outcome so each half of the exactly-once law can assert on the
+/// state its crash point leaves behind.
+async fn crashed_trigger_intent_redrive(
+    pause: IntentPausePoint,
+    at_crash: impl AsyncFnOnce(&crate::facade_support::InMemoryTriggerStore),
+) -> (
+    Arc<crate::facade_support::InMemoryTriggerStore>,
+    crate::TriggerSubscriptionRecord,
+    Box<crate::tool_dispatch::ToolDispatchOutcome>,
+) {
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
     let subscription = register_trigger_intent_subscription(&store).await;
     let calls = Arc::new(AtomicUsize::new(0));
-    let controller = Arc::new(IntentReplayController::new(Some(
-        IntentPausePoint::AfterToolAttemptCommit,
-    )));
+    let controller = Arc::new(IntentReplayController::new(Some(pause)));
     let mut context = fixed_intent_dispatch_context(
         Arc::clone(&controller),
         Arc::clone(&registry),
@@ -799,17 +802,9 @@ async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
             .await
             .expect_err("the injected crash aborts the first drain")
             .is_cancelled(),
-        "the first coordinator task must stop right after the attempt result commits"
+        "the first coordinator task must stop at the injected crash point"
     );
-    assert_eq!(
-        store
-            .list_occurrences(crate::TriggerOccurrenceFilter::default())
-            .await
-            .expect("read occurrences after the crash")
-            .len(),
-        0,
-        "no occurrence may exist before the recorded declaration drains"
-    );
+    at_crash(store.as_ref()).await;
 
     let redriven = run_fixed_intent_attempt(&context).await;
     assert_eq!(
@@ -817,22 +812,53 @@ async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
         1,
         "the attempt result replays instead of re-running the provider"
     );
+    (store, subscription, redriven)
+}
+
+/// Reads the single executed trigger outcome and its occurrence id.
+fn executed_trigger_outcome(
+    outcome: &crate::tool_dispatch::ToolDispatchOutcome,
+) -> (&serde_json::Value, String) {
     let [crate::ToolIntentExecutionOutcome::Executed {
         kind: crate::ToolIntentKind::EmitTrigger,
         result,
         ..
-    }] = redriven.intent_outcomes.as_slice()
+    }] = outcome.intent_outcomes.as_slice()
     else {
         panic!(
-            "the redrive must execute the recorded trigger declaration: {:?}",
-            redriven.intent_outcomes
+            "the drain must execute the recorded trigger declaration: {:?}",
+            outcome.intent_outcomes
         )
     };
     let occurrence_id = result["occurrence_id"]
         .as_str()
         .expect("the executed outcome reports its occurrence")
         .to_string();
+    (result, occurrence_id)
+}
 
+/// The at-least-once half of the atomic-emission law: a recorded `EmitTrigger`
+/// declaration reaches the trigger router only after the attempt result
+/// commits, so a crash in between emits nothing, and the redrive still ingests
+/// the occurrence and reserves its delivery.
+#[tokio::test]
+async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
+    use crate::TriggerStore as _;
+    let (store, subscription, redriven) =
+        crashed_trigger_intent_redrive(IntentPausePoint::AfterToolAttemptCommit, async |store| {
+            assert_eq!(
+                store
+                    .list_occurrences(crate::TriggerOccurrenceFilter::default())
+                    .await
+                    .expect("read occurrences after the crash")
+                    .len(),
+                0,
+                "no occurrence may exist before the recorded declaration drains"
+            );
+        })
+        .await;
+
+    let (_, occurrence_id) = executed_trigger_outcome(&redriven);
     let occurrences = store
         .list_occurrences(crate::TriggerOccurrenceFilter::default())
         .await
@@ -847,5 +873,75 @@ async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
     assert_eq!(
         deliveries[0].subscription.subscription_id,
         subscription.subscription_id
+    );
+}
+
+/// The at-most-once half: a crash after the occurrence is ingested and its
+/// delivery start commits leaves durable state the redrive must not add to. The
+/// redrive re-ingests the same idempotency key, replays the same delivery start
+/// from the journal, and reports the same bytes — the reservation reads back as
+/// `AlreadyReserved` on the second drive, which is exactly the live-state read a
+/// recorded outcome may not expose.
+#[tokio::test]
+async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_outcome() {
+    use crate::TriggerStore as _;
+    let (store, subscription, redriven) = crashed_trigger_intent_redrive(
+        IntentPausePoint::AfterProcessCommandCommit(1),
+        async |store| {
+            let occurrences = store
+                .list_occurrences(crate::TriggerOccurrenceFilter::default())
+                .await
+                .expect("read occurrences after the crash");
+            assert_eq!(
+                occurrences.len(),
+                1,
+                "the crash lands after the occurrence is ingested"
+            );
+            assert_eq!(
+                store
+                    .list_deliveries_by_occurrence_id(&occurrences[0].occurrence_id)
+                    .await
+                    .expect("read deliveries after the crash")
+                    .len(),
+                1,
+                "the crash lands after the delivery start commits"
+            );
+        },
+    )
+    .await;
+
+    let (result, occurrence_id) = executed_trigger_outcome(&redriven);
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read occurrences after the redrive");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "a redrive past a committed emission may not ingest a second occurrence"
+    );
+    assert_eq!(occurrences[0].occurrence_id, occurrence_id);
+    let deliveries = store
+        .list_deliveries_by_occurrence_id(&occurrence_id)
+        .await
+        .expect("read the reserved deliveries");
+    assert_eq!(
+        deliveries.len(),
+        1,
+        "a redrive may not reserve a second delivery"
+    );
+    assert_eq!(
+        deliveries[0].subscription.subscription_id,
+        subscription.subscription_id
+    );
+    assert_eq!(
+        result["deliveries"],
+        json!([{
+            "occurrence_id": occurrence_id,
+            "subscription_id": subscription.subscription_id,
+            "process_id": deliveries[0].process_id,
+            "outcome": "started",
+        }]),
+        "the recorded outcome states what every drive did, not which drive reserved first"
     );
 }

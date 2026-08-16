@@ -605,6 +605,12 @@ impl ToolIntentIngress {
         let result = match result {
             RealizedIntent::Trigger(report) => {
                 let value = serde_json::to_value(report).unwrap_or(serde_json::Value::Null);
+                // `realize_inner` dispatches on the submitted intent, so this
+                // pairing only breaks if an admitted submission row carries a
+                // kind its own payload contradicts. The trigger route has no
+                // journal replay to cross-check, so the row is the only place
+                // that corruption can come from; refuse rather than report a
+                // trigger outcome under another kind.
                 if kind != lash_core::ToolIntentKind::EmitTrigger {
                     return Err(RealizationFailure::Refused(
                         ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
@@ -851,7 +857,7 @@ impl ToolIntentIngress {
             .effect_host
             .scoped(self.scope.clone())?;
         router
-            .emit(request, scoped.controller())
+            .emit_recorded(request, scoped.controller())
             .await
             .map_err(Into::into)
     }

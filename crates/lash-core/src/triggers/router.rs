@@ -470,6 +470,8 @@ fn trigger_delivery_process_preimage(
     identity.finish()
 }
 
+const DELIVERY_REQUIRES_REGISTRY: &str = "trigger delivery requires a process registry";
+
 #[derive(Clone)]
 pub struct TriggerRouter {
     store: Arc<dyn TriggerStore>,
@@ -494,6 +496,54 @@ impl TriggerRouter {
         Arc::clone(&self.store)
     }
 
+    /// Emits a recorded [`crate::ToolIntent::EmitTrigger`] declaration and
+    /// settles the report so redriving that one declaration returns the same
+    /// bytes.
+    ///
+    /// [`Self::emit`] reports each delivery's live reservation status, which is
+    /// committed outside the effect journal and flips `Reserved` to
+    /// `AlreadyReserved` once the first drive has run (FIG-806). A recorded
+    /// declaration cannot carry that read: its report becomes the durable,
+    /// wire-visible `ToolIntentExecutionOutcome::Executed` result, and on a
+    /// runtime-owned host there is no journal to replay it from, so the drain
+    /// must recompute the identical value. Every drive starts each reserved
+    /// delivery under the same deterministic journal key, so `Started` is the
+    /// statement that holds on the first drive and every redrive; without a
+    /// process registry no drive starts anything, so the same failure holds.
+    ///
+    /// This is deliberately not a journaled wrapper around [`Self::emit`]:
+    /// delivery starts are themselves effects, and nesting them inside an outer
+    /// effect is what [`crate::ToolContext::triggers`] refuses on
+    /// ordinal-addressed journal tiers.
+    #[doc(hidden)]
+    pub async fn emit_recorded(
+        &self,
+        request: TriggerOccurrenceRequest,
+        effect_controller: &dyn crate::RuntimeEffectController,
+    ) -> Result<TriggerEmitReport, PluginError> {
+        let report = self.emit(request, effect_controller).await?;
+        let deliverable = self.process_registry.is_some();
+        let deliveries = report
+            .deliveries
+            .into_iter()
+            .map(|mut delivery| {
+                delivery.outcome = match (delivery.outcome, deliverable) {
+                    (TriggerDeliveryEmitOutcome::AlreadyReserved, true) => {
+                        TriggerDeliveryEmitOutcome::Started
+                    }
+                    (TriggerDeliveryEmitOutcome::AlreadyReserved, false) => {
+                        TriggerDeliveryEmitOutcome::Failed {
+                            reason: DELIVERY_REQUIRES_REGISTRY.to_string(),
+                        }
+                    }
+                    (outcome, _) => outcome,
+                };
+                delivery
+            })
+            .collect();
+        Ok(TriggerEmitReport::new(report.occurrence_id, deliveries))
+    }
+
     pub async fn emit(
         &self,
         request: TriggerOccurrenceRequest,
@@ -510,7 +560,7 @@ impl TriggerRouter {
                     let outcome = match reservation.reservation_status {
                         TriggerDeliveryReservationStatus::Reserved => {
                             TriggerDeliveryEmitOutcome::Failed {
-                                reason: "trigger delivery requires a process registry".to_string(),
+                                reason: DELIVERY_REQUIRES_REGISTRY.to_string(),
                             }
                         }
                         TriggerDeliveryReservationStatus::AlreadyReserved => {

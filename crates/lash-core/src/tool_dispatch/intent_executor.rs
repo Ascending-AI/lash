@@ -402,12 +402,16 @@ async fn execute_one(
             // dedupe point and each reserved delivery starts under its own
             // deterministic journal key, so a redrive of this declaration
             // re-ingests the same occurrence and re-plays the same starts.
+            // `emit_recorded` settles the report those two dedupe points make
+            // replay-varying, so the recorded `Executed` result is byte-stable.
             let router = context.trigger_router.as_ref().ok_or_else(|| {
                 crate::PluginError::Session(
                     "trigger store is unavailable in this runtime".to_string(),
                 )
             })?;
-            let report = Box::pin(router.emit(
+            // Boxed because the drain future is already near the coordinator's
+            // large-future budget and emission adds a delivery-start frame.
+            let report = Box::pin(router.emit_recorded(
                 intent.request.clone(),
                 context.effect_controller.controller(),
             ))

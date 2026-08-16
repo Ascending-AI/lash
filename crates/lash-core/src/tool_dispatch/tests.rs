@@ -617,6 +617,15 @@ impl ToolProvider for AttemptIntentTools {
                     event_type: "attempt.intent.note".to_string(),
                     payload: json!({"ordinal": 2}),
                 }),
+                crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
+                    session_id: "session".to_string(),
+                    request: crate::TriggerOccurrenceRequest::new(
+                        "attempt.intent.trigger",
+                        "attempt-intents-source",
+                        json!({"ordinal": 3}),
+                        "attempt-intents-occurrence",
+                    ),
+                }),
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
                     session_id: "session".to_string(),
                     process_id: "attempt-intents-target".to_string(),
@@ -2342,7 +2351,14 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
         )
         .await
         .expect("register intent target");
-    context.processes = crate::testing::effect_backed_process_service(registry);
+    let registry = Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>;
+    context.processes = crate::testing::effect_backed_process_service(Arc::clone(&registry));
+    context.trigger_router = Some(crate::TriggerRouter::new(
+        Arc::new(crate::facade_support::InMemoryTriggerStore::default())
+            as Arc<dyn crate::TriggerStore>,
+        Some(registry),
+        None,
+    ));
 
     let prepared = crate::PreparedToolCall::from_parts(
         "attempt-intents-call",
@@ -2378,6 +2394,7 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
             Some(crate::ToolIntentKind::StartProcess),
             Some(crate::ToolIntentKind::SignalProcess),
             Some(crate::ToolIntentKind::EmitProcessEvent),
+            Some(crate::ToolIntentKind::EmitTrigger),
             Some(crate::ToolIntentKind::CancelProcess),
         ]
     );

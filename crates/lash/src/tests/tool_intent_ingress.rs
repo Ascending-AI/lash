@@ -56,14 +56,55 @@ async fn ingress_core_with_effect_host_and_env_store(
     Ok((core, registry))
 }
 
-async fn ingress_core_with_trigger_store() -> Result<(
+/// Registers the subscription a submitted occurrence must reserve a delivery
+/// for. Without it every emit report is empty and the dedupe assertions below
+/// pass without ever touching reservation or delivery state.
+async fn register_ingress_trigger_subscription(
+    store: &lash_core::facade_support::InMemoryTriggerStore,
+) -> Result<lash_core::TriggerSubscriptionRecord> {
+    use lash_core::TriggerStore as _;
+    let draft = lash_core::TriggerSubscriptionDraft::for_process(
+        "test/intent-ingress-delivery",
+        lash_core::ProcessExecutionEnvRef::new("process-env:intent-ingress-delivery"),
+        "intent.ingress.trigger",
+        "intent-ingress-source",
+        lash_core::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::json!({"process": "intent-ingress-delivery"}),
+        },
+        lash_core::ProcessIdentity::new("test-engine").with_label(Some("intent-ingress-delivery")),
+    )
+    .with_payload_schema(lash_core::LashSchema::any());
+    let outcome = store
+        .execute_command(
+            "intent-ingress-subscription",
+            lash_core::TriggerCommand::Register {
+                owner_scope: lash_core::TriggerOwnerScope::host("intent-ingress")
+                    .expect("owner scope"),
+                actor: lash_core::ProcessOriginator::host_scoped("intent-ingress"),
+                draft,
+            },
+        )
+        .await?
+        .expect("register the ingress trigger subscription");
+    let lash_core::TriggerCommandOutcome::Mutation { receipt } = outcome else {
+        panic!("registration must return a mutation receipt")
+    };
+    Ok(receipt.record_snapshot)
+}
+
+async fn ingress_core_with_trigger_store(
+    effect_host: Arc<dyn lash_core::EffectHost>,
+) -> Result<(
     LashCore,
     Arc<lash_core::facade_support::InMemoryTriggerStore>,
+    lash_core::TriggerSubscriptionRecord,
 )> {
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let subscription = register_ingress_trigger_subscription(&store).await?;
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(KeyJournalController::default()))
+        .effect_host(effect_host)
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -76,7 +117,7 @@ async fn ingress_core_with_trigger_store() -> Result<(
         .trigger_store(Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>)
         .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
-    Ok((core, store))
+    Ok((core, store, subscription))
 }
 
 fn trigger_intent(session_id: &str) -> lash_core::ToolIntent {
@@ -97,7 +138,8 @@ fn trigger_intent(session_id: &str) -> lash_core::ToolIntent {
 async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     use lash_core::TriggerStore as _;
 
-    let (core, store) = ingress_core_with_trigger_store().await?;
+    let (core, store, subscription) =
+        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-trigger-call", 0);
 
@@ -123,10 +165,24 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
         result["occurrence_id"].as_str(),
         Some(occurrences[0].occurrence_id.as_str())
     );
+    let deliveries = store
+        .list_deliveries_by_occurrence_id(&occurrences[0].occurrence_id)
+        .await?;
+    assert_eq!(
+        deliveries.len(),
+        1,
+        "the registered subscription is reserved"
+    );
+    assert_eq!(
+        deliveries[0].subscription.subscription_id,
+        subscription.subscription_id
+    );
 
     // The trigger route's dedupe point is the occurrence idempotency key at
     // the store, not an effect-journal key, so re-submitting the identity
-    // re-ingests the same occurrence rather than creating a second one.
+    // re-ingests the same occurrence rather than creating a second one. The
+    // reservation reads back as already reserved on that second pass, which is
+    // exactly the live-state read a recorded outcome may not expose.
     let duplicate = ingress.submit(key, trigger_intent(SESSION)).await;
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
@@ -148,6 +204,65 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
             .len(),
         1,
         "a re-submitted identity cannot ingest a second occurrence"
+    );
+    assert_eq!(
+        store
+            .list_deliveries_by_occurrence_id(&occurrences[0].occurrence_id)
+            .await?
+            .len(),
+        1,
+        "a re-submitted identity cannot reserve a second delivery"
+    );
+    Ok(())
+}
+
+/// A runtime-owned host has no journal to replay the emission from, so the
+/// submission row is the whole record: the first submit realizes the emission
+/// and completes its row, and the second is refused against that row rather
+/// than re-entering the router.
+#[tokio::test]
+async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<()> {
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _subscription) =
+        ingress_core_with_trigger_store(Arc::new(crate::durability::InlineEffectHost::default()))
+            .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("runtime-owned-trigger-call", 0);
+
+    let first = ingress.submit(key.clone(), trigger_intent(SESSION)).await;
+    let crate::tools::ToolIntentIngressOutcome::Admitted {
+        outcome:
+            lash_core::ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::EmitTrigger,
+                ..
+            },
+        ..
+    } = first
+    else {
+        panic!("a runtime-owned host realizes the trigger declaration: {first:?}")
+    };
+
+    let duplicate = ingress.submit(key, trigger_intent(SESSION)).await;
+    assert!(
+        matches!(
+            duplicate,
+            crate::tools::ToolIntentIngressOutcome::Refused {
+                refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
+                    kind: lash_core::ToolIntentKind::EmitTrigger
+                },
+                ..
+            }
+        ),
+        "the completed submission row refuses the second submit: {duplicate:?}"
+    );
+    assert_eq!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .len(),
+        1,
+        "the refusal keeps the second submit out of the router"
     );
     Ok(())
 }
