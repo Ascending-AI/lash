@@ -749,8 +749,10 @@ async fn enqueue_tool_catalog_refresh(
 async fn inject_message(
     AxumPath(slug): AxumPath<String>,
     State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
     Json(request): Json<InjectMessageRequest>,
 ) -> Result<Json<CommandAccepted>, AppError> {
+    let session_id = query.resolve(&state)?;
     let turn_model = model_spec_for_request(
         &state.selected_model(),
         request.model.as_deref(),
@@ -768,11 +770,13 @@ async fn inject_message(
         .map_err(AppError::not_found)?;
     let message = delivered.message;
     let delivery = delivered.delivery;
-    state.trace(
+    state.trace_for_session(
+        &session_id,
         "api.accounts.inject",
         json!({ "account": slug, "title": message.title }),
     );
-    state.push_message(
+    state.push_message_for_session(
+        &session_id,
         "event",
         format!("message delivered to `inbox.{}`: {}", slug, message.title),
     );
@@ -780,7 +784,7 @@ async fn inject_message(
         &state,
         restate::WorkbenchMailReceivedWorkflowRequest {
             operation_id: format!("workbench-mail-{}", uuid::Uuid::new_v4()),
-            session_id: state.current_session_id(),
+            session_id,
             model,
             delivery,
         },
