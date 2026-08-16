@@ -30,6 +30,8 @@ mod example_agent_workbench;
 mod execution_modes;
 #[cfg(test)]
 mod fig1294_ingress;
+#[cfg(test)]
+mod fig1348_selected_drain;
 mod index;
 mod operations;
 mod persistence;
