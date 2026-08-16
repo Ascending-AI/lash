@@ -8831,7 +8831,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:487#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:486#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -8848,7 +8848,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:487#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:486#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs:204, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:89 asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -8986,7 +8986,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:487#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:486#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -76108,7 +76108,7 @@ availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:214#read_view.rlm_dialect().language_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:389#transcript_code_languages(&projected),"
+assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:385#transcript_code_languages(&projected),"
 
 [[api]]
 symbol = "lash::rlm::RlmSessionReadViewExt::rlm_dialect"
@@ -76117,7 +76117,7 @@ availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:214#read_view.rlm_dialect().language_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:389#transcript_code_languages(&projected),"
+assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:385#transcript_code_languages(&projected),"
 
 [[api]]
 symbol = "lash::plugins::PluginSessionContext::protocol_turn_options"
