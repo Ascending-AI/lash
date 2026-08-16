@@ -195,6 +195,55 @@ fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
     assert_eq!(cache.stats().misses, 1);
 }
 
+#[test]
+fn compiled_process_cache_separates_source_dialects() {
+    let program =
+        crate::parse("process scan() { value = [1] alias = value alias[0] = 2 finish value[0] }")
+            .expect("parse module");
+    let lashlang = crate::LinkedModule::link_with_dialect(
+        program.clone(),
+        runtime_test_environment(),
+        crate::CompilationDialect::Lashlang,
+    )
+    .expect("link Lashlang module");
+    let typescript = crate::LinkedModule::link_with_dialect(
+        program,
+        runtime_test_environment(),
+        crate::CompilationDialect::Typescript,
+    )
+    .expect("link TypeScript module");
+    assert_ne!(lashlang.module_ref, typescript.module_ref);
+    let process_ref = lashlang
+        .artifact
+        .process_ref("scan")
+        .expect("scan process ref");
+    assert_eq!(
+        Some(process_ref),
+        typescript.artifact.process_ref("scan"),
+        "process identity intentionally remains source-dialect independent"
+    );
+
+    let mut cache = CompiledProcessCache::with_capacity(2);
+    let lashlang_compiled = cache
+        .get_or_compile(
+            &lashlang.artifact,
+            process_ref,
+            &lashlang.host_requirements_ref,
+        )
+        .expect("compile Lashlang process");
+    let typescript_compiled = cache
+        .get_or_compile(
+            &typescript.artifact,
+            process_ref,
+            &typescript.host_requirements_ref,
+        )
+        .expect("compile TypeScript process");
+
+    assert!(!Arc::ptr_eq(&lashlang_compiled, &typescript_compiled));
+    assert_eq!(cache.stats().hits, 0);
+    assert_eq!(cache.stats().misses, 2);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn receiver_module_operation_unwraps_result() {
     let value = exec(r#"finish (await tools.echo({ value: "ok" })?)"#)
@@ -1344,4 +1393,54 @@ async fn host_can_transform_fail_value_while_keeping_failure_path() {
         ExecutionOutcome::Failed(Value::Number(107.0)),
         "transformed value should still arrive on the failure path"
     );
+}
+
+/// A compiled-process cache hit must not build the key it only compares.
+///
+/// The key owns three cloned strings, so constructing it before the lookup
+/// charged every hit an allocation and 83 bytes for a value it dropped
+/// immediately — the same shape as the parse-on-hit defect, on the hot path.
+#[test]
+fn a_compiled_process_cache_hit_builds_no_key() {
+    use std::sync::atomic::Ordering;
+
+    let linked = crate::LinkedModule::link(
+        crate::parse("process scan() { finish 1 }").expect("parse module"),
+        runtime_test_environment(),
+    )
+    .expect("link module");
+    let process_ref = linked
+        .artifact
+        .process_ref("scan")
+        .expect("scan process ref")
+        .clone();
+    let mut cache = CompiledProcessCache::with_capacity(2);
+
+    let before = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
+    cache
+        .get_or_compile(
+            &linked.artifact,
+            &process_ref,
+            &linked.host_requirements_ref,
+        )
+        .expect("first compile misses");
+    let after_miss = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
+    assert_eq!(after_miss - before, 1, "a miss stores one owned key");
+
+    for _ in 0..8 {
+        cache
+            .get_or_compile(
+                &linked.artifact,
+                &process_ref,
+                &linked.host_requirements_ref,
+            )
+            .expect("subsequent lookups hit");
+    }
+    let after_hits = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
+    assert_eq!(
+        after_hits, after_miss,
+        "eight cache hits must build no keys at all"
+    );
+    assert_eq!(cache.stats().hits, 8);
+    assert_eq!(cache.stats().misses, 1);
 }

@@ -140,6 +140,45 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn parent_end_actions(&self) -> Vec<crate::ToolIntentParentEndAction> {
         self.dispatch.recorded_intent_outcomes.snapshot()
     }
+
+    /// Executes a nondeterministic language-runtime operation behind the
+    /// durable effect controller so replay returns the recorded sample.
+    pub async fn journaled_language_runtime_value(
+        &self,
+        effect_id: String,
+        operation: String,
+    ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
+        let scope = self
+            .parent_invocation
+            .as_ref()
+            .map(|invocation| invocation.scope.clone())
+            .unwrap_or_else(|| crate::RuntimeScope::new(self.session_id.clone()));
+        let invocation = crate::RuntimeInvocation::effect(
+            scope,
+            effect_id.clone(),
+            crate::RuntimeEffectKind::LanguageRuntimeValue,
+            effect_id,
+        )
+        .with_caused_by(
+            self.parent_invocation
+                .as_ref()
+                .and_then(crate::RuntimeInvocation::causal_ref),
+        );
+        self.dispatch
+            .effect_controller
+            .controller()
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::LanguageRuntimeValue { operation },
+                ),
+                crate::RuntimeEffectLocalExecutor::language_runtime_value(Arc::clone(
+                    &self.dispatch.clock,
+                )),
+            )
+            .await?
+            .into_language_runtime_value()
+    }
     pub(super) fn process_scope(
         &self,
         parent_invocation: Option<crate::RuntimeInvocation>,

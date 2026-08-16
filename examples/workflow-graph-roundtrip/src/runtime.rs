@@ -248,7 +248,7 @@ impl ExecutionHost for RunHost {
                     })
                     .collect();
                 Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult { results },
+                    ResourceOperationBatchResult::settled_in_input_order(results),
                 ))
             }
             AbilityOp::Sleep(sleep) => self.perform_sleep(sleep).await,

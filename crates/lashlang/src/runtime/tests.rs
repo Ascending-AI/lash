@@ -41,8 +41,8 @@ impl ExecutionHost for Host {
                 Self::perform_resource_operation(operation).map(AbilityResult::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult {
-                    results: batch
+                ResourceOperationBatchResult::settled_in_input_order(
+                    batch
                         .operations
                         .into_iter()
                         .map(|operation| {
@@ -51,7 +51,7 @@ impl ExecutionHost for Host {
                             ))
                         })
                         .collect(),
-                },
+                ),
             )),
             AbilityOp::Await(handle) => match handle {
                 Value::Record(_) => Ok(AbilityResult::Value(Value::Null)),
@@ -1039,6 +1039,9 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::Join => format!("intrinsic join argc={argc}"),
         IntrinsicOp::JavaScriptSplit => format!("intrinsic typescript_split argc={argc}"),
         IntrinsicOp::JavaScriptJoin => format!("intrinsic typescript_join argc={argc}"),
+        IntrinsicOp::JavaScriptStdlib(_) => {
+            format!("intrinsic typescript_stdlib argc={argc}")
+        }
         IntrinsicOp::Trim => format!("intrinsic trim argc={argc}"),
         IntrinsicOp::Slice => format!("intrinsic slice argc={argc}"),
         IntrinsicOp::ToString => format!("intrinsic to_string argc={argc}"),

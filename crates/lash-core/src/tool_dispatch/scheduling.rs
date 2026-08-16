@@ -2,12 +2,13 @@ use std::future::Future;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 
-/// Run a batch concurrently and report outcomes in original index order.
+/// Run a batch concurrently, reporting outcomes in input order alongside the
+/// order in which they settled.
 pub(crate) async fn schedule_tool_batch<T, O, IndexOf, Run, Fut>(
     items: Vec<T>,
     index_of: IndexOf,
     run: Run,
-) -> Vec<O>
+) -> ScheduledToolBatch<O>
 where
     T: Send + 'static,
     O: Send + 'static,
@@ -27,6 +28,22 @@ where
         outcomes.push(outcome);
     }
 
+    // `FuturesUnordered` yields in completion order, which is the only place the
+    // settlement order of a batch exists. Record it before sorting the outcomes
+    // back into the caller's input order: an aggregate that must reject with the
+    // first *settled* rejection cannot recover this afterwards.
+    let settlement_order = outcomes.iter().map(|(index, _)| *index).collect();
     outcomes.sort_by_key(|(index, _)| *index);
-    outcomes.into_iter().map(|(_, outcome)| outcome).collect()
+    ScheduledToolBatch {
+        outcomes: outcomes.into_iter().map(|(_, outcome)| outcome).collect(),
+        settlement_order,
+    }
+}
+
+/// A scheduled batch: outcomes in input order, plus the order they settled in.
+pub(crate) struct ScheduledToolBatch<O> {
+    /// One outcome per input, in input order.
+    pub(crate) outcomes: Vec<O>,
+    /// Input indices in the order their futures completed.
+    pub(crate) settlement_order: Vec<usize>,
 }

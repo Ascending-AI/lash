@@ -134,6 +134,15 @@ pub(crate) struct CompiledResourceOperationBatch {
     pub(crate) shape: CompiledAggregateAwaitShape,
     pub(crate) stack_value_count: usize,
     pub(crate) aggregate_unwrap: bool,
+    /// Select the rejection this batch reports by the order its leaves
+    /// *settled* rather than the order they were written.
+    ///
+    /// `Promise.all` is specified to reject with the first settled rejection,
+    /// so the TypeScript lowering sets this. Lashlang's own aggregates select
+    /// in input order and leave it clear, which is why the choice is recorded
+    /// per batch at lowering instead of being inferred at run time from a
+    /// dialect flag that answers some other question.
+    pub(crate) first_settled_rejection: bool,
 }
 
 #[derive(Clone)]
@@ -379,6 +388,7 @@ pub(crate) enum IntrinsicOp {
     Join,
     JavaScriptSplit,
     JavaScriptJoin,
+    JavaScriptStdlib(usize),
     Trim,
     Slice,
     ToString,
@@ -558,6 +568,7 @@ impl IntrinsicOp {
             IntrinsicOp::Find(argc)
             | IntrinsicOp::Format(argc)
             | IntrinsicOp::Range(argc)
+            | IntrinsicOp::JavaScriptStdlib(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
             | IntrinsicOp::Unknown { argc, .. } => argc,
             IntrinsicOp::FormatCompiled(_)
@@ -581,6 +592,7 @@ impl IntrinsicOp {
             IntrinsicOp::Join => BuiltinProfileTag::Join,
             IntrinsicOp::JavaScriptSplit => BuiltinProfileTag::Split,
             IntrinsicOp::JavaScriptJoin => BuiltinProfileTag::Join,
+            IntrinsicOp::JavaScriptStdlib(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,
@@ -694,6 +706,7 @@ pub(crate) enum BuiltinProfileTag {
     Upper,
     Unique,
     Reverse,
+    TypeScriptStdlib,
     Unknown,
 }
 
@@ -810,6 +823,7 @@ const BUILTIN_PROFILE_NAMES: [&str; BUILTIN_PROFILE_COUNT] = [
     "upper",
     "unique",
     "reverse",
+    "typescript_stdlib",
     "unknown",
 ];
 

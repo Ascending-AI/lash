@@ -1152,7 +1152,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 37, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 38, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1561,9 +1561,55 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 37,
+            expected: 38,
         })
     ));
+}
+
+/// The runtime-effect kinds a protocol-37 peer knew, as a closed decoder.
+///
+/// Version 38 adds `language_runtime_value`; a 37 peer has no name for it, so
+/// the version gate has to refuse the envelope before this decoder ever sees
+/// the value — exactly the property the sibling activity test pins for a new
+/// event variant.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Protocol37RuntimeEffectKind {
+    LlmCall,
+    Direct,
+    ToolAttempt,
+    ToolBatch,
+    ToolParentEnd,
+    Process,
+    Trigger,
+    ExecCode,
+    Checkpoint,
+    SyncExecutionEnvironment,
+    Sleep,
+    AwaitEvent,
+    PeekAwaitEvent,
+}
+
+#[test]
+fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_decode() {
+    let kind = serde_json::to_value(RemoteRuntimeEffectKind::LanguageRuntimeValue)
+        .expect("serialize the version 38 effect kind");
+    assert_eq!(kind, serde_json::json!("language_runtime_value"));
+
+    assert!(
+        matches!(
+            ensure_protocol_version(37),
+            Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                actual: 37,
+                expected: 38,
+            })
+        ),
+        "the version gate refuses a 37 peer before any payload is interpreted"
+    );
+
+    let error = serde_json::from_value::<Protocol37RuntimeEffectKind>(kind)
+        .expect_err("without the version gate, the new kind is unknown to a 37 peer");
+    assert!(error.to_string().contains("unknown variant"), "{error}");
 }
 
 #[test]

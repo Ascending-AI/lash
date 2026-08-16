@@ -979,6 +979,7 @@ impl From<lash_core::RuntimeEffectKind> for RemoteRuntimeEffectKind {
             lash_core::RuntimeEffectKind::Sleep => Self::Sleep,
             lash_core::RuntimeEffectKind::AwaitEvent => Self::AwaitEvent,
             lash_core::RuntimeEffectKind::PeekAwaitEvent => Self::PeekAwaitEvent,
+            lash_core::RuntimeEffectKind::LanguageRuntimeValue => Self::LanguageRuntimeValue,
         }
     }
 }
@@ -999,6 +1000,7 @@ impl From<RemoteRuntimeEffectKind> for lash_core::RuntimeEffectKind {
             RemoteRuntimeEffectKind::Sleep => Self::Sleep,
             RemoteRuntimeEffectKind::AwaitEvent => Self::AwaitEvent,
             RemoteRuntimeEffectKind::PeekAwaitEvent => Self::PeekAwaitEvent,
+            RemoteRuntimeEffectKind::LanguageRuntimeValue => Self::LanguageRuntimeValue,
         }
     }
 }

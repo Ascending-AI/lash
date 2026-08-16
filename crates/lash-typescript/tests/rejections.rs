@@ -106,7 +106,57 @@ rejection_test!(
     Code::OptionalChainingUnsupported
 );
 rejection_test!(rejects_new, "new Date();", Code::NewUnsupported);
-rejection_test!(rejects_update, "x++;", Code::UpdateUnsupported);
+rejection_test!(
+    rejects_unsupported_await,
+    "await 1;",
+    Code::AwaitUnsupported
+);
+rejection_test!(
+    rejects_unawaited_tool_call,
+    "web.fetch({});",
+    Code::AwaitRequired
+);
+rejection_test!(rejects_unawaited_sleep, "sleep(1);", Code::AwaitRequired);
+rejection_test!(
+    rejects_missing_literal_method,
+    "'x'.missing();",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_method_on_bound_receiver,
+    "const s = 'a,b'; s.notAMethod(',');",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_method_on_chained_receiver,
+    "'abc'.repeat(2).notAMethod(10, 'x');",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_method_on_computed_receiver,
+    "const xs = [['a']]; xs[0].notAMethod();",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_method_under_await,
+    "const s = 'a'; await s.notAMethod();",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_array_from_mapping_callback,
+    "Array.from('ab', value => value.toUpperCase());",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_missing_runtime_property,
+    "finish(Math.PI);",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_dynamic_process_config,
+    "const config = {}; const worker = defineProcess(config);",
+    Code::ProcessConfigLiteralRequired
+);
 rejection_test!(
     rejects_switch,
     "switch (x) { case 1: break; }",
@@ -118,26 +168,15 @@ rejection_test!(
     Code::DoWhileUnsupported
 );
 rejection_test!(
-    rejects_classic_for,
-    "for (let i = 0; i < 1; i++) {}",
-    Code::ForUnsupported
-);
-rejection_test!(
     rejects_for_in,
     "for (const key in value) {}",
     Code::ForInUnsupported
-);
-rejection_test!(
-    rejects_for_of,
-    "for (const value of values) {}",
-    Code::ForOfUnsupported
 );
 rejection_test!(
     rejects_delete,
     "delete value.field;",
     Code::DeleteUnsupported
 );
-rejection_test!(rejects_await, "await value;", Code::AwaitUnsupported);
 rejection_test!(
     rejects_yield,
     "function* f() { yield 1; }",
@@ -214,14 +253,86 @@ rejection_test!(
 );
 
 #[test]
-fn mapped_string_methods_accept_exactly_one_argument() {
+fn agent_iteration_await_and_ecma_method_arities_are_accepted() {
     for source in [
+        "let x = 0; x++; finish(x);",
+        "for (let i = 0; i < 1; i++) {}",
+        "const values = [1]; for (const value of values) { print(value); }",
+        "await web.fetch({ url: 'https://example.com' });",
         "finish(`${'abc'.startsWith('bc', 1)}`);",
         "finish(`${'abc'.includes('b', 2)}`);",
         "finish(`${'abc'.endsWith('b', 2)}`);",
-        "finish(`${'abc'.split('', 2)}`);",
+        "finish(`${'abc'.charCodeAt(0, 99)}`);",
     ] {
-        let error = lash_typescript::validate(source).expect_err(source);
-        assert_eq!(error.code, Code::UnsupportedExpression, "{source}");
+        lash_typescript::validate(source).expect(source);
+    }
+}
+
+rejection_test!(
+    rejects_update_in_value_position,
+    "let x = 1; const old = x++;",
+    Code::UpdateUnsupported
+);
+
+/// The register must name exactly what the lowerer accepts.
+///
+/// The documented inventory was hand-maintained and fell nine methods behind
+/// the allowlist, so the register told a guest that `slice` rejects when it
+/// does not. This derives the expected sentence from the lowerer and compares,
+/// which is the only way a prose inventory stays true.
+#[test]
+fn instance_method_inventory_matches_the_lowerer() {
+    let register = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
+        .expect("the register is readable");
+    let documented = register
+        .split("The shipped instance methods are ")
+        .nth(1)
+        .expect("the register names its instance methods")
+        .split('.')
+        .next()
+        .expect("the sentence ends");
+    let documented = documented
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect::<std::collections::BTreeSet<_>>();
+
+    // Set equality in both directions. Documented-implies-accepted alone
+    // leaves the direction that actually drifted — the allowlist growing while
+    // the register stands still — unchecked, which is how the register came to
+    // be nine methods behind.
+    let accepted = lash_typescript::accepted_instance_methods()
+        .iter()
+        .map(|method| (*method).to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    let undocumented = accepted.difference(&documented).collect::<Vec<_>>();
+    assert!(
+        undocumented.is_empty(),
+        "the lowerer accepts {undocumented:?}, which the register does not document"
+    );
+    let unaccepted = documented.difference(&accepted).collect::<Vec<_>>();
+    assert!(
+        unaccepted.is_empty(),
+        "the register documents {unaccepted:?}, which the lowerer does not accept"
+    );
+    let claimed = register
+        .split("37 static methods and\n")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|count| count.parse::<usize>().ok())
+        .expect("the register states an instance-method count");
+    assert_eq!(
+        claimed,
+        documented.len(),
+        "the stated instance-method count must match the documented list"
+    );
+    for candidate in [
+        "sort", "pop", "push", "shift", "unshift", "reduce", "filter", "flat", "substr",
+    ] {
+        assert!(
+            !lash_typescript::accepts_instance_method(candidate),
+            "`{candidate}` is not documented, so it must not be accepted"
+        );
     }
 }

@@ -20,6 +20,7 @@ mod child_sessions;
 mod core_contracts;
 mod effect;
 mod effect_response_hook;
+mod language_runtime_value;
 mod persistence;
 mod plugin_lifecycle;
 mod projection;

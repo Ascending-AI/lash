@@ -2423,6 +2423,7 @@ dependencies = [
  "lash-subagents",
  "lash-tools",
  "lash-trace",
+ "lash-typescript",
  "lashlang",
  "restate-sdk",
  "rusqlite",

@@ -32,6 +32,24 @@ pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program
 /// never something a caller should render back to a user.
 pub const GENERATED_BINDING_PREFIX: &str = lower::GENERATED_BINDING_PREFIX;
 
+/// Whether the lowerer accepts `method` as an instance standard-library method.
+///
+/// Exposed so the register's documented inventory can be pinned against the
+/// allowlist instead of being maintained by hand.
+pub fn accepts_instance_method(method: &str) -> bool {
+    lower::accepts_instance_method(method)
+}
+
+/// Every instance standard-library method the lowerer accepts.
+///
+/// Exposed alongside the predicate so the register's pin can assert set
+/// equality. A predicate alone only answers questions that are asked, which
+/// leaves the direction that actually drifted — the allowlist growing while
+/// the register stands still — checked by spot samples.
+pub fn accepted_instance_methods() -> &'static [&'static str] {
+    lower::accepted_instance_methods()
+}
+
 pub use diagnostics::{Diagnostic, DiagnosticCode, SourceSpan};
 pub use signatures::render_tool_signature;
 
@@ -59,11 +77,27 @@ pub fn link(
     host: &lashlang::LashlangHostEnvironment,
 ) -> Result<lashlang::LinkedModule, Diagnostic> {
     let program = parse(source)?;
-    lashlang::LinkedModule::link(program, host)
-        .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
+    lashlang::LinkedModule::link_with_dialect(
+        program,
+        host,
+        lashlang::CompilationDialect::Typescript,
+    )
+    .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
 }
 
 /// Compiles an already-linked TypeScript module with reference semantics.
 pub fn compile_linked(linked: &lashlang::LinkedModule) -> lashlang::CompiledProgram {
     lashlang::compile_linked_with_dialect(linked, lashlang::CompilationDialect::Typescript)
+}
+
+/// Compiles one process from a lowered TypeScript module with reference semantics.
+pub fn compile_process(
+    program: &lashlang::Program,
+    process_name: &str,
+) -> Result<lashlang::CompiledProgram, lashlang::RuntimeError> {
+    lashlang::compile_process_with_dialect(
+        program,
+        process_name,
+        lashlang::CompilationDialect::Typescript,
+    )
 }

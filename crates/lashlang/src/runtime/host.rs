@@ -68,7 +68,77 @@ pub struct ResourceOperationBatch {
 
 #[derive(Clone, Debug)]
 pub struct ResourceOperationBatchResult {
+    /// Per-leaf results in the batch's **input** order. Aggregates that are
+    /// specified to preserve input order — `Promise.allSettled` — read this
+    /// directly.
     pub results: Vec<ResourceOperationResult>,
+    /// Input indices in the order the leaves **settled**, which is the order
+    /// `Promise.all` must select its rejection from. Hosts record it as part of
+    /// the journaled batch result so replay reproduces the same choice.
+    ///
+    /// It is a required field rather than an optional one: a host that cannot
+    /// observe settlement order must say so explicitly with
+    /// [`ResourceOperationBatchResult::settled_in_input_order`], because a
+    /// silently defaulted order would reintroduce the input-order rejection
+    /// this field exists to fix.
+    pub settlement_order: Vec<usize>,
+}
+
+impl ResourceOperationBatchResult {
+    /// A batch whose leaves settled in the order they were issued.
+    ///
+    /// This is the honest constructor for a host that runs its leaves
+    /// sequentially, and for one that resolves them without ever suspending:
+    /// in both cases input order *is* settlement order.
+    pub fn settled_in_input_order(results: Vec<ResourceOperationResult>) -> Self {
+        let settlement_order = (0..results.len()).collect();
+        Self {
+            results,
+            settlement_order,
+        }
+    }
+
+    /// A batch whose leaves settled in `settlement_order`, an ordering of the
+    /// input indices.
+    pub fn settled_in_order(
+        results: Vec<ResourceOperationResult>,
+        settlement_order: Vec<usize>,
+    ) -> Self {
+        Self {
+            results,
+            settlement_order,
+        }
+    }
+
+    /// The input indices in settlement order, validated against `results`.
+    ///
+    /// The VM refuses a batch whose order is not an ordering of its results
+    /// rather than guessing, so a host that miscounts fails closed. The error
+    /// names the offending position: a length-only complaint reads as
+    /// self-consistent and leaves nothing to debug.
+    pub fn settlement_sequence(&self) -> Result<&[usize], String> {
+        if self.settlement_order.len() != self.results.len() {
+            return Err(format!(
+                "reported {} settled positions for {} results",
+                self.settlement_order.len(),
+                self.results.len()
+            ));
+        }
+        let mut seen = vec![false; self.results.len()];
+        for index in &self.settlement_order {
+            let Some(slot) = seen.get_mut(*index) else {
+                return Err(format!(
+                    "settled position {index} is out of range for {} results",
+                    self.results.len()
+                ));
+            };
+            if *slot {
+                return Err(format!("settled position {index} was reported twice"));
+            }
+            *slot = true;
+        }
+        Ok(&self.settlement_order)
+    }
 }
 
 #[derive(Clone, Debug)]

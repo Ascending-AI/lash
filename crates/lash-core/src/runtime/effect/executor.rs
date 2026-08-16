@@ -12,6 +12,8 @@ use tokio_util::sync::CancellationToken;
 pub(crate) mod control;
 mod controller_error;
 mod process_local;
+
+mod language_runtime;
 mod scoped;
 mod task_panic;
 mod trigger;
@@ -243,8 +245,7 @@ impl Drop for AbortEffectTaskOnDrop {
 }
 
 impl<'run> RuntimeEffectLocalExecutor<'run> {
-    /// Constructs a local path that rejects execution for effect-host implementors whose durable
-    /// controller must not fall back to inline nondeterministic work.
+    /// Constructs a local path that rejects unavailable inline execution.
     pub fn unavailable() -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Unavailable,
@@ -252,8 +253,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the inline sleep path for effect-host implementors; cancellation is observed through
-    /// the supplied token and the system clock sets the deadline behavior.
+    /// Builds the cancellable inline sleep path using the system clock.
     pub fn sleep(cancellation: CancellationToken) -> Self {
         Self::sleep_with_clock(cancellation, Arc::new(crate::SystemClock))
     }
@@ -937,6 +937,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                 Ok(RuntimeEffectOutcome::ToolBatch {
                     launches: outcome.launches,
                     triggers: outcome.triggers,
+                    settlement_order: outcome.settlement_order,
                 })
             }
             RuntimeEffectCommand::ToolAttempt {
@@ -1062,6 +1063,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
             .map(|outcome| RuntimeEffectOutcome::ToolBatch {
                 launches: outcome.launches,
                 triggers: outcome.triggers,
+                settlement_order: outcome.settlement_order,
             }),
             RuntimeEffectCommand::ExecCode { language, code } => {
                 let result = runner

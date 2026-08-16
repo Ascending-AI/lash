@@ -173,6 +173,21 @@ pub(crate) const BUILTINS: &[Builtin] = &[
         name: "reverse",
         arity: Arity::Exact(1),
     },
+    // Dialect-private intrinsics. They are registered here so the shared
+    // linker, compiler, runtime arity diagnostics, and profiler agree on the
+    // call contract; source Lashlang cannot spell the reserved names.
+    Builtin {
+        name: "__typescript_split",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_join",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_stdlib",
+        arity: Arity::AtLeast(1),
+    },
 ];
 
 /// Looks up a builtin by name.
@@ -189,5 +204,9 @@ pub(crate) fn is_builtin(name: &str) -> bool {
 }
 
 pub(crate) fn names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
-    BUILTINS.iter().map(|builtin| builtin.name)
+    // Dialect-private entries are deliberately kept at the end of the
+    // registry and never advertised as source Lashlang builtins.
+    BUILTINS[..BUILTINS.len() - 3]
+        .iter()
+        .map(|builtin| builtin.name)
 }

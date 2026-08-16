@@ -59,6 +59,7 @@ pub enum RuntimeEffectKind {
     Sleep,
     AwaitEvent,
     PeekAwaitEvent,
+    LanguageRuntimeValue,
 }
 
 impl RuntimeEffectKind {
@@ -79,6 +80,7 @@ impl RuntimeEffectKind {
             Self::Sleep => "sleep",
             Self::AwaitEvent => "await_event",
             Self::PeekAwaitEvent => "peek_await_event",
+            Self::LanguageRuntimeValue => "language_runtime_value",
         }
     }
 }
@@ -451,6 +453,9 @@ pub enum RuntimeEffectCommand {
     PeekAwaitEvent {
         key: crate::AwaitEventKey,
     },
+    LanguageRuntimeValue {
+        operation: String,
+    },
 }
 
 // Measured 200 B on rustc 1.97.0, x86_64-unknown-linux-gnu (FIG-595).
@@ -481,6 +486,7 @@ impl RuntimeEffectCommand {
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
+            Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
 }
@@ -674,6 +680,13 @@ pub struct ToolBatchEffectOutcome {
     pub launches: Vec<ToolCallLaunch>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub triggers: Vec<ToolTriggerEffectOutcome>,
+    /// Input indices in the order the batch's leaves settled.
+    ///
+    /// Required, and deliberately without a serde default: an aggregate that
+    /// must reject with its first *settled* rejection cannot tell a defaulted
+    /// input order from a real one, so a journal entry written before this
+    /// field existed is refused rather than silently replayed as input order.
+    pub settlement_order: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -748,6 +761,9 @@ pub enum RuntimeEffectOutcome {
         launches: Vec<ToolCallLaunch>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         triggers: Vec<ToolTriggerEffectOutcome>,
+        /// Input indices in the order the leaves settled. Required and never
+        /// defaulted: see [`ToolBatchEffectOutcome::settlement_order`].
+        settlement_order: Vec<usize>,
     },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
@@ -772,6 +788,9 @@ pub enum RuntimeEffectOutcome {
     },
     PeekAwaitEvent {
         resolution: Option<crate::Resolution>,
+    },
+    LanguageRuntimeValue {
+        value: serde_json::Value,
     },
 }
 
@@ -946,9 +965,15 @@ impl RuntimeEffectOutcome {
         self,
     ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
         match self {
-            Self::ToolBatch { launches, triggers } => {
-                Ok(ToolBatchEffectOutcome { launches, triggers })
-            }
+            Self::ToolBatch {
+                launches,
+                triggers,
+                settlement_order,
+            } => Ok(ToolBatchEffectOutcome {
+                launches,
+                triggers,
+                settlement_order,
+            }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::ToolBatch,
                 other.kind(),
@@ -1052,6 +1077,19 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Extracts a journaled language-runtime value.
+    pub fn into_language_runtime_value(
+        self,
+    ) -> Result<serde_json::Value, RuntimeEffectControllerError> {
+        match self {
+            Self::LanguageRuntimeValue { value } => Ok(value),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::LanguageRuntimeValue,
+                other.kind(),
+            )),
+        }
+    }
+
     /// Exposes kind to effect-host implementors while executing or replaying a runtime effect.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
@@ -1067,6 +1105,7 @@ impl RuntimeEffectOutcome {
             Self::Sleep => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
+            Self::LanguageRuntimeValue { .. } => RuntimeEffectKind::LanguageRuntimeValue,
         }
     }
 }
@@ -1251,5 +1290,53 @@ mod rejection_tests {
             RuntimeEffectCommand::ToolBatch { batch: value },
             "runtime_effect_tool_batch_call_replay",
         );
+    }
+}
+
+#[cfg(test)]
+mod settlement_order_journal_tests {
+    use super::*;
+
+    /// A journal entry written before settlement order existed must be refused.
+    ///
+    /// This is the whole reason the field carries no serde default: an
+    /// aggregate that rejects with its first *settled* rejection cannot tell a
+    /// defaulted input order from a recorded one, so replaying an older entry
+    /// as input order would silently reintroduce the bug the order fixes.
+    #[test]
+    fn a_tool_batch_outcome_without_settlement_order_fails_closed() {
+        // The tag key is `type`, not `kind`: a payload keyed `kind` fails on the
+        // *tag* and would pass this test while proving nothing about the field.
+        let legacy = serde_json::json!({
+            "type": "tool_batch",
+            "launches": [],
+            "triggers": [],
+        });
+        let decoded = serde_json::from_value::<RuntimeEffectOutcome>(legacy);
+        let error = decoded.expect_err("an outcome without settlement order must not decode");
+        assert!(
+            error.to_string().contains("settlement_order"),
+            "the refusal must name the missing field, not the tag: {error}"
+        );
+    }
+
+    /// A current entry round-trips with its order intact.
+    #[test]
+    fn a_tool_batch_outcome_round_trips_its_settlement_order() {
+        let outcome = RuntimeEffectOutcome::ToolBatch {
+            launches: Vec::new(),
+            triggers: Vec::new(),
+            settlement_order: vec![2, 0, 1],
+        };
+        let encoded = serde_json::to_string(&outcome).expect("outcome encodes");
+        let decoded =
+            serde_json::from_str::<RuntimeEffectOutcome>(&encoded).expect("outcome decodes");
+        let RuntimeEffectOutcome::ToolBatch {
+            settlement_order, ..
+        } = decoded
+        else {
+            panic!("decoded the wrong outcome kind");
+        };
+        assert_eq!(settlement_order, vec![2, 0, 1]);
     }
 }

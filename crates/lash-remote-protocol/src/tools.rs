@@ -1,6 +1,6 @@
 //! Tool grants: schemas, call-path bindings, activation, and retry policies.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -97,18 +97,18 @@ impl RemoteToolGrant {
     }
 
     pub fn call_path_bindings(&self) -> Result<Vec<String>, RemoteProtocolError> {
-        let mut paths = Vec::new();
+        let mut paths = BTreeSet::new();
         for (key, value) in &self.bindings {
             if let Some(binding) = RemoteCallPathBinding::from_value(value) {
                 validate_call_path_binding(&self.name, key, &binding)?;
-                paths.push(format!(
+                paths.insert(format!(
                     "{}.{}",
                     binding.module_path.join("."),
                     binding.operation
                 ));
             }
         }
-        Ok(paths)
+        Ok(paths.into_iter().collect())
     }
 
     fn required_call_path_binding(

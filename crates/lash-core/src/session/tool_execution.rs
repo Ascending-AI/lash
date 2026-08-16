@@ -329,284 +329,59 @@ struct CoordinatedToolLaunch {
     triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
-impl RuntimeExecutionContext<'_> {
-    fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeInvocation {
-        let suffix = format!("tool-batch:{batch_id}");
-        if let Some(parent) = self.parent_invocation.as_ref() {
-            let parent_effect_id = parent.effect_id().unwrap_or("effect");
-            return crate::runtime::causal::child_effect_invocation(
-                parent,
-                format!("{parent_effect_id}:{suffix}"),
-                crate::RuntimeEffectKind::ToolBatch,
-                suffix,
-            );
-        }
-        let replay_key = format!("{}:{suffix}", self.execution_scope_id());
-        crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::new(self.session_id.clone()),
-            suffix,
-            crate::RuntimeEffectKind::ToolBatch,
-            replay_key,
-        )
+/// Whether a reported settlement order is an ordering of the batch's own
+/// launches: one position per launch, each in range, none repeated.
+///
+/// A malformed order is refused rather than trimmed. Trimming produces a
+/// well-formed permutation that no later validator can tell from a real one.
+fn validate_batch_settlement_order(order: &[usize], launches: usize) -> Result<(), String> {
+    if order.len() != launches {
+        return Err(format!(
+            "tool batch reported {} settled positions for {launches} launches",
+            order.len()
+        ));
     }
-
-    pub(crate) async fn execute_prepared_tool_batch_launches(
-        &self,
-        batch: crate::PreparedToolBatch,
-        parent_invocation: crate::RuntimeInvocation,
-        child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
-    ) -> Result<crate::ToolBatchEffectOutcome, crate::RuntimeEffectControllerError> {
-        let indexed_tools = batch.calls.into_iter().enumerate().collect::<Vec<_>>();
-        let cancellation = self.cancellation_token.clone().unwrap_or_default();
-        let tool_cancel = cancellation.child_token();
-        let child_trace_hooks = std::sync::Arc::new(child_trace_hooks);
-        if !self
-            .dispatch
-            .effect_controller
-            .controller()
-            .supports_concurrent_effects()
-        {
-            let mut launches = Vec::with_capacity(indexed_tools.len());
-            let mut triggers = Vec::new();
-            let mut context = self.clone().with_cancellation_token(tool_cancel.clone());
-            for (index, child) in indexed_tools {
-                if cancellation.is_cancelled() {
-                    tool_cancel.cancel();
-                    launches.push(cancelled_runtime_tool_call_launch(
-                        child.call.call_id,
-                        child.call.tool_name,
-                        child.call.args,
-                        child.call.replay,
-                    ));
-                    continue;
-                }
-                let child_execution_trace_hook =
-                    child_trace_hooks.get(&child.call.call_id).cloned();
-                let outcome = context
-                    .execute_prepared_tool_batch_child(
-                        child,
-                        index,
-                        parent_invocation.clone(),
-                        child_execution_trace_hook,
-                        None,
-                    )
-                    .await;
-                launches.push(outcome.launch);
-                triggers.extend(outcome.triggers);
-                context = context.with_cancellation_token(tool_cancel.clone());
-            }
-            return Ok(crate::ToolBatchEffectOutcome { launches, triggers });
-        }
-        let intent_drain_gate =
-            std::sync::Arc::new(crate::tool_dispatch::BatchIntentDrainGate::default());
-        let child_outcomes = schedule_tool_batch(indexed_tools, |(index, _)| *index, {
-            let context = self.clone();
-            let cancellation = cancellation.clone();
-            let tool_cancel = tool_cancel.clone();
-            let child_trace_hooks = std::sync::Arc::clone(&child_trace_hooks);
-            let intent_drain_gate = std::sync::Arc::clone(&intent_drain_gate);
-            move |(index, child)| {
-                let context = context.clone().with_cancellation_token(tool_cancel.clone());
-                let cancellation = cancellation.clone();
-                let tool_cancel = tool_cancel.clone();
-                let parent_invocation = parent_invocation.clone();
-                let cancelled_tool = child.call.clone();
-                let child_execution_trace_hook =
-                    child_trace_hooks.get(&child.call.call_id).cloned();
-                let (intent_drain_slot, mut final_result_committed) =
-                    crate::tool_dispatch::IntentDrainSlot::new(
-                        std::sync::Arc::clone(&intent_drain_gate),
-                        index,
-                    );
-                let cancellation_slot = intent_drain_slot.clone();
-                async move {
-                    let tool_call = context.execute_prepared_tool_batch_child(
-                        child,
-                        index,
-                        parent_invocation,
-                        child_execution_trace_hook,
-                        Some(intent_drain_slot),
-                    );
-                    tokio::pin!(tool_call);
-                    tokio::select! {
-                        biased;
-                        _ = cancellation.cancelled() => {
-                            tool_cancel.cancel();
-                            let grace = context
-                                .dispatch
-                                .clock
-                                .sleep(std::time::Duration::from_millis(50));
-                            tokio::pin!(grace);
-                            if *final_result_committed.borrow() {
-                                return tool_call.await;
-                            }
-                            tokio::select! {
-                                biased;
-                                outcome = &mut tool_call => outcome,
-                                changed = final_result_committed.changed() => {
-                                    if changed.is_ok() && *final_result_committed.borrow() {
-                                        tool_call.await
-                                    } else {
-                                        cancellation_slot.finish().await;
-                                        CoordinatedToolLaunch {
-                                            launch: cancelled_runtime_tool_call_launch(
-                                                cancelled_tool.call_id,
-                                                cancelled_tool.tool_name,
-                                                cancelled_tool.args,
-                                                cancelled_tool.replay,
-                                            ),
-                                            triggers: Vec::new(),
-                                        }
-                                    }
-                                },
-                                _ = &mut grace => {
-                                    cancellation_slot.finish().await;
-                                    CoordinatedToolLaunch {
-                                        launch: cancelled_runtime_tool_call_launch(
-                                            cancelled_tool.call_id,
-                                            cancelled_tool.tool_name,
-                                            cancelled_tool.args,
-                                            cancelled_tool.replay,
-                                        ),
-                                        triggers: Vec::new(),
-                                    }
-                                },
-                            }
-                        }
-                        outcome = &mut tool_call => outcome,
-                    }
-                }
-            }
-        })
-        .await;
-        // A cancel-grace timeout above drops a child tool future that may have
-        // parked this process run's execution permit
-        // (`release_process_execution_permit_while`), and the run continues
-        // afterwards. Reacquire the slot here — every child is finished, so
-        // this cannot starve a sibling that is still parked on it — exactly as
-        // the cancelled background-session-turn path does before it resumes.
-        crate::runtime::ensure_process_execution_permit().await;
-
-        let mut launches = Vec::with_capacity(child_outcomes.len());
-        let mut triggers = Vec::new();
-        for outcome in child_outcomes {
-            launches.push(outcome.launch);
-            triggers.extend(outcome.triggers);
-        }
-        Ok(crate::ToolBatchEffectOutcome { launches, triggers })
-    }
-
-    async fn execute_prepared_tool_batch_child(
-        &self,
-        child: crate::PreparedToolBatchCall,
-        index: usize,
-        parent_invocation: crate::RuntimeInvocation,
-        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-        intent_drain_slot: Option<crate::tool_dispatch::IntentDrainSlot>,
-    ) -> CoordinatedToolLaunch {
-        let call_id = child.call.call_id.clone();
-        let tool_name = child.call.tool_name.clone();
-        let args = child.call.args.clone();
-        let replay = child.call.replay.clone();
-        let activity_id = TurnActivityId::new(format!("tool:{call_id}"));
-        self.emit_tool_call_started(&call_id, &tool_name, args.clone(), activity_id.clone())
-            .await;
-
-        if child.execution_grant.is_none()
-            && self.dispatch.is_orchestrating_tool(&child.call.tool_id)
-        {
-            let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&self.dispatch))
-                .prepared_call(&child.call)
-                .cancellation_token(self.cancellation_token.clone())
-                .runtime_execution_context(
-                    self.clone()
-                        .with_parent_invocation(parent_invocation.clone()),
-                )
-                .parent_invocation(Some(parent_invocation))
-                .child_execution_trace_hook(child_execution_trace_hook)
-                .build();
-            let outcome = crate::tool_dispatch::execute_orchestrating_tool(
-                self.dispatch.as_ref(),
-                child.call,
-                tool_context,
-            )
-            .await;
-            if let Some(slot) = &intent_drain_slot {
-                slot.finish().await;
-            }
-            let completed = self
-                .complete_tool_call(index, call_id, replay, outcome, activity_id)
-                .await;
-            return CoordinatedToolLaunch {
-                launch: crate::runtime::ToolCallLaunch::Done {
-                    result: Box::new(completed.completed),
-                },
-                triggers: Vec::new(),
-            };
-        }
-
-        let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
-            self.dispatch.as_ref(),
-            &child.call.tool_id,
-        )
-        .map(|manifest| manifest.retry_policy)
-        .or_else(|| {
-            child
-                .execution_grant
-                .as_ref()
-                .map(|grant| grant.manifest.retry_policy)
-        })
-        .unwrap_or(crate::ToolRetryPolicy::Never);
-        let intent_trace_hook = child_execution_trace_hook.clone();
-        let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
-            child_execution_trace_hook
-                .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
-                .unwrap_or_default();
-        let coordinated = coordinate_tool_invocation(
-            self.dispatch.as_ref(),
-            child.call.clone(),
-            child.execution_grant,
-            retry_policy,
-            ToolAttemptEffectIdentity::Batch {
-                parent: parent_invocation.clone(),
-                replay_suffix: child.replay_suffix.clone(),
-            },
-            self.cancellation_token.clone(),
-            intent_drain_slot,
-            intent_trace_hook,
-            |completion_key| {
-                crate::RuntimeEffectLocalExecutor::tool_batch(
-                    self.clone(),
-                    trace_hooks.clone(),
-                    completion_key,
-                )
-            },
-        )
-        .await;
-        let outcome = match coordinated.launch {
-            ToolCallLaunch::Done(outcome) => *outcome,
-            ToolCallLaunch::Pending(pending) => {
-                self.await_pending_tool_dispatch_outcome_with_suffix(
-                    &call_id,
-                    Some(parent_invocation),
-                    format!("{}:await", child.replay_suffix),
-                    *pending,
-                    self.cancellation_token.clone(),
-                )
-                .await
-            }
+    let mut seen = vec![false; launches];
+    for position in order {
+        let Some(slot) = seen.get_mut(*position) else {
+            return Err(format!(
+                "tool batch reported settled position {position} for {launches} launches"
+            ));
         };
-        let completed = self
-            .complete_tool_call(index, call_id, replay, outcome, activity_id)
-            .await;
-        CoordinatedToolLaunch {
-            launch: crate::runtime::ToolCallLaunch::Done {
-                result: Box::new(completed.completed),
-            },
-            triggers: coordinated.triggers,
+        if *slot {
+            return Err(format!(
+                "tool batch reported settled position {position} more than once"
+            ));
+        }
+        *slot = true;
+    }
+    Ok(())
+}
+
+/// The replies to a tool batch, in input order, with the order they settled.
+#[derive(Debug, Default)]
+pub struct ToolBatchReplies {
+    /// One reply per invocation, in input order.
+    pub replies: Vec<ToolInvocationReply>,
+    /// Input indices in the order the invocations settled.
+    pub settlement_order: Vec<usize>,
+}
+
+impl ToolBatchReplies {
+    /// Replies whose invocations settled in the order they were issued.
+    pub fn settled_in_input_order(replies: Vec<ToolInvocationReply>) -> Self {
+        let settlement_order = (0..replies.len()).collect();
+        Self {
+            replies,
+            settlement_order,
         }
     }
+}
 
+#[path = "tool_execution/batch.rs"]
+mod batch;
+
+impl RuntimeExecutionContext<'_> {
     async fn emit_tool_call_started(
         &self,
         call_id: &str,
@@ -981,230 +756,6 @@ impl RuntimeExecutionContext<'_> {
                 .await_process(process_id, process_scope),
         )
         .await
-    }
-
-    /// Executes a source-ordered tool batch for code-executor implementors and returns replies in
-    /// the same order even though individual calls may run concurrently.
-    pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> Vec<ToolInvocationReply> {
-        if calls.is_empty() {
-            return Vec::new();
-        }
-
-        let batch_id = deterministic_tool_invocation_batch_id(&calls);
-        let mut replies = vec![None; calls.len()];
-        let mut prepared_entries = Vec::new();
-
-        for (index, call) in calls.into_iter().enumerate() {
-            let preparation = if let Some(grant) = call.execution_grant.as_deref().cloned() {
-                let pending = crate::sansio::PendingToolCall {
-                    call_id: call.id.clone(),
-                    tool_name: grant.manifest.name.clone(),
-                    args: call.args,
-                    replay: None,
-                };
-                (
-                    Some(grant.clone()),
-                    prepare_granted_tool_call_with_context(
-                        self.dispatch.as_ref(),
-                        &grant,
-                        pending,
-                        Some(call.id.clone()),
-                    )
-                    .await,
-                )
-            } else {
-                let Some(manifest) = crate::tool_dispatch::resolve_callable_manifest_by_id(
-                    self.dispatch.as_ref(),
-                    &call.tool_id,
-                ) else {
-                    let outcome = ToolDispatchOutcome {
-                        record: ToolCallRecord {
-                            call_id: Some(call.id.clone()),
-                            tool: call.tool_id.to_string(),
-                            args: call.args,
-                            output: ToolCallOutput::failure(ToolFailure::runtime(
-                                ToolFailureClass::Unavailable,
-                                "tool_unavailable",
-                                format!(
-                                    "Tool id `{}` is unavailable in this session",
-                                    call.tool_id
-                                ),
-                            )),
-                            duration_ms: 0,
-                        },
-                        attempts: Vec::new(),
-                        intents: crate::ToolIntents::default(),
-                        intent_outcomes: Vec::new(),
-                    };
-                    let completed = self
-                        .complete_tool_call(
-                            index,
-                            call.id,
-                            None,
-                            outcome,
-                            TurnActivityId::new(format!("tool:{}", batch_id)),
-                        )
-                        .await;
-                    replies[index] = Some(
-                        ToolInvocationReply::from_output(completed.completed.output)
-                            .with_record(completed.record),
-                    );
-                    continue;
-                };
-
-                let pending = crate::sansio::PendingToolCall {
-                    call_id: call.id.clone(),
-                    tool_name: manifest.name,
-                    args: call.args,
-                    replay: None,
-                };
-                (None, self.prepare_tool_call(pending).await)
-            };
-            let (execution_grant, preparation) = preparation;
-            match preparation {
-                ToolPreparationOutcome::Prepared(prepared) => {
-                    prepared_entries.push((
-                        index,
-                        *prepared,
-                        execution_grant,
-                        call.child_execution_trace_hook,
-                    ));
-                }
-                ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = self
-                        .complete_tool_call(
-                            index,
-                            call.id,
-                            None,
-                            *outcome,
-                            TurnActivityId::new(format!("tool:{}", batch_id)),
-                        )
-                        .await;
-                    replies[index] = Some(
-                        ToolInvocationReply::from_output(completed.completed.output)
-                            .with_record(completed.record),
-                    );
-                }
-            }
-        }
-
-        if !prepared_entries.is_empty() {
-            let invocation = self.tool_batch_invocation(&batch_id);
-            let batch = crate::PreparedToolBatch::new_with_grants(
-                batch_id.clone(),
-                prepared_entries
-                    .iter()
-                    .map(|(_, prepared, grant, _)| (prepared.clone(), grant.clone()))
-                    .collect(),
-            );
-            let child_trace_hooks = prepared_entries
-                .iter()
-                .filter_map(|(_, prepared, _, hook)| {
-                    hook.clone().map(|hook| (prepared.call_id.clone(), hook))
-                })
-                .collect();
-            let envelope = crate::RuntimeEffectEnvelope::new(
-                invocation.clone(),
-                crate::RuntimeEffectCommand::ToolBatch { batch },
-            );
-            let local_executor = crate::RuntimeEffectLocalExecutor::tool_batch(
-                self.clone(),
-                child_trace_hooks,
-                None,
-            );
-            let raw_outcome = self
-                .dispatch
-                .effect_controller
-                .controller()
-                .execute_effect(envelope, local_executor)
-                .await;
-            let outcome =
-                match raw_outcome.and_then(crate::RuntimeEffectOutcome::into_tool_batch_effect) {
-                    Ok(outcome) => outcome,
-                    Err(err) => {
-                        for (index, prepared, _, _) in prepared_entries {
-                            replies[index] = Some(ToolInvocationReply::error(serde_json::json!(
-                                format!("tool batch failed: {err}")
-                            )));
-                            let _ = prepared;
-                        }
-                        return replies
-                            .into_iter()
-                            .map(|reply| reply.expect("every batch reply slot should be filled"))
-                            .collect();
-                    }
-                };
-            self.dispatch
-                .recorded_intent_outcomes
-                .record_launches(&outcome.launches);
-            if outcome.launches.len() != prepared_entries.len() {
-                let message = format!(
-                    "tool batch returned {} launches for {} prepared calls",
-                    outcome.launches.len(),
-                    prepared_entries.len()
-                );
-                for (index, _, _, _) in prepared_entries {
-                    replies[index] = Some(ToolInvocationReply::error(serde_json::json!(message)));
-                }
-            } else {
-                for ((index, prepared, _, _), launch) in
-                    prepared_entries.into_iter().zip(outcome.launches)
-                {
-                    let call_id = prepared.call_id.clone();
-                    let reply = match launch {
-                        crate::runtime::ToolCallLaunch::Done { result } => {
-                            let result = *result;
-                            let record = ToolCallRecord {
-                                call_id: Some(result.call_id.clone()),
-                                tool: result.tool_name.clone(),
-                                args: result.args.clone(),
-                                output: result.output.clone(),
-                                duration_ms: result.duration_ms,
-                            };
-                            ToolInvocationReply::from_output(result.output).with_record(record)
-                        }
-                        crate::runtime::ToolCallLaunch::Pending {
-                            key,
-                            pending,
-                            duration_ms,
-                        } => {
-                            let dispatch_outcome = self
-                                .await_pending_tool_dispatch_outcome(
-                                    &call_id,
-                                    Some(invocation.clone()),
-                                    crate::tool_dispatch::PendingToolDispatchOutcome {
-                                        tool_name: prepared.tool_name.clone(),
-                                        args: prepared.args.clone(),
-                                        key: *key,
-                                        pending,
-                                        duration_ms,
-                                        attempts: Vec::new(),
-                                    },
-                                    self.cancellation_token.clone(),
-                                )
-                                .await;
-                            let completed = self
-                                .complete_tool_call(
-                                    index,
-                                    call_id.clone(),
-                                    prepared.replay.clone(),
-                                    dispatch_outcome,
-                                    TurnActivityId::new(format!("tool:{call_id}")),
-                                )
-                                .await;
-                            ToolInvocationReply::from_output(completed.completed.output)
-                                .with_record(completed.record)
-                        }
-                    };
-                    replies[index] = Some(reply);
-                }
-            }
-        }
-
-        replies
-            .into_iter()
-            .map(|reply| reply.expect("every batch reply slot should be filled"))
-            .collect()
     }
 
     /// Executes one catalog-authorized tool by stable ID for code-executor implementors.
@@ -1586,5 +1137,39 @@ impl RuntimeExecutionContext<'_> {
 
         self.complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
             .await
+    }
+}
+
+#[cfg(test)]
+mod settlement_order_boundary_tests {
+    use super::validate_batch_settlement_order as validate;
+
+    /// The reviewer's probe table. Every malformed order must be refused at the
+    /// boundary; repairing one into an input-order permutation is what silently
+    /// restored the original rejection-selection bug.
+    #[test]
+    fn a_malformed_settlement_order_is_refused_not_repaired() {
+        assert!(
+            validate(&[1, 0], 2).is_ok(),
+            "a genuine out-of-order settle"
+        );
+        assert!(
+            validate(&[0, 1], 2).is_ok(),
+            "input order is still an order"
+        );
+        let out_of_range =
+            validate(&[usize::MAX, 0], 2).expect_err("an out-of-range position must be refused");
+        assert!(
+            out_of_range.contains("settled position"),
+            "the refusal names the position: {out_of_range}"
+        );
+        let empty = validate(&[], 2).expect_err("an empty order must be refused");
+        assert!(empty.contains("0 settled positions"), "{empty}");
+        let duplicate = validate(&[0, 0], 2).expect_err("a duplicated position must be refused");
+        assert!(duplicate.contains("more than once"), "{duplicate}");
+        assert!(
+            validate(&[0, 1, 0], 2).is_err(),
+            "an over-long order must be refused"
+        );
     }
 }

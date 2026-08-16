@@ -36,6 +36,16 @@ pub enum LashlangRuntimeError {
     /// A tool definition omits its required `lashlang.tool` binding.
     #[error("tool `{tool}` is missing an explicit `lashlang.tool` binding")]
     MissingToolBinding { tool: String },
+    /// A tool's `typescript.tool` binding cannot be decoded.
+    #[error("tool `{tool}` has invalid `typescript.tool` binding: {source}")]
+    InvalidTypescriptToolBinding {
+        tool: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    /// A tool definition omits its required `typescript.tool` binding.
+    #[error("tool `{tool}` is missing an explicit `typescript.tool` binding")]
+    MissingTypescriptToolBinding { tool: String },
     /// The `lashlang.surface` extension payload cannot be decoded.
     #[error("invalid `lashlang.surface` extension payload: {source}")]
     InvalidSurfaceExtension {

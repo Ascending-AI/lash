@@ -11,8 +11,8 @@ impl ExecutionHost for BenchHost {
                 bench_resource_call(&operation, args).map(AbilityResult::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                lashlang::ResourceOperationBatchResult {
-                    results: batch
+                lashlang::ResourceOperationBatchResult::settled_in_input_order(
+                    batch
                         .operations
                         .into_iter()
                         .map(|operation| {
@@ -27,7 +27,7 @@ impl ExecutionHost for BenchHost {
                             ))
                         })
                         .collect(),
-                },
+                ),
             )),
             AbilityOp::StartProcess(start) => {
                 Self::task_handle(&start.process_name, &start.args).map(AbilityResult::Value)

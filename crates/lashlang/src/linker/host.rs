@@ -362,18 +362,28 @@ impl LinkedModule {
         program: Program,
         surface: impl Borrow<LashlangHostEnvironment>,
     ) -> Result<Self, LinkError> {
+        Self::link_with_dialect(program, surface, crate::CompilationDialect::Lashlang)
+    }
+
+    pub fn link_with_dialect(
+        program: Program,
+        surface: impl Borrow<LashlangHostEnvironment>,
+        dialect: crate::CompilationDialect,
+    ) -> Result<Self, LinkError> {
         crate::ast::validate_ast(&program)?;
         let surface = surface.borrow();
         let mut linker = Linker::new(&program, surface);
         let program = linker.link_program()?;
         let program = materialize_default_trigger_keys(program)?;
         let requirements = host_requirements_for_program_with_catalog(&program, &surface.resources);
-        let artifact =
-            ModuleArtifact::from_program_with_requirements(program.clone(), requirements).map_err(
-                |err| LinkError::ModuleHash {
-                    message: err.to_string(),
-                },
-            )?;
+        let artifact = ModuleArtifact::from_program_with_requirements_and_dialect(
+            program.clone(),
+            requirements,
+            dialect,
+        )
+        .map_err(|err| LinkError::ModuleHash {
+            message: err.to_string(),
+        })?;
         Ok(Self {
             module_ref: artifact.module_ref.clone(),
             host_requirements_ref: artifact.host_requirements_ref.clone(),

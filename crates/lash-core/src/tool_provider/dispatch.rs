@@ -49,10 +49,13 @@ impl<'run> ToolDispatchClient<'run> {
         };
         // Children of a batch dispatch carry the batch call's id so consumers
         // can attribute them to their parent without re-parsing batch args.
+        // A nested provider batch is not an aggregate await, so it needs the
+        // replies only; settlement order matters where Promise.all selects.
         runtime
             .with_batch_parent_call_id(self.context.tool_call_id.clone())
             .call_tool_batch(calls)
             .await
+            .replies
     }
 }
 

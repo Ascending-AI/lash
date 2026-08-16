@@ -44,7 +44,7 @@ pub(crate) use compiler::*;
 pub use entry_points::{
     ExecutableProgram, compile, compile_ast, compile_ast_with_dialect, compile_linked,
     compile_linked_process, compile_linked_with_dialect, compile_module_artifact_process,
-    compile_process, execute, prewarm,
+    compile_process, compile_process_with_dialect, execute, prewarm,
 };
 pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,

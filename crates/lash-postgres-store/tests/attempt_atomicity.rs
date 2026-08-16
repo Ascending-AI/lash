@@ -1746,10 +1746,22 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
 
     let recorded_outcome: RuntimeEffectOutcome =
         serde_json::from_str(&recorded_outcome_json).expect("decode recorded nested fault batch");
-    let RuntimeEffectOutcome::ToolBatch { launches, triggers } = &recorded_outcome else {
+    let RuntimeEffectOutcome::ToolBatch {
+        launches,
+        triggers,
+        settlement_order,
+    } = &recorded_outcome
+    else {
         panic!("nested fault frame must record a ToolBatch outcome")
     };
     assert!(triggers.is_empty());
+    let mut settled = settlement_order.clone();
+    settled.sort_unstable();
+    assert_eq!(
+        settled,
+        (0..launches.len()).collect::<Vec<_>>(),
+        "the recorded batch settles every child exactly once"
+    );
     let terminal_oracle = launches
         .iter()
         .map(|launch| {
@@ -1833,6 +1845,7 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
                 Ok(RuntimeEffectOutcome::ToolBatch {
                     launches: Vec::new(),
                     triggers: Vec::new(),
+                    settlement_order: Vec::new(),
                 })
             }),
         )

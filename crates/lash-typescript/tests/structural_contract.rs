@@ -59,7 +59,7 @@ fn console_log_accepts_zero_and_multiple_arguments_with_to_string_joining() {
 }
 
 #[test]
-fn tool_signatures_are_synchronous_reserved_safe_and_collision_proof() {
+fn tool_signatures_are_async_reserved_safe_and_collision_proof() {
     let signature = lash_typescript::render_tool_signature(
         "search-docs",
         &json!({
@@ -72,9 +72,9 @@ fn tool_signatures_are_synchronous_reserved_safe_and_collision_proof() {
     );
     assert_eq!(
         signature,
-        "declare function __lash_tool_7365617263682d646f6373(input: { \"delete\": string }): number;"
+        "declare function __lash_tool_7365617263682d646f6373(input: { \"delete\": string }): Promise<number>;"
     );
-    assert!(!signature.contains("Promise"));
+    assert!(signature.contains("Promise"));
 
     let reserved = lash_typescript::render_tool_signature("delete", &json!({}), None);
     let prefix_collision =

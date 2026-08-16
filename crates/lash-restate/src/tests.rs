@@ -11024,6 +11024,89 @@ async fn trigger_lashlang_registration(process_id: &str, resource: &str) -> Proc
     .with_execution_env_ref(Some(env_ref))
 }
 
+async fn typescript_process_registration(process_id: &str) -> ProcessRegistration {
+    let linked = lash_typescript::link(
+        r#"
+        const worker = defineProcess({
+          name: "worker",
+          signals: {},
+          run: async () => { return { ok: true }; }
+        });
+        finish(null);
+        "#,
+        &lashlang::LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::new(),
+            lashlang::LashlangAbilities::all(),
+        ),
+    )
+    .expect("link TypeScript process");
+    lashlang::LashlangArtifactStore::put_module_artifact(
+        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &linked.artifact,
+    )
+    .await
+    .expect("store TypeScript artifact");
+    assert_eq!(
+        linked.artifact.compilation_dialect,
+        lashlang::CompilationDialect::Typescript
+    );
+    let process = linked
+        .artifact
+        .canonical_ir
+        .process("worker")
+        .expect("worker process declaration");
+    let env_ref = persist_recovery_env_ref().await;
+    ProcessRegistration::new(
+        process_id,
+        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: linked.module_ref,
+            process_ref: linked
+                .artifact
+                .process_ref("worker")
+                .expect("worker process ref")
+                .clone(),
+            host_requirements_ref: linked.host_requirements_ref,
+            process_name: "worker".to_string(),
+            args: serde_json::Map::new(),
+        }),
+        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+    )
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_signal_event_types(
+        process,
+    ))
+    .with_execution_env_ref(Some(env_ref))
+}
+
+#[tokio::test]
+async fn typescript_artifact_runs_through_process_engine_to_terminal() {
+    let registry = process_registry();
+    registry
+        .register_process(typescript_process_registration("typescript-worker").await)
+        .await
+        .expect("register TypeScript process");
+
+    let worker = recovery_worker(
+        Arc::clone(&registry),
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+    );
+    worker
+        .drive_pending_processes()
+        .await
+        .expect("run stored TypeScript artifact");
+    assert_eq!(
+        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+            .await_terminal("typescript-worker")
+            .await
+            .expect("await TypeScript process"),
+        ProcessAwaitOutput::Success {
+            value: serde_json::json!({ "ok": true }),
+            control: None,
+        }
+    );
+}
+
 fn assert_lashlang_engine_record(
     record: &lash_core::ProcessRecord,
     expected_process_name: &str,

@@ -80,7 +80,6 @@ pub(crate) fn to_json(value: &Value) -> serde_json::Value {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn to_json_direct(value: &Value) -> serde_json::Value {
     match value {
         Value::Null | Value::Undefined => serde_json::Value::Null,
@@ -277,7 +276,6 @@ pub(crate) fn append_runtime_json_async<'a>(
     })
 }
 
-#[cfg(test)]
 pub(crate) fn image_to_json(image: &ImageValue) -> serde_json::Value {
     let mut object = serde_json::Map::with_capacity(7);
     object.insert(
@@ -350,7 +348,6 @@ where
     map.end()
 }
 
-#[cfg(test)]
 fn resource_to_json(handle: &ResourceHandle) -> serde_json::Value {
     serde_json::json!({
         "__resource__": true,

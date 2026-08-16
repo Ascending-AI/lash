@@ -617,6 +617,17 @@ impl LashlangProcessHost<'_> {
         args: Vec<lashlang::Value>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
     ) -> Result<lashlang::Value, ExecutionHostError> {
+        if crate::is_typescript_runtime_receiver(&receiver) {
+            let call_site = call_site.as_ref().ok_or_else(|| {
+                ExecutionHostError::new("TypeScript runtime operation is missing its call site")
+            })?;
+            let effect_id = self.resource_tool_call_id("typescript.runtime", call_site, None);
+            return crate::journaled_typescript_runtime_value(
+                &self.ctx, effect_id, &receiver, &operation, &args,
+            )
+            .await
+            .expect("TypeScript runtime receiver checked above");
+        }
         let (_, invocation) =
             self.prepare_resource_invocation(operation, receiver, args, call_site, None)?;
         let lash_core::facade_support::ToolInvocation {
@@ -644,6 +655,31 @@ impl LashlangProcessHost<'_> {
         let mut positions = Vec::new();
         let mut invocations = Vec::new();
         for (index, operation) in batch.operations.into_iter().enumerate() {
+            if crate::is_typescript_runtime_receiver(&operation.receiver) {
+                let result = match operation.call_site.as_ref() {
+                    Some(call_site) => {
+                        let effect_id = self.resource_tool_call_id(
+                            "typescript.runtime",
+                            call_site,
+                            Some(index),
+                        );
+                        crate::journaled_typescript_runtime_value(
+                            &self.ctx,
+                            effect_id,
+                            &operation.receiver,
+                            &operation.operation,
+                            &operation.args,
+                        )
+                        .await
+                        .expect("TypeScript runtime receiver checked above")
+                    }
+                    None => Err(ExecutionHostError::new(
+                        "TypeScript runtime operation is missing its call site",
+                    )),
+                };
+                results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
+                continue;
+            }
             match self.prepare_resource_invocation(
                 operation.operation,
                 operation.receiver,
@@ -661,21 +697,36 @@ impl LashlangProcessHost<'_> {
             }
         }
 
-        for (index, reply) in positions
-            .into_iter()
-            .zip(self.ctx.call_tool_batch(invocations).await)
-        {
+        let batch = self.ctx.call_tool_batch(invocations).await;
+        for (index, reply) in positions.iter().copied().zip(batch.replies) {
             results[index] = Some(lashlang::ResourceOperationResult::from_result(
                 protocol_tool_reply_to_lashlang_value(reply),
             ));
         }
 
-        lashlang::ResourceOperationBatchResult {
-            results: results
+        // The batch counts settlement in its own invocation positions; the VM
+        // counts in the aggregate's leaf positions. Leaves that failed before
+        // the batch ran had already settled, so they lead.
+        let mut settlement_order = (0..results.len())
+            .filter(|index| !positions.contains(index))
+            .collect::<Vec<_>>();
+        // `call_tool_batch` refuses a malformed order at its boundary, so every
+        // reported position is a real invocation position here. Filtering again
+        // would only convert a future defect back into a silent repair.
+        settlement_order.extend(
+            batch
+                .settlement_order
+                .iter()
+                .filter_map(|position| positions.get(*position).copied()),
+        );
+
+        lashlang::ResourceOperationBatchResult::settled_in_order(
+            results
                 .into_iter()
                 .map(|result| result.expect("every batch result slot should be filled"))
                 .collect(),
-        }
+            settlement_order,
+        )
     }
 
     async fn await_handle(

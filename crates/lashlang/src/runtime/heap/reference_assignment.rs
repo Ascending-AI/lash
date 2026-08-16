@@ -105,7 +105,15 @@ impl Heap {
                         key: javascript_to_string(index),
                     }
                 })?;
-                if index >= values.len() {
+                if index > values.len() {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: format!(
+                            "TS_SPARSE_ARRAY_UNSUPPORTED: assignment index {index} skips array length {}",
+                            values.len()
+                        ),
+                    });
+                }
+                if index == values.len() {
                     let added = index + 1 - values.len();
                     let attempted = old_object
                         .logical_bytes()

@@ -91,6 +91,14 @@ pub fn compile_process(
     program: &Program,
     process_name: &str,
 ) -> Result<CompiledProgram, RuntimeError> {
+    compile_process_with_dialect(program, process_name, super::CompilationDialect::Lashlang)
+}
+
+pub fn compile_process_with_dialect(
+    program: &Program,
+    process_name: &str,
+    dialect: super::CompilationDialect,
+) -> Result<CompiledProgram, RuntimeError> {
     crate::ast::check_ast_nesting_depth(program).map_err(|error| {
         RuntimeError::ValidationFailed {
             reason: error.to_string(),
@@ -108,7 +116,11 @@ pub fn compile_process(
         expression_spans: Vec::new(),
         expression_source_spans: Vec::new(),
     };
-    Ok(compile_program_internal(&process_program))
+    compile_ast_with_dialect(&process_program, dialect).map_err(|error| {
+        RuntimeError::ValidationFailed {
+            reason: error.to_string(),
+        }
+    })
 }
 
 pub fn compile_linked_process(
@@ -144,11 +156,12 @@ pub fn compile_linked_process(
             process_ref,
             process_name,
         ),
+        linked.artifact.compilation_dialect,
     );
     Ok(CompiledProgram {
         chunk,
         compile_stats,
-        dialect: super::CompilationDialect::Lashlang,
+        dialect: linked.artifact.compilation_dialect,
     })
 }
 
@@ -183,11 +196,12 @@ pub fn compile_module_artifact_process(
             process_ref.clone(),
             process_name,
         ),
+        artifact.compilation_dialect,
     );
     Ok(CompiledProgram {
         chunk,
         compile_stats,
-        dialect: super::CompilationDialect::Lashlang,
+        dialect: artifact.compilation_dialect,
     })
 }
 

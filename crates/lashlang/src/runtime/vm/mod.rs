@@ -17,6 +17,7 @@ mod effects;
 mod exceptions;
 mod heap_plan;
 mod javascript;
+mod javascript_json;
 mod reference_assignment;
 
 #[cfg(test)]
@@ -1299,6 +1300,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         match op {
             IntrinsicOp::JavaScriptSplit => self.execute_javascript_split()?,
             IntrinsicOp::JavaScriptJoin => self.execute_javascript_join()?,
+            IntrinsicOp::JavaScriptStdlib(argc) => self.execute_javascript_stdlib(argc)?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;

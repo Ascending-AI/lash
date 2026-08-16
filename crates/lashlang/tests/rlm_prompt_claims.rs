@@ -61,7 +61,7 @@ impl ExecutionHost for MockHost {
                     ));
                 }
                 Ok(AbilityResult::ResourceOperationBatch(
-                    lashlang::ResourceOperationBatchResult { results },
+                    lashlang::ResourceOperationBatchResult::settled_in_input_order(results),
                 ))
             }
             AbilityOp::StartProcess(start) => {

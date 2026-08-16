@@ -6,41 +6,78 @@ which lowers into `lashlang::Program`. Runtime type annotations are erased.
 
 ## Dialect contract
 
-The accepted v1 surface is deliberately small: `let`/`const`, functions and
-arrows with immutable captures, blocks, `if`, `while`, `break`, `continue`,
+The accepted v1 surface is deliberately bounded: `let`/`const`, functions and
+arrows with immutable captures, blocks, `if`, `while`, the canonical
+`for (let i = start; i < end; i++)` form, `for...of`, `break`, `continue`,
 `try`/`catch`/`finally`, `throw`, `return`, arrays, records, field/index access
 and assignment, calls, primitive unary/arithmetic/comparison/equality/logical
-operators, conditionals, templates, array/string `.length`, the explicitly
-mapped String methods, array `join`, and free `console.log` calls. `console.log`
+operators, conditionals, templates, array/string `.length`, the standard-library
+inventory below, and free `console.log` calls. `console.log`
 accepts any arity and prints its arguments after ECMA `ToString` conversion,
 joined by one space; lexical bindings named `console` take precedence.
 Accepted operations follow ECMA-262 coercion, truthiness, operand-return, and
 reference rules. TypeScript type annotations, aliases, and interfaces are
 erased after parsing or used for signature/type work.
 
-This layer treats a TypeScript cell as a pure calculator: it has no tool calls,
-no `await`, and no deferred tool resolution. Tool signatures are synchronous
-descriptions for a later integration layer; execution support is FIG-1305.
+Cells are scripts and may use top-level `await` for tools, process handles,
+`sleep`, `waitSignal`, `Promise.all`, and `Promise.allSettled`. General async
+function authoring remains a named rejection; the one async function literal
+surface is the `run` field of a top-level literal `defineProcess` definition.
+Tool calls require `await` and use explicit `typescript.tool` module paths;
+their prompt signatures return `Promise<T>`. Unknown module paths participate
+in the executor's deferred tool-resolution path.
+
+Durable work has the static shape
+`const worker = defineProcess({ name: "worker", signals: {}, run: async (...) => { ... } })`.
+`start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and `finish` lower to
+the shared process/effect machinery. `wake(value)` emits progress from a run;
+`wake(handle, "signal", payload)` sends a declared signal to another run.
+`finish` is cell-only. A normal return from `run` finishes the
+process only after all enclosing `finally` blocks execute; an uncaught throw
+fails it. Dynamic process definitions and targets reject with dedicated
+`TS_PROCESS_*` diagnostics.
+
+`Promise.all` and `Promise.allSettled` aggregate top-level tool promises and
+already-resolved values through the shared batch machine. Nested tool promises,
+non-array iterables, and process/timer promises are named rejections in v1.
+`Promise.all` rejects with the reason of the leaf that settled first, and
+`Promise.allSettled` keeps its results in input order, both as ECMA specifies.
+The host records the order its leaves settled in as part of the journaled batch
+result, so replay selects the same reason rather than re-deriving one.
+
+A rejected `Promise.all` still waits for every leaf to settle before it reports.
+ECMA specifies which reason surfaces, not when: it has no wall times, and a
+conforming program cannot observe the difference except through timing. v1 has
+no fail-fast cancellation of an in-flight batch leaf, so the aggregate settles
+at the pace of its slowest leaf while rejecting with its first-settled reason.
+This is a runtime-system constraint, not an alternate semantics.
+
+`Date.now()` and `Math.random()` are host effects, so their result is recorded
+at the same journal boundary as other effects and replay never samples the VM's
+clock or RNG. `new Date()` rejects with `TS_NEW_UNSUPPORTED`.
 
 Everything outside the accepted surface is rejected with a stable `TS_*`
 diagnostic. Most rejection is static; the deviation register names every
 shape-dependent runtime rejection. The executable inventories in
 `tests/rejections.rs`, `tests/structural_contract.rs`, and the checked-in Node
 differential suite under `tests/differential/` are the source of truth. In
-particular, v1 excludes classes, generators, async/await, `var`,
-destructuring, all `for` variants, modules/imports, JSX, enums, namespaces,
+particular, v1 excludes classes, generators, general async functions, `var`,
+destructuring, `for...in` and non-canonical classic `for` forms, modules/imports, JSX, enums, namespaces,
 decorators, `eval`/`Function`, prototype access, accessors, methods, regular
 expressions, BigInt, spread, optional chaining, compound assignment operators
 (`x += 1` and `a[0] += 5` alike reject with
 `TS_ASSIGNMENT_OPERATOR_UNSUPPORTED`), and operators not represented by the
-accepted VM semantics. The mapped String methods take exactly one argument:
-their optional second parameter (`'abc'.startsWith('bc', 1)`,
-`'abc'.includes('b', 2)`, `'abc'.endsWith('b', 2)`, `'abc'.split('', 2)`)
-rejects. Identifiers beginning with `__typescript_` are reserved for the
+accepted VM semantics. Identifiers beginning with `__typescript_` are reserved for the
 lowerer's generated bindings and reject with `TS_RESERVED_IDENTIFIER`.
 Mutually recursive function declarations reject with
 `TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
 and call itself by that name, and self-recursive declarations are unaffected.
+
+The canonical classic `for` lowering rejects a `continue` that crosses a
+`finally`, because the current loop epilogue would otherwise run before the
+`finally`. `for...of` snapshots arrays and strings before iteration; until a
+resumable iterator protocol exists, loop bodies that mutate the source or make
+user-authored calls reject with `TS_FOR_OF_ITERATOR_UNSUPPORTED`.
 
 ## Deviation register
 
@@ -50,6 +87,15 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- A `map` callback runs inside the VM and cannot perform effects. `console.log`,
+  a tool call, or any other effect inside one terminates with the typed
+  `EffectInBuiltinCallback` error. The callback is ordinary synchronous code:
+  an `await` inside it is a parse-level rejection, so there is no suspension
+  point inside `map` to make durable.
+- A single JavaScript string result is capped at **8 MiB**. Multiplicative
+  growth paths such as `repeat` and replacement-token expansion preflight the
+  result before allocation; exceeding the cap terminates as the uncatchable
+  `MemoryLimitExceeded` resource exhaustion error.
 - A TypeScript cell is capped at **64 KiB** of source and rejects with
   `TS_SOURCE_TOO_LARGE`. The bound is what makes the parse-stack reservation
   finite, and 64 KiB is roughly 1 600 lines — far more than a cell should be.
@@ -95,19 +141,20 @@ language semantics:
   `undefined` are omitted and array elements become `null`; incoming JSON
   cannot manufacture `undefined`.
 - Lone UTF-16 surrogates are not representable in the v1 UTF-8 value model, so
-  literals reject with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED` instead of being
-  replaced or corrupted. Two further shapes produce a lone surrogate only at
-  runtime and reject there with `TS_LONE_SURROGATE_UNSUPPORTED`: splitting a
-  string containing an astral character into units (`'\u{1F600}'.split('')`)
-  and indexing into one (`'\u{1F600}'[0]`). Both raise a catchable TypeScript
-  exception, so a program can swallow the deviation and continue with a result
-  Node would not produce.
-- Out-of-range non-negative array writes extend with `undefined` holes, matching
-  ECMAScript. Negative and other non-index array writes would create named
-  object properties, which the v1 array representation cannot carry; they
-  reject at runtime with `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED` and never
-  mutate an element.
-
+  literals reject with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`. Indexing an
+  astral string at one UTF-16 unit, `Object.values`/`Object.entries` when their
+  string receiver would produce those units, and the two empty-separator
+  expansions — `split('')` and `replaceAll('', …)`, both of which ECMA defines
+  per UTF-16 code unit — reject at runtime with `TS_LONE_SURROGATE_UNSUPPORTED`
+  on an astral receiver. BMP receivers are unaffected. Other string methods
+  that could manufacture a lone surrogate are absent from the shipped
+  surface.
+- Appending at exactly `array.length` is supported. An assignment that skips an
+  index would create holes the v1 dense-list representation cannot distinguish
+  from explicit `undefined`, so it rejects as `TS_SPARSE_ARRAY_UNSUPPORTED`.
+  Negative and other non-index writes would create named object properties and
+  reject as `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`; neither path mutates an
+  element.
 - `console.log` is host-defined rather than ECMA-262, and prints ECMA
   `ToString` of each argument. Node's inspector formatting is not reproduced:
   `console.log({a: 1})` prints `[object Object]` where Node prints `{ a: 1 }`.
@@ -120,7 +167,31 @@ language semantics:
   nothing keeps the name its author wrote.
 
 No other semantic deviation is intentionally accepted for an operation in the
-surface above.
+surface below.
+
+## Standard-library inventory
+
+The v1 inventory contains 64 method names: 37 static methods and
+27 instance method names (with `toString`, `concat`, `includes`,
+`indexOf`, and `lastIndexOf` shared by more than one receiver kind).
+
+`instance_method_inventory_matches_the_lowerer` pins the list below against
+`is_instance_stdlib_method`, so the register cannot drift from what the lowerer
+actually accepts.
+
+The shipped static methods are `Object.keys`, `values`, `entries`,
+`fromEntries`, `hasOwn`, and `is`; `Array.isArray` and `of`;
+`String.fromCodePoint`; `Number.isFinite`, `isInteger`,
+`isNaN`, `isSafeInteger`, `parseFloat`, and `parseInt`; `JSON.parse` and
+`stringify`; and `Math.abs`, `acos`, `asin`, `cbrt`, `ceil`, `cos`, `exp`,
+`floor`, `log`, `log10`, `log2`, `round`, `sin`, `tan`, `trunc`, `max`, `min`,
+`pow`, `sqrt`, and `sign`.
+
+The shipped instance methods are `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, and `valueOf`. Missing methods reject with
+`TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
+named typed runtime failure when only its runtime type is known. Mutating array
+methods are deliberately absent; index assignment remains the supported
+mutation surface.
 
 ## Source nesting budget
 
@@ -226,10 +297,13 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 310 rows, of which 237 are distinct
+The Node differential table carries 345 rows, of which 272 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 237 unique rows rather than of 310 distinct behaviours.
+that of the 272 unique rows rather than of 345 distinct behaviours. Both counts
+are pinned against the table by `committed_row_counts_match_the_register`, and
+the generator pins each lane's own row count, so neither this paragraph nor a
+lane can drift from the corpus in silence.
 
 The curated test262-derived slice and its selection rule live under
 `tests/test262/`.

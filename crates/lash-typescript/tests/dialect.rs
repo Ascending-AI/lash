@@ -577,3 +577,44 @@ mod durability {
         }
     }
 }
+
+/// A process suspended inside a `for…of` body resumes across a continuation
+/// round-trip.
+///
+/// The for-of filter's register text rests on this; the claim had no test in
+/// the layer, so the narrowing that let bodies do work was justified by an
+/// assertion nothing executed.
+#[test]
+fn a_process_suspended_inside_for_of_resumes() {
+    futures::executor::block_on(async {
+        let program = lash_typescript::compile(
+            "const xs = [1, 2, 3]; let total = 0; for (const x of xs) { print('step'); total = total + x; } finish(`${total}`);",
+        )
+        .expect("for-of with an effect compiles");
+        let mut state = State::new();
+        let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
+        let mut suspensions = 0;
+        let outcome = loop {
+            match vm
+                .run_process_until_effect()
+                .await
+                .expect("run to the next effect")
+            {
+                VmRunOutcome::EffectCompleted => {
+                    // Round-trip the continuation at every effect boundary.
+                    let continuation = vm.suspend().expect("suspend inside the loop");
+                    let encoded = serde_json::to_vec(&continuation).expect("encode");
+                    let decoded = serde_json::from_slice(&encoded).expect("decode");
+                    vm = Vm::resume_from(decoded, &program, &Host).expect("resume");
+                    suspensions += 1;
+                }
+                VmRunOutcome::Complete(outcome) => break outcome,
+            }
+        };
+        assert!(suspensions >= 3, "each loop step suspends: {suspensions}");
+        assert_eq!(
+            outcome,
+            ExecutionOutcome::Finished(Value::String("6".into()))
+        );
+    });
+}

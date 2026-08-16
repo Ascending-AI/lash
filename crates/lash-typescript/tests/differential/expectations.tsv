@@ -300,7 +300,7 @@ findings	11	accept	"'\\u{10000}' < '\\uff61'"	"true"	-
 findings	12	accept	"((function f(this: number, a: number){ return a; })(7))"	"7"	-
 findings	13	accept	"({a:1}).missing"	"undefined"	-
 findings	14	accept	"[1][9]"	"undefined"	-
-findings	15	accept	"(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()"	"4|undefined|undefined|9"	-
+findings	15	runtime-reject	"(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()"	"4|undefined|undefined|9"	TS_SPARSE_ARRAY_UNSUPPORTED
 findings	16	runtime-reject	"(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()"	"9"	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
 findings	17	reject	"'\\uD800'"	"\ud800"	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
 findings	18	accept	"+'\\uFEFF5'"	"5"	-
@@ -309,3 +309,38 @@ findings	20	accept	"+'\\uFEFF 5\\u00A0'"	"5"	-
 findings	21	accept	"+'\\u2028\\u20295'"	"5"	-
 findings	22	runtime-reject	"'\\uD83D\\uDE00'.split('')"	"\ud83d,\ude00"	TS_LONE_SURROGATE_UNSUPPORTED
 findings	23	runtime-reject	"'\\uD83D\\uDE00'[0]"	"\ud83d"	TS_LONE_SURROGATE_UNSUPPORTED
+findings	24	accept	"JSON.parse('1e400')"	"Infinity"	-
+findings	25	accept	"JSON.parse('-1e400')"	"-Infinity"	-
+findings	26	accept	"JSON.parse('1e-400')"	"0"	-
+findings	27	accept	"JSON.parse('[1e400,2]')[0]"	"Infinity"	-
+findings	28	accept	"'abcdef'.slice(1)"	"bcdef"	-
+findings	29	accept	"'abcdef'.slice(-2)"	"ef"	-
+findings	30	accept	"'ab'.slice()"	"ab"	-
+findings	31	accept	"'abcdef'.slice(1, undefined)"	"bcdef"	-
+findings	32	accept	"'abcdef'.substring(1)"	"bcdef"	-
+findings	33	accept	"'abcdef'.substring(1, undefined)"	"bcdef"	-
+findings	34	accept	"[1,2,3].slice(1).join('-')"	"2-3"	-
+findings	35	accept	"[1,2,3].slice(-2).join('-')"	"2-3"	-
+findings	36	accept	"[1,2].slice().join('-')"	"1-2"	-
+findings	37	accept	"'abc'.replaceAll('b', '[$&]')"	"a[b]c"	-
+findings	38	accept	"'abc'.replaceAll('b', '[$`]')"	"a[a]c"	-
+findings	39	accept	"'abc'.replaceAll('b', \"[$']\")"	"a[c]c"	-
+findings	40	accept	"'aba'.replaceAll('a', '[$&]')"	"[a]b[a]"	-
+findings	41	accept	"'abc'.replace('b', '[$&]')"	"a[b]c"	-
+findings	42	accept	"JSON.parse('{\"a\":\"caf\\u00e9\",\"n\":1e400}').a"	"café"	-
+findings	43	accept	"JSON.parse('{\"a\":\"caf\\u00e9\"}').a"	"café"	-
+findings	44	accept	"JSON.stringify(JSON.parse('{\"o\":{\"__lash_json_f64_overflow_sign__\":1},\"n\":1e400}').o)"	"{\"__lash_json_f64_overflow_sign__\":1}"	-
+findings	45	accept	"JSON.stringify([1,2,3].map(x => x * 2))"	"[2,4,6]"	-
+findings	46	accept	"JSON.stringify(['a','b'].map(s => s + '!'))"	"[\"a!\",\"b!\"]"	-
+findings	47	accept	"JSON.stringify([10,20,30].map((v, i) => v + i))"	"[10,21,32]"	-
+findings	48	accept	"JSON.stringify([].map(x => x))"	"[]"	-
+findings	49	accept	"JSON.stringify([1,2].map((v, i) => [i, v]))"	"[[0,1],[1,2]]"	-
+findings	50	accept	"'5'.padStart(3, '0')"	"005"	-
+findings	51	accept	"'5'.padEnd(3, '*')"	"5**"	-
+findings	52	accept	"'abcd'.padStart(2, '0')"	"abcd"	-
+findings	53	accept	"'abc'.replaceAll('', '-')"	"-a-b-c-"	-
+findings	54	accept	"''.replaceAll('', '-')"	"-"	-
+findings	55	accept	"'abc'.replace('', '-')"	"-abc"	-
+findings	56	accept	"'café'.replaceAll('', '.')"	".c.a.f.é."	-
+findings	57	accept	"'ab'.replaceAll('', '[$`|$\\']')"	"[|ab]a[a|b]b[ab|]"	-
+findings	58	reject	"'ab'.map((x) => x)"	"ERR<TypeError>"	TS_METHOD_UNSUPPORTED

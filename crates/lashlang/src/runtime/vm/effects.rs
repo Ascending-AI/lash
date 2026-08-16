@@ -318,14 +318,33 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             return Err(error);
         }
+        // A batch that selects by settlement order needs a usable order. A host
+        // that reports a malformed one fails closed rather than being silently
+        // read as input order, which is the behaviour this replaces.
+        let settlement_order = if batch.first_settled_rejection {
+            let order = match result.settlement_sequence() {
+                Ok(order) => order,
+                Err(problem) => {
+                    let error = RuntimeError::ResourceBatchSettlementOrder { problem };
+                    for active in active_nodes.iter().flatten() {
+                        self.fail_lashlang_execution(active, error.to_string());
+                    }
+                    return Err(error);
+                }
+            };
+            Some(order.to_vec())
+        } else {
+            None
+        };
 
-        let mut first_unwrapped_error = None;
+        let mut unwrapped_errors = vec![None; batch.leaves.len()];
         let mut leaf_values = Vec::with_capacity(batch.leaves.len());
-        for ((leaf, result), active) in batch
+        for (leaf_index, ((leaf, result), active)) in batch
             .leaves
             .iter()
             .zip(result.results)
             .zip(active_nodes.iter())
+            .enumerate()
         {
             match result {
                 ResourceOperationResult::Value(value) => {
@@ -336,9 +355,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 ResourceOperationResult::Error(error) => {
                     if leaf.unwrap {
-                        if first_unwrapped_error.is_none() {
-                            first_unwrapped_error = Some((error.clone(), leaf.source_span));
-                        }
+                        unwrapped_errors[leaf_index] = Some((error.clone(), leaf.source_span));
                         if let Some(active) = active {
                             self.fail_lashlang_execution(active, error.to_string());
                         }
@@ -353,7 +370,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         }
 
-        if let Some((source, span)) = first_unwrapped_error {
+        // `Promise.all` reports the rejection that settled first; Lashlang's own
+        // aggregates report the first one written. Both scan the same per-leaf
+        // rejections, in different orders.
+        let selection: Box<dyn Iterator<Item = usize>> = match &settlement_order {
+            Some(order) => Box::new(order.iter().copied()),
+            None => Box::new(0..unwrapped_errors.len()),
+        };
+        let mut selected = None;
+        for index in selection {
+            if let Some(error) = unwrapped_errors.get_mut(index).and_then(Option::take) {
+                selected = Some(error);
+                break;
+            }
+        }
+
+        if let Some((source, span)) = selected {
             self.pending_error_span = span;
             return Err(RuntimeError::UnwrappedModuleOperationFailed { source });
         }

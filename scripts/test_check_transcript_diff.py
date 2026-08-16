@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -79,6 +81,179 @@ class TranscriptDiffTests(unittest.TestCase):
                 exit_code = MODULE.main(["--enforce", "base...head"])
 
         self.assertEqual(exit_code, 0)
+
+    def test_a_dispatched_run_reads_the_justification_from_the_pull_request(
+        self,
+    ) -> None:
+        # A workflow_dispatch payload carries no pull request at all, which is
+        # what made the sanctioned recovery path unable to pass a gate the PR
+        # body already satisfied.
+        completed = mock.Mock(stdout=DURABLE_DIFF)
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            event_path.write_text(
+                json.dumps({"inputs": {}, "ref": "refs/heads/topic"}),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(MODULE.subprocess, "run", return_value=completed),
+                mock.patch.dict(
+                    MODULE.os.environ,
+                    {
+                        "GITHUB_EVENT_PATH": str(event_path),
+                        "GITHUB_TOKEN": "token",
+                        "GITHUB_REPOSITORY": "owner/repo",
+                        "GITHUB_REF_NAME": "topic",
+                        "GITHUB_HEAD_REF": "",
+                    },
+                ),
+                mock.patch.object(
+                    MODULE.urllib.request,
+                    "urlopen",
+                    side_effect=self.fake_pull_request_query(
+                        [{"body": "Transcript: the fixture commits twice."}]
+                    ),
+                ),
+            ):
+                exit_code = MODULE.main(["--enforce", "base...head"])
+
+        self.assertEqual(exit_code, 0)
+
+    def test_the_query_asks_for_this_branch_in_this_repository(self) -> None:
+        seen: list[str] = []
+
+        def record(request, timeout=None):  # noqa: ANN001, ARG001
+            seen.append(request.full_url)
+            self.assertEqual(request.headers["Authorization"], "Bearer token")
+            return self.json_response([])
+
+        with (
+            mock.patch.dict(
+                MODULE.os.environ,
+                {
+                    "GITHUB_TOKEN": "token",
+                    "GITHUB_REPOSITORY": "owner/repo",
+                    "GITHUB_REF_NAME": "topic",
+                    "GITHUB_HEAD_REF": "",
+                },
+            ),
+            mock.patch.object(MODULE.urllib.request, "urlopen", side_effect=record),
+        ):
+            MODULE.queried_pull_request_body()
+
+        self.assertEqual(len(seen), 1)
+        self.assertIn("/repos/owner/repo/pulls", seen[0])
+        self.assertIn("head=owner%3Atopic", seen[0])
+        self.assertIn("state=open", seen[0])
+
+    def test_a_dispatched_run_still_fails_without_a_justification(self) -> None:
+        # The fallback must not become a way through: an open PR whose body
+        # says nothing is the same answer as no PR.
+        completed = mock.Mock(stdout=DURABLE_DIFF)
+        with (
+            mock.patch.object(MODULE.subprocess, "run", return_value=completed),
+            mock.patch.dict(
+                MODULE.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": "",
+                    "GITHUB_TOKEN": "token",
+                    "GITHUB_REPOSITORY": "owner/repo",
+                    "GITHUB_REF_NAME": "topic",
+                    "GITHUB_HEAD_REF": "",
+                },
+            ),
+            mock.patch.object(
+                MODULE.urllib.request,
+                "urlopen",
+                side_effect=self.fake_pull_request_query([{"body": "## Validation"}]),
+            ),
+        ):
+            exit_code = MODULE.main(["--enforce", "base...head"])
+
+        self.assertEqual(exit_code, 1)
+
+    def test_an_unreachable_api_fails_closed(self) -> None:
+        completed = mock.Mock(stdout=DURABLE_DIFF)
+        with (
+            mock.patch.object(MODULE.subprocess, "run", return_value=completed),
+            mock.patch.dict(
+                MODULE.os.environ,
+                {
+                    "GITHUB_EVENT_PATH": "",
+                    "GITHUB_TOKEN": "token",
+                    "GITHUB_REPOSITORY": "owner/repo",
+                    "GITHUB_REF_NAME": "topic",
+                    "GITHUB_HEAD_REF": "",
+                },
+            ),
+            mock.patch.object(
+                MODULE.urllib.request,
+                "urlopen",
+                side_effect=OSError("no route to host"),
+            ),
+        ):
+            exit_code = MODULE.main(["--enforce", "base...head"])
+
+        self.assertEqual(exit_code, 1)
+
+    def test_no_credentials_means_no_query(self) -> None:
+        # Locally there is no token, so the gate must not try to reach the
+        # network at all — and must not treat the silence as approval.
+        with (
+            mock.patch.dict(
+                MODULE.os.environ,
+                {"GITHUB_TOKEN": "", "GITHUB_REPOSITORY": "", "GITHUB_HEAD_REF": ""},
+            ),
+            mock.patch.object(
+                MODULE.urllib.request, "urlopen", side_effect=AssertionError("queried")
+            ),
+        ):
+            self.assertIsNone(MODULE.queried_pull_request_body())
+            self.assertFalse(MODULE.has_transcript_justification())
+
+    def test_an_event_body_without_a_sentence_consults_the_live_pull_request(
+        self,
+    ) -> None:
+        # A payload is a snapshot taken when the event fired. If the sentence
+        # was added to the PR afterwards, the payload is stale, and the branch
+        # should not need another push to say something already written.
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            event_path.write_text(
+                json.dumps({"pull_request": {"body": "## Validation"}}),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.dict(
+                    MODULE.os.environ,
+                    {
+                        "GITHUB_EVENT_PATH": str(event_path),
+                        "GITHUB_TOKEN": "token",
+                        "GITHUB_REPOSITORY": "owner/repo",
+                        "GITHUB_REF_NAME": "topic",
+                        "GITHUB_HEAD_REF": "",
+                    },
+                ),
+                mock.patch.object(
+                    MODULE.urllib.request,
+                    "urlopen",
+                    side_effect=self.fake_pull_request_query(
+                        [{"body": "Transcript: added after the push."}]
+                    ),
+                ),
+            ):
+                self.assertTrue(MODULE.has_transcript_justification())
+
+    @staticmethod
+    def json_response(payload: object):
+        response = io.BytesIO(json.dumps(payload).encode("utf-8"))
+        return contextlib.closing(response)
+
+    def fake_pull_request_query(self, payload: object):
+        def respond(request, timeout=None):  # noqa: ANN001, ARG001
+            return self.json_response(payload)
+
+        return respond
 
     def test_advisory_mode_reports_without_failing(self) -> None:
         completed = mock.Mock(stdout=DURABLE_DIFF)

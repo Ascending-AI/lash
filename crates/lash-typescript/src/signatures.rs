@@ -10,12 +10,39 @@ pub fn render_tool_signature(
 ) -> String {
     let input = json_schema_to_type_expr(input_schema);
     let output = output_schema.map_or(TypeExpr::Any, json_schema_to_type_expr);
-    format!(
-        "declare function {}(input: {}): {};",
-        render_identifier(name),
-        render_type(&input),
-        render_type(&output)
-    )
+    let segments = name.split('.').collect::<Vec<_>>();
+    if segments.len() > 1
+        && segments
+            .iter()
+            .all(|segment| is_identifier(segment) && !is_reserved_word(segment))
+    {
+        let (operation, modules) = segments.split_last().expect("non-empty call path");
+        let mut declaration = format!(
+            "function {operation}(input: {}): Promise<{}>;",
+            render_type(&input),
+            render_type(&output)
+        );
+        // Only the outermost wrapper may carry `declare`: a nested one is
+        // already inside an ambient context, and `declare namespace a { declare
+        // namespace b { … } }` is not valid TypeScript. This is prompt text the
+        // model reads as ground truth.
+        for (depth, module) in modules.iter().rev().enumerate() {
+            let ambient = if depth + 1 == modules.len() {
+                "declare "
+            } else {
+                ""
+            };
+            declaration = format!("{ambient}namespace {module} {{ {declaration} }}");
+        }
+        declaration
+    } else {
+        format!(
+            "declare function {}(input: {}): Promise<{}>;",
+            render_identifier(name),
+            render_type(&input),
+            render_type(&output)
+        )
+    }
 }
 
 fn render_type(ty: &TypeExpr) -> String {
@@ -202,7 +229,7 @@ mod tests {
         );
         assert_eq!(
             signature,
-            "declare function __lash_tool_7365617263682d646f6373(input: { limit?: number; query: string }): Array<string>;"
+            "declare function __lash_tool_7365617263682d646f6373(input: { limit?: number; query: string }): Promise<Array<string>>;"
         );
     }
 }

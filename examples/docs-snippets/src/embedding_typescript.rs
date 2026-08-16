@@ -40,6 +40,6 @@ fn typescript_linking_and_schema_signatures_use_shared_lash_types() {
     );
     assert_eq!(
         signature,
-        "declare function search(input: { query: string }): Array<string>;"
+        "declare function search(input: { query: string }): Promise<Array<string>>;"
     );
 }

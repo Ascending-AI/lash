@@ -282,6 +282,19 @@ impl HostBridge<'_> {
         args: Vec<FlowValue>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
     ) -> Result<FlowValue, ExecutionHostError> {
+        if lash_lashlang_runtime::is_typescript_runtime_receiver(&receiver) {
+            let fallback_index = call_site.is_none().then(|| self.next_index());
+            let effect_id = self.resource_tool_call_id(
+                "typescript.runtime",
+                call_site.as_ref(),
+                fallback_index,
+            );
+            return lash_lashlang_runtime::journaled_typescript_runtime_value(
+                &self.ctx, effect_id, &receiver, &operation, &args,
+            )
+            .await
+            .expect("TypeScript runtime receiver checked above");
+        }
         let receiver = match &receiver {
             FlowValue::Resource(receiver) => receiver,
             _ => {
@@ -386,6 +399,25 @@ impl HostBridge<'_> {
         let mut invocations = Vec::new();
 
         for (source_index, operation) in batch.operations.into_iter().enumerate() {
+            if lash_lashlang_runtime::is_typescript_runtime_receiver(&operation.receiver) {
+                let effect_id = self.resource_tool_call_id(
+                    "typescript.runtime",
+                    operation.call_site.as_ref(),
+                    Some(source_index),
+                );
+                let result = lash_lashlang_runtime::journaled_typescript_runtime_value(
+                    &self.ctx,
+                    effect_id,
+                    &operation.receiver,
+                    &operation.operation,
+                    &operation.args,
+                )
+                .await
+                .expect("TypeScript runtime receiver checked above");
+                results[source_index] =
+                    Some(lashlang::ResourceOperationResult::from_result(result));
+                continue;
+            }
             let result = async {
                 let receiver = match &operation.receiver {
                     FlowValue::Resource(receiver) => receiver,
@@ -483,13 +515,15 @@ impl HostBridge<'_> {
             invocations.push(invocation);
         }
 
+        let batch = self.ctx.call_tool_batch(invocations).await;
         for ((((source_index, host_operation), source_operation), execution_index), reply) in
             positions
-                .into_iter()
+                .iter()
+                .copied()
                 .zip(host_operations)
                 .zip(source_operations)
                 .zip(execution_indices)
-                .zip(self.ctx.call_tool_batch(invocations).await)
+                .zip(batch.replies)
         {
             // Batch replies are terminal for the same reason as scalar replies.
             let outcome = match &reply.output.outcome {
@@ -504,12 +538,30 @@ impl HostBridge<'_> {
             results[source_index] = Some(lashlang::ResourceOperationResult::from_result(result));
         }
 
-        lashlang::ResourceOperationBatchResult {
-            results: results
+        // The batch reports settlement in its own invocation positions; the VM
+        // reads leaf positions. Leaves resolved before the batch ran — the
+        // journaled TypeScript runtime values above, and anything that failed
+        // during preparation — had already settled, so they lead the order.
+        let mut settlement_order = (0..results.len())
+            .filter(|index| !positions.contains(index))
+            .collect::<Vec<_>>();
+        // `call_tool_batch` refuses a malformed order at its boundary, so every
+        // reported position is a real invocation position here. Filtering again
+        // would only convert a future defect back into a silent repair.
+        settlement_order.extend(
+            batch
+                .settlement_order
+                .iter()
+                .filter_map(|position| positions.get(*position).copied()),
+        );
+
+        lashlang::ResourceOperationBatchResult::settled_in_order(
+            results
                 .into_iter()
                 .map(|result| result.expect("every batch result slot should be filled"))
                 .collect(),
-        }
+            settlement_order,
+        )
     }
 
     async fn trigger_operation(

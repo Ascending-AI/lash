@@ -4,6 +4,8 @@ use crate::facade_support::ScopedEffectControllerFacadeOps;
 pub(in crate::runtime) struct ToolBatchRunOutcome {
     pub launches: Vec<crate::runtime::ToolCallLaunch>,
     pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
+    /// Input indices in the order the batch's leaves settled.
+    pub settlement_order: Vec<usize>,
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -225,6 +227,7 @@ impl RuntimeTurnDriver<'_> {
         Ok(ToolBatchRunOutcome {
             launches: outcome.launches,
             triggers: outcome.triggers,
+            settlement_order: outcome.settlement_order,
         })
     }
 
