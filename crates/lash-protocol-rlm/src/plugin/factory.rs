@@ -14,6 +14,7 @@ use lash_lashlang_runtime::{
 
 use super::registration::register_rlm_protocol_plugin;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
+use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect, RlmDialectRegistry};
 use crate::driver::SharedPromptUsage;
 use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::{ProjectionRegistry, ProjectionResolver};
@@ -47,8 +48,8 @@ pub fn rlm_lashlang_surface(
     process_lifecycle: bool,
 ) -> LashlangSurface {
     let surface = LashlangSurface::new(
-        config.lashlang_abilities,
-        config.lashlang_language_features,
+        config.lashlang_abilities.into_engine(),
+        config.lashlang_language_features.into_engine(),
         lashlang::LashlangHostCatalog::new(),
     );
     if process_lifecycle {
@@ -297,7 +298,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             .with_plugin_extensions(ctx.extensions())
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let engine = LashlangProcessEngine::new(Arc::clone(&self.artifact_store), surface)
-            .with_execution_bounds(config.execution_bounds())
+            .with_execution_bounds(config.execution_bounds().into_engine())
             .with_execution_trace(
                 self.lashlang_execution_trace_config.sink.clone(),
                 ctx.trace_context().clone(),
@@ -308,19 +309,27 @@ impl PluginFactory for RlmProtocolPluginFactory {
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         let config = rlm_protocol_config(self.config.clone(), self.process_lifecycle()?);
         let lashlang_surface = LashlangSurface::new(
-            config.lashlang_abilities,
-            config.lashlang_language_features,
+            config.lashlang_abilities.into_engine(),
+            config.lashlang_language_features.into_engine(),
             lashlang::LashlangHostCatalog::new(),
         )
         .with_plugin_extensions(&ctx.extensions)
         .map_err(|err| PluginError::Registration(err.to_string()))?;
+        let dialect: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::new(
+            lashlang_surface,
+            LashlangDialectServices {
+                projection_resolver: Arc::clone(&self.projection_resolver),
+                artifact_store: Arc::clone(&self.artifact_store),
+                deferred_tool_resolver: self.deferred_tool_resolver.clone(),
+                execution_trace_config: self.lashlang_execution_trace_config.clone(),
+                execution_bounds: config.execution_bounds(),
+            },
+        ));
+        let dialect_registry = RlmDialectRegistry::new([Arc::clone(&dialect)]);
         Ok(Arc::new(RlmProtocolPlugin {
             config,
-            projection_resolver: Arc::clone(&self.projection_resolver),
-            deferred_tool_resolver: self.deferred_tool_resolver.clone(),
-            artifact_store: Arc::clone(&self.artifact_store),
-            lashlang_execution_trace_config: self.lashlang_execution_trace_config.clone(),
-            lashlang_surface,
+            dialect,
+            dialect_registry,
             last_prompt_usage: Arc::new(RwLock::new(None)),
         }))
     }
@@ -377,11 +386,8 @@ pub type ModuleCompileOutput = lashlang::ModuleCompileOutput;
 
 struct RlmProtocolPlugin {
     config: RlmProtocolPluginConfig,
-    projection_resolver: Arc<dyn ProjectionResolver>,
-    deferred_tool_resolver: Option<SharedDeferredToolResolver>,
-    artifact_store: Arc<dyn LashlangArtifactStore>,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-    lashlang_surface: LashlangSurface,
+    dialect: Arc<dyn RlmDialect>,
+    dialect_registry: RlmDialectRegistry,
     last_prompt_usage: SharedPromptUsage,
 }
 
@@ -394,11 +400,8 @@ impl SessionPlugin for RlmProtocolPlugin {
         register_rlm_protocol_plugin(
             reg,
             self.config.clone(),
-            Arc::clone(&self.projection_resolver),
-            self.deferred_tool_resolver.clone(),
-            Arc::clone(&self.artifact_store),
-            self.lashlang_execution_trace_config.clone(),
-            self.lashlang_surface.clone(),
+            self.dialect_registry.clone(),
+            Arc::clone(&self.dialect),
             Arc::clone(&self.last_prompt_usage),
         )
     }

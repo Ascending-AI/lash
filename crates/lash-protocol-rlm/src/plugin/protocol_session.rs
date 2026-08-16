@@ -173,7 +173,7 @@ mod tests {
 
     use super::*;
     use crate::plugin::budget_warning::BUDGET_WARNING_STATUS;
-    use crate::projection::{ProjectionRegistry, RlmProjectedBindings};
+    use crate::projection::RlmProjectedBindings;
 
     struct NoopPromptManager;
 
@@ -299,17 +299,8 @@ mod tests {
     }
 
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
-        let runtime_state = Arc::new(
-            RlmRuntimeState::new(
-                Arc::new(ProjectionRegistry::default()),
-                lashlang::global_in_memory_lashlang_artifact_store(),
-                lash_lashlang_runtime::LashlangSurface::default(),
-                None,
-                crate::executor::RlmLashlangExecutionTraceConfig::default(),
-                lashlang::ExecutionBounds::unbounded(),
-            )
-            .expect("runtime state"),
-        );
+        let runtime_state =
+            Arc::new(RlmRuntimeState::new_lashlang_for_tests().expect("runtime state"));
         RlmProtocolSession::new(config, runtime_state)
     }
 

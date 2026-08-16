@@ -18,7 +18,7 @@ struct GraphFact {
     subject_id: String,
     entry_kind: String,
     entry_name: String,
-    status: crate::tracing::TraceLashlangStatus,
+    status: crate::tracing::TraceLanguageExecutionStatus,
     nodes: Vec<NodeFact>,
 }
 
@@ -130,7 +130,10 @@ pub(super) fn assert_successful_agent_scenario(run: &AgentScenarioRun) {
     let contract = GraphContract::from_graphs(&run.graph_snapshots);
     assert_foreground_exec_graph_completed(run);
     assert_graph_lineage_connected(&contract, &run.final_process_list);
-    assert_subagent_bridge_exec_graphs(run, crate::tracing::TraceLashlangStatus::Completed);
+    assert_subagent_bridge_exec_graphs(
+        run,
+        crate::tracing::TraceLanguageExecutionStatus::Completed,
+    );
 }
 
 fn assert_no_unexpected_turn_errors(events: &[TurnActivity]) {
@@ -263,7 +266,7 @@ fn assert_foreground_exec_graph_completed(run: &AgentScenarioRun) {
         });
     assert_eq!(
         graph.status,
-        crate::tracing::TraceLashlangStatus::Completed,
+        crate::tracing::TraceLanguageExecutionStatus::Completed,
         "foreground exec graph did not complete: {graph:#?}"
     );
 }
@@ -351,7 +354,7 @@ pub(super) fn assert_completed_process_graph(contract: &GraphContract, entry_nam
             graph.entry_kind == "process"
                 && graph.entry_name == entry_name
                 && graph.subject_kind == "process"
-                && graph.status == crate::tracing::TraceLashlangStatus::Completed
+                && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
         }),
         "missing completed process graph `{entry_name}`: {contract:#?}"
     );
@@ -367,7 +370,7 @@ pub(super) fn assert_min_completed_process_graphs(contract: &GraphContract, expe
         .filter(|graph| {
             graph.entry_kind == "process"
                 && graph.subject_kind == "process"
-                && graph.status == crate::tracing::TraceLashlangStatus::Completed
+                && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
         })
         .count();
     assert!(
@@ -393,7 +396,7 @@ pub(super) fn assert_min_completed_child_session_exec_graphs(
                     &graph.subject,
                     crate::tracing::TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
                 )
-                && graph.status == crate::tracing::TraceLashlangStatus::Completed
+                && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
         })
         .count();
     assert!(
@@ -405,7 +408,7 @@ pub(super) fn assert_min_completed_child_session_exec_graphs(
 
 pub(super) fn assert_subagent_bridge_exec_graphs(
     run: &AgentScenarioRun,
-    expected_status: crate::tracing::TraceLashlangStatus,
+    expected_status: crate::tracing::TraceLanguageExecutionStatus,
 ) {
     let subagent_process_ids = run
         .final_process_list
@@ -456,5 +459,8 @@ pub(super) fn assert_session_turn_child_graph(
                 GraphContract::from_graphs(&run.graph_snapshots)
             )
         });
-    assert_eq!(graph.status, crate::tracing::TraceLashlangStatus::Completed);
+    assert_eq!(
+        graph.status,
+        crate::tracing::TraceLanguageExecutionStatus::Completed
+    );
 }

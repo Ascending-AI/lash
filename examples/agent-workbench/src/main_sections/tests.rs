@@ -7,9 +7,9 @@ mod tests {
     }
     use lash::rlm::RlmTurnBuilderExt;
     use lash::tracing::{
-        TraceBranchSelection, TraceLashlangChildExecution, TraceLashlangEdgeSelection,
-        TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity, TraceLashlangGraphChildLink,
-        TraceLashlangMap, TraceLashlangMapEdge, TraceLashlangMapNode, TraceLashlangStatus,
+        TraceBranchSelection, TraceLanguageChildExecution, TraceLashlangEdgeSelection,
+        TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity, TraceLashlangGraphChildLink,
+        TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionStatus,
         TraceRuntimeScope, TraceRuntimeSubject,
     };
     use std::future::Future;
@@ -152,7 +152,7 @@ mod tests {
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),
-            status: TraceLashlangStatus::Running,
+            status: TraceLanguageExecutionStatus::Running,
             nodes: Vec::new(),
             edges: Vec::new(),
             children,
@@ -160,7 +160,7 @@ mod tests {
     }
 
     fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGraph) {
-        let identity = TraceLashlangExecutionIdentity {
+        let identity = TraceLanguageExecutionIdentity {
             scope: graph.scope.clone(),
             subject: graph.subject.clone(),
             module_ref: graph.module_ref.clone(),
@@ -171,11 +171,12 @@ mod tests {
         store
             .append(&TraceRecord::new(
                 TraceContext::default().for_session(graph.scope.session_id.clone()),
-                TraceEvent::LashlangExecution {
-                    event: TraceLashlangExecutionEvent::ExecutionStarted {
+                TraceEvent::LanguageExecution {
+                    language: "lashlang".to_string(),
+                    event: TraceLanguageExecutionEvent::ExecutionStarted {
                         event_key: format!("{}:start", graph.graph_key),
                         identity,
-                        execution_map: TraceLashlangMap {
+                        execution_map: TraceLanguageExecutionMap {
                             module_ref: graph.module_ref.clone(),
                             entry_kind: graph.entry_kind.clone(),
                             entry_ref: graph.entry_ref.clone(),
@@ -272,7 +273,7 @@ mod tests {
     fn lashlang_graph_store_builds_graph_state() {
         let store = TraceLashlangGraphStore::default();
         let context = TraceContext::default().for_session("s1");
-        let identity = TraceLashlangExecutionIdentity {
+        let identity = TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope::new("s1"),
             subject: TraceRuntimeSubject::Process {
                 process_id: "p1".to_string(),
@@ -282,37 +283,40 @@ mod tests {
             entry_ref: Some("r1:0".to_string()),
             entry_name: "main".to_string(),
         };
-        let append = |event: TraceLashlangExecutionEvent| {
+        let append = |event: TraceLanguageExecutionEvent| {
             store
                 .append(&TraceRecord::new(
                     context.clone(),
-                    TraceEvent::LashlangExecution { event },
+                    TraceEvent::LanguageExecution {
+                        language: "lashlang".to_string(),
+                        event,
+                    },
                 ))
                 .expect("append tracking event");
         };
 
-        append(TraceLashlangExecutionEvent::ExecutionStarted {
+        append(TraceLanguageExecutionEvent::ExecutionStarted {
             event_key: "p1:start".to_string(),
             identity: identity.clone(),
-            execution_map: TraceLashlangMap {
+            execution_map: TraceLanguageExecutionMap {
                 module_ref: "m1".to_string(),
                 entry_kind: "process".to_string(),
                 entry_ref: Some("r1:0".to_string()),
                 entry_name: "main".to_string(),
-                nodes: vec![TraceLashlangMapNode {
+                nodes: vec![TraceLanguageExecutionMapNode {
                     id: "branch".to_string(),
                     kind: "branch".to_string(),
                     label: "if".to_string(),
                     label_metadata: None,
                 }],
                 edges: vec![
-                    TraceLashlangMapEdge {
+                    TraceLanguageExecutionMapEdge {
                         id: "then-edge".to_string(),
                         from: "branch".to_string(),
                         to: "then".to_string(),
                         label: "then".to_string(),
                     },
-                    TraceLashlangMapEdge {
+                    TraceLanguageExecutionMapEdge {
                         id: "else-edge".to_string(),
                         from: "branch".to_string(),
                         to: "else".to_string(),
@@ -321,7 +325,7 @@ mod tests {
                 ],
             },
         });
-        append(TraceLashlangExecutionEvent::BranchSelected {
+        append(TraceLanguageExecutionEvent::BranchSelected {
             event_key: "p1:branch".to_string(),
             identity: identity.clone(),
             node_id: "branch".to_string(),
@@ -329,12 +333,12 @@ mod tests {
             edge_id: "then-edge".to_string(),
             selected: TraceBranchSelection::Then,
         });
-        append(TraceLashlangExecutionEvent::ChildStarted {
+        append(TraceLanguageExecutionEvent::ChildStarted {
             event_key: "p1:child".to_string(),
             identity,
             parent_node_id: "branch".to_string(),
             occurrence: 1,
-            child: TraceLashlangChildExecution {
+            child: TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::new("s1"),
                 subject: TraceRuntimeSubject::Process {
                     process_id: "p2".to_string(),
@@ -346,7 +350,7 @@ mod tests {
         });
 
         let graph = store.graph("process:p1").expect("graph");
-        assert_eq!(graph.status, TraceLashlangStatus::Running);
+        assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);
         assert_eq!(graph.children.len(), 1);
         assert_eq!(graph.children[0].child_graph_key, "process:p2");
         assert_eq!(

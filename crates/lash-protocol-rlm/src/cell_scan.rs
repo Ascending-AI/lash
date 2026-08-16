@@ -1,4 +1,4 @@
-//! Single source of truth for the RLM paired lashlang tag grammar.
+//! Single source of truth for the RLM paired executable-cell grammar.
 //!
 //! A model response may contain visible assistant prose followed by a
 //! line whose trimmed content is exactly `<lashlang>`, then Lashlang
@@ -6,11 +6,10 @@
 //! `</lashlang>`. Markdown code blocks, inline tag mentions, and retired
 //! `%%lashlang` markers are plain text.
 
-pub(crate) const LASHLANG_START_TAG: &str = "<lashlang>";
-pub(crate) const LASHLANG_END_TAG: &str = "</lashlang>";
+use crate::dialect::CellTags;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LashlangStartTagSpan {
+pub(crate) struct StartTagSpan {
     /// Byte offset of the first byte of the start tag line.
     pub(crate) start_tag_start: usize,
     /// Byte offset immediately after the start tag line terminator.
@@ -20,7 +19,7 @@ pub(crate) struct LashlangStartTagSpan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LashlangCellSpan {
+pub(crate) struct CellSpan {
     /// Byte offset of the first byte of the start tag line.
     pub(crate) start_tag_start: usize,
     /// Byte offset immediately after the start tag line terminator.
@@ -36,15 +35,15 @@ pub(crate) struct LashlangCellSpan {
     pub(crate) end_tag_end: usize,
 }
 
-/// Locate the first complete executable Lashlang block in `text`, if any.
-pub(crate) fn first_lashlang_cell_span(text: &str) -> Option<LashlangCellSpan> {
+/// Locate the first complete executable block for `tags` in `text`, if any.
+pub(crate) fn first_cell_span(text: &str, tags: CellTags) -> Option<CellSpan> {
     let mut pos = 0;
     while pos <= text.len() {
         let line = logical_line(text, pos);
-        if line.text.trim() == LASHLANG_START_TAG && line.has_terminator {
+        if line.text.trim() == tags.open && line.has_terminator {
             let body_start = line.next_pos;
-            if let Some(end) = first_lashlang_end_tag_after(text, body_start, true) {
-                return Some(LashlangCellSpan {
+            if let Some(end) = first_end_tag_after(text, body_start, true, tags) {
+                return Some(CellSpan {
                     start_tag_start: pos,
                     body_start,
                     body_end: source_body_end(text, body_start, end.line_start),
@@ -68,24 +67,24 @@ pub(crate) fn first_lashlang_cell_span(text: &str) -> Option<LashlangCellSpan> {
 /// Render one canonical paired lashlang block. `prose` is trimmed at the
 /// end, and `code` is emitted as the exact executable source between the
 /// tags.
-pub(crate) fn render_lashlang_cell_text(prose: &str, code: &str) -> String {
+pub(crate) fn render_cell_text(tags: CellTags, prose: &str, code: &str) -> String {
     let prose = prose.trim_end();
     let mut rendered = String::new();
     if !prose.is_empty() {
         rendered.push_str(prose);
         rendered.push('\n');
     }
-    rendered.push_str(LASHLANG_START_TAG);
+    rendered.push_str(tags.open);
     rendered.push('\n');
     rendered.push_str(code);
     rendered.push('\n');
-    rendered.push_str(LASHLANG_END_TAG);
+    rendered.push_str(tags.close);
     rendered
 }
 
 /// Returns the byte length of a suffix that could still become a start tag
 /// line once more streamed text arrives.
-pub(crate) fn possible_lashlang_start_tag_suffix_len(text: &str) -> usize {
+pub(crate) fn possible_start_tag_suffix_len(text: &str, tags: CellTags) -> usize {
     text.char_indices()
         .filter_map(|(idx, _)| {
             if idx > 0 && !text[..idx].ends_with('\n') {
@@ -96,9 +95,7 @@ pub(crate) fn possible_lashlang_start_tag_suffix_len(text: &str) -> usize {
             if trimmed.is_empty() {
                 return Some(suffix.len());
             }
-            LASHLANG_START_TAG
-                .starts_with(trimmed)
-                .then_some(suffix.len())
+            tags.open.starts_with(trimmed).then_some(suffix.len())
         })
         .next()
         .unwrap_or(0)
@@ -107,15 +104,15 @@ pub(crate) fn possible_lashlang_start_tag_suffix_len(text: &str) -> usize {
 /// Locate a start tag only after its line has completed. Streaming uses
 /// this to avoid suppressing an incomplete line like `<lashlang> here`
 /// before the model has emitted the rest of the line.
-pub(crate) fn complete_lashlang_start_tag_span(text: &str) -> Option<LashlangStartTagSpan> {
+pub(crate) fn complete_start_tag_span(text: &str, tags: CellTags) -> Option<StartTagSpan> {
     let mut pos = 0;
     while pos < text.len() {
         let line = logical_line(text, pos);
         if !line.has_terminator {
             return None;
         }
-        if line.text.trim() == LASHLANG_START_TAG {
-            return Some(LashlangStartTagSpan {
+        if line.text.trim() == tags.open {
+            return Some(StartTagSpan {
                 start_tag_start: pos,
                 body_start: line.next_pos,
                 body_end: text.len(),
@@ -128,11 +125,12 @@ pub(crate) fn complete_lashlang_start_tag_span(text: &str) -> Option<LashlangSta
 
 /// Locate a closing tag line inside a cell body. `allow_eof` is reserved for
 /// genuine response EOF; an ordinary provider chunk boundary is not EOF.
-pub(crate) fn complete_lashlang_end_tag_span(
+pub(crate) fn complete_end_tag_span(
     text: &str,
     allow_eof: bool,
-) -> Option<LashlangCellSpan> {
-    first_lashlang_end_tag_after(text, 0, allow_eof).map(|end| LashlangCellSpan {
+    tags: CellTags,
+) -> Option<CellSpan> {
+    first_end_tag_after(text, 0, allow_eof, tags).map(|end| CellSpan {
         start_tag_start: 0,
         body_start: 0,
         body_end: source_body_end(text, 0, end.line_start),
@@ -170,11 +168,16 @@ fn logical_line(text: &str, pos: usize) -> LogicalLine<'_> {
     }
 }
 
-fn first_lashlang_end_tag_after(text: &str, start: usize, allow_eof: bool) -> Option<EndTagLine> {
+fn first_end_tag_after(
+    text: &str,
+    start: usize,
+    allow_eof: bool,
+    tags: CellTags,
+) -> Option<EndTagLine> {
     let mut pos = start;
     while pos <= text.len() {
         let line = logical_line(text, pos);
-        if line.text.trim() == LASHLANG_END_TAG && (line.has_terminator || allow_eof) {
+        if line.text.trim() == tags.close && (line.has_terminator || allow_eof) {
             return Some(EndTagLine {
                 line_start: pos,
                 next_pos: line.next_pos,
@@ -204,6 +207,37 @@ fn source_body_end(text: &str, body_start: usize, end_tag_start: usize) -> usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tags() -> CellTags {
+        CellTags {
+            open: "<lashlang>",
+            close: "</lashlang>",
+        }
+    }
+
+    fn first_lashlang_cell_span(text: &str) -> Option<CellSpan> {
+        first_cell_span(text, tags())
+    }
+
+    fn render_lashlang_cell_text(prose: &str, code: &str) -> String {
+        render_cell_text(tags(), prose, code)
+    }
+
+    #[test]
+    fn scanner_and_renderer_use_the_supplied_dialect_tags() {
+        let tags = CellTags {
+            open: "<typescript>",
+            close: "</typescript>",
+        };
+        let rendered = render_cell_text(tags, "Checking.", "finish(1)");
+        assert_eq!(
+            rendered,
+            "Checking.\n<typescript>\nfinish(1)\n</typescript>"
+        );
+        let span = first_cell_span(&rendered, tags).expect("custom dialect cell");
+        assert_eq!(&rendered[span.body_start..span.body_end], "finish(1)");
+        assert!(first_cell_span(&rendered, self::tags()).is_none());
+    }
 
     fn code(text: &str) -> Option<&str> {
         let span = first_lashlang_cell_span(text)?;

@@ -15,14 +15,19 @@ use lash_core::plugin::{
 };
 
 use crate::cell_scan::{
-    complete_lashlang_end_tag_span, complete_lashlang_start_tag_span,
-    possible_lashlang_start_tag_suffix_len, render_lashlang_cell_text,
+    complete_end_tag_span, complete_start_tag_span, possible_start_tag_suffix_len,
 };
+#[cfg(test)]
+use crate::dialect::LashlangDialect;
+use crate::dialect::RlmDialect;
 
 /// Install the stream-mask hooks on the given registrar. Called by
 /// [`crate::plugin::RlmProtocolPlugin::register`] when the session is active.
-pub fn register_stream_mask(reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-    let state = Arc::new(Mutex::new(CellDetector::new()));
+pub fn register_stream_mask(
+    reg: &mut PluginRegistrar,
+    dialect: Arc<dyn RlmDialect>,
+) -> Result<(), PluginError> {
+    let state = Arc::new(Mutex::new(CellDetector::with_dialect(dialect)));
 
     let stream_state = Arc::clone(&state);
     reg.output()
@@ -90,6 +95,7 @@ fn transform_final_response(
 }
 
 struct CellDetector {
+    dialect: Arc<dyn RlmDialect>,
     pending: String,
     inside_cell: bool,
     cell_closed: bool,
@@ -100,8 +106,16 @@ struct CellDetector {
 }
 
 impl CellDetector {
+    #[cfg(test)]
     fn new() -> Self {
+        Self::with_dialect(Arc::new(LashlangDialect::prompt_only(
+            lash_lashlang_runtime::LashlangSurface::default(),
+        )))
+    }
+
+    fn with_dialect(dialect: Arc<dyn RlmDialect>) -> Self {
         Self {
+            dialect,
             pending: String::new(),
             inside_cell: false,
             cell_closed: false,
@@ -124,7 +138,7 @@ impl CellDetector {
 
     fn splice_into_visible(&self, visible: &str) -> String {
         debug_assert!(self.cell_closed);
-        render_lashlang_cell_text(visible, &self.cell_body)
+        self.dialect.render_history_cell(visible, &self.cell_body)
     }
 
     fn spliced_response_text(&self) -> String {
@@ -147,7 +161,7 @@ impl CellDetector {
 
         self.pending.push_str(chunk);
 
-        if let Some(span) = complete_lashlang_start_tag_span(&self.pending) {
+        if let Some(span) = complete_start_tag_span(&self.pending, self.dialect.cell_tags()) {
             self.inside_cell = true;
             let prose_before = self.pending[..span.start_tag_start].to_string();
             self.visible_prose.push_str(&prose_before);
@@ -159,7 +173,8 @@ impl CellDetector {
             return self.capture_cell_body_chunk(&body_suffix, prose_before, events);
         }
 
-        let safe_len = self.pending.len() - possible_lashlang_start_tag_suffix_len(&self.pending);
+        let safe_len = self.pending.len()
+            - possible_start_tag_suffix_len(&self.pending, self.dialect.cell_tags());
         if safe_len == 0 {
             return AssistantStreamTransform {
                 chunk: String::new(),
@@ -187,15 +202,18 @@ impl CellDetector {
         mut events: Vec<PluginRuntimeEvent>,
     ) -> AssistantStreamTransform {
         self.cell_body.push_str(chunk);
-        let abort_stream =
-            if let Some(span) = complete_lashlang_end_tag_span(&self.cell_body, false) {
-                self.cell_body = self.cell_body[..span.body_end].to_string();
-                self.cell_closed = true;
-                events.push(self.end_event());
-                true
-            } else {
-                false
-            };
+        // `allow_eof` stays false: a chunk boundary is not response EOF, which
+        // is what makes the mask — not the provider's stop — own the boundary.
+        let abort_stream = if let Some(span) =
+            complete_end_tag_span(&self.cell_body, false, self.dialect.cell_tags())
+        {
+            self.cell_body = self.cell_body[..span.body_end].to_string();
+            self.cell_closed = true;
+            events.push(self.end_event());
+            true
+        } else {
+            false
+        };
 
         AssistantStreamTransform {
             chunk: visible_chunk,
@@ -209,7 +227,9 @@ impl CellDetector {
         if self.cell_closed || !self.inside_cell {
             return Vec::new();
         }
-        let Some(span) = complete_lashlang_end_tag_span(&self.cell_body, true) else {
+        // Genuine response EOF, so a closing tag at the buffer end counts.
+        let Some(span) = complete_end_tag_span(&self.cell_body, true, self.dialect.cell_tags())
+        else {
             return Vec::new();
         };
         self.cell_body.truncate(span.body_end);
@@ -221,7 +241,7 @@ impl CellDetector {
         debug_assert!(!self.emitted_start);
         self.emitted_start = true;
         PluginRuntimeEvent::Custom {
-            name: "rlm_lashlang_cell_start".to_string(),
+            name: self.dialect.stream_cell_start_event_name().to_string(),
             payload: serde_json::json!({}),
         }
     }
@@ -230,7 +250,7 @@ impl CellDetector {
         debug_assert!(!self.emitted_end);
         self.emitted_end = true;
         PluginRuntimeEvent::Custom {
-            name: "rlm_lashlang_cell_end".to_string(),
+            name: self.dialect.stream_cell_end_event_name().to_string(),
             payload: serde_json::json!({}),
         }
     }
@@ -239,7 +259,17 @@ impl CellDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cell_scan::first_lashlang_cell_span;
+    use crate::cell_scan::first_cell_span;
+
+    fn first_lashlang_cell_span(text: &str) -> Option<crate::cell_scan::CellSpan> {
+        first_cell_span(
+            text,
+            crate::dialect::CellTags {
+                open: "<lashlang>",
+                close: "</lashlang>",
+            },
+        )
+    }
 
     #[test]
     fn prose_streams_as_assistant_text_before_cell() {

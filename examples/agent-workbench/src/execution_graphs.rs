@@ -476,7 +476,7 @@ fn short_graph_title(graph_key: &str) -> String {
 mod tests {
     use super::*;
     use lash::process::ProcessInput as RuntimeInput;
-    use lash::tracing::{TraceLashlangGraphChildLink, TraceLashlangStatus};
+    use lash::tracing::{TraceLanguageExecutionStatus, TraceLashlangGraphChildLink};
     use serde_json::json;
     use std::sync::Arc;
 
@@ -522,7 +522,7 @@ mod tests {
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),
-            status: TraceLashlangStatus::Running,
+            status: TraceLanguageExecutionStatus::Running,
             nodes: Vec::new(),
             edges: Vec::new(),
             children,
@@ -572,7 +572,7 @@ mod tests {
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),
-            status: TraceLashlangStatus::Running,
+            status: TraceLanguageExecutionStatus::Running,
             nodes: Vec::new(),
             edges: Vec::new(),
             children: vec![TraceLashlangGraphChildLink {
@@ -600,7 +600,7 @@ mod tests {
             entry_kind: "main".to_string(),
             entry_ref: None,
             entry_name: "main".to_string(),
-            status: TraceLashlangStatus::Completed,
+            status: TraceLanguageExecutionStatus::Completed,
             nodes: Vec::new(),
             edges: Vec::new(),
             children: Vec::new(),

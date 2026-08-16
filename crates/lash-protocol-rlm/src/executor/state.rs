@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use lash_core::SessionError;
 use lashlang::{
@@ -472,6 +473,7 @@ struct CaptureRollback {
 }
 
 pub struct RlmExecutionState {
+    engine_id: Arc<str>,
     pub(super) rlm: FlowState,
     pub(super) scratch: ExecutionScratch,
     pub(super) linked_programs: lashlang::LinkedProgramCache,
@@ -507,8 +509,14 @@ pub struct RlmExecutionState {
 }
 
 impl RlmExecutionState {
+    #[cfg(test)]
     pub fn new() -> Result<Self, SessionError> {
+        Self::for_engine("lashlang")
+    }
+
+    pub(crate) fn for_engine(engine_id: impl Into<Arc<str>>) -> Result<Self, SessionError> {
         Ok(Self {
+            engine_id: engine_id.into(),
             rlm: FlowState::new(),
             scratch: ExecutionScratch::new(),
             linked_programs: lashlang::LinkedProgramCache::new(),
@@ -747,7 +755,7 @@ impl RlmExecutionState {
 
         let root = RlmSnapshotRoot {
             version: RLM_SNAPSHOT_VERSION,
-            engine: "lashlang".to_string(),
+            engine: self.engine_id.to_string(),
             globals: next_globals.clone(),
             files: persisted_files.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
@@ -885,8 +893,9 @@ impl RlmExecutionState {
                 found: parsed.version,
             });
         }
-        if parsed.engine != "lashlang" {
+        if parsed.engine != self.engine_id.as_ref() {
             return Err(RlmSnapshotError::EngineMismatch {
+                expected: self.engine_id.to_string(),
                 found: parsed.engine,
             });
         }
@@ -1039,7 +1048,10 @@ impl RlmExecutionState {
 pub(crate) fn capture_scratch_files_for_testing(
     files: Vec<(String, Vec<u8>)>,
 ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-    let mut state = RlmExecutionState::new()?;
+    // Production construction names its dialect; this testing-feature helper
+    // captures files for the Lashlang engine, which is what it did before the
+    // dialect became explicit.
+    let mut state = RlmExecutionState::for_engine("lashlang")?;
     for (path, body) in files {
         state.write_scratch_file_for_testing(&path, &body)?;
     }

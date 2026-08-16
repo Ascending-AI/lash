@@ -320,8 +320,8 @@ where
                 self.emit_instant(record, protocol_step_span_name(payload), None)
             }
             TraceEvent::TokenUsage { .. } => self.emit_instant(record, "lash.token_usage", None),
-            TraceEvent::LashlangExecution { .. } => {
-                self.emit_instant(record, "lash.lashlang_execution", None)
+            TraceEvent::LanguageExecution { .. } => {
+                self.emit_instant(record, "lash.language_execution", None)
             }
             TraceEvent::Custom { .. } => self.emit_instant(record, "lash.custom", None),
         }
@@ -873,12 +873,12 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 usage_attributes(&mut attrs, "lash.usage.cumulative", cumulative);
             }
         }
-        TraceEvent::LashlangExecution { event } => {
-            lashlang_execution_attributes(&mut attrs, event);
+        TraceEvent::LanguageExecution { language, event } => {
+            language_execution_attributes(&mut attrs, language, event);
             push_payload_json(
                 &mut attrs,
                 options,
-                "lash.lashlang_execution.event_json",
+                "lash.language_execution.event_json",
                 event,
             );
         }
@@ -904,11 +904,12 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
     attrs
 }
 
-fn lashlang_execution_attributes(
+fn language_execution_attributes(
     attrs: &mut Vec<KeyValue>,
-    event: &crate::TraceLashlangExecutionEvent,
+    language: &str,
+    event: &crate::TraceLanguageExecutionEvent,
 ) {
-    use crate::TraceLashlangExecutionEvent as Event;
+    use crate::TraceLanguageExecutionEvent as Event;
 
     let kind = match event {
         Event::ExecutionStarted { .. } => "execution_started",
@@ -919,7 +920,11 @@ fn lashlang_execution_attributes(
         Event::BranchSelected { .. } => "branch_selected",
         Event::ChildStarted { .. } => "child_started",
     };
-    attrs.push(KeyValue::new("lash.lashlang_execution.kind", kind));
+    attrs.push(KeyValue::new(
+        "lash.language_execution.language",
+        language.to_string(),
+    ));
+    attrs.push(KeyValue::new("lash.language_execution.kind", kind));
 
     match event {
         Event::ExecutionStarted {
@@ -958,62 +963,62 @@ fn lashlang_execution_attributes(
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.event_key",
+                "lash.language_execution.event_key",
                 event_key.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.graph_key",
+                "lash.language_execution.graph_key",
                 identity.graph_key(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.session_id",
+                "lash.language_execution.session_id",
                 identity.scope.session_id.clone(),
             ));
             if let Some(turn_id) = &identity.scope.turn_id {
                 attrs.push(KeyValue::new(
-                    "lash.lashlang_execution.turn_id",
+                    "lash.language_execution.turn_id",
                     turn_id.clone(),
                 ));
             }
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.module_ref",
+                "lash.language_execution.module_ref",
                 identity.module_ref.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.entry_kind",
+                "lash.language_execution.entry_kind",
                 identity.entry_kind.clone(),
             ));
             push_opt(
                 attrs,
-                "lash.lashlang_execution.entry_ref",
+                "lash.language_execution.entry_ref",
                 &identity.entry_ref,
             );
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.entry_name",
+                "lash.language_execution.entry_name",
                 identity.entry_name.clone(),
             ));
             match &identity.subject {
                 crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.subject_type",
+                        "lash.language_execution.subject_type",
                         "effect",
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.effect_id",
+                        "lash.language_execution.effect_id",
                         effect_id.clone(),
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.effect_kind",
+                        "lash.language_execution.effect_kind",
                         kind.clone(),
                     ));
                 }
                 crate::TraceRuntimeSubject::Process { process_id } => {
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.subject_type",
+                        "lash.language_execution.subject_type",
                         "process",
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.process_id",
+                        "lash.language_execution.process_id",
                         process_id.clone(),
                     ));
                 }
@@ -1041,15 +1046,15 @@ fn lashlang_execution_attributes(
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.node_id",
+                "lash.language_execution.node_id",
                 node_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.node_kind",
+                "lash.language_execution.node_kind",
                 node_kind.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.occurrence",
+                "lash.language_execution.occurrence",
                 *occurrence as i64,
             ));
         }
@@ -1061,19 +1066,19 @@ fn lashlang_execution_attributes(
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.node_id",
+                "lash.language_execution.node_id",
                 node_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.edge_id",
+                "lash.language_execution.edge_id",
                 edge_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.branch",
+                "lash.language_execution.branch",
                 format!("{selected:?}").to_ascii_lowercase(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.occurrence",
+                "lash.language_execution.occurrence",
                 *occurrence as i64,
             ));
         }
@@ -1083,35 +1088,35 @@ fn lashlang_execution_attributes(
             ..
         } => {
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.parent_node_id",
+                "lash.language_execution.parent_node_id",
                 parent_node_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.child_graph_key",
+                "lash.language_execution.child_graph_key",
                 child.graph_key(),
             ));
             match &child.subject {
                 crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.child_subject_type",
+                        "lash.language_execution.child_subject_type",
                         "effect",
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.child_effect_id",
+                        "lash.language_execution.child_effect_id",
                         effect_id.clone(),
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.child_effect_kind",
+                        "lash.language_execution.child_effect_kind",
                         kind.clone(),
                     ));
                 }
                 crate::TraceRuntimeSubject::Process { process_id } => {
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.child_subject_type",
+                        "lash.language_execution.child_subject_type",
                         "process",
                     ));
                     attrs.push(KeyValue::new(
-                        "lash.lashlang_execution.child_process_id",
+                        "lash.language_execution.child_process_id",
                         process_id.clone(),
                     ));
                 }
@@ -1119,18 +1124,18 @@ fn lashlang_execution_attributes(
         }
         Event::ExecutionFinished { status, error, .. } => {
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.status",
+                "lash.language_execution.status",
                 format!("{status:?}").to_ascii_lowercase(),
             ));
-            push_opt(attrs, "lash.lashlang_execution.error", error);
+            push_opt(attrs, "lash.language_execution.error", error);
         }
         Event::ExecutionStarted { execution_map, .. } => {
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.node_count",
+                "lash.language_execution.node_count",
                 execution_map.nodes.len() as i64,
             ));
             attrs.push(KeyValue::new(
-                "lash.lashlang_execution.edge_count",
+                "lash.language_execution.edge_count",
                 execution_map.edges.len() as i64,
             ));
         }

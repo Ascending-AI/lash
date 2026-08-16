@@ -2,6 +2,7 @@
 //! restore.
 
 use super::*;
+use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect};
 use lashlang::{
     ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record as FlowRecord, Value as FlowValue,
@@ -361,6 +362,23 @@ fn old_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
+#[test]
+fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
+    let mut source = RlmExecutionState::for_engine("lashlang").expect("source state");
+    let hydration = hydrate(source.snapshot_execution_state().expect("source snapshot"));
+    let mut target = RlmExecutionState::for_engine("typescript").expect("target state");
+
+    let error = target
+        .restore_execution_state(&hydration)
+        .expect_err("a snapshot from another dialect must be rejected");
+
+    assert!(matches!(
+        error,
+        RlmSnapshotError::EngineMismatch { expected, found }
+            if expected == "typescript" && found == "lashlang"
+    ));
+}
+
 /// Fixed-byte authority for the version-8 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
@@ -485,6 +503,35 @@ fn version_8_root_encodes_to_golden_bytes() {
         .into_iter()
         .collect()
     );
+}
+
+#[test]
+fn lashlang_dialect_pins_snapshot_engine_id() {
+    let dialect = LashlangDialect::new(
+        lash_lashlang_runtime::LashlangSurface::default(),
+        LashlangDialectServices {
+            projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+            artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+            deferred_tool_resolver: None,
+            execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+            execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        },
+    );
+
+    assert_eq!(dialect.snapshot_engine_id(), "lashlang");
+
+    let mut session = dialect.create_session().expect("create Lashlang session");
+    let snapshot = session
+        .snapshot_execution_state()
+        .expect("snapshot Lashlang session");
+    let root: RlmSnapshotRoot = rmp_serde::from_slice(
+        snapshot
+            .root
+            .as_deref()
+            .expect("fresh Lashlang snapshot has a root"),
+    )
+    .expect("decode Lashlang snapshot root");
+    assert_eq!(root.engine, "lashlang");
 }
 
 #[test]

@@ -20,8 +20,8 @@ pub(crate) enum RlmSnapshotError {
         "RLM snapshot version {found} is incompatible with version {expected}; {CUTOVER_REMEDY}"
     )]
     VersionMismatch { expected: u32, found: u32 },
-    #[error("RLM snapshot engine `{found}` is unsupported; expected `lashlang`")]
-    EngineMismatch { found: String },
+    #[error("RLM snapshot engine `{found}` is unsupported; expected `{expected}`")]
+    EngineMismatch { expected: String, found: String },
     #[error(
         "RLM snapshot logical key `{logical_key}` references missing leaf component `{component}`"
     )]

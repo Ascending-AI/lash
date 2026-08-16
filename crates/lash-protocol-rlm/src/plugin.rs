@@ -2,6 +2,7 @@ pub const RLM_PROTOCOL_PLUGIN_ID: &str = "rlm_protocol";
 
 mod budget_warning;
 mod config;
+mod config_types;
 mod factory;
 mod prose_projector;
 mod protocol_driver;
@@ -11,6 +12,7 @@ mod runtime_state;
 mod tool_args;
 
 pub use config::RlmProtocolPluginConfig;
+pub use config_types::{ExecutionBound, ExecutionBounds, RlmAbilities, RlmLanguageFeatures};
 pub use factory::{
     LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
     LashlangModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory,

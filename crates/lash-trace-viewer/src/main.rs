@@ -18,9 +18,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use lash_trace::{
-    TraceContentBlock, TraceError, TraceEvent, TraceLashlangChildExecution,
-    TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity, TraceLashlangStatus,
-    TraceLlmRequest, TraceRecord, TraceRuntimeSubject, TraceTokenUsage,
+    TraceContentBlock, TraceError, TraceEvent, TraceLlmRequest, TraceRecord, TraceTokenUsage,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -29,7 +27,9 @@ use serde_json::Value;
 mod composition_change_tests;
 #[cfg(test)]
 mod execution_evidence_tests;
+mod language;
 mod render;
+use language::{language_execution_failed, language_execution_summary, language_execution_title};
 use render::interpret_typed;
 
 #[derive(Debug, Parser)]
@@ -231,7 +231,7 @@ fn render_event(index: usize, entry: &TraceEntry) -> RenderEvent {
         "llm"
     } else if kind.starts_with("tool") {
         "tool"
-    } else if kind == "lashlang_execution" || kind.ends_with("stream_event") {
+    } else if kind == "language_execution" || kind.ends_with("stream_event") {
         "stream"
     } else {
         ""
@@ -335,163 +335,6 @@ fn failure_detail(error: &TraceError) -> String {
         .clone()
         .or_else(|| error.code.clone())
         .unwrap_or_default()
-}
-
-fn lashlang_title(event: &TraceLashlangExecutionEvent) -> String {
-    match event {
-        TraceLashlangExecutionEvent::ExecutionStarted { identity, .. } => {
-            format!("{} started", entry_name(identity))
-        }
-        TraceLashlangExecutionEvent::ExecutionFinished {
-            identity, status, ..
-        } => format!("{} {}", entry_name(identity), lashlang_status_str(*status)),
-        TraceLashlangExecutionEvent::NodeStarted { label, .. } => format!("{label} started"),
-        TraceLashlangExecutionEvent::NodeCompleted { label, .. } => format!("{label} completed"),
-        TraceLashlangExecutionEvent::NodeFailed { label, .. } => format!("{label} failed"),
-        TraceLashlangExecutionEvent::BranchSelected { selected, .. } => {
-            format!("branch selected: {}", branch_selection_str(*selected))
-        }
-        TraceLashlangExecutionEvent::ChildStarted {
-            identity, child, ..
-        } => format!(
-            "{} started child {}",
-            entry_name(identity),
-            child_label(child)
-        ),
-    }
-}
-
-fn lashlang_summary(event: &TraceLashlangExecutionEvent) -> String {
-    let mut parts = Vec::new();
-    let identity = lashlang_identity(event);
-    if !identity.entry_name.is_empty() {
-        parts.push(format!("entry {}", identity.entry_name));
-    }
-    if !identity.entry_kind.is_empty() {
-        parts.push(format!("kind {}", identity.entry_kind));
-    }
-    parts.push(format!("subject {}", subject_summary(&identity.subject)));
-    if !identity.scope.session_id.is_empty() {
-        parts.push(format!("session {}", identity.scope.session_id));
-    }
-    if let Some(turn_id) = &identity.scope.turn_id {
-        parts.push(format!("turn {turn_id}"));
-    }
-    if !identity.module_ref.is_empty() {
-        parts.push(format!("module {}", identity.module_ref));
-    }
-    match event {
-        TraceLashlangExecutionEvent::NodeStarted {
-            node_id,
-            occurrence,
-            ..
-        }
-        | TraceLashlangExecutionEvent::NodeCompleted {
-            node_id,
-            occurrence,
-            ..
-        } => {
-            parts.push(format!("node {node_id}"));
-            parts.push(format!("occurrence {occurrence}"));
-        }
-        TraceLashlangExecutionEvent::NodeFailed {
-            node_id,
-            occurrence,
-            error,
-            ..
-        } => {
-            parts.push(format!("node {node_id}"));
-            parts.push(format!("occurrence {occurrence}"));
-            parts.push(format!("error {error}"));
-        }
-        TraceLashlangExecutionEvent::BranchSelected {
-            node_id,
-            occurrence,
-            edge_id,
-            ..
-        } => {
-            parts.push(format!("node {node_id}"));
-            parts.push(format!("occurrence {occurrence}"));
-            parts.push(format!("edge {edge_id}"));
-        }
-        TraceLashlangExecutionEvent::ChildStarted {
-            occurrence, child, ..
-        } => {
-            parts.push(format!("occurrence {occurrence}"));
-            parts.push(format!("child {}", subject_summary(&child.subject)));
-        }
-        TraceLashlangExecutionEvent::ExecutionFinished { error, .. } => {
-            if let Some(error) = error {
-                parts.push(format!("error {error}"));
-            }
-        }
-        TraceLashlangExecutionEvent::ExecutionStarted { execution_map, .. } => {
-            parts.push(format!("{} nodes", execution_map.nodes.len()));
-            parts.push(format!("{} edges", execution_map.edges.len()));
-        }
-    }
-    parts.join("\n")
-}
-
-fn lashlang_failed(event: &TraceLashlangExecutionEvent) -> bool {
-    matches!(
-        event,
-        TraceLashlangExecutionEvent::NodeFailed { .. }
-            | TraceLashlangExecutionEvent::ExecutionFinished {
-                status: TraceLashlangStatus::Failed,
-                ..
-            }
-    )
-}
-
-fn lashlang_identity(event: &TraceLashlangExecutionEvent) -> &TraceLashlangExecutionIdentity {
-    match event {
-        TraceLashlangExecutionEvent::ExecutionStarted { identity, .. }
-        | TraceLashlangExecutionEvent::ExecutionFinished { identity, .. }
-        | TraceLashlangExecutionEvent::NodeStarted { identity, .. }
-        | TraceLashlangExecutionEvent::NodeCompleted { identity, .. }
-        | TraceLashlangExecutionEvent::NodeFailed { identity, .. }
-        | TraceLashlangExecutionEvent::BranchSelected { identity, .. }
-        | TraceLashlangExecutionEvent::ChildStarted { identity, .. } => identity,
-    }
-}
-
-fn entry_name(identity: &TraceLashlangExecutionIdentity) -> &str {
-    if identity.entry_name.is_empty() {
-        "Lashlang"
-    } else {
-        &identity.entry_name
-    }
-}
-
-fn child_label(child: &TraceLashlangChildExecution) -> String {
-    child
-        .entry_name
-        .clone()
-        .unwrap_or_else(|| subject_summary(&child.subject))
-}
-
-fn subject_summary(subject: &TraceRuntimeSubject) -> String {
-    match subject {
-        TraceRuntimeSubject::Process { process_id } => format!("process {process_id}"),
-        TraceRuntimeSubject::Effect { effect_id, kind } => format!("effect {kind}:{effect_id}"),
-    }
-}
-
-fn lashlang_status_str(status: TraceLashlangStatus) -> &'static str {
-    match status {
-        TraceLashlangStatus::Running => "running",
-        TraceLashlangStatus::Completed => "completed",
-        TraceLashlangStatus::Failed => "failed",
-        TraceLashlangStatus::Cancelled => "cancelled",
-    }
-}
-
-fn branch_selection_str(selection: lash_trace::TraceBranchSelection) -> &'static str {
-    match selection {
-        lash_trace::TraceBranchSelection::Then => "then",
-        lash_trace::TraceBranchSelection::Else => "else",
-    }
 }
 
 fn kind_title(kind: &str) -> String {
@@ -1063,7 +906,7 @@ mod tests {
     use super::*;
     use lash_trace::{
         TraceAgentFrameSwitch, TraceContentBlock, TraceContext, TraceError, TraceEvent,
-        TraceLashlangExecutionEvent, TraceLashlangExecutionIdentity, TraceLashlangMap,
+        TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
         TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TraceProviderRequestEvent,
         TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope, TraceRuntimeStreamEvent,
         TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome, TraceToolCallOutput,
@@ -1093,8 +936,8 @@ mod tests {
         ))
     }
 
-    fn identity() -> TraceLashlangExecutionIdentity {
-        TraceLashlangExecutionIdentity {
+    fn identity() -> TraceLanguageExecutionIdentity {
+        TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope::new("s1"),
             subject: TraceRuntimeSubject::Process {
                 process_id: "p1".to_string(),
@@ -1335,11 +1178,12 @@ mod tests {
                 usage: usage(),
                 cumulative: Some(usage()),
             },
-            TraceEvent::LashlangExecution {
-                event: TraceLashlangExecutionEvent::ExecutionStarted {
+            TraceEvent::LanguageExecution {
+                language: "lashlang".to_string(),
+                event: TraceLanguageExecutionEvent::ExecutionStarted {
                     event_key: "k".to_string(),
                     identity: identity(),
-                    execution_map: TraceLashlangMap::default(),
+                    execution_map: TraceLanguageExecutionMap::default(),
                 },
             },
             TraceEvent::TurnCompleted {
