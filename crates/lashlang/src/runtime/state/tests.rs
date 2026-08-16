@@ -434,6 +434,35 @@ fn named_bytes(wire: &CanonicalSnapshot) -> Vec<u8> {
     rmp_serde::to_vec_named(wire).expect("encode test wire")
 }
 
+/// The snapshot version fence refuses the format one step behind the current
+/// one, not just an absurd number.
+///
+/// Off-by-one is the version a fence actually meets in production — the deploy
+/// that straddles a bump — so the case worth pinning is `current - 1`, on a
+/// wire that is otherwise entirely valid and decodes cleanly at the current
+/// version.
+#[test]
+fn a_snapshot_one_version_behind_is_refused_by_the_fence() {
+    let mut globals = Record::new();
+    globals.insert("total".to_string(), Value::Number(3.0));
+    let bytes = Snapshot::new(globals)
+        .to_canonical_bytes()
+        .expect("encode a snapshot");
+    Snapshot::from_canonical_bytes(&bytes).expect("the current version must decode");
+
+    let mut wire: CanonicalSnapshot = rmp_serde::from_slice(&bytes).expect("decode the wire");
+    wire.version = LASHLANG_SNAPSHOT_VERSION - 1;
+    let error = Snapshot::from_canonical_bytes(&named_bytes(&wire))
+        .expect_err("the previous snapshot version must be refused");
+    assert_eq!(
+        error,
+        SnapshotDecodeError::VersionMismatch {
+            expected: LASHLANG_SNAPSHOT_VERSION,
+            found: LASHLANG_SNAPSHOT_VERSION - 1,
+        }
+    );
+}
+
 #[test]
 fn canonical_decode_rejects_descending_heap_ids() {
     let wire = canonical_heap_with(

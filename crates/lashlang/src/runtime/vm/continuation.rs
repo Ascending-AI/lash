@@ -1358,6 +1358,49 @@ mod tests {
 
     mod program_validation;
 
+    /// The version fence refuses the format one step behind the current one,
+    /// not just an absurd number.
+    ///
+    /// Off-by-one is the version a fence actually meets in production — the
+    /// deploy that straddles a bump — and it is the one a fence written as
+    /// `< SOME_FLOOR` or `!= 0` would wave through. Both the structural
+    /// validator and the wire decoder are checked; `resume_from` restates the
+    /// same comparison a third time.
+    #[test]
+    fn a_continuation_one_format_version_behind_is_refused() {
+        let previous = VM_CONTINUATION_FORMAT_VERSION - 1;
+        let mut continuation = empty_continuation(Heap::default());
+        continuation.format_version = previous;
+
+        let error = validate_continuation(&continuation)
+            .expect_err("the previous format version must be refused");
+        assert_eq!(
+            error,
+            ContinuationError::FormatVersionMismatch {
+                expected: VM_CONTINUATION_FORMAT_VERSION,
+                found: previous,
+            }
+        );
+
+        // The same wire deserialized rather than hand-built: the decode refuses
+        // before anything reads a field it might not have.
+        let wire = serde_json::to_string(&continuation).expect("serialize");
+        let decode_error = serde_json::from_str::<VmContinuation>(&wire)
+            .expect_err("decoding the previous format version must fail");
+        assert!(
+            decode_error.to_string().contains(&previous.to_string())
+                && decode_error
+                    .to_string()
+                    .contains(&VM_CONTINUATION_FORMAT_VERSION.to_string()),
+            "the decode error must name both versions: {decode_error}"
+        );
+
+        // And the current version still validates, so the assertion above is
+        // about the version and nothing else.
+        validate_continuation(&empty_continuation(Heap::default()))
+            .expect("the current format version validates");
+    }
+
     #[test]
     fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
         // A cyclic object used to validate "by identity" and resume. Under the
