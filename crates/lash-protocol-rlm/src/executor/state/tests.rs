@@ -31,24 +31,26 @@ fn hydrate(
 #[test]
 fn large_scalar_edit_commits_changed_state_not_retained_session() {
     let mut state = RlmExecutionState::new().expect("state");
-    let mut runtime = state.rlm.snapshot();
     for index in 0..50 {
-        runtime.globals.insert(
-            format!("page_{index}"),
-            FlowValue::String(format!("page-{index}-{}", "x".repeat(100 * 1024)).into()),
-        );
+        state
+            .rlm
+            .insert_global(
+                format!("page_{index}"),
+                FlowValue::String(format!("page-{index}-{}", "x".repeat(100 * 1024)).into()),
+            )
+            .expect("seed a global");
     }
-    state.rlm = FlowState::from_snapshot(runtime);
     state.mark_execution_started();
     let initial = state.snapshot_execution_state().expect("initial snapshot");
     state.acknowledge_execution_state_capture();
 
-    let mut runtime = state.rlm.snapshot();
-    runtime.globals.insert(
-        "page_0".to_string(),
-        FlowValue::String(format!("changed-{}", "y".repeat(100 * 1024)).into()),
-    );
-    state.rlm = FlowState::from_snapshot(runtime);
+    state
+        .rlm
+        .insert_global(
+            "page_0".to_string(),
+            FlowValue::String(format!("changed-{}", "y".repeat(100 * 1024)).into()),
+        )
+        .expect("seed a global");
     state.dirty_globals.insert("page_0".to_string());
     state.root_dirty = true;
     let changed = state.snapshot_execution_state().expect("changed snapshot");
@@ -74,8 +76,8 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
         "FIG1257_LARGE_SCALAR retained_bytes={retained_bytes} changed_commit_bytes={changed_bytes} initial_leaves={initial_leaves} changed_bodies={changed_bodies}"
     );
 
-    assert_eq!(retained_bytes, 5_122_593);
-    assert_eq!(changed_bytes, 117_910);
+    assert_eq!(retained_bytes, 5_122_602);
+    assert_eq!(changed_bytes, 117_919);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }
@@ -90,20 +92,18 @@ fn tiny_files_inline_and_avoid_per_file_leaf_overhead() {
             .write_scratch_file_for_testing(&format!("scratch-{index:03}.txt"), body.as_bytes())
             .expect("write tiny scratch file");
     }
-    let mut runtime = state.rlm.snapshot();
-    runtime
-        .globals
-        .insert("revision".to_string(), FlowValue::Number(1.0));
-    state.rlm = FlowState::from_snapshot(runtime);
+    state
+        .rlm
+        .insert_global("revision".to_string(), FlowValue::Number(1.0))
+        .expect("seed a global");
     state.mark_execution_started();
     let initial = state.snapshot_execution_state().expect("initial snapshot");
     state.acknowledge_execution_state_capture();
 
-    let mut runtime = state.rlm.snapshot();
-    runtime
-        .globals
-        .insert("revision".to_string(), FlowValue::Number(2.0));
-    state.rlm = FlowState::from_snapshot(runtime);
+    state
+        .rlm
+        .insert_global("revision".to_string(), FlowValue::Number(2.0))
+        .expect("seed a global");
     state.dirty_globals.insert("revision".to_string());
     state.root_dirty = true;
     let changed = state.snapshot_execution_state().expect("changed snapshot");
@@ -124,7 +124,7 @@ fn tiny_files_inline_and_avoid_per_file_leaf_overhead() {
         changed.components.is_empty(),
         "an unrelated edit must not carry per-file leaf manifest rows"
     );
-    assert_eq!(changed_bytes, 43_493);
+    assert_eq!(changed_bytes, 43_502);
 }
 
 fn retained_file_commit_bytes(body_len: usize, leaf: bool) -> usize {
@@ -379,7 +379,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-8 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-9 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -390,28 +390,27 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_8_root_encodes_to_golden_bytes() {
+fn version_9_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "85a776657273696f6e08a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f736361",
-        "6c617282a46b696e64a6696e6c696e65a4626f6479c43581a7676c6f62616c739182a46e616d65a576616c7565a5",
-        "76616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f736974",
-        "6582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f736861323536",
-        "2f3039333562656436626133363463663565333435613136326365386539303162323838643935396264623730306466",
-        "3331386363363164633136376331326331a566696c657382b06e6f7465732f696e6c696e652e62696e82a46b",
-        "696e64a6696e6c696e65a4626f6479c402ff00af6e6f7465732f6c617267652e62696e82a46b696e64a46c656166",
-        "a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f7368613235362f326561313639383863613961",
-        "3362393733666631313639336536646534626430373837373536353563643637313563356130366131323066373162",
-        "3365383237b464656665",
-        "727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657986aa73657373696f6e5f6964ae73657373696f6e",
-        "2d676f6c64656ea77475726e5f6964a67475726e2d37aa7475726e5f696e64657803b270726f746f636f6c5f6974",
-        "65726174696f6e02a96566666563745f6964a86566666563742d39aa7265706c61795f6b6579a87265706c61792d",
-        "31ab7265736f6c7574696f6e7382a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e69",
-        "74696f6e85a26964aa746f6f6c3a6665746368a46e616d65a56665746368ab6465736372697074696f6eae466574",
-        "6368206f6e652055524c2eac696e7075745f736368656d6181a963616e6f6e6963616c82aa70726f706572746965",
-        "7381a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181",
-        "a963616e6f6e6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562",
-        "b1657865637574696f6e5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b",
-        "696e64ad6e6f745f617661696c61626c65",
+        "85a776657273696f6e09a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c",
+        "617282a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e02a7676c6f62616c739182a46e616d65",
+        "a576616c7565a576616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f",
+        "6d706f7369746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f73",
+        "68613235362f3033363138323834376139303931613136303166336436333430653361613239363737303734393766",
+        "6539363737383833626435356537333066373565626265a566696c657382b06e6f7465732f696e6c696e652e62696e",
+        "82a46b696e64a6696e6c696e65a4626f6479c402ff00af6e6f7465732f6c617267652e62696e82a46b696e64a46c65",
+        "6166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f7368613235362f32656131363938386361",
+        "3961336239373366663131363933653664653462643037383737353635356364363731356335613036613132306637",
+        "31623365383237b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657986aa73657373696f6e",
+        "5f6964ae73657373696f6e2d676f6c64656ea77475726e5f6964a67475726e2d37aa7475726e5f696e64657803b270",
+        "726f746f636f6c5f697465726174696f6e02a96566666563745f6964a86566666563742d39aa7265706c61795f6b65",
+        "79a87265706c61792d31ab7265736f6c7574696f6e7382a97765622e666574636884a46b696e64a87265736f6c7665",
+        "64aa646566696e6974696f6e85a26964aa746f6f6c3a6665746368a46e616d65a56665746368ab6465736372697074",
+        "696f6eae4665746368206f6e652055524c2eac696e7075745f736368656d6181a963616e6f6e6963616c82aa70726f",
+        "7065727469657381a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f75747075745f7363",
+        "68656d6181a963616e6f6e6963616c81a474797065a6737472696e67a9736f757263655f6964ac7265676973747279",
+        "3a776562b1657865637574696f6e5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e74",
+        "81a46b696e64ad6e6f745f617661696c61626c65",
     );
 
     let mut resolutions = BTreeMap::new();
@@ -486,7 +485,7 @@ fn version_8_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-8 root encoding changed; decide on a version bump before updating the golden"
+        "the version-9 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =
@@ -495,7 +494,7 @@ fn version_8_root_encodes_to_golden_bytes() {
     assert_eq!(
         root_leaf_keys(&decoded),
         [
-            "execution_state/sha256/0935bed6ba364cf5e345a162ce8e901b288d959bdb700df318cc61dc167c12c1"
+            "execution_state/sha256/036182847a9091a1601f3d6340e3aa2967707497fe9677883bd55e730f75ebbe"
                 .to_string(),
             "execution_state/sha256/2ea16988ca9a3b973ff11693e6de4bd078775655cd6715c5a06a120f71b3e827"
                 .to_string(),
@@ -503,35 +502,6 @@ fn version_8_root_encodes_to_golden_bytes() {
         .into_iter()
         .collect()
     );
-}
-
-#[test]
-fn lashlang_dialect_pins_snapshot_engine_id() {
-    let dialect = LashlangDialect::new(
-        lash_lashlang_runtime::LashlangSurface::default(),
-        LashlangDialectServices {
-            projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-            artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
-            deferred_tool_resolver: None,
-            execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
-            execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-        },
-    );
-
-    assert_eq!(dialect.snapshot_engine_id(), "lashlang");
-
-    let mut session = dialect.create_session().expect("create Lashlang session");
-    let snapshot = session
-        .snapshot_execution_state()
-        .expect("snapshot Lashlang session");
-    let root: RlmSnapshotRoot = rmp_serde::from_slice(
-        snapshot
-            .root
-            .as_deref()
-            .expect("fresh Lashlang snapshot has a root"),
-    )
-    .expect("decode Lashlang snapshot root");
-    assert_eq!(root.engine, "lashlang");
 }
 
 #[test]
@@ -611,12 +581,13 @@ fn in_memory_reopen_restores_inline_and_leaf_binary_files_byte_exactly() {
 fn leaf_bearing_hydration_and_live_target()
 -> (lash_core::plugin::HydratedExecutionState, RlmExecutionState) {
     let mut source = RlmExecutionState::new().expect("source state");
-    let mut snapshot = source.rlm.snapshot();
-    snapshot.globals.insert(
-        "kept".to_string(),
-        FlowValue::List(vec![FlowValue::String("source".repeat(2048).into())].into()),
-    );
-    source.rlm = FlowState::from_snapshot(snapshot);
+    source
+        .rlm
+        .insert_global(
+            "kept".to_string(),
+            FlowValue::List(vec![FlowValue::String("source".repeat(2048).into())].into()),
+        )
+        .expect("seed a global");
     source.mark_execution_started();
     source
         .write_scratch_file_for_testing("keep.txt", b"source-file")
@@ -628,11 +599,9 @@ fn leaf_bearing_hydration_and_live_target()
     );
 
     let mut live = RlmExecutionState::new().expect("live state");
-    let mut snapshot = live.rlm.snapshot();
-    snapshot
-        .globals
-        .insert("live".to_string(), FlowValue::String("untouched".into()));
-    live.rlm = FlowState::from_snapshot(snapshot);
+    live.rlm
+        .insert_global("live".to_string(), FlowValue::String("untouched".into()))
+        .expect("seed a global");
     live.mark_execution_started();
     live.write_scratch_file_for_testing("live.txt", b"live-file")
         .expect("write live scratch file");
@@ -641,12 +610,12 @@ fn leaf_bearing_hydration_and_live_target()
 
 fn assert_live_state_untouched(live: &RlmExecutionState, live_dir: &std::path::Path) {
     assert_eq!(
-        live.rlm.snapshot().globals.get("live"),
+        live.rlm.snapshot().globals().get("live"),
         Some(&FlowValue::String("untouched".into())),
         "a rejected restore must not replace live globals"
     );
     assert!(
-        live.rlm.snapshot().globals.get("kept").is_none(),
+        live.rlm.snapshot().globals().get("kept").is_none(),
         "a rejected restore must not leak the source's globals"
     );
     assert_eq!(
@@ -787,12 +756,13 @@ fn failed_file_collection_keeps_dirty_globals_retryable() {
     use std::os::unix::ffi::OsStringExt as _;
 
     let mut state = RlmExecutionState::new().expect("state");
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "large".to_string(),
-        FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "large".to_string(),
+            FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
+        )
+        .expect("seed a global");
     state.mark_execution_started();
     let invalid_path = state
         .scratch_dir
@@ -863,12 +833,13 @@ fn same_size_scratch_file_rewrite_emits_a_changed_leaf() {
 #[test]
 fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
     let mut state = RlmExecutionState::new().expect("state");
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "large".to_string(),
-        FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "large".to_string(),
+            FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
+        )
+        .expect("seed a global");
     state.mark_execution_started();
     let first = state.snapshot_execution_state().expect("first capture");
     assert!(first.components.values().any(|component| matches!(
@@ -916,18 +887,20 @@ fn includes_globals_excludes_history_and_named() {
 #[test]
 fn excludes_direct_projected_globals() {
     let mut state = RlmExecutionState::new().unwrap();
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "projected".to_string(),
-        FlowValue::Projected(ProjectedValue::scalar(
-            "projected",
-            FlowValue::String("host".into()),
-        )),
-    );
-    snapshot
-        .globals
-        .insert("plain".to_string(), FlowValue::String("local".into()));
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "projected".to_string(),
+            FlowValue::Projected(ProjectedValue::scalar(
+                "projected",
+                FlowValue::String("host".into()),
+            )),
+        )
+        .expect("seed a global");
+    state
+        .rlm
+        .insert_global("plain".to_string(), FlowValue::String("local".into()))
+        .expect("seed a global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
 
@@ -953,15 +926,17 @@ fn excludes_top_level_globals_containing_nested_projected_values() {
         )),
     );
     record.insert("title".to_string(), FlowValue::String("local".into()));
-    let mut snapshot = state.rlm.snapshot();
-    snapshot
-        .globals
-        .insert("doc".to_string(), FlowValue::Record(Arc::new(record)));
-    snapshot.globals.insert(
-        "plain".to_string(),
-        FlowValue::List(vec![FlowValue::Number(1.0)].into()),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global("doc".to_string(), FlowValue::Record(Arc::new(record)))
+        .expect("seed a global");
+    state
+        .rlm
+        .insert_global(
+            "plain".to_string(),
+            FlowValue::List(vec![FlowValue::Number(1.0)].into()),
+        )
+        .expect("seed a global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
 
@@ -1004,16 +979,46 @@ impl ProjectedHostDescriptor for CountingProjectedValue {
 fn excludes_custom_projected_globals_without_rendering_or_materializing() {
     let projected = Arc::new(CountingProjectedValue::default());
     let mut state = RlmExecutionState::new().unwrap();
-    let mut snapshot = state.rlm.snapshot();
-    snapshot.globals.insert(
-        "projected".to_string(),
-        FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),
-    );
-    state.rlm = FlowState::from_snapshot(snapshot);
+    state
+        .rlm
+        .insert_global(
+            "projected".to_string(),
+            FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),
+        )
+        .expect("seed a global");
 
     let vars = state.bound_variable_values(&BTreeSet::new());
 
     assert!(vars.is_empty(), "{vars:?}");
     assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn lashlang_dialect_pins_snapshot_engine_id() {
+    let dialect = LashlangDialect::new(
+        lash_lashlang_runtime::LashlangSurface::default(),
+        LashlangDialectServices {
+            projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+            artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+            deferred_tool_resolver: None,
+            execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+            execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        },
+    );
+
+    assert_eq!(dialect.snapshot_engine_id(), "lashlang");
+
+    let mut session = dialect.create_session().expect("create Lashlang session");
+    let snapshot = session
+        .snapshot_execution_state()
+        .expect("snapshot Lashlang session");
+    let root: RlmSnapshotRoot = rmp_serde::from_slice(
+        snapshot
+            .root
+            .as_deref()
+            .expect("fresh Lashlang snapshot has a root"),
+    )
+    .expect("decode Lashlang snapshot root");
+    assert_eq!(root.engine, "lashlang");
 }

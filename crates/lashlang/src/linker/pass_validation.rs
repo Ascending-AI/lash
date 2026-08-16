@@ -85,14 +85,14 @@ impl<'module> Linker<'module> {
                     operation,
                     crate::TriggerHostOperation::Update | crate::TriggerHostOperation::Revive
                 ) {
-                    let expected_revision = trigger_operation_record_entry(args, "expected_revision")
-                        .ok_or(LinkError::InvalidTriggerRegistration { span: scope.span })?;
-                    let revision_ty = self
-                        .infer_expr_type_expected(
-                            expected_revision,
-                            &mut scope.clone(),
-                            Some(&TypeExpr::Int),
-                        )?;
+                    let expected_revision =
+                        trigger_operation_record_entry(args, "expected_revision")
+                            .ok_or(LinkError::InvalidTriggerRegistration { span: scope.span })?;
+                    let revision_ty = self.infer_expr_type_expected(
+                        expected_revision,
+                        &mut scope.clone(),
+                        Some(&TypeExpr::Int),
+                    )?;
                     if !self.is_type_assignable(&revision_ty, &TypeExpr::Int) {
                         return Err(LinkError::IncompatibleOperationInput {
                             operation: operation.receiver_method().to_string(),
@@ -455,10 +455,7 @@ impl<'module> Linker<'module> {
                 let item_ty = self.iterable_item_type(&iterable_ty, scope.span)?;
                 let before = scope.clone();
                 let mut body_scope = scope.clone();
-                let previous = body_scope.bind(
-                    binding.as_str(),
-                    self.binding_for_type(&item_ty),
-                );
+                let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
                 let mut completion = self.infer_completion(body, &mut body_scope)?;
                 body_scope.restore(binding.as_str(), previous);
                 scope.widen_loop(before, body_scope);
@@ -536,9 +533,7 @@ impl<'module> Linker<'module> {
             | Expr::String(_)
             | Expr::Break
             | Expr::Continue => literal_type(expr),
-            Expr::TypeLiteral(_) => {
-                binding_type(self.closed_schema_witness_binding(expr).as_ref())
-            }
+            Expr::TypeLiteral(_) => binding_type(self.closed_schema_witness_binding(expr).as_ref()),
             Expr::Variable(name) => {
                 if let Some(binding) = scope.get(name) {
                     binding_type(Some(&binding))
@@ -670,10 +665,7 @@ impl<'module> Linker<'module> {
                 let item_ty = self.iterable_item_type(&iterable_ty, scope.span)?;
                 let before = scope.clone();
                 let mut body_scope = scope.clone();
-                let previous = body_scope.bind(
-                    binding.as_str(),
-                    self.binding_for_type(&item_ty),
-                );
+                let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
                 self.infer_expr_type(body, &mut body_scope)?;
                 body_scope.restore(binding.as_str(), previous);
                 scope.widen_loop(before, body_scope);
@@ -777,8 +769,13 @@ impl<'module> Linker<'module> {
                     } else {
                         let mut arg_types = Vec::with_capacity(args.len());
                         for arg in args {
-                            let expected_arg = expected_call_arg_type(&binding.input_ty, args.len());
-                            arg_types.push(self.infer_expr_type_expected(arg, scope, expected_arg)?);
+                            let expected_arg =
+                                expected_call_arg_type(&binding.input_ty, args.len());
+                            arg_types.push(self.infer_expr_type_expected(
+                                arg,
+                                scope,
+                                expected_arg,
+                            )?);
                         }
                         let actual_input = call_input_type(arg_types);
                         if !self.is_type_assignable(&actual_input, &binding.input_ty) {
@@ -796,13 +793,8 @@ impl<'module> Linker<'module> {
                 } else {
                     let mut arg_types = Vec::with_capacity(args.len());
                     for arg in args {
-                        let expected_arg =
-                            expected_call_arg_type(&binding.input_ty, args.len());
-                        arg_types.push(self.infer_expr_type_expected(
-                            arg,
-                            scope,
-                            expected_arg,
-                        )?);
+                        let expected_arg = expected_call_arg_type(&binding.input_ty, args.len());
+                        arg_types.push(self.infer_expr_type_expected(arg, scope, expected_arg)?);
                     }
                     let actual_input = call_input_type(arg_types);
                     if !self.is_type_assignable(&actual_input, &binding.input_ty) {
@@ -1001,11 +993,10 @@ fn materialize_default_trigger_keys(mut program: Program) -> Result<Program, Lin
     };
     for declaration in &mut program.declarations {
         if let Declaration::Process(process) = declaration {
-            process.body =
-                crate::ExprFolder::fold_expr(&mut materializer, std::mem::replace(
-                    &mut process.body,
-                    Expr::Null,
-                ));
+            process.body = crate::ExprFolder::fold_expr(
+                &mut materializer,
+                std::mem::replace(&mut process.body, Expr::Null),
+            );
         }
     }
     program.main = crate::ExprFolder::fold_expr(
@@ -1046,18 +1037,8 @@ fn collect_default_trigger_keys(
             else_block,
         } => {
             collect_default_trigger_keys(condition, bindings, seen, derived_keys)?;
-            collect_default_trigger_keys(
-                then_block,
-                &mut bindings.clone(),
-                seen,
-                derived_keys,
-            )?;
-            collect_default_trigger_keys(
-                else_block,
-                &mut bindings.clone(),
-                seen,
-                derived_keys,
-            )?;
+            collect_default_trigger_keys(then_block, &mut bindings.clone(), seen, derived_keys)?;
+            collect_default_trigger_keys(else_block, &mut bindings.clone(), seen, derived_keys)?;
             return Ok(());
         }
         Expr::For { iterable, body, .. } => {
@@ -1083,17 +1064,12 @@ fn collect_default_trigger_keys(
             if let Ok(call) = crate::register_call_args(args)
                 && call.subscription_key.is_none()
             {
-                let Some((source_type, source_key)) =
-                    static_trigger_source(call.source, bindings)
+                let Some((source_type, source_key)) = static_trigger_source(call.source, bindings)
                 else {
-                    return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey {
-                        span: None,
-                    });
+                    return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: None });
                 };
                 let Some(process) = static_trigger_target(call.target, bindings) else {
-                    return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey {
-                        span: None,
-                    });
+                    return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: None });
                 };
                 if !seen.insert((process.clone(), source_type.clone(), source_key.clone())) {
                     return Err(LinkError::DuplicateDerivedTriggerSubscriptionKey {
@@ -1210,9 +1186,7 @@ fn static_trigger_json(
             .map(Into::into),
         Expr::Record(entries) => entries
             .iter()
-            .map(|(name, value)| {
-                Some((name.to_string(), static_trigger_json(value, bindings)?))
-            })
+            .map(|(name, value)| Some((name.to_string(), static_trigger_json(value, bindings)?)))
             .collect::<Option<serde_json::Map<_, _>>>()
             .map(Into::into),
         _ => None,

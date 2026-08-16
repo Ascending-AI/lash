@@ -21,15 +21,16 @@ impl LashlangHostCatalog {
         let mut catalog = Self::new();
         for operation in operations {
             let operation = operation.into();
-            catalog.add_module_operation(
-                ["tools"],
-                "Tools",
-                operation.clone(),
-                operation,
-                TypeExpr::Any,
-                TypeExpr::Any,
-            )
-            .expect("tool-default operations are idempotent");
+            catalog
+                .add_module_operation(
+                    ["tools"],
+                    "Tools",
+                    operation.clone(),
+                    operation,
+                    TypeExpr::Any,
+                    TypeExpr::Any,
+                )
+                .expect("tool-default operations are idempotent");
         }
         catalog
     }
@@ -166,10 +167,9 @@ impl LashlangHostCatalog {
             .module_instances
             .get_mut(&key)
             .expect("module instance was just inserted");
-        module.operations.insert(
-            operation,
-            ModuleOperationBinding { host_operation },
-        );
+        module
+            .operations
+            .insert(operation, ModuleOperationBinding { host_operation });
         Ok(())
     }
 
@@ -518,7 +518,10 @@ impl LashlangHostCatalog {
         suggestions
     }
 
-    pub(crate) fn operation_suggestions_for_resource_type(&self, resource_type: &str) -> Vec<String> {
+    pub(crate) fn operation_suggestions_for_resource_type(
+        &self,
+        resource_type: &str,
+    ) -> Vec<String> {
         let mut suggestions = self
             .module_instances
             .values()

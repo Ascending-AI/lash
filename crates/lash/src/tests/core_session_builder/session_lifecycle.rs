@@ -842,6 +842,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
     let config: crate::rlm::RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
         "instruction_budget": { "bounded": 1_000_000 },
         "deadline": { "bounded": 30_000 },
+        "memory_limit": { "bounded": 67_108_864 },
         "lashlang_abilities": { "processes": true, "triggers": true }
     }))
     .expect("rlm config");
@@ -1057,7 +1058,9 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // them (here `compile-extra-tool` resolves to `lookup`).
     let artifact_store = Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new());
     let factory = Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::new(lash_protocol_rlm::ExecutionBound::instructions(1_000_000), lash_protocol_rlm::ExecutionBound::secs(30)),
+        lash_protocol_rlm::RlmProtocolPluginConfig::new(lash_protocol_rlm::ExecutionBound::instructions(1_000_000), lash_protocol_rlm::ExecutionBound::secs(30),
+    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
+),
         artifact_store.clone(),
     ));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![
@@ -1316,7 +1319,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         panic!("expected typed protocol rejection at the host boundary, got {error}");
     };
 
-    assert!(message.contains("RLM snapshot version 5 is incompatible with version 8"));
+    assert!(message.contains("RLM snapshot version 5 is incompatible with version 9"));
     assert!(message.contains("drain in-flight sessions on the old build"));
     assert!(message.contains("recreate development/test stores"));
     Ok(())

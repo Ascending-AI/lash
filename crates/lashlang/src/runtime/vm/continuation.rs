@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::super::ExecutionBound;
+use super::super::{ExecutionBound, HeapObject, HeapRestoreWire, PersistedRoots};
 use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -38,7 +38,7 @@ impl TestSuspension {
 /// The compiled program is intentionally not embedded: callers must supply the
 /// same content-addressed program to [`Vm::resume_from`]. Derived validation
 /// plans are rebuilt lazily after restore.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct VmContinuation {
     pub instruction_pointer: usize,
     #[serde(
@@ -69,6 +69,113 @@ pub struct VmContinuation {
     pub pending_error_span: Option<Span>,
     pub instructions_executed: u64,
     pub active_execution_elapsed: std::time::Duration,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_heap",
+        deserialize_with = "continuation_serde::deserialize_heap"
+    )]
+    pub heap: VmHeapContinuation,
+}
+
+impl<'de> Deserialize<'de> for VmContinuation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            instruction_pointer: usize,
+            #[serde(deserialize_with = "continuation_serde::deserialize_values")]
+            operand_stack: Vec<Value>,
+            #[serde(deserialize_with = "continuation_serde::deserialize_optional_value")]
+            last_value: Option<Value>,
+            #[serde(deserialize_with = "continuation_serde::deserialize_slots")]
+            slots: Vec<Option<Value>>,
+            projected_slots: Vec<bool>,
+            #[serde(deserialize_with = "continuation_serde::deserialize_record")]
+            globals: Record,
+            iterator_stack: Vec<VmIteratorContinuation>,
+            occurrence_counters: std::collections::BTreeMap<String, u64>,
+            mode: ExecutionMode,
+            profile: Option<VmProfileContinuation>,
+            pending_error_span: Option<Span>,
+            instructions_executed: u64,
+            active_execution_elapsed: std::time::Duration,
+            #[serde(deserialize_with = "continuation_serde::deserialize_heap")]
+            heap: VmHeapContinuation,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let continuation = Self {
+            instruction_pointer: wire.instruction_pointer,
+            operand_stack: wire.operand_stack,
+            last_value: wire.last_value,
+            slots: wire.slots,
+            projected_slots: wire.projected_slots,
+            globals: wire.globals,
+            iterator_stack: wire.iterator_stack,
+            occurrence_counters: wire.occurrence_counters,
+            mode: wire.mode,
+            profile: wire.profile,
+            pending_error_span: wire.pending_error_span,
+            instructions_executed: wire.instructions_executed,
+            active_execution_elapsed: wire.active_execution_elapsed,
+            heap: wire.heap,
+        };
+        validate_continuation(&continuation).map_err(serde::de::Error::custom)?;
+        Ok(continuation)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VmHeapContinuation {
+    heap: Heap,
+}
+
+impl VmHeapContinuation {
+    fn new(heap: Heap) -> Self {
+        Self { heap }
+    }
+
+    fn into_heap(self) -> Heap {
+        self.heap
+    }
+
+    pub fn allocation_counter(&self) -> u64 {
+        self.heap.allocations()
+    }
+
+    pub fn live_logical_bytes(&self) -> u64 {
+        self.heap.live_logical_bytes()
+    }
+
+    pub fn size_schedule_version(&self) -> u32 {
+        self.heap.schedule_version()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn storage_slot_count(&self) -> usize {
+        self.heap.slots.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn vacant_slot_count(&self) -> usize {
+        self.heap.slots.iter().filter(|slot| slot.is_none()).count()
+    }
+
+    pub fn materialize(&self, value: &Value) -> Result<Value, ContinuationError> {
+        self.heap
+            .export(value)
+            .map_err(|_| ContinuationError::UnserializableValue {
+                location: "continuation heap".to_string(),
+                variant: "invalid heap reference",
+            })
+    }
+}
+
+impl Default for VmHeapContinuation {
+    fn default() -> Self {
+        Self::new(Heap::default())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -139,19 +246,29 @@ pub enum ContinuationError {
     InstructionBudgetExceeded { limit: u64 },
     #[error("lashlang active-execution deadline of {limit_ms}ms was already exceeded")]
     ExecutionDeadlineExceeded { limit_ms: u128 },
+    #[error(
+        "lashlang logical memory limit of {limit} bytes was already exceeded by {live} live bytes"
+    )]
+    MemoryLimitExceeded { limit: u64, live: u64 },
 }
 
 impl ContinuationError {
     pub fn is_execution_bound_exhausted(&self) -> bool {
         matches!(
             self,
-            Self::InstructionBudgetExceeded { .. } | Self::ExecutionDeadlineExceeded { .. }
+            Self::InstructionBudgetExceeded { .. }
+                | Self::ExecutionDeadlineExceeded { .. }
+                | Self::MemoryLimitExceeded { .. }
         )
     }
 }
 
 mod continuation_serde {
     use super::*;
+    use crate::HeapId;
+
+    const NUMBER_WIRE_VERSION: u32 = 1;
+    const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -165,61 +282,213 @@ mod continuation_serde {
     enum ValueWire {
         Null,
         Bool(bool),
-        Number(f64),
+        Number(NumberWire),
         String(String),
         Image(super::ImageValue),
         Resource(super::ResourceHandle),
+        Ref(HeapId),
         Tuple(Vec<ValueWire>),
         List(Vec<ValueWire>),
         Record(Vec<(String, ValueWire)>),
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct NumberWire {
+        version: u32,
+        bits: u64,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct HeapWire {
+        next_id: u64,
+        allocation_counter: u64,
+        live_logical_bytes: u64,
+        size_schedule_version: u32,
+        objects: Vec<HeapEntryWire>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct HeapEntryWire {
+        id: HeapId,
+        object: HeapObjectWire,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(tag = "kind", rename_all = "snake_case")]
+    enum HeapObjectWire {
+        Tuple { items: Vec<ValueWire> },
+        List { items: Vec<ValueWire> },
+        Record { fields: Vec<(String, ValueWire)> },
     }
 
     fn value_to_wire(value: &Value) -> Result<ValueWire, &'static str> {
         Ok(match value {
             Value::Null => ValueWire::Null,
             Value::Bool(value) => ValueWire::Bool(*value),
-            Value::Number(value) => ValueWire::Number(*value),
+            Value::Number(value) => ValueWire::Number(NumberWire {
+                version: NUMBER_WIRE_VERSION,
+                bits: if value.is_nan() {
+                    CANONICAL_NAN_BITS
+                } else {
+                    value.to_bits()
+                },
+            }),
             Value::String(value) => ValueWire::String(value.to_string()),
             Value::Image(value) => ValueWire::Image((**value).clone()),
             Value::Resource(value) => ValueWire::Resource(value.clone()),
+            Value::Ref(value) => ValueWire::Ref(*value),
             Value::Tuple(values) => {
                 ValueWire::Tuple(values.iter().map(value_to_wire).collect::<Result<_, _>>()?)
             }
             Value::List(values) => {
                 ValueWire::List(values.iter().map(value_to_wire).collect::<Result<_, _>>()?)
             }
-            Value::Record(record) => ValueWire::Record(
-                record
-                    .iter()
-                    .map(|(key, value)| Ok((key.to_string(), value_to_wire(value)?)))
-                    .collect::<Result<_, &'static str>>()?,
-            ),
+            Value::Record(record) => ValueWire::Record(record_to_wire(record)?),
             Value::Projected(_) => return Err("projected value"),
         })
     }
 
-    fn value_from_wire(value: ValueWire) -> Value {
-        match value {
+    fn value_from_wire(value: ValueWire) -> Result<Value, &'static str> {
+        Ok(match value {
             ValueWire::Null => Value::Null,
             ValueWire::Bool(value) => Value::Bool(value),
-            ValueWire::Number(value) => Value::Number(value),
+            ValueWire::Number(value) => {
+                if value.version != NUMBER_WIRE_VERSION {
+                    return Err("unsupported continuation number wire version");
+                }
+                let number = f64::from_bits(value.bits);
+                Value::Number(if number.is_nan() {
+                    f64::from_bits(CANONICAL_NAN_BITS)
+                } else {
+                    number
+                })
+            }
             ValueWire::String(value) => Value::String(value.into()),
             ValueWire::Image(value) => Value::Image(Box::new(value)),
             ValueWire::Resource(value) => Value::Resource(value),
-            ValueWire::Tuple(values) => {
-                Value::Tuple(values.into_iter().map(value_from_wire).collect())
+            ValueWire::Ref(value) => Value::Ref(value),
+            ValueWire::Tuple(values) => Value::Tuple(
+                values
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            ),
+            ValueWire::List(values) => Value::List(
+                values
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            ),
+            ValueWire::Record(entries) => Value::Record(Arc::new(record_from_wire(entries)?)),
+        })
+    }
+
+    fn record_to_wire(record: &Record) -> Result<Vec<(String, ValueWire)>, &'static str> {
+        record
+            .iter()
+            .map(|(key, value)| Ok((key.to_string(), value_to_wire(value)?)))
+            .collect()
+    }
+
+    fn record_from_wire(entries: Vec<(String, ValueWire)>) -> Result<Record, &'static str> {
+        let mut record = record_with_capacity(entries.len());
+        let mut names = std::collections::BTreeSet::new();
+        for (key, value) in entries {
+            if !names.insert(key.clone()) {
+                return Err("continuation record keys must be unique");
             }
-            ValueWire::List(values) => {
-                Value::List(values.into_iter().map(value_from_wire).collect())
-            }
-            ValueWire::Record(entries) => {
-                let mut record = record_with_capacity(entries.len());
-                for (key, value) in entries {
-                    record.insert(key, value_from_wire(value));
-                }
-                Value::Record(Arc::new(record))
-            }
+            record.insert(key, value_from_wire(value)?);
         }
+        Ok(record)
+    }
+
+    fn object_to_wire(object: &HeapObject) -> Result<HeapObjectWire, &'static str> {
+        Ok(match object {
+            HeapObject::Tuple(values) => HeapObjectWire::Tuple {
+                items: values.iter().map(value_to_wire).collect::<Result<_, _>>()?,
+            },
+            HeapObject::List(values) => HeapObjectWire::List {
+                items: values.iter().map(value_to_wire).collect::<Result<_, _>>()?,
+            },
+            HeapObject::Record(record) => HeapObjectWire::Record {
+                fields: record_to_wire(record)?,
+            },
+        })
+    }
+
+    fn object_from_wire(object: HeapObjectWire) -> Result<HeapObject, &'static str> {
+        Ok(match object {
+            HeapObjectWire::Tuple { items } => HeapObject::Tuple(
+                items
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<_, _>>()?,
+            ),
+            HeapObjectWire::List { items } => HeapObject::List(
+                items
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<_, _>>()?,
+            ),
+            HeapObjectWire::Record { fields } => {
+                HeapObject::Record(Box::new(record_from_wire(fields)?))
+            }
+        })
+    }
+
+    pub(super) fn serialize_heap<S>(
+        continuation: &VmHeapContinuation,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let heap = &continuation.heap;
+        let objects = heap
+            .objects_in_id_order()
+            .map(|(id, object)| {
+                Ok(HeapEntryWire {
+                    id,
+                    object: object_to_wire(object)?,
+                })
+            })
+            .collect::<Result<Vec<_>, &'static str>>()
+            .map_err(serde::ser::Error::custom)?;
+        HeapWire {
+            next_id: heap.next_id,
+            allocation_counter: heap.allocations(),
+            live_logical_bytes: heap.live_logical_bytes(),
+            size_schedule_version: heap.schedule_version(),
+            objects,
+        }
+        .serialize(serializer)
+    }
+
+    pub(super) fn deserialize_heap<'de, D>(deserializer: D) -> Result<VmHeapContinuation, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = HeapWire::deserialize(deserializer)?;
+        let objects = wire
+            .objects
+            .into_iter()
+            .map(|entry| object_from_wire(entry.object).map(|object| (entry.id, object)))
+            .collect::<Result<_, _>>()
+            .map_err(serde::de::Error::custom)?;
+        let heap = Heap::from_wire(
+            HeapRestoreWire {
+                next_id: wire.next_id,
+                allocation_counter: wire.allocation_counter,
+                live_logical_bytes: wire.live_logical_bytes,
+                size_schedule_version: wire.size_schedule_version,
+                objects,
+            },
+            &[],
+        )
+        .map_err(serde::de::Error::custom)?;
+        Ok(VmHeapContinuation::new(heap))
     }
 
     fn optional_to_wire(value: &Option<Value>) -> Result<OptionalValueWire, &'static str> {
@@ -229,11 +498,11 @@ mod continuation_serde {
         }
     }
 
-    fn optional_from_wire(value: OptionalValueWire) -> Option<Value> {
-        match value {
+    fn optional_from_wire(value: OptionalValueWire) -> Result<Option<Value>, &'static str> {
+        Ok(match value {
             OptionalValueWire::Unset => None,
-            OptionalValueWire::Set(value) => Some(value_from_wire(value)),
-        }
+            OptionalValueWire::Set(value) => Some(value_from_wire(value)?),
+        })
     }
 
     pub(super) fn serialize_values<S>(values: &[Value], serializer: S) -> Result<S::Ok, S::Error>
@@ -252,8 +521,13 @@ mod continuation_serde {
     where
         D: Deserializer<'de>,
     {
-        Vec::<ValueWire>::deserialize(deserializer)
-            .map(|values| values.into_iter().map(value_from_wire).collect())
+        Vec::<ValueWire>::deserialize(deserializer).and_then(|values| {
+            values
+                .into_iter()
+                .map(value_from_wire)
+                .collect::<Result<_, _>>()
+                .map_err(serde::de::Error::custom)
+        })
     }
 
     pub(super) fn serialize_optional_value<S>(
@@ -274,7 +548,8 @@ mod continuation_serde {
     where
         D: Deserializer<'de>,
     {
-        OptionalValueWire::deserialize(deserializer).map(optional_from_wire)
+        OptionalValueWire::deserialize(deserializer)
+            .and_then(|value| optional_from_wire(value).map_err(serde::de::Error::custom))
     }
 
     pub(super) fn serialize_slots<S>(
@@ -296,8 +571,13 @@ mod continuation_serde {
     where
         D: Deserializer<'de>,
     {
-        Vec::<OptionalValueWire>::deserialize(deserializer)
-            .map(|slots| slots.into_iter().map(optional_from_wire).collect())
+        Vec::<OptionalValueWire>::deserialize(deserializer).and_then(|slots| {
+            slots
+                .into_iter()
+                .map(optional_from_wire)
+                .collect::<Result<_, _>>()
+                .map_err(serde::de::Error::custom)
+        })
     }
 
     pub(super) fn serialize_record<S>(record: &Record, serializer: S) -> Result<S::Ok, S::Error>
@@ -314,15 +594,53 @@ mod continuation_serde {
         D: Deserializer<'de>,
     {
         ValueWire::deserialize(deserializer).and_then(|value| match value_from_wire(value) {
-            Value::Record(record) => Ok((*record).clone()),
-            _ => Err(serde::de::Error::custom("expected continuation record")),
+            Err(error) => Err(serde::de::Error::custom(error)),
+            Ok(Value::Record(record)) => Ok((*record).clone()),
+            Ok(_) => Err(serde::de::Error::custom("expected continuation record")),
         })
     }
 }
 
+/// Splits a continuation's roots into the ones that own what they name and the
+/// ones that only borrow it.
+///
+/// Slots, globals and a parked loop binding all survive the boundary: whatever
+/// they name is theirs, and two of them naming one object is the aliasing this
+/// round exists to make unrepresentable. The operand stack, the last-value
+/// register and an iterator's captured cursor are execution scratch — the VM
+/// legitimately holds a value on the stack and in the slot it was just stored
+/// into, and a cursor holds the elements it is handing out one at a time — so
+/// they borrow without owning.
+fn continuation_forest_roots(continuation: &VmContinuation) -> PersistedRoots<'_> {
+    let mut roots = PersistedRoots::default();
+    for (index, value) in continuation.slots.iter().enumerate() {
+        if let Some(value) = value {
+            roots.durable(format!("slot {index}"), value);
+        }
+    }
+    for (name, value) in continuation.globals.iter() {
+        roots.durable(format!("global `{name}`"), value);
+    }
+    for (depth, iterator) in continuation.iterator_stack.iter().enumerate() {
+        if let Some(value) = iterator.restore_value.as_ref() {
+            roots.durable(format!("iterator {depth} restore value"), value);
+        }
+        if let VmIteratorCursor::List { values, .. } = &iterator.cursor {
+            roots.transient_all(values.iter());
+        }
+    }
+    roots.transient_all(continuation.operand_stack.iter());
+    roots.transient_all(continuation.last_value.iter());
+    roots
+}
+
 fn validate_continuation(continuation: &VmContinuation) -> Result<(), ContinuationError> {
     validate_values(&continuation.operand_stack, "operand stack")?;
+    validate_heap_references(&continuation.heap.heap, &continuation.operand_stack)?;
     validate_optional_value(continuation.last_value.as_ref(), "last value")?;
+    if let Some(value) = continuation.last_value.as_ref() {
+        validate_heap_reference(&continuation.heap.heap, value)?;
+    }
     for (index, (value, projected)) in continuation
         .slots
         .iter()
@@ -336,20 +654,65 @@ fn validate_continuation(continuation: &VmContinuation) -> Result<(), Continuati
             });
         }
         validate_optional_value(value.as_ref(), &format!("slot {index}"))?;
+        if let Some(value) = value.as_ref() {
+            validate_heap_reference(&continuation.heap.heap, value)?;
+        }
     }
     for (key, value) in continuation.globals.iter() {
         validate_value(value, &format!("global `{key}`"))?;
+        validate_heap_reference(&continuation.heap.heap, value)?;
     }
     for (depth, iterator) in continuation.iterator_stack.iter().enumerate() {
         validate_optional_value(
             iterator.restore_value.as_ref(),
             &format!("iterator {depth} restore value"),
         )?;
+        if let Some(value) = iterator.restore_value.as_ref() {
+            validate_heap_reference(&continuation.heap.heap, value)?;
+        }
         if let VmIteratorCursor::List { values, .. } = &iterator.cursor {
             validate_values(values, &format!("iterator {depth} values"))?;
+            validate_heap_references(&continuation.heap.heap, values)?;
         }
     }
+    for (id, object) in continuation.heap.heap.objects_in_id_order() {
+        match object {
+            HeapObject::Tuple(values) | HeapObject::List(values) => {
+                validate_values(values, &format!("heap object {}", id.get()))?;
+                validate_heap_references(&continuation.heap.heap, values)?;
+            }
+            HeapObject::Record(record) => {
+                for (key, value) in record.iter() {
+                    validate_value(value, &format!("heap object {}.{key}", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, value)?;
+                }
+            }
+        }
+    }
+    continuation
+        .heap
+        .heap
+        .validate_persisted_forest(&continuation_forest_roots(continuation))
+        .map_err(|reason| ContinuationError::UnserializableValue {
+            location: format!("continuation heap: {reason}"),
+            variant: "invalid heap object graph",
+        })?;
     Ok(())
+}
+
+fn validate_heap_references(heap: &Heap, values: &[Value]) -> Result<(), ContinuationError> {
+    for value in values {
+        validate_heap_reference(heap, value)?;
+    }
+    Ok(())
+}
+
+fn validate_heap_reference(heap: &Heap, value: &Value) -> Result<(), ContinuationError> {
+    heap.validate_resolvable_refs(value)
+        .map_err(|_| ContinuationError::UnserializableValue {
+            location: "continuation heap root".to_string(),
+            variant: "dangling heap reference",
+        })
 }
 
 fn validate_values(values: &[Value], location: &str) -> Result<(), ContinuationError> {
@@ -372,12 +735,6 @@ fn validate_value(value: &Value, location: &str) -> Result<(), ContinuationError
             location: location.to_string(),
             variant: "Projected",
         }),
-        Value::Number(number) if !number.is_finite() => {
-            Err(ContinuationError::UnserializableValue {
-                location: location.to_string(),
-                variant: "non-finite Number",
-            })
-        }
         Value::Tuple(values) | Value::List(values) => {
             for (index, value) in values.iter().enumerate() {
                 validate_value(value, &format!("{location}[{index}]"))?;
@@ -395,7 +752,8 @@ fn validate_value(value: &Value, location: &str) -> Result<(), ContinuationError
         | Value::Number(_)
         | Value::String(_)
         | Value::Image(_)
-        | Value::Resource(_) => Ok(()),
+        | Value::Resource(_)
+        | Value::Ref(_) => Ok(()),
     }
 }
 
@@ -423,6 +781,36 @@ fn profile_from_continuation(
 }
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
+    #[cfg(test)]
+    pub(crate) fn live_logical_bytes(&self) -> u64 {
+        self.heap.live_logical_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn instructions_executed(&self) -> u64 {
+        self.instructions_executed
+    }
+
+    fn new_heap(host: &H) -> Heap {
+        let limit = match host.execution_bounds().memory_limit {
+            ExecutionBound::Bounded(limit) => limit.get(),
+            ExecutionBound::Unbounded => u64::MAX,
+        };
+        let mut heap = Heap::with_limit(limit);
+        heap.set_collect_every_allocation(host.collect_heap_every_allocation());
+        heap
+    }
+
+    pub(crate) fn install_heap(&mut self, mut heap: Heap) {
+        let limit = match self.host.execution_bounds().memory_limit {
+            ExecutionBound::Bounded(limit) => limit.get(),
+            ExecutionBound::Unbounded => u64::MAX,
+        };
+        heap.set_limit(limit);
+        heap.set_collect_every_allocation(self.host.collect_heap_every_allocation());
+        self.heap = heap;
+    }
+
     pub(crate) fn new_with_mode(
         chunk: &'a Chunk,
         slots: SlotState,
@@ -444,6 +832,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: None,
             instructions_executed: 0,
             active_execution_elapsed: std::time::Duration::ZERO,
+            heap: Self::new_heap(host),
+            heap_initialized: false,
+            extras_heapified: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -472,6 +863,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: None,
             instructions_executed: 0,
             active_execution_elapsed: std::time::Duration::ZERO,
+            heap: Self::new_heap(host),
+            heap_initialized: false,
+            extras_heapified: false,
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
@@ -482,9 +876,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     ///
     /// Projected host values, even when nested inside another value, cannot be
     /// reconstructed without their host descriptor and decline the boundary.
-    /// Non-finite numbers are also declined because `Value`'s JSON serde maps
-    /// them to `null`.
-    pub fn suspend(&self) -> Result<VmContinuation, ContinuationError> {
+    pub fn suspend(&mut self) -> Result<VmContinuation, ContinuationError> {
+        let roots = self.heap_roots();
+        self.heap.collect(roots.iter());
         validate_values(&self.stack, "operand stack")?;
         validate_optional_value(self.last_value.as_ref(), "last value")?;
         for (index, value) in self.slots.values.iter().enumerate() {
@@ -544,6 +938,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: self.pending_error_span,
             instructions_executed: self.instructions_executed,
             active_execution_elapsed: self.active_execution_elapsed,
+            heap: VmHeapContinuation::new(self.heap.clone()),
         };
         validate_continuation(&continuation)?;
         Ok(continuation)
@@ -596,6 +991,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 limit_ms: limit.as_millis(),
             });
         }
+        if let ExecutionBound::Bounded(limit) = bounds.memory_limit
+            && continuation.heap.live_logical_bytes() > limit.get()
+        {
+            return Err(ContinuationError::MemoryLimitExceeded {
+                limit: limit.get(),
+                live: continuation.heap.live_logical_bytes(),
+            });
+        }
         let profile = continuation
             .profile
             .map(profile_from_continuation)
@@ -617,6 +1020,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 restore: LoopRestore {
                     previous: iterator.restore_value,
                 },
+                heapified: false,
             })
             .collect();
         Ok(Self {
@@ -638,6 +1042,18 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: continuation.pending_error_span,
             instructions_executed: continuation.instructions_executed,
             active_execution_elapsed: continuation.active_execution_elapsed,
+            heap: {
+                let mut heap = continuation.heap.into_heap();
+                let limit = match bounds.memory_limit {
+                    ExecutionBound::Bounded(limit) => limit.get(),
+                    ExecutionBound::Unbounded => u64::MAX,
+                };
+                heap.set_limit(limit);
+                heap.set_collect_every_allocation(host.collect_heap_every_allocation());
+                heap
+            },
+            heap_initialized: true,
+            extras_heapified: false,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are
@@ -646,5 +1062,150 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::HeapId;
+
+    fn empty_continuation(heap: Heap) -> VmContinuation {
+        VmContinuation {
+            instruction_pointer: 0,
+            operand_stack: Vec::new(),
+            last_value: None,
+            slots: Vec::new(),
+            projected_slots: Vec::new(),
+            globals: Record::new(),
+            iterator_stack: Vec::new(),
+            occurrence_counters: Default::default(),
+            mode: ExecutionMode::Process,
+            profile: None,
+            pending_error_span: None,
+            instructions_executed: 0,
+            active_execution_elapsed: std::time::Duration::ZERO,
+            heap: VmHeapContinuation::new(heap),
+        }
+    }
+
+    #[test]
+    fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
+        // A cyclic object used to validate "by identity" and resume. Under the
+        // forest invariant it cannot be expressed: the object holds itself, so
+        // it has an owner no root can account for.
+        let mut cyclic = Heap::default();
+        let Value::Ref(root) = cyclic
+            .allocate(HeapObject::List(Vec::new()))
+            .expect("allocate cyclic root")
+        else {
+            unreachable!()
+        };
+        cyclic
+            .replace_object(root, HeapObject::List(vec![Value::Ref(root)]))
+            .expect("close cycle");
+        let mut continuation = empty_continuation(cyclic);
+        continuation.slots = vec![Some(Value::Ref(root))];
+        continuation.projected_slots = vec![false];
+        let error = validate_continuation(&continuation)
+            .expect_err("a cyclic continuation must be rejected");
+        assert!(
+            error.to_string().contains("must have one owner"),
+            "unexpected rejection: {error}"
+        );
+
+        // The acyclic case still round-trips byte-for-byte, negative zero and
+        // all.
+        let mut heap = Heap::default();
+        let Value::Ref(id) = heap
+            .allocate(HeapObject::List(vec![Value::Number(-0.0)]))
+            .expect("allocate root")
+        else {
+            unreachable!()
+        };
+        let mut continuation = empty_continuation(heap);
+        continuation.slots = vec![Some(Value::Ref(id))];
+        continuation.projected_slots = vec![false];
+        validate_continuation(&continuation).expect("an owned tree validates");
+        let bytes = serde_json::to_vec(&continuation).expect("serialize heap");
+        let restored: VmContinuation = serde_json::from_slice(&bytes).expect("restore heap");
+        assert_eq!(serde_json::to_vec(&restored).expect("redump heap"), bytes);
+        let HeapObject::List(values) = restored.heap.heap.get(id).expect("restored root") else {
+            panic!("root should remain a list")
+        };
+        let Value::Number(number) = values[0] else {
+            panic!("first member should be a number")
+        };
+        assert_eq!(number.to_bits(), (-0.0_f64).to_bits());
+    }
+
+    #[test]
+    fn continuation_numbers_canonicalize_nan_and_preserve_negative_zero() {
+        let mut left = empty_continuation(Heap::default());
+        left.operand_stack = vec![
+            Value::Number(f64::from_bits(0x7ff0_0000_0000_0001)),
+            Value::Number(-0.0),
+        ];
+        let mut right = empty_continuation(Heap::default());
+        right.operand_stack = vec![
+            Value::Number(f64::from_bits(0xfff8_0000_0000_0042)),
+            Value::Number(-0.0),
+        ];
+
+        let left_bytes = serde_json::to_vec(&left).expect("serialize NaN continuation");
+        let right_bytes = serde_json::to_vec(&right).expect("serialize NaN continuation");
+        assert_eq!(left_bytes, right_bytes, "all NaN payloads canonicalize");
+        let restored: VmContinuation =
+            serde_json::from_slice(&left_bytes).expect("restore NaN continuation");
+        assert_eq!(
+            serde_json::to_vec(&restored).expect("redump continuation"),
+            left_bytes
+        );
+        let Value::Number(nan) = restored.operand_stack[0] else {
+            panic!("expected NaN")
+        };
+        let Value::Number(negative_zero) = restored.operand_stack[1] else {
+            panic!("expected negative zero")
+        };
+        assert_eq!(nan.to_bits(), 0x7ff8_0000_0000_0000);
+        assert_eq!(negative_zero.to_bits(), (-0.0_f64).to_bits());
+    }
+
+    #[test]
+    fn continuation_decode_rejects_descending_counters_and_dangling_refs() {
+        let mut heap = Heap::default();
+        heap.allocate(HeapObject::List(Vec::new())).expect("first");
+        heap.allocate(HeapObject::List(Vec::new())).expect("second");
+        let continuation = empty_continuation(heap);
+        let mut descending = serde_json::to_value(&continuation).expect("wire");
+        descending["heap"]["objects"]
+            .as_array_mut()
+            .expect("heap objects")
+            .reverse();
+        assert!(
+            serde_json::from_value::<VmContinuation>(descending)
+                .expect_err("descending IDs must fail")
+                .to_string()
+                .contains("strictly ordered by ID")
+        );
+
+        let mut counter = serde_json::to_value(&continuation).expect("wire");
+        counter["heap"]["next_id"] = serde_json::json!(1000);
+        assert!(
+            serde_json::from_value::<VmContinuation>(counter)
+                .expect_err("counter mismatch must fail")
+                .to_string()
+                .contains("allocation counter plus one")
+        );
+
+        let mut dangling = empty_continuation(Heap::default());
+        dangling.operand_stack = vec![Value::Ref(HeapId::from_counter(99))];
+        let bytes = serde_json::to_vec(&dangling).expect("dangling wire");
+        assert!(
+            serde_json::from_slice::<VmContinuation>(&bytes)
+                .expect_err("dangling continuation root must fail")
+                .to_string()
+                .contains("dangling heap reference")
+        );
     }
 }

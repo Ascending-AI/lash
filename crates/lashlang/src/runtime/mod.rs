@@ -20,6 +20,7 @@ mod entry_points;
 mod error;
 pub use error::{FormatError, RuntimeError};
 mod format;
+mod heap;
 mod host;
 mod instruction;
 mod json;
@@ -41,6 +42,11 @@ pub use entry_points::{
     ExecutableProgram, compile, compile_linked, compile_linked_process,
     compile_module_artifact_process, compile_process, execute, prewarm,
 };
+pub use heap::{
+    DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
+    HeapId,
+};
+pub(crate) use heap::{Heap, HeapObject, HeapRestoreWire, PersistedRoots};
 pub use host::{
     AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
     ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart,
@@ -63,8 +69,8 @@ pub(crate) use schema::{
 pub(crate) use vm::SlotState;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, Vm, VmContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome,
+    ContinuationError, Vm, VmContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmProfileContinuation, VmRunOutcome,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`
@@ -78,11 +84,12 @@ pub(crate) use format::*;
 pub(crate) use json::*;
 #[allow(unused_imports)]
 pub(crate) use ops::*;
+pub use state::LASHLANG_SNAPSHOT_VERSION;
 #[doc(hidden)]
 pub use state::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, validate_canonical_messagepack_structure,
 };
-pub use state::{Snapshot, SnapshotDecodeError, State};
+pub use state::{GlobalPatch, GlobalPatchOutcome, Snapshot, SnapshotDecodeError, State};
 pub use value::{
     ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY,
     LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,

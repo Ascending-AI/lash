@@ -1189,6 +1189,7 @@ pub(crate) fn coerce_string(value: &Value) -> Result<Cow<'_, str>, RuntimeError>
         | Value::Tuple(_)
         | Value::List(_)
         | Value::Record(_)
+        | Value::Ref(_)
         | Value::Projected(_) => Err(RuntimeError::ExpectedText {
             actual: value_type_name(value).to_string(),
         }),
@@ -1300,6 +1301,12 @@ pub(crate) fn is_truthy(value: &Value) -> bool {
         Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => true,
         Value::Tuple(values) => !values.is_empty(),
         Value::Projected(value) => futures_executor::block_on(value.truthy()),
+        // A heap object is a tuple, list or record; every one of those is truthy
+        // except an empty tuple, so this is the closest defined answer.
+        Value::Ref(_) => {
+            debug_assert_exported_value("truthiness");
+            true
+        }
     }
 }
 
@@ -1342,6 +1349,22 @@ pub(crate) fn error_value(message: String) -> Value {
     Value::Record(Arc::new(record))
 }
 
+/// Fails loudly in debug builds when a heap reference reaches a boundary that
+/// cannot report an error, and lets release builds carry on with the caller's
+/// defined fallback.
+///
+/// A reference here is always a VM bug — the instruction heap plan is supposed
+/// to have exported it — but a durable session losing its host process over a
+/// display or serialization path is a far worse failure than a wrong rendering,
+/// so these paths never panic in release.
+pub(crate) fn debug_assert_exported_value(context: &str) {
+    debug_assert!(
+        false,
+        "heap references must be exported before {context}; the instruction heap plan is missing this opcode"
+    );
+    let _ = context;
+}
+
 pub(crate) fn value_type_name(value: &Value) -> &str {
     match value {
         Value::Null => "null",
@@ -1354,6 +1377,7 @@ pub(crate) fn value_type_name(value: &Value) -> &str {
         Value::List(_) => "list",
         Value::Record(_) => "record",
         Value::Projected(value) => value.value_type_name(),
+        Value::Ref(_) => "heap_ref",
     }
 }
 
@@ -1368,7 +1392,8 @@ pub(crate) fn value_contains_projected(value: &Value) -> bool {
         | Value::Number(_)
         | Value::String(_)
         | Value::Image(_)
-        | Value::Resource(_) => false,
+        | Value::Resource(_)
+        | Value::Ref(_) => false,
     }
 }
 

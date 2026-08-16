@@ -1,5 +1,5 @@
 use super::{
-    ImageValue, RuntimeError, Value,
+    ImageValue, RuntimeError, Value, debug_assert_exported_value,
     record::{Symbol, intern_symbol},
     unwrap_type_value,
 };
@@ -84,6 +84,12 @@ impl PrimitiveMask {
                 _ => Self::OBJECT.0,
             },
             Value::Number(_) => 0,
+            // No type mask matches, so validation reports a type mismatch
+            // instead of accepting an opaque value.
+            Value::Ref(_) => {
+                debug_assert_exported_value("schema validation");
+                0
+            }
         };
         self.0 & value_mask != 0
     }
@@ -441,6 +447,7 @@ fn schema_value_type_name(value: &Value) -> &'static str {
             "tuple" | "list" => "array",
             _ => "object",
         },
+        Value::Ref(_) => "heap_ref",
     }
 }
 

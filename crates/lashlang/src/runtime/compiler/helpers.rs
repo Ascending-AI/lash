@@ -169,6 +169,21 @@ fn label_attaches_to_assignment_value(expr: &Expr) -> bool {
     }
 }
 
+/// Whether a value produced by `expr` must be isolated before a durable store.
+///
+/// Container literals and comprehensions already isolate every member they
+/// admit and build a fresh container around those copies, so the stored value is
+/// exclusively owned by construction. Everything else — a variable, a field or
+/// index read, a concatenation, a builtin result — can hand back a value whose
+/// members are still reachable from another binding, and so has to be copied.
+pub(crate) fn store_needs_isolation(expr: &Expr) -> bool {
+    match expr {
+        Expr::LabelAnnotated { expr, .. } => store_needs_isolation(expr),
+        Expr::Tuple(_) | Expr::List(_) | Expr::Record(_) | Expr::ListComprehension { .. } => false,
+        _ => true,
+    }
+}
+
 pub(crate) fn is_pure_expr(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { expr, .. } => is_pure_expr(expr),

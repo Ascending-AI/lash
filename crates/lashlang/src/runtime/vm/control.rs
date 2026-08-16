@@ -5,6 +5,7 @@ use super::super::{
     ExecutionOutcome, RuntimeError, RuntimeFailure, Value,
 };
 use super::effects::VmEffect;
+use super::heap_plan::{SlotExport, StackExport, instruction_heap_plan};
 use super::{Vm, VmRunOutcome};
 use crate::lexer::Span;
 
@@ -216,8 +217,35 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 span: None,
             });
         }
+        if !self.heap_initialized {
+            if let Err(error) = self.heapify_vm_state() {
+                return Err(VmTrap {
+                    error,
+                    instruction_ip: self.ip.min(self.chunk.code.len().saturating_sub(1)),
+                    span: None,
+                });
+            }
+            self.heap_initialized = true;
+        }
         while let Some(instruction) = self.chunk.code.get(self.ip).copied() {
             let instruction_ip = self.ip;
+            if let Err(error) = self.materialize_instruction_operands(instruction) {
+                return Err(VmTrap {
+                    error,
+                    instruction_ip,
+                    span: None,
+                });
+            }
+            // Under stress collection the scope opens before every instruction,
+            // not just before the ones a list said could allocate. Any
+            // instruction can reach an allocation — a general concat isolates
+            // its result — and an allocation that commits outside an open scope
+            // collects against empty pins and sweeps live objects.
+            if self.heap.allocation_scope_needs_roots() {
+                let roots = self.heap_roots();
+                self.heap.begin_allocation_scope(roots);
+            }
+            active_started = Instant::now();
             self.ip += 1;
             self.instructions_executed = self.instructions_executed.saturating_add(1);
             let profile = self
@@ -247,6 +275,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 Err(error) => Err(error),
             };
+            if result.is_ok()
+                && let Err(error) = self.heapify_vm_state()
+            {
+                return Err(VmTrap {
+                    error,
+                    instruction_ip,
+                    span: None,
+                });
+            }
             if let Some((tag, start)) = profile {
                 self.record_instruction_profile(tag, start.elapsed().as_nanos());
             }
@@ -349,6 +386,243 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 limit_ms: limit.as_millis(),
             });
         }
+        if let ExecutionBound::Bounded(limit) = bounds.memory_limit
+            && self.heap.live_logical_bytes() > limit.get()
+        {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: limit.get(),
+                attempted: self.heap.live_logical_bytes(),
+            });
+        }
         Ok(())
+    }
+
+    /// Exports whatever this instruction's heap plan says it reads.
+    fn materialize_instruction_operands(
+        &mut self,
+        instruction: super::Instruction,
+    ) -> Result<(), RuntimeError> {
+        let plan = instruction_heap_plan(instruction, self.chunk);
+        match plan.stack {
+            StackExport::Top(window) => {
+                let start = self.stack.len().saturating_sub(window);
+                for index in start..self.stack.len() {
+                    let exported = self.heap.export_for_instruction(&self.stack[index])?;
+                    self.stack[index] = exported;
+                }
+            }
+            StackExport::All => {
+                for value in &mut self.stack {
+                    *value = self.heap.export_for_instruction(value)?;
+                }
+            }
+        }
+        match plan.slots {
+            SlotExport::None => {}
+            SlotExport::Read(slot) => self.materialize_slot(slot)?,
+            SlotExport::Mutate(slot) => self.materialize_mutable_slot(slot)?,
+            SlotExport::All => {
+                for slot in 0..self.slots.values.len() {
+                    self.materialize_slot(slot)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn materialize_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
+        if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn materialize_mutable_slot(&mut self, slot: usize) -> Result<(), RuntimeError> {
+        if let Some(value) = self.slots.values.get_mut(slot).and_then(Option::as_mut) {
+            *value = self.heap.export_for_mutation(value)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn materialize_vm_state(&mut self) -> Result<(), RuntimeError> {
+        for value in &mut self.stack {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        if let Some(value) = &mut self.last_value {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        for value in self.slots.values.iter_mut().flatten() {
+            *value = self.heap.export_for_instruction(value)?;
+        }
+        for entry in &mut self.slots.extras.entries {
+            entry.value = self.heap.export_for_instruction(&entry.value)?;
+        }
+        for iterator in &mut self.iter_stack {
+            if let super::IterCursor::List { values, .. } = &mut iterator.cursor {
+                let materialized = values
+                    .iter()
+                    .map(|value| self.heap.export_for_instruction(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                *values = materialized.into();
+            }
+            if let Some(value) = &mut iterator.restore.previous {
+                *value = self.heap.export_for_instruction(value)?;
+            }
+            iterator.heapified = false;
+        }
+        self.extras_heapified = false;
+        Ok(())
+    }
+
+    /// Imports every inline compound left in VM state into the heap.
+    ///
+    /// This runs after each instruction, so its cost has to be proportional to
+    /// what the instruction could have changed, not to the data the VM happens
+    /// to hold. The operand stack and the slot table are bounded by the
+    /// program's shape, but iterator cursors and the extra-globals record are
+    /// not: both are written once and then only read, so each carries a flag and
+    /// is scanned exactly once.
+    fn heapify_vm_state(&mut self) -> Result<(), RuntimeError> {
+        if self.heap.allocation_scope_needs_roots() {
+            self.heap.begin_allocation_scope(self.heap_roots());
+        }
+        let pending_iterators = self
+            .iter_stack
+            .iter()
+            .enumerate()
+            .filter_map(|(index, iterator)| (!iterator.heapified).then_some(index))
+            .collect::<Vec<_>>();
+        let scan_extras = !self.extras_heapified;
+        // Durable holders come first so a transient holder of the same tree can
+        // reuse what they imported rather than allocating a second object.
+        let mut values = Vec::new();
+        values.extend(
+            self.slots
+                .values
+                .iter()
+                .flatten()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        if scan_extras {
+            values.extend(
+                self.slots
+                    .extras
+                    .values()
+                    .filter(|value| needs_heap_import(value))
+                    .cloned(),
+            );
+        }
+        for index in &pending_iterators {
+            let iterator = &self.iter_stack[*index];
+            values.extend(
+                iterator
+                    .restore
+                    .previous
+                    .iter()
+                    .filter(|value| needs_heap_import(value))
+                    .cloned(),
+            );
+        }
+        let durable_count = values.len();
+        values.extend(
+            self.stack
+                .iter()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        values.extend(
+            self.last_value
+                .iter()
+                .filter(|value| needs_heap_import(value))
+                .cloned(),
+        );
+        for index in &pending_iterators {
+            let iterator = &self.iter_stack[*index];
+            if let super::IterCursor::List {
+                values: iterator_values,
+                ..
+            } = &iterator.cursor
+            {
+                values.extend(
+                    iterator_values
+                        .iter()
+                        .filter(|value| needs_heap_import(value))
+                        .cloned(),
+                );
+            }
+        }
+
+        if !values.is_empty() {
+            let imported = self.heap.import_values(values, durable_count);
+            self.heap.end_allocation_scope();
+            let mut imported = imported?.into_iter();
+            for value in self.slots.values.iter_mut().flatten() {
+                replace_imported_value(value, &mut imported);
+            }
+            if scan_extras {
+                for entry in &mut self.slots.extras.entries {
+                    replace_imported_value(&mut entry.value, &mut imported);
+                }
+            }
+            for index in &pending_iterators {
+                if let Some(value) = &mut self.iter_stack[*index].restore.previous {
+                    replace_imported_value(value, &mut imported);
+                }
+            }
+            for value in &mut self.stack {
+                replace_imported_value(value, &mut imported);
+            }
+            if let Some(value) = &mut self.last_value {
+                replace_imported_value(value, &mut imported);
+            }
+            for index in &pending_iterators {
+                if let super::IterCursor::List {
+                    values: iterator_values,
+                    ..
+                } = &mut self.iter_stack[*index].cursor
+                {
+                    for value in iterator_values.make_mut() {
+                        replace_imported_value(value, &mut imported);
+                    }
+                }
+            }
+            debug_assert!(imported.next().is_none());
+        } else {
+            self.heap.end_allocation_scope();
+        }
+        for index in pending_iterators {
+            self.iter_stack[index].heapified = true;
+        }
+        self.extras_heapified = true;
+        if self.heap.needs_collection() {
+            let roots = self.heap_roots();
+            self.heap.collect(roots.iter());
+        }
+        Ok(())
+    }
+
+    pub(super) fn heap_roots(&self) -> Vec<Value> {
+        let mut roots = self.stack.clone();
+        roots.extend(self.last_value.iter().cloned());
+        roots.extend(self.slots.values.iter().flatten().cloned());
+        roots.extend(self.slots.extras.values().cloned());
+        for iterator in &self.iter_stack {
+            if let super::IterCursor::List { values, .. } = &iterator.cursor {
+                roots.push(Value::List(values.clone()));
+            }
+            roots.extend(iterator.restore.previous.iter().cloned());
+        }
+        roots
+    }
+}
+
+fn needs_heap_import(value: &Value) -> bool {
+    matches!(value, Value::Tuple(_) | Value::List(_) | Value::Record(_))
+}
+
+fn replace_imported_value(value: &mut Value, imported: &mut impl Iterator<Item = Value>) {
+    if needs_heap_import(value) {
+        *value = imported.next().expect("heap import count matches");
     }
 }

@@ -93,9 +93,7 @@ pub enum LinkError {
     },
     #[error("trigger registration `inputs` must map at least one param to `trigger.event`")]
     MissingTriggerEventInput { span: Option<Span> },
-    #[error(
-        "`trigger.event` is only valid as a direct value inside trigger definition `inputs`"
-    )]
+    #[error("`trigger.event` is only valid as a direct value inside trigger definition `inputs`")]
     TriggerEventOutsideInputs { span: Option<Span> },
     #[error(
         "`trigger.event` represents the whole event; projections such as `trigger.event.field` are not supported"
@@ -184,10 +182,7 @@ pub enum LinkError {
         span: Option<Span>,
     },
     #[error("cannot iterate over {actual}; expected a list")]
-    IncompatibleIterationTarget {
-        actual: String,
-        span: Option<Span>,
-    },
+    IncompatibleIterationTarget { actual: String, span: Option<Span> },
     #[error("failed to hash linked module: {message}")]
     ModuleHash { message: String },
 }

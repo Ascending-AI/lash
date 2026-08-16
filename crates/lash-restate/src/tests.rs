@@ -7737,6 +7737,7 @@ async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_before_pending_w
             lash_protocol_rlm::RlmProtocolPluginConfig::new(
                 lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
                 lash_protocol_rlm::ExecutionBound::secs(30),
+                lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
             ),
             Arc::clone(&artifact_store),
         )

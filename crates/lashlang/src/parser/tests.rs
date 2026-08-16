@@ -23,7 +23,10 @@ mod tests {
     fn type_expression_fragment_consumes_the_complete_input() {
         assert_eq!(
             parse_type_expression("list[str | null]").expect("type fragment should parse"),
-            TypeExpr::List(Box::new(TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null])))
+            TypeExpr::List(Box::new(TypeExpr::Union(vec![
+                TypeExpr::Str,
+                TypeExpr::Null
+            ])))
         );
         let error = parse_type_expression("any trailing")
             .expect_err("trailing type fragment input should be rejected");
@@ -35,8 +38,8 @@ mod tests {
         let err = parse("finish").expect_err("bare finish should be rejected");
         assert!(matches!(err, ParseError::MissingFinishValue { .. }));
 
-        let err = parse("process p() { finish }")
-            .expect_err("bare process finish should be rejected");
+        let err =
+            parse("process p() { finish }").expect_err("bare process finish should be rejected");
         assert!(matches!(err, ParseError::MissingFinishValue { .. }));
     }
 
@@ -44,7 +47,10 @@ mod tests {
     fn submit_keyword_is_removed() {
         let err = parse(r#"submit "ok""#).expect_err("submit should be rejected");
         assert!(matches!(err, ParseError::SubmitRemoved { .. }));
-        assert_eq!(err.to_string(), "`submit` was removed; use `finish <value>`");
+        assert_eq!(
+            err.to_string(),
+            "`submit` was removed; use `finish <value>`"
+        );
     }
 
     #[test]
@@ -247,10 +253,9 @@ mod tests {
 
     #[test]
     fn list_comprehension_parses_ordered_for_and_if_clauses() {
-        let program = parse(
-            "result = [format(\"{}:{}\", a, b) for a in xs if a > 0 for b in ys if b != a]",
-        )
-        .expect("list comprehension should parse");
+        let program =
+            parse("result = [format(\"{}:{}\", a, b) for a in xs if a > 0 for b in ys if b != a]")
+                .expect("list comprehension should parse");
         let Expr::Assign { expr, .. } = &block(&program)[0] else {
             panic!("expected assignment");
         };
@@ -470,22 +475,27 @@ mod tests {
             "#;
         let graph = crate::workflow_graph_from_source(source).expect("module should project");
         assert!(graph.process("triage").is_some());
-        assert!(graph.nodes().any(|node| matches!(
-            node.kind,
-            crate::WorkflowNodeKind::Call { .. }
-        )));
+        assert!(
+            graph
+                .nodes()
+                .any(|node| matches!(node.kind, crate::WorkflowNodeKind::Call { .. }))
+        );
         assert!(graph.nodes().any(|node| matches!(
             node.kind,
             crate::WorkflowNodeKind::Container(crate::WorkflowContainer::If { .. })
         )));
-        assert!(graph.nodes().any(|node| matches!(
-            node.kind,
-            crate::WorkflowNodeKind::Terminal { .. }
-        )));
-        assert!(graph.main.edges.iter().any(|edge| matches!(
-            edge.kind,
-            crate::WorkflowEdgeKind::Sequence
-        )));
+        assert!(
+            graph
+                .nodes()
+                .any(|node| matches!(node.kind, crate::WorkflowNodeKind::Terminal { .. }))
+        );
+        assert!(
+            graph
+                .main
+                .edges
+                .iter()
+                .any(|edge| matches!(edge.kind, crate::WorkflowEdgeKind::Sequence))
+        );
     }
 
     #[test]

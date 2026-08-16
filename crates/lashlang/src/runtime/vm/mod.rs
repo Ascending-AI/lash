@@ -23,12 +23,13 @@ use rustc_hash::FxHashMap;
 mod continuation;
 mod control;
 mod effects;
+mod heap_plan;
 
 #[cfg(test)]
 use continuation::TestSuspension;
 pub use continuation::{
-    ContinuationError, VmContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmProfileContinuation, VmRunOutcome,
+    ContinuationError, VmContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmProfileContinuation, VmRunOutcome,
 };
 use control::{VmMode, VmStep};
 use effects::VmEffect;
@@ -40,8 +41,8 @@ use super::schema::{
 };
 use super::value::ProjectedValue;
 use super::{
-    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, ImageValue,
-    Instruction, InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    Chunk, CompiledProgram, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap, HeapObject,
+    ImageValue, Instruction, InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
     LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, ProfileAccumulator,
     ProfileReport, ProjectedBindings, ResourceHandle, RuntimeError, State, Value,
     add_assign_index_number, add_values, as_number, assign_path, eval_binary_values,
@@ -228,6 +229,11 @@ pub struct Vm<'a, H> {
     pending_error_span: Option<Span>,
     instructions_executed: u64,
     active_execution_elapsed: Duration,
+    pub(crate) heap: Heap,
+    heap_initialized: bool,
+    /// Whether the extra-globals record has been imported into the heap. It is
+    /// written once, when the VM is built or restored, and only read after that.
+    extras_heapified: bool,
     assigned_globals: std::collections::BTreeSet<String>,
     #[cfg(test)]
     test_suspension: TestSuspension,
@@ -250,12 +256,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Builds a VM from authored globals for an externally driven execution.
     pub fn from_state(program: &'a CompiledProgram, state: &mut State, host: &'a H) -> Self {
         let projected = host.projected_bindings();
-        let slots = SlotState::from_globals(
-            std::mem::take(&mut state.globals),
-            &program.chunk.slot_names,
-            &projected,
-        );
+        let (globals, heap) = state.take_runtime();
+        let slots = SlotState::from_globals(globals, &program.chunk.slot_names, &projected);
         let mut vm = Self::new_with_mode(&program.chunk, slots, host, host.execution_mode());
+        vm.install_heap(heap);
         if host.profile_execution() {
             vm.enable_profile();
         }
@@ -422,6 +426,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.load_slot(name)?.clone();
                 self.stack.push(value);
             }
+            Instruction::DeepCopy => {
+                let value = self.pop_stack()?;
+                self.stack.push(self.heap.isolate_value(&value)?);
+            }
             Instruction::StoreName(name) => {
                 let value = self.pop_stack()?;
                 self.slots
@@ -452,19 +460,33 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 if self.stack[list_index..]
                     .iter()
                     .any(|value| matches!(value, Value::Projected(_)))
-                    || !matches!(self.stack[list_index], Value::List(_))
                 {
                     return Ok(None);
                 }
-                let item = self.pop_stack()?;
-                let Some(Value::List(items)) = self.stack.last_mut() else {
-                    unreachable!("list append target was checked above");
-                };
-                let values = items.make_mut();
-                if values.len() == values.capacity() {
-                    values.reserve(1);
+                // This opcode only ever appends to a comprehension's own
+                // accumulator, which nothing outside the comprehension can
+                // reach, so appending into its object is unobservable — and it
+                // keeps the accumulation linear instead of rebuilding the list
+                // on every element.
+                match &self.stack[list_index] {
+                    Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
+                        let target = Value::Ref(*id);
+                        let item = self.pop_stack()?;
+                        self.heap.push_list(&target, item)?;
+                    }
+                    Value::List(_) => {
+                        let item = self.pop_stack()?;
+                        let Some(Value::List(items)) = self.stack.last_mut() else {
+                            unreachable!("list append target was checked above");
+                        };
+                        let values = items.make_mut();
+                        if values.len() == values.capacity() {
+                            values.reserve(1);
+                        }
+                        values.push(item);
+                    }
+                    _ => return Ok(None),
                 }
-                values.push(item);
             }
             Instruction::BuildRecord(keys) => {
                 let record = self.drain_record_from_stack(keys)?;
@@ -508,11 +530,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
                 let right = self.pop_stack()?;
                 let left = self.pop_stack()?;
-                let value = match (left, right) {
-                    (Value::Number(left), Value::Number(right)) if op != BinaryOp::In => {
-                        eval_number_binary_values(left, op, right)
+                let value = if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
+                    let equal = self.heap.structural_eq(&left, &right)?;
+                    Value::Bool(if op == BinaryOp::Equal { equal } else { !equal })
+                } else {
+                    match (left, right) {
+                        (Value::Number(left), Value::Number(right)) if op != BinaryOp::In => {
+                            eval_number_binary_values(left, op, right)
+                        }
+                        (left, right) => eval_binary_values(left, op, right)?,
                     }
-                    (left, right) => eval_binary_values(left, op, right)?,
                 };
                 self.stack.push(value);
             }
@@ -715,35 +742,29 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::AddAssignIndexNumber { slot, right } => {
                 let index = self.pop_stack()?;
-                self.add_assign_index_number(slot, &index, right)?;
+                if let Some(Value::Ref(id)) = self.slots.get(slot) {
+                    let target = Value::Ref(*id);
+                    let index = self.heap.export(&index)?;
+                    let value = self.heap.add_assign_index_number(&target, &index, right)?;
+                    self.record_assignment(slot);
+                    self.last_value = Some(value);
+                } else {
+                    self.add_assign_index_number(slot, &index, right)?;
+                }
             }
             Instruction::AddAssignIndexSlotNumber { slot, index, right } => {
                 let index = self.load_slot(index)?.clone();
-                self.add_assign_index_number(slot, &index, right)?;
-            }
-            Instruction::AppendAssign(slot) => {
-                let item = self.pop_stack()?;
-                let slot_name = &self.chunk.slot_names[slot];
-                self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-                let current =
-                    self.slots
-                        .get_mut(slot)
-                        .ok_or_else(|| RuntimeError::UndefinedVariable {
-                            name: slot_name.text.to_string(),
-                        })?;
-                let value = if let Value::List(items) = current {
-                    let values = items.make_mut();
-                    if values.len() == values.capacity() {
-                        values.reserve(1);
-                    }
-                    values.push(item);
-                    Value::List(items.clone())
+                if let Some(Value::Ref(id)) = self.slots.get(slot) {
+                    let target = Value::Ref(*id);
+                    let index = self.heap.export(&index)?;
+                    let value = self.heap.add_assign_index_number(&target, &index, right)?;
+                    self.record_assignment(slot);
+                    self.last_value = Some(value);
                 } else {
-                    add_values(current.clone(), Value::List(vec![item].into()))?
-                };
-                self.record_assignment(slot);
-                self.last_value = Some(value);
+                    self.add_assign_index_number(slot, &index, right)?;
+                }
             }
+            Instruction::AppendAssign(slot) => self.append_assign(slot)?,
             Instruction::Finish => return Ok(Some(VmStep::Effect(VmEffect::Finish))),
             Instruction::SleepFor => {
                 return Ok(Some(VmStep::Effect(VmEffect::Sleep(SleepKind::For))));
@@ -823,6 +844,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     },
                     binding,
                     restore: self.slots.capture_temporary(binding),
+                    heapified: false,
                 });
             }
             Instruction::IterNext { jump_to } => {
@@ -835,6 +857,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 };
                 self.slots.assign_loop_binding(iter_state.binding, value);
             }
+            Instruction::DeepCopyLoopBinding(binding) => self.deep_copy_loop_binding(binding)?,
             Instruction::EndIter => {
                 if let Some(iter_state) = self.iter_stack.pop() {
                     self.slots
@@ -899,93 +922,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 "fast path re-dispatch with resolved operands must complete the opcode"
             ),
         }
-    }
-
-    #[inline(always)]
-    fn add_assign_value(&mut self, slot: usize, right: Value) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-        let value = {
-            let left = self
-                .slots
-                .get_mut(slot)
-                .ok_or_else(|| RuntimeError::UndefinedVariable {
-                    name: slot_name.text.to_string(),
-                })?;
-            match (left, right) {
-                (Value::Number(left), Value::Number(right)) => {
-                    *left += right;
-                    Value::Number(*left)
-                }
-                (left, right) => {
-                    let value = add_values(left.clone(), right)?;
-                    *left = value.clone();
-                    value
-                }
-            }
-        };
-        self.record_assignment(slot);
-        self.last_value = Some(value);
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn add_assign_number(&mut self, slot: usize, right: f64) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-        let value = {
-            let left = self
-                .slots
-                .get_mut(slot)
-                .ok_or_else(|| RuntimeError::UndefinedVariable {
-                    name: slot_name.text.to_string(),
-                })?;
-            match left {
-                Value::Number(left) => {
-                    *left += right;
-                    Value::Number(*left)
-                }
-                left => {
-                    let value = add_values(left.clone(), Value::Number(right))?;
-                    *left = value.clone();
-                    value
-                }
-            }
-        };
-        self.record_assignment(slot);
-        self.last_value = Some(value);
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn add_assign_slot(&mut self, slot: usize, right: usize) -> Result<(), RuntimeError> {
-        let right = self.load_slot(right)?;
-        if let Value::Number(right) = right {
-            return self.add_assign_number(slot, *right);
-        }
-        let right = right.clone();
-        self.add_assign_value(slot, right)
-    }
-
-    #[inline(always)]
-    fn add_assign_index_number(
-        &mut self,
-        slot: usize,
-        index: &Value,
-        right: f64,
-    ) -> Result<(), RuntimeError> {
-        let slot_name = &self.chunk.slot_names[slot];
-        self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-        let root = self
-            .slots
-            .get_mut(slot)
-            .ok_or_else(|| RuntimeError::UndefinedVariable {
-                name: slot_name.text.to_string(),
-            })?;
-        let value = add_assign_index_number(root, index, right)?;
-        self.record_assignment(slot);
-        self.last_value = Some(value);
-        Ok(())
     }
 
     /// Async slow path for the run loop. The synchronous `step_instruction_fast`
@@ -1079,9 +1015,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.last_value = Some(last_value);
             }
             Instruction::ListAppend => {
-                let item = self.pop_stack()?;
+                let item = materialize_projected_async(self.pop_stack()?).await;
                 let list = self.pop_stack()?;
-                let value = execute_push_builtin_async(list, item).await?;
+                let value = match &list {
+                    Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
+                        self.heap.push_list(&list, item)?
+                    }
+                    _ => execute_push_builtin_async(list, item).await?,
+                };
                 self.stack.push(value);
             }
             Instruction::Unary(op) => {
@@ -1211,6 +1152,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     cursor: IterCursor::List { values, index: 0 },
                     binding,
                     restore: self.slots.capture_temporary(binding),
+                    heapified: false,
                 });
             }
             Instruction::BeginRangeIter { binding, argc } => {
@@ -1229,6 +1171,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     },
                     binding,
                     restore: self.slots.capture_temporary(binding),
+                    heapified: false,
                 });
             }
             Instruction::ResolveTypeRef(slot) => {
@@ -1269,6 +1212,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::PushBool(_)
             | Instruction::PushNumber(_)
             | Instruction::LoadName(_)
+            | Instruction::DeepCopy
             | Instruction::StoreName(_)
             | Instruction::StoreConst { .. }
             | Instruction::BuildTuple(_)
@@ -1293,6 +1237,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::Pop
             | Instruction::Jump(_)
             | Instruction::IterNext { .. }
+            | Instruction::DeepCopyLoopBinding(_)
             | Instruction::EndIter => {
                 unreachable!("opcode is always completed by step_instruction_fast")
             }
@@ -1323,38 +1268,47 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let mut item = Some(materialize_projected_async(self.pop_stack()?).await);
                 let slot_name = &self.chunk.slot_names[slot];
                 self.slots.ensure_assignable(slot, &self.chunk.slot_names)?;
-                let fast_value = {
-                    let current = self.slots.get_mut(slot).ok_or_else(|| {
-                        RuntimeError::UndefinedVariable {
-                            name: slot_name.text.to_string(),
-                        }
-                    })?;
-                    if let Value::List(items) = current {
-                        let values = items.make_mut();
-                        if values.len() == values.capacity() {
-                            values.reserve(1);
-                        }
-                        values.push(item.take().expect("push item should be available"));
-                        Some(Value::List(items.clone()))
-                    } else {
-                        None
-                    }
-                };
-                if let Some(value) = fast_value {
+                if let Some(Value::Ref(id)) = self.slots.get(slot) {
+                    let target = Value::Ref(*id);
+                    let value = self
+                        .heap
+                        .push_list(&target, item.take().expect("push item should be available"))?;
                     self.record_assignment(slot);
                     self.last_value = Some(value);
                 } else {
-                    let item = item.expect("push item should be available");
-                    let current = self.slots.get_mut(slot).ok_or_else(|| {
-                        RuntimeError::UndefinedVariable {
-                            name: slot_name.text.to_string(),
+                    let fast_value = {
+                        let current = self.slots.get_mut(slot).ok_or_else(|| {
+                            RuntimeError::UndefinedVariable {
+                                name: slot_name.text.to_string(),
+                            }
+                        })?;
+                        if let Value::List(items) = current {
+                            let values = items.make_mut();
+                            if values.len() == values.capacity() {
+                                values.reserve(1);
+                            }
+                            values.push(item.take().expect("push item should be available"));
+                            Some(Value::List(items.clone()))
+                        } else {
+                            None
                         }
-                    })?;
-                    let value = execute_push_builtin_async(current.clone(), item).await?;
-                    self.slots
-                        .assign(slot, value.clone(), &self.chunk.slot_names)?;
-                    self.record_assignment(slot);
-                    self.last_value = Some(value);
+                    };
+                    if let Some(value) = fast_value {
+                        self.record_assignment(slot);
+                        self.last_value = Some(value);
+                    } else {
+                        let item = item.expect("push item should be available");
+                        let current = self.slots.get_mut(slot).ok_or_else(|| {
+                            RuntimeError::UndefinedVariable {
+                                name: slot_name.text.to_string(),
+                            }
+                        })?;
+                        let value = execute_push_builtin_async(current.clone(), item).await?;
+                        self.slots
+                            .assign(slot, value.clone(), &self.chunk.slot_names)?;
+                        self.record_assignment(slot);
+                        self.last_value = Some(value);
+                    }
                 }
             }
             IntrinsicOp::FormatCompiled(template) => {
@@ -1501,22 +1455,36 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 
     fn record_assignment(&mut self, slot: usize) {
-        self.assigned_globals
-            .insert(self.chunk.slot_names[slot].text.to_string());
+        let name = &self.chunk.slot_names[slot].text;
+        if !self.assigned_globals.contains(name.as_ref()) {
+            self.assigned_globals.insert(name.to_string());
+        }
     }
 
-    pub fn into_globals(self) -> Record {
+    pub fn into_globals(mut self) -> Record {
+        self.materialize_vm_state()
+            .expect("completed lashlang VM state must export to tree values");
         self.slots.into_globals(&self.chunk.slot_names)
     }
 
-    pub(crate) fn recycle_into_globals(mut self, scratch: &mut ExecutionScratch) -> Record {
+    pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
+        let globals = self.slots.into_globals(&self.chunk.slot_names);
+        Ok((globals, self.heap))
+    }
+
+    pub(crate) fn recycle_into_state_parts(
+        mut self,
+        scratch: &mut ExecutionScratch,
+    ) -> Result<(Record, Heap), RuntimeError> {
         self.stack.clear();
         self.iter_stack.clear();
         scratch.stack = std::mem::take(&mut self.stack);
         scratch.iter_stack = std::mem::take(&mut self.iter_stack);
         scratch.assigned_globals = std::mem::take(&mut self.assigned_globals);
-        self.slots
-            .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values)
+        let globals = self
+            .slots
+            .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values);
+        Ok((globals, self.heap))
     }
 
     fn record_instruction_profile(&mut self, tag: InstructionProfileTag, elapsed_ns: u128) {
@@ -1545,41 +1513,5 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 }
 
-pub(crate) struct IterState {
-    cursor: IterCursor,
-    binding: usize,
-    restore: LoopRestore,
-}
-
-enum IterCursor {
-    List { values: ListValue, index: usize },
-    Range { next: i64, end: i64, step: i64 },
-}
-
-impl IterCursor {
-    fn next_value(&mut self) -> Option<Value> {
-        match self {
-            Self::List { values, index } => {
-                let value = values.get(*index)?.clone();
-                *index += 1;
-                Some(value)
-            }
-            Self::Range { next, end, step } => {
-                if (*step > 0 && *next >= *end) || (*step < 0 && *next <= *end) {
-                    return None;
-                }
-                let value = *next;
-                *next = (*next).saturating_add(*step);
-                Some(Value::Number(value as f64))
-            }
-        }
-    }
-}
-
-struct LoopRestore {
-    previous: Option<Value>,
-}
-
-pub(super) fn range_has_next(start: i64, end: i64, step: i64) -> bool {
-    (step > 0 && start < end) || (step < 0 && start > end)
-}
+include!("assignment.rs");
+include!("iteration.rs");

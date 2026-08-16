@@ -325,6 +325,9 @@ fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
         FlowValue::Tuple(_) | FlowValue::List(_) => "list",
         FlowValue::Record(_) => "record",
         FlowValue::Projected(_) => "projected",
+        FlowValue::Ref(_) => {
+            unreachable!("VM heap references must be materialized before schema rendering")
+        }
     }
 }
 

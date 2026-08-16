@@ -4,26 +4,30 @@ mod tests {
 
     fn resources() -> LashlangHostCatalog {
         let mut catalog = LashlangHostCatalog::new();
-        catalog.add_module_operation(
-            ["tools"],
-            "Tools",
-            "read_file",
-            "read_file",
-            TypeExpr::Object(vec![TypeField {
-                name: "path".into(),
-                ty: TypeExpr::Str,
-                optional: false,
-            }]),
-            TypeExpr::Str,
-        ).expect("host catalog operation must not conflict");
-        catalog.add_module_operation(
-            ["tools"],
-            "Tools",
-            "echo",
-            "echo",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        ).expect("host catalog operation must not conflict");
+        catalog
+            .add_module_operation(
+                ["tools"],
+                "Tools",
+                "read_file",
+                "read_file",
+                TypeExpr::Object(vec![TypeField {
+                    name: "path".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                }]),
+                TypeExpr::Str,
+            )
+            .expect("host catalog operation must not conflict");
+        catalog
+            .add_module_operation(
+                ["tools"],
+                "Tools",
+                "echo",
+                "echo",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
         for (operation, input_ty) in [
             ("accept_str", TypeExpr::Str),
             ("accept_int", TypeExpr::Int),
@@ -33,27 +37,31 @@ mod tests {
                 TypeExpr::Enum(vec!["default".into(), "careful".into()]),
             ),
         ] {
-            catalog.add_module_operation(
+            catalog
+                .add_module_operation(
+                    ["tools"],
+                    "Tools",
+                    operation,
+                    operation,
+                    input_ty,
+                    TypeExpr::Null,
+                )
+                .expect("host catalog operation must not conflict");
+        }
+        catalog
+            .add_module_operation(
                 ["tools"],
                 "Tools",
-                operation,
-                operation,
-                input_ty,
+                "accept_config",
+                "accept_config",
+                TypeExpr::Object(vec![TypeField {
+                    name: "mode".into(),
+                    ty: TypeExpr::Enum(vec!["default".into()]),
+                    optional: false,
+                }]),
                 TypeExpr::Null,
-            ).expect("host catalog operation must not conflict");
-        }
-        catalog.add_module_operation(
-            ["tools"],
-            "Tools",
-            "accept_config",
-            "accept_config",
-            TypeExpr::Object(vec![TypeField {
-                name: "mode".into(),
-                ty: TypeExpr::Enum(vec!["default".into()]),
-                optional: false,
-            }]),
-            TypeExpr::Null,
-        ).expect("host catalog operation must not conflict");
+            )
+            .expect("host catalog operation must not conflict");
         crate::add_trigger_resource_operations(&mut catalog);
         catalog
             .add_trigger_source_constructor(
@@ -280,8 +288,7 @@ mod tests {
             "properties": {},
             "additionalProperties": false
         }));
-        let read_output =
-            crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }));
+        let read_output = crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }));
         let play_input = crate::json_schema_to_type_expr(&serde_json::json!({
             "type": "object",
             "properties": {
@@ -294,8 +301,7 @@ mod tests {
             "required": ["cell"],
             "additionalProperties": false
         }));
-        let play_output =
-            crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }));
+        let play_output = crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }));
 
         assert_eq!(read_output, TypeExpr::Dict);
         assert_eq!(
@@ -306,24 +312,13 @@ mod tests {
                 optional: false,
             }])
         );
-        catalog.add_module_operation(
-            ["board"],
-            "Board",
-            "read",
-            "read",
-            read_input,
-            read_output,
-        ).expect("host catalog operation must not conflict");
-        catalog.add_module_operation(
-            ["board"],
-            "Board",
-            "play",
-            "play",
-            play_input,
-            play_output,
-        ).expect("host catalog operation must not conflict");
-        let environment =
-            LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
+        catalog
+            .add_module_operation(["board"], "Board", "read", "read", read_input, read_output)
+            .expect("host catalog operation must not conflict");
+        catalog
+            .add_module_operation(["board"], "Board", "play", "play", play_input, play_output)
+            .expect("host catalog operation must not conflict");
+        let environment = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
         let program = crate::parse(
             r#"
             process play_center_once(board_tool: Board) {
@@ -343,8 +338,8 @@ mod tests {
         LinkedModule::link(program, environment.clone())
             .expect("link Restate board process with imported schemas");
 
-        let fractional = crate::parse("await board.play({ cell: 4.5 })?")
-            .expect("parse fractional board call");
+        let fractional =
+            crate::parse("await board.play({ cell: 4.5 })?").expect("parse fractional board call");
         assert!(matches!(
             LinkedModule::link(fractional, environment),
             Err(LinkError::IncompatibleOperationInput { expected, actual, .. })
@@ -718,7 +713,11 @@ mod tests {
                 ..
             } if process == "scan" && source_type == "timer.Schedule"
         ));
-        assert!(error.to_string().contains("explicit literal subscription_key"));
+        assert!(
+            error
+                .to_string()
+                .contains("explicit literal subscription_key")
+        );
     }
 
     #[test]
@@ -753,8 +752,7 @@ mod tests {
     fn linked_artifact_manifest_contains_explicit_and_materialized_keys() {
         let source = serde_json::json!({ "expr": "0 8 * * *" });
         let source_key = semantic_trigger_source_key("timer.Schedule", &source);
-        let derived_key =
-            semantic_trigger_subscription_key("scan", "timer.Schedule", &source_key);
+        let derived_key = semantic_trigger_subscription_key("scan", "timer.Schedule", &source_key);
         let program = crate::parse(
             r#"
             process scan(tick: timer.Tick) {
@@ -1376,14 +1374,16 @@ mod tests {
     #[test]
     fn host_requirements_ref_tracks_resource_requirements_not_unrelated_tools() {
         let mut with_extra = resources();
-        with_extra.add_module_operation(
-            ["tools"],
-            "Tools",
-            "unrelated",
-            "unrelated",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        ).expect("host catalog operation must not conflict");
+        with_extra
+            .add_module_operation(
+                ["tools"],
+                "Tools",
+                "unrelated",
+                "unrelated",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
         let program = crate::parse(
             "process scan(tool: Tools) { finish (await tool.read_file({ path: \".\" }))? }",
         )
@@ -1415,22 +1415,26 @@ mod tests {
     #[test]
     fn module_aliases_sharing_resource_type_route_to_distinct_host_operations() {
         let mut catalog = LashlangHostCatalog::new();
-        catalog.add_module_operation(
-            ["inbox", "work"],
-            "Inbox",
-            "send",
-            "inbox__work__send",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        ).expect("host catalog operation must not conflict");
-        catalog.add_module_operation(
-            ["inbox", "personal"],
-            "Inbox",
-            "send",
-            "inbox__personal__send",
-            TypeExpr::Any,
-            TypeExpr::Any,
-        ).expect("host catalog operation must not conflict");
+        catalog
+            .add_module_operation(
+                ["inbox", "work"],
+                "Inbox",
+                "send",
+                "inbox__work__send",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
+        catalog
+            .add_module_operation(
+                ["inbox", "personal"],
+                "Inbox",
+                "send",
+                "inbox__personal__send",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
 
         assert_eq!(
             catalog
@@ -1486,14 +1490,16 @@ mod tests {
     fn identical_module_operation_binding_is_idempotent() {
         let mut catalog = LashlangHostCatalog::new();
         for _ in 0..2 {
-            catalog.add_module_operation(
-                ["directory"],
-                "Directory",
-                "lookup",
-                "directory_lookup",
-                TypeExpr::Any,
-                TypeExpr::Any,
-            ).expect("host catalog operation must not conflict");
+            catalog
+                .add_module_operation(
+                    ["directory"],
+                    "Directory",
+                    "lookup",
+                    "directory_lookup",
+                    TypeExpr::Any,
+                    TypeExpr::Any,
+                )
+                .expect("host catalog operation must not conflict");
         }
 
         assert_eq!(
@@ -1572,28 +1578,22 @@ mod tests {
             panic!("expected UnknownName");
         };
         assert_eq!(name, "value_39_typo");
-        let diagnostic = crate::format_link_diagnostic(
-            &source,
-            &LinkError::UnknownName {
-                name,
-                span,
-            },
-        );
+        let diagnostic =
+            crate::format_link_diagnostic(&source, &LinkError::UnknownName { name, span });
         assert!(diagnostic.contains("--> line 40, column 8"), "{diagnostic}");
     }
 
     #[test]
     fn live_host_globals_are_known_at_top_level() {
-        let program = crate::parse("finish { saved: persisted, payload: projected }")
-            .expect("parse");
+        let program =
+            crate::parse("finish { saved: persisted, payload: projected }").expect("parse");
         let environment = full_host_environment().with_globals(["persisted", "projected"]);
         LinkedModule::link(program, environment).expect("live host globals should link");
     }
 
     #[test]
     fn module_operation_calls_win_over_colliding_live_globals() {
-        let program = crate::parse("finish await tools.echo({ value: tools })?")
-            .expect("parse");
+        let program = crate::parse("finish await tools.echo({ value: tools })?").expect("parse");
         let environment = full_host_environment().with_globals(["tools"]);
         LinkedModule::link(program, environment)
             .expect("the exact module operation path should remain callable");
@@ -1673,7 +1673,10 @@ mod tests {
         let LinkError::UnknownResourceOperation { suggestions, .. } = &unknown else {
             panic!("expected UnknownResourceOperation, got {unknown:?}");
         };
-        assert!(suggestions.contains(&"tools.echo".to_string()), "{suggestions:?}");
+        assert!(
+            suggestions.contains(&"tools.echo".to_string()),
+            "{suggestions:?}"
+        );
         assert!(
             suggestions.contains(&"tools.read_file".to_string()),
             "{suggestions:?}"
@@ -1706,15 +1709,15 @@ mod tests {
 
     #[test]
     fn expected_enum_slots_reject_wrong_literals_but_admit_members_and_broad_strings() {
-        let wrong = crate::parse(r#"await tools.accept_mode("nope")?"#)
-            .expect("parse wrong enum literal");
+        let wrong =
+            crate::parse(r#"await tools.accept_mode("nope")?"#).expect("parse wrong enum literal");
         assert!(matches!(
             LinkedModule::link(wrong, full_host_environment()),
             Err(LinkError::IncompatibleExpectedLiteral { .. })
         ));
 
-        let member = crate::parse(r#"await tools.accept_mode("default")?"#)
-            .expect("parse enum member");
+        let member =
+            crate::parse(r#"await tools.accept_mode("default")?"#).expect("parse enum member");
         LinkedModule::link(member, full_host_environment()).expect("enum member should link");
 
         let broad = crate::parse(
@@ -1748,10 +1751,9 @@ mod tests {
             Err(LinkError::IncompatibleExpectedLiteral { .. })
         ));
 
-        let declared_return = crate::parse(
-            r#"process choose() -> enum["default"] { finish "nope" }"#,
-        )
-        .expect("parse declared enum return");
+        let declared_return =
+            crate::parse(r#"process choose() -> enum["default"] { finish "nope" }"#)
+                .expect("parse declared enum return");
         assert!(matches!(
             LinkedModule::link(declared_return, full_host_environment()),
             Err(LinkError::IncompatibleExpectedLiteral { .. })
@@ -2017,33 +2019,37 @@ mod tests {
             ("agents", "Agents", None),
             ("llm", "Llm", Some(TypeExpr::Str)),
         ] {
-            resources.add_module_operation_binding(
-                [module],
-                authority,
-                if module == "agents" { "spawn" } else { "query" },
-                format!("{module}_typed_output"),
-                ResourceOperationBinding {
-                    input_ty: input_ty.clone(),
-                    output_ty: TypeExpr::Any,
-                    output_from_input: Some(OutputFromInputBinding {
-                        input_field: "output".to_string(),
-                        default_schema,
-                    }),
-                },
-            ).expect("host catalog operation must not conflict");
+            resources
+                .add_module_operation_binding(
+                    [module],
+                    authority,
+                    if module == "agents" { "spawn" } else { "query" },
+                    format!("{module}_typed_output"),
+                    ResourceOperationBinding {
+                        input_ty: input_ty.clone(),
+                        output_ty: TypeExpr::Any,
+                        output_from_input: Some(OutputFromInputBinding {
+                            input_field: "output".to_string(),
+                            default_schema,
+                        }),
+                    },
+                )
+                .expect("host catalog operation must not conflict");
         }
-        resources.add_module_operation(
-            ["static_tool"],
-            "StaticTool",
-            "run",
-            "static_run",
-            TypeExpr::Any,
-            TypeExpr::Object(vec![TypeField {
-                name: "declared".into(),
-                ty: TypeExpr::Str,
-                optional: false,
-            }]),
-        ).expect("host catalog operation must not conflict");
+        resources
+            .add_module_operation(
+                ["static_tool"],
+                "StaticTool",
+                "run",
+                "static_run",
+                TypeExpr::Any,
+                TypeExpr::Object(vec![TypeField {
+                    name: "declared".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                }]),
+            )
+            .expect("host catalog operation must not conflict");
         LashlangHostEnvironment::new(resources, LashlangAbilities::all())
     }
 
@@ -2283,10 +2289,8 @@ mod tests {
             );
         }
 
-        let dict_items = crate::parse(
-            "process shape(items: dict) { finish reverse(items) }",
-        )
-        .expect("parse dict shaping input");
+        let dict_items = crate::parse("process shape(items: dict) { finish reverse(items) }")
+            .expect("parse dict shaping input");
         assert!(matches!(
             LinkedModule::link(dict_items, full_host_environment()),
             Err(LinkError::IncompatibleBuiltinOperands { builtin, .. }) if builtin == "reverse"

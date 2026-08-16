@@ -115,27 +115,40 @@ impl<'de> serde::Deserialize<'de> for ExecutionBound<Duration> {
 pub struct ExecutionBounds {
     pub instruction_budget: ExecutionBound<NonZeroU64>,
     pub deadline: ExecutionBound<Duration>,
+    pub memory_limit: ExecutionBound<NonZeroU64>,
 }
 
 impl ExecutionBounds {
     pub const fn new(
         instruction_budget: ExecutionBound<NonZeroU64>,
         deadline: ExecutionBound<Duration>,
+        memory_limit: ExecutionBound<NonZeroU64>,
     ) -> Self {
         Self {
             instruction_budget,
             deadline,
+            memory_limit,
         }
     }
 
+    pub const fn with_memory_limit(mut self, memory_limit: ExecutionBound<NonZeroU64>) -> Self {
+        self.memory_limit = memory_limit;
+        self
+    }
+
     pub const fn unbounded() -> Self {
-        Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
+        Self::new(
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+        )
     }
 
     pub(crate) fn into_engine(self) -> lashlang::ExecutionBounds {
         lashlang::ExecutionBounds::new(
             self.instruction_budget.into_engine(),
             self.deadline.into_engine(),
+            self.memory_limit.into_engine(),
         )
     }
 }

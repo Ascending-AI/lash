@@ -10,27 +10,25 @@ impl ExecutionHost for BenchHost {
                     .unwrap_or(&empty);
                 bench_resource_call(&operation, args).map(AbilityResult::Value)
             }
-            AbilityOp::ResourceOperationBatch(batch) => {
-                Ok(AbilityResult::ResourceOperationBatch(
-                    lashlang::ResourceOperationBatchResult {
-                        results: batch
-                            .operations
-                            .into_iter()
-                            .map(|operation| {
-                                let empty = Record::new();
-                                let args = operation
-                                    .args
-                                    .first()
-                                    .and_then(Value::as_record)
-                                    .unwrap_or(&empty);
-                                lashlang::ResourceOperationResult::from_result(
-                                    bench_resource_call(&operation, args),
-                                )
-                            })
-                            .collect(),
-                    },
-                ))
-            }
+            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
+                lashlang::ResourceOperationBatchResult {
+                    results: batch
+                        .operations
+                        .into_iter()
+                        .map(|operation| {
+                            let empty = Record::new();
+                            let args = operation
+                                .args
+                                .first()
+                                .and_then(Value::as_record)
+                                .unwrap_or(&empty);
+                            lashlang::ResourceOperationResult::from_result(bench_resource_call(
+                                &operation, args,
+                            ))
+                        })
+                        .collect(),
+                },
+            )),
             AbilityOp::StartProcess(start) => {
                 Self::task_handle(&start.process_name, &start.args).map(AbilityResult::Value)
             }
@@ -44,9 +42,7 @@ impl ExecutionHost for BenchHost {
             }
             AbilityOp::Cancel(handle) => Ok(AbilityResult::Value(handle)),
             AbilityOp::Print(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                Ok(AbilityResult::Value(value))
-            }
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }
@@ -145,10 +141,7 @@ fn trigger_mutation_record(args: &Record, disposition: &str) -> Value {
             .unwrap_or_else(|| Value::String("bench-trigger".into())),
     );
     record.insert("revision".to_string(), Value::Number(2.0));
-    record.insert(
-        "disposition".to_string(),
-        Value::String(disposition.into()),
-    );
+    record.insert("disposition".to_string(), Value::String(disposition.into()));
     record.insert("enabled".to_string(), Value::Bool(false));
     Value::Record(Arc::new(record))
 }

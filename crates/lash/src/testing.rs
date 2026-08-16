@@ -326,6 +326,7 @@ finish "registered"
             crate::rlm::RlmProtocolPluginConfig::new(
                 crate::rlm::ExecutionBound::instructions(1_000_000),
                 crate::rlm::ExecutionBound::secs(30),
+                crate::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
             )
             .with_lashlang_abilities(rebuild_abilities()),
             artifact_store,

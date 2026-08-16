@@ -18,6 +18,7 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
@@ -55,6 +56,7 @@ async fn sqlite_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store.clone(),
     );
@@ -163,6 +165,7 @@ async fn process_registry_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store,
     );
@@ -203,6 +206,7 @@ async fn subagents_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
@@ -284,6 +288,7 @@ fn configured_mcp_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
@@ -342,6 +347,7 @@ async fn durable_stores_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store.clone(),
     );

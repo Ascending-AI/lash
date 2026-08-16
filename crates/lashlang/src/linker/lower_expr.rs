@@ -104,12 +104,11 @@ impl<'module> Linker<'module> {
             Expr::Tuple(items) => {
                 let mut lowered = Vec::with_capacity(items.len());
                 let mut item_types = Vec::with_capacity(items.len());
-                let expected_item = expected.and_then(|expected| {
-                    match self.resolve_type_aliases(expected) {
+                let expected_item =
+                    expected.and_then(|expected| match self.resolve_type_aliases(expected) {
                         TypeExpr::List(item) => Some(*item),
                         _ => None,
-                    }
-                });
+                    });
                 for item in items {
                     let (item, binding) =
                         self.lower_expr_expected(item, scope, expected_item.as_ref())?;
@@ -126,12 +125,11 @@ impl<'module> Linker<'module> {
             Expr::List(items) => {
                 let mut lowered = Vec::with_capacity(items.len());
                 let mut item_types = Vec::with_capacity(items.len());
-                let expected_item = expected.and_then(|expected| {
-                    match self.resolve_type_aliases(expected) {
+                let expected_item =
+                    expected.and_then(|expected| match self.resolve_type_aliases(expected) {
                         TypeExpr::List(item) => Some(*item),
                         _ => None,
-                    }
-                });
+                    });
                 for item in items {
                     let (item, binding) =
                         self.lower_expr_expected(item, scope, expected_item.as_ref())?;
@@ -189,15 +187,14 @@ impl<'module> Linker<'module> {
                 let mut lowered = Vec::with_capacity(entries.len());
                 let mut fields = Vec::with_capacity(entries.len());
                 for (name, value) in entries {
-                    let expected_field = expected.and_then(|expected| {
-                        match self.resolve_type_aliases(expected) {
+                    let expected_field =
+                        expected.and_then(|expected| match self.resolve_type_aliases(expected) {
                             TypeExpr::Object(fields) => fields
                                 .into_iter()
                                 .find(|field| field.name == *name)
                                 .map(|field| field.ty),
                             _ => None,
-                        }
-                    });
+                        });
                     let (value, binding) =
                         self.lower_expr_expected(value, scope, expected_field.as_ref())?;
                     fields.push(TypeField {
@@ -269,16 +266,11 @@ impl<'module> Linker<'module> {
                 body,
             } => {
                 let (iterable, iterable_binding) = self.lower_expr(iterable, scope)?;
-                let item_ty = self.iterable_item_type(
-                    &binding_type(iterable_binding.as_ref()),
-                    scope.span,
-                )?;
+                let item_ty =
+                    self.iterable_item_type(&binding_type(iterable_binding.as_ref()), scope.span)?;
                 let before = scope.clone();
                 let mut body_scope = scope.clone();
-                let previous = body_scope.bind(
-                    binding.as_str(),
-                    self.binding_for_type(&item_ty),
-                );
+                let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
                 let body = self.lower_expr(body, &mut body_scope)?.0;
                 body_scope.restore(binding.as_str(), previous);
                 scope.widen_loop(before, body_scope);
@@ -407,11 +399,8 @@ impl<'module> Linker<'module> {
                                 span: scope.span,
                             });
                         }
-                        let (input, input_binding) = self.lower_expr_expected(
-                            &args[0],
-                            scope,
-                            Some(&constructor.input_ty),
-                        )?;
+                        let (input, input_binding) =
+                            self.lower_expr_expected(&args[0], scope, Some(&constructor.input_ty))?;
                         let actual_ty = binding_type(input_binding.as_ref());
                         if !self.is_type_assignable(&actual_ty, &constructor.input_ty) {
                             return Err(LinkError::IncompatibleConstructorInput {
@@ -546,8 +535,7 @@ impl<'module> Linker<'module> {
                 for arg in args {
                     let expected_arg =
                         expected_call_arg_type(&operation_binding.input_ty, args.len());
-                    let (arg, binding) =
-                        self.lower_expr_expected(arg, scope, expected_arg)?;
+                    let (arg, binding) = self.lower_expr_expected(arg, scope, expected_arg)?;
                     lowered_args.push(arg);
                     arg_types.push(binding_type(binding.as_ref()));
                 }
@@ -651,7 +639,10 @@ impl<'module> Linker<'module> {
                 let (inner, binding) =
                     self.lower_expr_expected(inner, scope, expected_return.as_ref())?;
                 let finish_ty = binding_type(binding.as_ref());
-                (Expr::Finish(Box::new(inner)), Some(Binding::Value(finish_ty)))
+                (
+                    Expr::Finish(Box::new(inner)),
+                    Some(Binding::Value(finish_ty)),
+                )
             }
             Expr::Fail(inner) => (
                 Expr::Fail(Box::new(self.lower_expr(inner, scope)?.0)),
@@ -797,5 +788,4 @@ impl<'module> Linker<'module> {
         }
         Ok(())
     }
-
 }

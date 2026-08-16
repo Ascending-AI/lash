@@ -190,6 +190,7 @@ async fn async_main() -> anyhow_like::Result<()> {
         lash_protocol_rlm::RlmProtocolPluginConfig::new(
             lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
             lash_protocol_rlm::ExecutionBound::secs(30),
+            lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store,
     );

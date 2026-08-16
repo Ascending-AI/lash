@@ -70,6 +70,7 @@ impl Compiler {
             ("push", 2) => {
                 self.compile_expr(&args[0]);
                 self.compile_expr(&args[1]);
+                self.code.push(Instruction::DeepCopy);
                 self.code.push(Instruction::Intrinsic(IntrinsicOp::Push));
             }
             ("range", 1..=3) => {
@@ -157,12 +158,14 @@ impl Compiler {
             Expr::Tuple(items) => {
                 for item in items {
                     self.compile_expr(item);
+                    self.code.push(Instruction::DeepCopy);
                 }
                 self.code.push(Instruction::BuildTuple(items.len()));
             }
             Expr::List(items) => {
                 for item in items {
                     self.compile_expr(item);
+                    self.code.push(Instruction::DeepCopy);
                 }
                 self.code.push(Instruction::BuildList(items.len()));
             }
@@ -172,6 +175,7 @@ impl Compiler {
             Expr::Record(entries) => {
                 for (_, value) in entries {
                     self.compile_expr(value);
+                    self.code.push(Instruction::DeepCopy);
                 }
                 let keys = self.push_key_list(entries.iter().map(|(key, _)| key.as_str()));
                 self.code.push(Instruction::BuildRecord(keys));
@@ -410,5 +414,4 @@ impl Compiler {
             },
         }
     }
-
 }

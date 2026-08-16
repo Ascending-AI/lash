@@ -73,6 +73,7 @@ async fn run(mode: &str) -> Result<()> {
         lash_protocol_rlm::RlmProtocolPluginConfig::new(
             lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
             lash_protocol_rlm::ExecutionBound::secs(30),
+            lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         Arc::new(storage.lashlang_artifact_store()),
     );

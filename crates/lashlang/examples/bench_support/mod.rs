@@ -32,6 +32,14 @@ pub enum Scenario {
     IntegerRangeHostEnvironment,
     FanoutExpressionHostEnvironment,
     ImageHostEnvironment,
+    HeapListIteration,
+    HeapNestedLoop,
+    HeapAllocationChurn,
+    HeapDeepChainMutation,
+    HeapComprehensionBuild,
+    HeapVariableConcat,
+    HeapShallowChainMutation,
+    HeapDeepChainMutation24,
 }
 
 impl Scenario {
@@ -57,6 +65,14 @@ impl Scenario {
         Self::IntegerRangeHostEnvironment,
         Self::FanoutExpressionHostEnvironment,
         Self::ImageHostEnvironment,
+        Self::HeapListIteration,
+        Self::HeapNestedLoop,
+        Self::HeapAllocationChurn,
+        Self::HeapDeepChainMutation,
+        Self::HeapComprehensionBuild,
+        Self::HeapVariableConcat,
+        Self::HeapShallowChainMutation,
+        Self::HeapDeepChainMutation24,
     ];
 
     #[allow(dead_code)]
@@ -83,13 +99,21 @@ impl Scenario {
             "integer_range_host_environment" => Self::IntegerRangeHostEnvironment,
             "fanout_expression_host_environment" => Self::FanoutExpressionHostEnvironment,
             "image_host_environment" => Self::ImageHostEnvironment,
+            "heap_list_iteration" => Self::HeapListIteration,
+            "heap_nested_loop" => Self::HeapNestedLoop,
+            "heap_allocation_churn" => Self::HeapAllocationChurn,
+            "heap_deep_chain_mutation" => Self::HeapDeepChainMutation,
+            "heap_comprehension_build" => Self::HeapComprehensionBuild,
+            "heap_variable_concat" => Self::HeapVariableConcat,
+            "heap_shallow_chain_mutation" => Self::HeapShallowChainMutation,
+            "heap_deep_chain_mutation_24" => Self::HeapDeepChainMutation24,
             _ => return None,
         })
     }
 
     #[allow(dead_code)]
     pub fn expected_values() -> &'static str {
-        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, or all"
+        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, heap_list_iteration, heap_nested_loop, heap_allocation_churn, heap_deep_chain_mutation, heap_comprehension_build, heap_variable_concat, heap_shallow_chain_mutation, heap_deep_chain_mutation_24, or all"
     }
 }
 
@@ -117,6 +141,14 @@ impl fmt::Display for Scenario {
             Self::IntegerRangeHostEnvironment => "integer_range_host_environment",
             Self::FanoutExpressionHostEnvironment => "fanout_expression_host_environment",
             Self::ImageHostEnvironment => "image_host_environment",
+            Self::HeapListIteration => "heap_list_iteration",
+            Self::HeapNestedLoop => "heap_nested_loop",
+            Self::HeapAllocationChurn => "heap_allocation_churn",
+            Self::HeapDeepChainMutation => "heap_deep_chain_mutation",
+            Self::HeapComprehensionBuild => "heap_comprehension_build",
+            Self::HeapVariableConcat => "heap_variable_concat",
+            Self::HeapShallowChainMutation => "heap_shallow_chain_mutation",
+            Self::HeapDeepChainMutation24 => "heap_deep_chain_mutation_24",
         })
     }
 }
@@ -164,7 +196,7 @@ pub fn seeded_state_for(scenario: Scenario) -> State {
             ))),
         );
     }
-    State::from_snapshot(lashlang::Snapshot { globals })
+    State::from_snapshot(lashlang::Snapshot::new(globals))
 }
 
 include!("sections/program.rs");

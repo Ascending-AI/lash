@@ -16,14 +16,8 @@ pub(crate) fn analyze_workflow_program(
         for param in &process.params {
             scope.bind(param.name.as_str(), linker.binding_for_type(&param.ty));
         }
-        scope.bind(
-            "input",
-            Binding::Value(process_input_type(process)),
-        );
-        scope.bind(
-            "inputs",
-            Binding::Value(process_input_record_type(process)),
-        );
+        scope.bind("input", Binding::Value(process_input_type(process)));
+        scope.bind("inputs", Binding::Value(process_input_record_type(process)));
         linker.analyze_workflow_block(&process.body, &mut scope, &spans, &mut analysis);
     }
 
@@ -31,12 +25,7 @@ pub(crate) fn analyze_workflow_program(
     for name in &surface.globals {
         main_scope.bind(name, any_binding());
     }
-    linker.analyze_workflow_block(
-        &program.main,
-        &mut main_scope,
-        &spans,
-        &mut analysis,
-    );
+    linker.analyze_workflow_block(&program.main, &mut main_scope, &spans, &mut analysis);
     analysis
 }
 
@@ -120,20 +109,16 @@ impl<'module> Linker<'module> {
             };
             self.process_types.insert(
                 process.name.to_string(),
-                process_type_for_decl(
-                    process,
-                    process.return_ty.clone().unwrap_or(TypeExpr::Any),
-                ),
+                process_type_for_decl(process, process.return_ty.clone().unwrap_or(TypeExpr::Any)),
             );
         }
         for (index, declaration) in self.program.declarations.iter().enumerate() {
             let Declaration::Process(process) = declaration else {
                 continue;
             };
-            if let Ok(output) = self.infer_process_output(
-                process,
-                self.program.declaration_spans.get(index).copied(),
-            ) {
+            if let Ok(output) = self
+                .infer_process_output(process, self.program.declaration_spans.get(index).copied())
+            {
                 self.process_types.insert(
                     process.name.to_string(),
                     process_type_for_decl(process, output),
@@ -240,12 +225,9 @@ impl<'module> Linker<'module> {
                         ListComprehensionClause::For { binding, iterable } => {
                             let item_ty = self
                                 .infer_expr_type(iterable, &mut element_scope)
-                                .and_then(|ty| {
-                                    self.iterable_item_type(&ty, element_scope.span)
-                                })
+                                .and_then(|ty| self.iterable_item_type(&ty, element_scope.span))
                                 .unwrap_or(TypeExpr::Any);
-                            element_scope
-                                .bind(binding.as_str(), self.binding_for_type(&item_ty));
+                            element_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
                         }
                         ListComprehensionClause::If { condition } => {
                             let _ = self.infer_expr_type(condition, &mut element_scope);
@@ -334,9 +316,9 @@ fn collect_expected_slots(
         });
     }
     match expr {
-        Expr::LabelAnnotated { expr, .. }
-        | Expr::Await(expr)
-        | Expr::ResultUnwrap(expr) => collect_expected_slots(expr, slot, expected, arguments),
+        Expr::LabelAnnotated { expr, .. } | Expr::Await(expr) | Expr::ResultUnwrap(expr) => {
+            collect_expected_slots(expr, slot, expected, arguments)
+        }
         Expr::Record(entries) => {
             for (name, value) in entries {
                 collect_expected_slots(
@@ -349,12 +331,7 @@ fn collect_expected_slots(
         }
         Expr::List(items) | Expr::Tuple(items) => {
             for (index, item) in items.iter().enumerate() {
-                collect_expected_slots(
-                    item,
-                    format!("{slot}[{index}]"),
-                    expected,
-                    arguments,
-                );
+                collect_expected_slots(item, format!("{slot}[{index}]"), expected, arguments);
             }
         }
         _ => {}
@@ -368,12 +345,7 @@ fn expression_spans_by_pointer(program: &Program) -> BTreeMap<usize, Span> {
         .map(|source_span| (source_span.path.clone(), source_span.span))
         .collect::<BTreeMap<_, _>>();
     let mut spans = BTreeMap::new();
-    collect_expression_spans_by_pointer(
-        &program.main,
-        &mut Vec::new(),
-        &spans_by_path,
-        &mut spans,
-    );
+    collect_expression_spans_by_pointer(&program.main, &mut Vec::new(), &spans_by_path, &mut spans);
     spans
 }
 

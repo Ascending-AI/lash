@@ -42,6 +42,7 @@ async fn service_core(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
             lash::rlm::ExecutionBound::secs(30),
+            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         ),
         artifact_store,
     );

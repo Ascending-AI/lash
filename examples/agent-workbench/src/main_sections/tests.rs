@@ -60,7 +60,7 @@ mod tests {
             }
         })) as Arc<dyn lash::persistence::LashlangArtifactStore>;
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30))
+            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30), lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024))
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store,
         );
@@ -1228,7 +1228,7 @@ finish initial
             SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
                 .expect("open durable product events");
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30))
+            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30), lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024))
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store_for_core,
         );
@@ -1857,7 +1857,7 @@ finish initial
                 active_turns: active_turns.clone(),
             }));
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30))
+            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30), lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024))
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store,
         )
@@ -2187,7 +2187,7 @@ finish initial
         let provider = trigger_registration_provider();
         let model = test_model();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30))
+            lash::rlm::RlmProtocolPluginConfig::new(lash::rlm::ExecutionBound::instructions(1_000_000), lash::rlm::ExecutionBound::secs(30), lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024))
                 .with_lashlang_abilities(workbench_lashlang_abilities()),
             artifact_store,
         );

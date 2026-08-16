@@ -637,6 +637,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         RlmProtocolPluginConfig::new(
             lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
             lash_protocol_rlm::ExecutionBound::secs(30),
+            lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
         )
         .with_lashlang_abilities(
             LashlangAbilities::default()

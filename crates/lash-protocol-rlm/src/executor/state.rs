@@ -117,6 +117,7 @@ fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
         SnapshotDecodeError::InvalidEncoding(details) => {
             RlmSnapshotError::FormatMismatch { details }
         }
+        error @ SnapshotDecodeError::VersionMismatch { .. } => RlmSnapshotError::Lashlang(error),
     })
 }
 
@@ -308,21 +309,20 @@ fn is_root_json_location(location: &str) -> bool {
 }
 
 fn snapshot_runtime_value(value: &FlowValue) -> Result<Vec<u8>, lashlang::ContinuationError> {
-    let snapshot = lashlang::Snapshot {
-        globals: [("value".to_string(), value.clone())].into_iter().collect(),
-    };
+    let snapshot =
+        lashlang::Snapshot::new([("value".to_string(), value.clone())].into_iter().collect());
     snapshot.to_canonical_bytes()
 }
 
 fn restore_runtime_value(data: &[u8]) -> Result<FlowValue, RlmSnapshotError> {
-    let mut snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
-    if snapshot.globals.len() != 1 || snapshot.globals.get("value").is_none() {
+    let snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
+    if snapshot.globals().len() != 1 || snapshot.globals().get("value").is_none() {
         return Err(RlmSnapshotError::FormatMismatch {
             details: "value body must contain exactly the canonical `value` binding".to_string(),
         });
     }
     Ok(snapshot
-        .globals
+        .into_globals()
         .remove("value")
         .expect("the canonical value binding was checked"))
 }
@@ -923,7 +923,7 @@ impl RlmExecutionState {
             };
             globals.insert(name.clone(), restore_runtime_value(body)?);
         }
-        let mut next_rlm = FlowState::from_snapshot(lashlang::Snapshot { globals });
+        let mut next_rlm = FlowState::from_snapshot(lashlang::Snapshot::new(globals));
         prune_reserved_projected_bindings(&mut next_rlm);
 
         let mut files = BTreeMap::new();
@@ -1001,21 +1001,15 @@ impl RlmExecutionState {
         if patch.is_empty() {
             return Ok(());
         }
-        let before = self
-            .rlm
-            .globals()
-            .iter()
-            .map(|(name, _)| name.to_string())
-            .collect::<BTreeSet<_>>();
-        apply_global_defaults(&mut self.rlm, patch, protected_names)
+        // The state commits the whole batch or none of it, so the dirty
+        // bookkeeping is recorded from what the commit reports rather than
+        // reconstructed afterwards. A rejected patch leaves both untouched.
+        let inserted = apply_global_defaults(&mut self.rlm, patch, protected_names)
             .map_err(SessionError::Protocol)?;
-        self.dirty_globals.extend(
-            self.rlm
-                .globals()
-                .iter()
-                .map(|(name, _)| name.to_string())
-                .filter(|name| !before.contains(name)),
-        );
+        if inserted.is_empty() {
+            return Ok(());
+        }
+        self.dirty_globals.extend(inserted);
         self.root_dirty = true;
         Ok(())
     }

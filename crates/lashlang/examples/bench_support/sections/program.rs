@@ -634,6 +634,120 @@ finish {
 }
 "#
         }
+        // Heap-shaped scenarios. These exist because a wall-clock cliff in
+        // iteration, allocation churn or descendant mutation was invisible to
+        // every other scenario here: none of them iterate a long list, and
+        // allocation-count budgets say nothing about time.
+        Scenario::HeapListIteration => {
+            // One pass over a long heap-backed list. Per-step work must not
+            // depend on the length of the list being iterated.
+            r#"
+rows = []
+for n in range(0, 2000) {
+  rows = push(rows, n)
+}
+total = 0
+seen = 0
+for row in rows {
+  total = total + row
+  seen = seen + 1
+}
+finish { total: total, seen: seen }
+"#
+        }
+        Scenario::HeapNestedLoop => {
+            // An inner pass over a list that the outer loop keeps growing.
+            r#"
+rows = []
+checksum = 0
+for n in range(0, 60) {
+  rows = push(rows, [n, n + 1])
+  for row in rows {
+    checksum = checksum + row[0]
+  }
+}
+finish { checksum: checksum, rows: len(rows) }
+"#
+        }
+        Scenario::HeapAllocationChurn => {
+            // Short-lived containers built and dropped in a loop, with a small
+            // retained set surviving across collections.
+            r#"
+kept = []
+for n in range(0, 400) {
+  scratch = { index: n, pair: [n, n + 1], label: format("row-{0}", n) }
+  if n % 40 == 0 {
+    kept = push(kept, scratch)
+  }
+}
+finish { kept: len(kept) }
+"#
+        }
+        Scenario::HeapDeepChainMutation => {
+            // Repeated writes to a descendant reached through a path, which is
+            // the shape that walks reverse parent edges.
+            r#"
+tree = { level: { rows: [[0], [1], [2]], counters: {} } }
+for n in range(0, 150) {
+  tree.level.rows[n % 3] = [n]
+  tree.level.counters["c"] = tree.level.counters["c"] + 1
+}
+finish { counter: tree.level.counters["c"], first: tree.level.rows[0] }
+"#
+        }
+        Scenario::HeapVariableConcat => {
+            // `acc = acc + other` where the right operand is a bare variable.
+            // Every other scenario uses the optimized single-item form, so this
+            // is the only guard on the general concat's per-iteration cost.
+            r#"
+other = [1, 2]
+acc = []
+for n in range(0, 300) {
+  acc = acc + other
+}
+finish { total: len(acc), head: acc[0] }
+"#
+        }
+        Scenario::HeapShallowChainMutation => {
+            // The shallow half of the depth pair: same write count, six levels
+            // of nesting.
+            r#"
+tree = { next: { next: { next: { next: { next: { next: { leaf: [0] } } } } } } }
+for n in range(0, 150) {
+  tree.next.next.next.next.next.next.leaf = [n]
+}
+finish { leaf: tree.next.next.next.next.next.next.leaf }
+"#
+        }
+        Scenario::HeapDeepChainMutation24 => {
+            // The deep half: the identical program at twenty-four levels, so
+            // the two scenarios differ only in ancestor depth and their ratio
+            // is the scaling guard. Twenty-four rather than the thirty-two a
+            // reviewer probed with, because a thirty-two-level literal
+            // overflows the 2 MiB stack a debug test thread gets; the ratio is
+            // what the guard reads, and four times the depth is four times the
+            // depth either way.
+            r#"
+tree = { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { next: { leaf: [0] } } } } } } } } } } } } } } } } } } } } } } } } }
+for n in range(0, 150) {
+  tree.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.leaf = [n]
+}
+finish { leaf: tree.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.next.leaf }
+"#
+        }
+        Scenario::HeapComprehensionBuild => {
+            // A comprehension accumulating over a long source list. Appending to
+            // the accumulator must not rebuild it once per element.
+            r#"
+source = []
+for n in range(0, 800) {
+  source = push(source, n)
+}
+doubled = [item + item for item in source]
+tagged = [[item] for item in source if item % 7 == 0]
+finish { doubled: len(doubled), tagged: len(tagged), last: doubled[len(doubled) - 1] }
+"#
+        }
     };
     format!("{BENCH_PROCESS_DECLS}\n{main}")
 }

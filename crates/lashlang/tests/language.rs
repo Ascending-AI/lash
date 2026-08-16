@@ -4,7 +4,10 @@ use lashlang::{
     RuntimeError, State, TypeExpr, Value, parse,
 };
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 
 #[derive(Default)]
@@ -2543,6 +2546,264 @@ async fn path_assignment_preserves_alias_isolation() {
         alias["items"],
         Value::List(vec![Value::Number(1.0), Value::Number(2.0)].into())
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn path_assignment_rhs_matches_pre_heap_value_semantics() {
+    let host = TestHost::default();
+    let mut state = State::new();
+    execute(
+        r#"
+            a = {}
+            b = []
+            a.x = b
+            b = push(b, 1)
+        "#,
+        &mut state,
+        &host,
+    )
+    .await
+    .expect("setup should succeed");
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("snapshot should encode");
+    let snapshot =
+        lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
+    let mut restored = State::from_snapshot(snapshot);
+    let value = finished(
+        execute("finish a.x", &mut restored, &host)
+            .await
+            .expect("restored execution should succeed"),
+    );
+
+    assert_eq!(value, Value::List(Vec::new().into()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn iterator_binding_matches_pre_heap_value_semantics() {
+    let host = TestHost::default();
+    let mut state = State::new();
+    execute(
+        r#"
+            a = [[1]]
+            for x in a {
+              x = push(x, 2)
+            }
+        "#,
+        &mut state,
+        &host,
+    )
+    .await
+    .expect("setup should succeed");
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("snapshot should encode");
+    let snapshot =
+        lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
+    let mut restored = State::from_snapshot(snapshot);
+    let value = finished(
+        execute("finish a", &mut restored, &host)
+            .await
+            .expect("restored execution should succeed"),
+    );
+
+    assert_eq!(
+        value,
+        Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn push_insertion_matches_pre_heap_value_semantics() {
+    let value = finished(
+        execute(
+            r#"
+            acc = []
+            for n in range(0, 3) {
+              row = [n]
+              acc = push(acc, row)
+              row = push(row, 99)
+            }
+            finish acc
+            "#,
+            &mut State::new(),
+            &TestHost::default(),
+        )
+        .await
+        .expect("execution should succeed"),
+    );
+
+    assert_eq!(
+        value,
+        Value::List(
+            vec![
+                Value::List(vec![Value::Number(0.0)].into()),
+                Value::List(vec![Value::Number(1.0)].into()),
+                Value::List(vec![Value::Number(2.0)].into()),
+            ]
+            .into()
+        )
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn iterator_value_pushed_into_container_matches_pre_heap_semantics() {
+    let value = finished(
+        execute(
+            r#"
+            xs = [[1]]
+            acc = []
+            for x in xs {
+              acc = push(acc, x)
+              x = push(x, 9)
+            }
+            finish acc
+            "#,
+            &mut State::new(),
+            &TestHost::default(),
+        )
+        .await
+        .expect("execution should succeed"),
+    );
+
+    assert_eq!(
+        value,
+        Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nested_field_index_and_comprehension_inserts_keep_value_semantics() {
+    let value = finished(
+        execute(
+            r#"
+            source = { rows: [[[1]], [[2]]] }
+            flattened = [inner for outer in source.rows for inner in outer]
+            picked = source.rows[0][0]
+            holder = { items: [] }
+            holder.items = push(holder.items, picked)
+            picked = push(picked, 9)
+            for inner in source.rows[1] { inner = push(inner, 8) }
+            finish { flattened: flattened, held: holder.items, source: source }
+            "#,
+            &mut State::new(),
+            &TestHost::default(),
+        )
+        .await
+        .expect("nested insertion program should succeed"),
+    );
+    let record = value.as_record().expect("result should be a record");
+    assert_eq!(
+        record["flattened"],
+        Value::List(
+            vec![
+                Value::List(vec![Value::Number(1.0)].into()),
+                Value::List(vec![Value::Number(2.0)].into()),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        record["held"],
+        Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into())
+    );
+    assert_eq!(
+        record["source"],
+        Value::Record(Arc::new(Record::from_iter([(
+            "rows".to_string(),
+            Value::List(
+                vec![
+                    Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into()),
+                    Value::List(vec![Value::List(vec![Value::Number(2.0)].into())].into()),
+                ]
+                .into()
+            ),
+        )])))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn effect_result_to_path_isolated_from_later_field_reads() {
+    let host = TestHost::default().with_file("a.txt", "original");
+    let source = r#"
+            holder = { value: null }
+            holder.value = await files.read({ path: "a.txt" })?
+            local = holder.value
+            finish { local: local, stored: holder.value }
+            "#;
+    let linked = lashlang::LinkedModule::link(
+        parse(source).expect("effect path program should parse"),
+        test_host_environment(),
+    )
+    .expect("effect path program should link");
+    let compiled = lashlang::compile_linked(&linked);
+    let mut state = State::new();
+    let value = finished(
+        lashlang::execute(&compiled, &mut state, &host)
+            .await
+            .expect("effect path insertion should succeed"),
+    );
+    assert_eq!(
+        value,
+        Value::Record(Arc::new(Record::from_iter([
+            ("local".to_string(), Value::String("original".into())),
+            ("stored".to_string(), Value::String("original".into())),
+        ])))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
+    let host = TestHost::default();
+    let mut state = State::new();
+    execute("seed = [1]", &mut state, &host)
+        .await
+        .expect("heap setup should succeed");
+    assert!(
+        state
+            .set_default(
+                "diary",
+                Value::List(vec![Value::String("kept".into())].into()),
+            )
+            .expect("default should be metered")
+    );
+
+    let value = finished(
+        execute("finish diary", &mut state, &host)
+            .await
+            .expect("patched global should reach the next cell"),
+    );
+    assert_eq!(
+        value,
+        Value::List(vec![Value::String("kept".into())].into())
+    );
+
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("patched snapshot should encode");
+    let snapshot =
+        lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
+    let mut restored = State::from_snapshot(snapshot);
+    let value = finished(
+        execute("finish diary", &mut restored, &host)
+            .await
+            .expect("patched global should survive cold restore"),
+    );
+    assert_eq!(
+        value,
+        Value::List(vec![Value::String("kept".into())].into())
+    );
+
+    assert!(restored.remove_global("diary").is_some());
+    assert!(matches!(
+        execute("finish diary", &mut restored, &host).await,
+        Err(ExecuteError::Runtime(
+            RuntimeError::UndefinedVariable { .. }
+        ))
+    ));
 }
 
 #[tokio::test(flavor = "current_thread")]

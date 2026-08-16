@@ -156,6 +156,7 @@ async fn instruction_budget_exhaustion_is_typed_and_caret_rendered() {
         .with_execution_bounds(ExecutionBounds::new(
             ExecutionBound::instructions(1),
             ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
         ));
     let mut state = State::new();
     let error = execute_program(&program, &mut state, &env)
@@ -177,6 +178,7 @@ async fn effect_free_terminal_segment_enforces_tiny_instruction_budget() {
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(1),
         ExecutionBound::Unbounded,
+        ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
     assert!(matches!(
@@ -192,6 +194,7 @@ async fn effect_free_intrinsic_dispatch_enforces_bounds_before_later_runtime_err
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(10),
         ExecutionBound::Unbounded,
+        ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
     assert!(matches!(
@@ -205,6 +208,7 @@ async fn shaping_collection_work_consumes_instruction_budget() {
     let program = crate::parse("finish unique(range(0, 4000))").expect("program should parse");
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(10),
+        ExecutionBound::Unbounded,
         ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
@@ -226,6 +230,7 @@ finish value
     let env = ExecutionEnvironment::new(&SlowToolHost).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::Unbounded,
         ExecutionBound::millis(20),
+        ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &env)
@@ -241,6 +246,7 @@ async fn deadline_exhaustion_is_a_typed_runtime_error() {
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::Unbounded,
         ExecutionBound::Bounded(std::time::Duration::from_nanos(1)),
+        ExecutionBound::Unbounded,
     ));
     let mut state = State::new();
     let error = execute_program(&program, &mut state, &env)
@@ -771,6 +777,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::PushBool(value) => format!("push_bool {value}"),
         Instruction::PushNumber(value) => format!("push_number {value}"),
         Instruction::LoadName(slot) => format!("load_name {slot}:{}", slot_name(chunk, slot)),
+        Instruction::DeepCopy => "deep_copy".to_string(),
         Instruction::StoreName(slot) => format!("store_name {slot}:{}", slot_name(chunk, slot)),
         Instruction::StoreConst { slot, constant } => format!(
             "store_const {slot}:{} c{constant} {}",
@@ -920,6 +927,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             )
         }
         Instruction::IterNext { jump_to } => format!("iter_next {jump_to}"),
+        Instruction::DeepCopyLoopBinding(slot) => format!("deep_copy_loop_binding ${slot}"),
         Instruction::EndIter => "end_iter".to_string(),
         Instruction::ResolveTypeRef(slot) => {
             format!("resolve_type_ref {slot}:{}", slot_name(chunk, slot))
@@ -1231,3 +1239,4 @@ include!("tests/compiler_cases.rs");
 include!("tests/projection_cases.rs");
 include!("tests/async_and_cache_cases.rs");
 include!("tests/continuation_cases.rs");
+include!("tests/continuation_wire_cases.rs");

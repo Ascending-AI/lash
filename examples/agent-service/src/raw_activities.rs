@@ -320,6 +320,7 @@ finish "done through raw activities"
             lash_protocol_rlm::RlmProtocolPluginConfig::new(
                 lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
                 lash_protocol_rlm::ExecutionBound::secs(30),
+                lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
             ),
             Arc::new(
                 lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))

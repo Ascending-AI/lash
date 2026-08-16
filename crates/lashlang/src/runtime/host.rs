@@ -143,6 +143,22 @@ impl ExecutionBound<std::num::NonZeroU64> {
             None => panic!("instruction budget must be non-zero"),
         }
     }
+
+    /// Construct a finite logical-memory bound in bytes.
+    ///
+    /// The same nonzero representation carries instruction counts and byte
+    /// counts; naming both constructors keeps a byte limit from being spelled
+    /// as an instruction budget at the call site.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `bytes` is zero.
+    pub const fn logical_bytes(bytes: u64) -> Self {
+        match std::num::NonZeroU64::new(bytes) {
+            Some(bytes) => Self::Bounded(bytes),
+            None => panic!("logical memory limit must be non-zero"),
+        }
+    }
 }
 
 impl ExecutionBound<Duration> {
@@ -233,21 +249,41 @@ impl<'de> serde::Deserialize<'de> for ExecutionBound<Duration> {
 pub struct ExecutionBounds {
     pub instruction_budget: ExecutionBound<std::num::NonZeroU64>,
     pub deadline: ExecutionBound<Duration>,
+    pub memory_limit: ExecutionBound<std::num::NonZeroU64>,
 }
 
 impl ExecutionBounds {
+    /// Builds a bound set.
+    ///
+    /// All three limits are stated: a host that does not decide how much
+    /// logical memory an execution may hold has not finished configuring it,
+    /// and a silent default here would be a bound nobody chose.
     pub const fn new(
         instruction_budget: ExecutionBound<std::num::NonZeroU64>,
         deadline: ExecutionBound<Duration>,
+        memory_limit: ExecutionBound<std::num::NonZeroU64>,
     ) -> Self {
         Self {
             instruction_budget,
             deadline,
+            memory_limit,
         }
     }
 
+    pub const fn with_memory_limit(
+        mut self,
+        memory_limit: ExecutionBound<std::num::NonZeroU64>,
+    ) -> Self {
+        self.memory_limit = memory_limit;
+        self
+    }
+
     pub const fn unbounded() -> Self {
-        Self::new(ExecutionBound::Unbounded, ExecutionBound::Unbounded)
+        Self::new(
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+            ExecutionBound::Unbounded,
+        )
     }
 }
 
@@ -279,6 +315,11 @@ pub trait ExecutionHost: Sync {
 
     fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::unbounded()
+    }
+
+    /// Deterministic GC stress mode used by the conformance suite.
+    fn collect_heap_every_allocation(&self) -> bool {
+        false
     }
 
     fn take_scratch(&self) -> Option<ExecutionScratch> {

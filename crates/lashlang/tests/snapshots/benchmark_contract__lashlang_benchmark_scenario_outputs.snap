@@ -1,6 +1,5 @@
 ---
 source: crates/lashlang/tests/benchmark_contract.rs
-assertion_line: 33
 expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs should serialize\")"
 ---
 {
@@ -35,6 +34,42 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
     "second": "right"
   },
   "general_fanout": "alpha:3|beta:3",
+  "heap_allocation_churn": {
+    "kept": 10
+  },
+  "heap_comprehension_build": {
+    "doubled": 800,
+    "last": 1598,
+    "tagged": 115
+  },
+  "heap_deep_chain_mutation": {
+    "counter": 150,
+    "first": [
+      147
+    ]
+  },
+  "heap_deep_chain_mutation_24": {
+    "leaf": [
+      149
+    ]
+  },
+  "heap_list_iteration": {
+    "seen": 2000,
+    "total": 1999000
+  },
+  "heap_nested_loop": {
+    "checksum": 35990,
+    "rows": 60
+  },
+  "heap_shallow_chain_mutation": {
+    "leaf": [
+      149
+    ]
+  },
+  "heap_variable_concat": {
+    "head": 1,
+    "total": 600
+  },
   "image_host_environment": {
     "descriptor_has_id": true,
     "descriptor_has_type": true,

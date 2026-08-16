@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::{ProjectedFuture, Value, write_number};
+use super::{ProjectedFuture, Value, debug_assert_exported_value, write_number};
 
 const DEFAULT_ARRAY_HEAD: usize = 8;
 const DEFAULT_ARRAY_TAIL: usize = 2;
@@ -116,6 +116,10 @@ impl BudgetedJsonProjector {
                     serde_json::to_string(resource).unwrap_or_else(|_| "null".to_string())
                 }
                 Value::Projected(projected) => projected.render().await,
+                Value::Ref(_) => {
+                    debug_assert_exported_value("projection rendering");
+                    "null".to_string()
+                }
                 Value::Tuple(values) | Value::List(values) => {
                     if self.config.max_depth != usize::MAX && depth >= self.config.max_depth {
                         return depth_marker(self.config.max_depth);

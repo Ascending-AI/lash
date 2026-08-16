@@ -6574,8 +6574,9 @@ impl RlmExecutionSnapshotProbe {
         };
         lashlang::Snapshot::from_canonical_bytes(body)
             .ok()?
-            .globals
-            .remove("value")
+            .globals()
+            .get("value")
+            .cloned()
     }
 
     fn file<'a>(

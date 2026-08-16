@@ -216,6 +216,8 @@ configure_bindgen_headers
 
 step "Formatting"
 cargo fmt --all --check
+python3 scripts/check_included_file_formatting.py
+rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
 
 step "Clippy"
 # shellcheck disable=SC2086

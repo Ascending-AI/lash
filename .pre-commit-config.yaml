@@ -34,6 +34,14 @@ repos:
         entry: actionlint -no-color
         files: '^\.github/workflows/.*\.ya?ml$'
         pass_filenames: true
+      # Mirrors CI Lint "Check formatting" for the files `cargo fmt` cannot
+      # see, because `include!` splices text rather than declaring a module.
+      - id: included-file-formatting
+        name: include!d file formatting
+        language: system
+        entry: python3 scripts/check_included_file_formatting.py
+        files: '\.rs$'
+        pass_filenames: false
 
       # Mirrors CI Lint "Check production file-size budget".
       - id: file-size-budget

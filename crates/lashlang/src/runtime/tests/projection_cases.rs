@@ -468,9 +468,9 @@ async fn projected_bindings_are_read_only_and_not_snapshotted() {
     let (_, state) = exec_with_projected("alias = history\nfinish alias[0]", &projected)
         .await
         .expect("alias should materialize");
-    assert!(state.snapshot().globals.get("history").is_none());
+    assert!(state.snapshot().globals().get("history").is_none());
     assert!(matches!(
-        state.snapshot().globals.get("alias"),
+        state.snapshot().globals().get("alias"),
         Some(Value::List(_))
     ));
 }
@@ -540,7 +540,7 @@ fn canonical_snapshot_encodes_projected_values_without_materializing() {
 
     assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
-    let Some(Value::Projected(projected)) = restored.globals.get("match_text") else {
+    let Some(Value::Projected(projected)) = restored.globals().get("match_text") else {
         panic!("expected projected placeholder");
     };
     assert_eq!(projected.name(), "matches[0].text");
@@ -552,18 +552,21 @@ fn canonical_snapshot_encodes_projected_values_without_materializing() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn canonical_snapshot_restore_makes_projected_value_unavailable() {
-    let snapshot = Snapshot {
-        globals: [("match_text".to_string(), Value::Projected(ProjectedValue::custom(
-            "matches[0].text",
-            Arc::new(SnapshotGuardProjectedValue::default()),
-        )))]
+    let snapshot = Snapshot::new(
+        [(
+            "match_text".to_string(),
+            Value::Projected(ProjectedValue::custom(
+                "matches[0].text",
+                Arc::new(SnapshotGuardProjectedValue::default()),
+            )),
+        )]
         .into_iter()
         .collect(),
-    };
+    );
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
     let snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
 
-    let Some(Value::Projected(projected)) = snapshot.globals.get("match_text") else {
+    let Some(Value::Projected(projected)) = snapshot.globals().get("match_text") else {
         panic!("expected projected placeholder");
     };
 
@@ -611,7 +614,7 @@ async fn flat_search_match_projected_text_separates_slice_snapshot_and_stringify
     assert_eq!(text.materialize_count.load(Ordering::SeqCst), 0);
 
     let snapshot = state.snapshot();
-    let Some(Value::Record(stored_match)) = snapshot.globals.get("m") else {
+    let Some(Value::Record(stored_match)) = snapshot.globals().get("m") else {
         panic!("stored match should stay flat record");
     };
     assert!(matches!(
@@ -620,7 +623,7 @@ async fn flat_search_match_projected_text_separates_slice_snapshot_and_stringify
     ));
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
     let encoded_snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
-    let Some(Value::Record(encoded_match)) = encoded_snapshot.globals.get("m") else {
+    let Some(Value::Record(encoded_match)) = encoded_snapshot.globals().get("m") else {
         panic!("encoded match should stay a flat record");
     };
     let Some(Value::Projected(encoded_text)) = encoded_match.get("text") else {
@@ -1124,18 +1127,12 @@ async fn image_values_are_immutable_and_len_is_unsupported() {
     let err = exec_with_global("img", test_image(), "img.label = \"other\"\nfinish img")
         .await
         .expect_err("image field assignment should fail");
-    assert_eq!(
-        err,
-        RuntimeError::ImmutableImageFields
-    );
+    assert_eq!(err, RuntimeError::ImmutableImageFields);
 
     let err = exec_with_global("img", test_image(), "finish len(img)")
         .await
         .expect_err("len image should fail");
-    assert_eq!(
-        err,
-        RuntimeError::LenUnsupported
-    );
+    assert_eq!(err, RuntimeError::LenUnsupported);
 }
 
 #[tokio::test(flavor = "current_thread")]

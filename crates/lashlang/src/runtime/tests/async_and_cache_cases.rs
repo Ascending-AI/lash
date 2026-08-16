@@ -32,9 +32,7 @@ impl ExecutionHost for AsyncHost {
             }
             AbilityOp::Cancel(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::Print(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
-                Ok(AbilityResult::Value(value))
-            }
+            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
         }
     }
@@ -307,7 +305,7 @@ async fn process_lifecycle_controls_sleep_wait_and_signal() {
     ]);
     let mut globals = Record::new();
     globals.insert("run".to_string(), Value::Record(Arc::new(handle)));
-    let mut state = State::from_snapshot(Snapshot { globals });
+    let mut state = State::from_snapshot(Snapshot::new(globals));
     let compiled = compile_program(&program);
 
     let outcome = execute_compiled_process(&compiled, &mut state, &host)
@@ -428,9 +426,7 @@ async fn foreground_sleep_runs_as_regular_effect() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn process_mode_rejects_programmatic_foreground_controls() {
-    for (keyword, stmt) in [
-        ("print", Expr::Print(Box::new(Expr::String("debug".into())))),
-    ] {
+    for (keyword, stmt) in [("print", Expr::Print(Box::new(Expr::String("debug".into()))))] {
         let program = Program::block(vec![stmt]);
         let compiled = compile_program(&program);
         let mut state = State::new();
@@ -494,7 +490,10 @@ async fn traced_started_tool_errors_point_at_failing_tool_expression() {
         message.contains("value = await tools.err({})?"),
         "{message}"
     );
-    assert!(message.contains("                      ^~~~~~~~~~~~~"), "{message}");
+    assert!(
+        message.contains("                      ^~~~~~~~~~~~~"),
+        "{message}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
