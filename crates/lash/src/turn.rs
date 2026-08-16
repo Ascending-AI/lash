@@ -13,8 +13,65 @@ pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
 
 mod selected_drain;
 
-pub use selected_drain::{SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainOutcome};
 use selected_drain::{selected_drain_outcome, selected_drain_refusal_cause};
+
+/// How one distinct requested batch ID satisfied a successful selected drain.
+///
+/// Missing rows are idempotent success. A present row that cannot join the
+/// exact composition causes a pre-execution refusal, not a satisfaction value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SelectedQueuedWorkBatchSatisfaction {
+    /// This invocation claimed and executed the durable row.
+    ClaimedNow {
+        /// Requested durable batch ID.
+        batch_id: String,
+    },
+    /// No durable row remained, so the idempotent request was already done.
+    AlreadySatisfied {
+        /// Requested durable batch ID.
+        batch_id: String,
+    },
+}
+
+/// Successful result of an exact, host-selected queued-work drain.
+///
+/// Every distinct requested ID was either executed now or had no remaining
+/// durable row. A present ID that cannot join the exact claim returns
+/// [`EmbedError::SelectedQueuedWorkDrainRefused`](crate::EmbedError::SelectedQueuedWorkDrainRefused)
+/// before selected execution.
+#[derive(Clone, Debug)]
+pub struct SelectedQueuedWorkDrainOutcome<T> {
+    /// Executed turn, absent only for a fully satisfied drain with no selected turn.
+    pub turn: Option<T>,
+    /// One entry per distinct requested ID, ordered by first occurrence.
+    pub satisfied: Vec<SelectedQueuedWorkBatchSatisfaction>,
+}
+
+impl<T> SelectedQueuedWorkDrainOutcome<T> {
+    /// Reports whether this successful drain settled every requested ID without
+    /// executing a selected turn.
+    ///
+    /// Refusals are errors, so `true` means every distinct ID was satisfied
+    /// without a selected turn (or the selection was empty), never unclaimable.
+    pub fn settled_without_selected_turn(&self) -> bool {
+        self.turn.is_none()
+    }
+
+    /// Reports whether this successful drain executed a newly claimed turn.
+    ///
+    /// `false` has the same fully-satisfied meaning as
+    /// [`Self::settled_without_selected_turn`].
+    pub fn executed_selected_turn(&self) -> bool {
+        self.turn.is_some()
+    }
+
+    /// Returns the turn or panics with `message` when the successful drain was
+    /// fully satisfied without one.
+    #[track_caller]
+    pub fn expect(self, message: &str) -> T {
+        self.turn.expect(message)
+    }
+}
 
 /// The two internal event sinks threaded through the turn-execution helpers.
 ///

@@ -288,8 +288,12 @@ impl QueuedWorkBatchingConfig {
     /// Returns the context capacity reserved for the model action after Lash
     /// renders the queued-work prefix.
     ///
-    /// Fresh coalescing stops before it would consume this reserve. A single
-    /// row may use the reserve only when it still fits the model context; a row
+    /// Since FIG-1313 no shipped drain policy spends this budget: the two
+    /// default modes do no token arithmetic. It is handed to the configured
+    /// [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) as
+    /// [`QueuedDrainRequest::available_tokens`](crate::QueuedDrainRequest::available_tokens),
+    /// where a custom policy may weigh it, and a reserve that consumes the
+    /// whole model context is still rejected as a misconfiguration. A row
     /// larger than the entire context is refused and left pending.
     pub const fn action_token_reserve(&self) -> usize {
         self.action_token_reserve.get()
