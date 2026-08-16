@@ -62,7 +62,7 @@ jobs:
           shared-key: linux-debug
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
@@ -215,7 +215,7 @@ jobs:
           save-if: false
 
       - name: Install protoc and nextest
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc,nextest
 
@@ -307,7 +307,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
@@ -412,7 +412,7 @@ jobs:
           save-if: false
 
       - name: Install protoc and nextest
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc,nextest
 
@@ -518,7 +518,7 @@ jobs:
           save-if: false
 
       - name: Install protoc and nextest
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc,nextest
 
@@ -573,7 +573,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
@@ -636,7 +636,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
@@ -680,7 +680,7 @@ jobs:
           shared-key: cross-${{ matrix.target }}
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
@@ -725,7 +725,7 @@ jobs:
           shared-key: linux-release
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
@@ -814,7 +814,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
@@ -891,7 +891,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
 
