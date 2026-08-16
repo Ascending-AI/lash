@@ -271,6 +271,7 @@ fn source_for(path: &Path, test_metadata: &metadata::Metadata, finish: bool) -> 
     // not a production runtime global, so bridge only Test262's assertion
     // namespace to the latter spelling. Vendored tests remain byte-identical.
     let test = test
+        .replace("new Test262Error(", "Test262Error(")
         .replace("assert.sameValue", "assert[\"sameValue\"]")
         .replace("assert.notSameValue", "assert[\"notSameValue\"]")
         .replace("assert.compareArray", "assert[\"compareArray\"]");
@@ -531,8 +532,17 @@ fn typescript_type_syntax_status_is_pinned() {
     .expect("erased TypeScript program executes");
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(1.0)));
 
+    let enum_program = lash_typescript::compile("enum E { A } finish(E.A);")
+        .expect("runtime enums are accepted TypeScript syntax");
+    let enum_outcome = futures::executor::block_on(lashlang::execute(
+        &enum_program,
+        &mut State::new(),
+        &Host::default(),
+    ))
+    .expect("runtime enum program executes");
+    assert_eq!(enum_outcome, ExecutionOutcome::Finished(Value::Number(0.0)));
+
     for (source, expected) in [
-        ("enum E { A }", DiagnosticCode::EnumUnsupported),
         ("namespace N {}", DiagnosticCode::NamespaceUnsupported),
         ("@sealed class C {}", DiagnosticCode::DecoratorUnsupported),
     ] {

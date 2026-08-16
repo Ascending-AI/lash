@@ -185,7 +185,18 @@ fn url_search_params_for_each_observes_live_appends_and_deletes() {
                 deleteSeen[deleteSeen.length] = name;
                 if (name === 'a') { deleted.delete('b'); }
             });
-            finish([appendSeen, deleteSeen]);
+            const shifted = new URLSearchParams('a=1&b=2&d=4');
+            const shiftSeen = [];
+            shifted.forEach((value, name) => {
+                shiftSeen[shiftSeen.length] = name + value;
+                if (name === 'a' && value === '1') {
+                    shifted.delete('b');
+                    shifted.append('c', '3');
+                    shifted.delete('a');
+                    shifted.append('a', '10');
+                }
+            });
+            finish([appendSeen, deleteSeen, shiftSeen]);
             "#,
         ),
         Value::List(
@@ -199,6 +210,14 @@ fn url_search_params_for_each_observes_live_appends_and_deletes() {
                     .into(),
                 ),
                 Value::List(vec![Value::String("a".into()), Value::String("c".into())].into(),),
+                Value::List(
+                    vec![
+                        Value::String("a1".into()),
+                        Value::String("c3".into()),
+                        Value::String("a10".into()),
+                    ]
+                    .into(),
+                ),
             ]
             .into(),
         )

@@ -46,6 +46,7 @@ pub use javascript_regexp::{
     validate_typescript_regexp, validate_typescript_regexp_shape,
 };
 
+use super::heap::same_value_zero;
 use super::host::{ExecutionMode, ProcessEventKind, SleepKind};
 use super::record::{Record, record_with_capacity};
 use super::schema::{

@@ -16,7 +16,7 @@ is no fallback or wildcard row. The Rust harness fails if the two sets differ.
 `manifest.tsv` selects 42 executable probes and assigns each an area plus a
 `pass` or ratcheted `skip` disposition. `skip-register.tsv` names every other
 upstream test path and its reason, so the 53,578-test source tree has no silent
-omissions. `expected-counts.tsv` pins 28 passes and 14 executable skips by area.
+omissions. `expected-counts.tsv` pins 34 passes and 8 executable skips by area.
 A skipped probe is still compiled: if its named rejection changes or it starts
 compiling, the suite fails and requires an explicit promotion/count update.
 For selected tests that Test262 would also synthesize in strict mode, a
@@ -37,10 +37,11 @@ runner therefore prepends the small implementations under `harness-shim/`:
   accepted; no passing selected test may use it.
 
 The dialect reserves dotted method-call syntax for its method allowlist. At
-ingestion the runner bridges only `assert.sameValue`, `assert.notSameValue`,
-and `assert.compareArray` to equivalent computed-property function calls and
-supplies an omitted diagnostic-message argument. Vendored source remains
-unchanged and the assertion semantics run inside the real VM.
+ingestion the runner bridges `assert.sameValue`, `assert.notSameValue`, and
+`assert.compareArray` to equivalent computed-property function calls, supplies
+an omitted diagnostic-message argument, and normalizes direct
+`new Test262Error(...)` construction to the callable shim. Vendored source
+remains unchanged and the assertion semantics run inside the real VM.
 
 ## Deliberate sync
 

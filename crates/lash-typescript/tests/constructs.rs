@@ -198,6 +198,60 @@ fn map_and_set_surface_preserves_same_value_zero_identity_and_order() {
 }
 
 #[test]
+fn map_and_set_for_each_observe_live_add_delete_and_reinsert() {
+    assert_eq!(
+        finished(
+            r#"
+            const map = new Map([['a', 1], ['b', 2], ['d', 4]]);
+            const mapSeen = [];
+            map.forEach((value, key) => {
+                mapSeen[mapSeen.length] = key + value;
+                if (key === 'a' && value === 1) {
+                    map.delete('b');
+                    map.set('c', 3);
+                    map.delete('a');
+                    map.set('a', 10);
+                }
+            });
+            const set = new Set([1, 2, 4]);
+            const setSeen = [];
+            const state = { first: true };
+            set.forEach((value) => {
+                setSeen[setSeen.length] = value;
+                if (state.first) {
+                    state.first = false;
+                    set.delete(2);
+                    set.add(3);
+                    set.delete(1);
+                    set.add(1);
+                }
+            });
+            finish([mapSeen, setSeen]);
+            "#,
+        ),
+        Value::List(
+            vec![
+                Value::List(
+                    ["a1", "d4", "c3", "a10"]
+                        .into_iter()
+                        .map(|value| Value::String(value.into()))
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+                Value::List(
+                    [1.0, 4.0, 3.0, 1.0]
+                        .into_iter()
+                        .map(Value::Number)
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+            ]
+            .into(),
+        )
+    );
+}
+
+#[test]
 fn delete_preserves_alias_identity_and_rejects_array_holes() {
     assert_eq!(
         finished(

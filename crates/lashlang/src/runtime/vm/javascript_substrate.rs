@@ -139,7 +139,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.heap.allocate_url_search_params(entries)?
             }
             ("RegExp", args) => self.construct_regexp(args)?,
-            ("Map", []) | ("Map", [Value::Undefined]) => self.heap.allocate_map(Vec::new())?,
+            ("Map", []) | ("Map", [Value::Undefined | Value::Null]) => {
+                self.heap.allocate_map(Vec::new())?
+            }
             ("Map", [entries]) => {
                 let mut map_entries = Vec::new();
                 for entry in heap_sequence(&self.heap, entries)? {
@@ -153,7 +155,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 self.heap.allocate_map(map_entries)?
             }
-            ("Set", []) | ("Set", [Value::Undefined]) => self.heap.allocate_set(Vec::new())?,
+            ("Set", []) | ("Set", [Value::Undefined | Value::Null]) => {
+                self.heap.allocate_set(Vec::new())?
+            }
             ("Set", [values]) => self.heap.allocate_set(heap_sequence(&self.heap, values)?)?,
             ("Date", values) => self.construct_javascript_date(values)?,
             _ => {

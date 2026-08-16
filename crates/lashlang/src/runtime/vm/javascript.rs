@@ -577,12 +577,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ),
             ("Map", "has", [key]) => Some(Value::Bool(self.heap.map_has(receiver, key)?)),
             ("Map", "set", [key, value]) => {
-                self.heap.map_set(receiver, key.clone(), value.clone())?;
+                self.map_set_live(receiver, key, value)?;
                 Some(Value::Ref(receiver))
             }
-            ("Map", "delete", [key]) => Some(Value::Bool(self.heap.map_delete(receiver, key)?)),
+            ("Map", "delete", [key]) => Some(Value::Bool(self.map_delete_live(receiver, key)?)),
             ("Map", "clear", []) => {
                 self.heap.map_clear(receiver)?;
+                self.map_for_each_clear(receiver);
                 Some(Value::Undefined)
             }
             ("Map", "keys", []) => Some(Value::List(
@@ -613,9 +614,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .into(),
             )),
             ("Map", "forEach", [function]) => {
-                // Durable determinism deliberately snapshots the complete call
-                // sequence here. Entries added during callbacks are not visited,
-                // while an entry deleted before its turn remains in the snapshot.
+                // The durable call queue is updated by Map mutations while the
+                // callback is active. It therefore acts like ECMA's live ordered
+                // entry list, including delete-and-reinsert at the tail.
                 let calls = self
                     .heap
                     .map_entries(receiver)?
@@ -628,12 +629,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             ("Set", "has", [value]) => Some(Value::Bool(self.heap.set_has(receiver, value)?)),
             ("Set", "add", [value]) => {
-                self.heap.set_add(receiver, value.clone())?;
+                self.set_add_live(receiver, value)?;
                 Some(Value::Ref(receiver))
             }
-            ("Set", "delete", [value]) => Some(Value::Bool(self.heap.set_delete(receiver, value)?)),
+            ("Set", "delete", [value]) => Some(Value::Bool(self.set_delete_live(receiver, value)?)),
             ("Set", "clear", []) => {
                 self.heap.set_clear(receiver)?;
+                self.set_for_each_clear(receiver);
                 Some(Value::Undefined)
             }
             ("Set", "keys" | "values" | "entries", []) => {
@@ -654,9 +656,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 ))
             }
             ("Set", "forEach", [function]) => {
-                // As with Map, the durable callback driver consumes this cloned
-                // snapshot: later additions are not visited and later deletions
-                // do not remove an already-scheduled callback.
+                // As with Map, mutation maintains this durable pending queue as
+                // the live ordered Set contents change.
                 let calls = self
                     .heap
                     .set_values(receiver)?

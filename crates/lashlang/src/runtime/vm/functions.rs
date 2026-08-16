@@ -45,6 +45,123 @@ fn slot_names_for(chunk: &Chunk, active_function: Option<usize>) -> &[Name] {
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
+    pub(super) fn map_set_live(
+        &mut self,
+        receiver: HeapId,
+        key: &Value,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        let existed = self.heap.map_has(receiver, key)?;
+        self.heap.map_set(receiver, key.clone(), value.clone())?;
+        let (stored_key, stored_value) = self
+            .heap
+            .map_entries(receiver)?
+            .expect("Map receiver was checked")
+            .into_iter()
+            .find(|(candidate, _)| same_value_zero(candidate, key))
+            .expect("Map.set stored the key");
+        self.map_for_each_set(receiver, stored_key, stored_value, existed);
+        Ok(())
+    }
+
+    pub(super) fn map_delete_live(
+        &mut self,
+        receiver: HeapId,
+        key: &Value,
+    ) -> Result<bool, RuntimeError> {
+        let deleted = self.heap.map_delete(receiver, key)?;
+        if deleted {
+            self.map_for_each_delete(receiver, key);
+        }
+        Ok(deleted)
+    }
+
+    pub(super) fn set_add_live(
+        &mut self,
+        receiver: HeapId,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        let existed = self.heap.set_has(receiver, value)?;
+        self.heap.set_add(receiver, value.clone())?;
+        let stored = self
+            .heap
+            .set_values(receiver)?
+            .expect("Set receiver was checked")
+            .into_iter()
+            .find(|candidate| same_value_zero(candidate, value))
+            .expect("Set.add stored the value");
+        self.set_for_each_add(receiver, stored, existed);
+        Ok(())
+    }
+
+    pub(super) fn set_delete_live(
+        &mut self,
+        receiver: HeapId,
+        value: &Value,
+    ) -> Result<bool, RuntimeError> {
+        let deleted = self.heap.set_delete(receiver, value)?;
+        if deleted {
+            self.set_for_each_delete(receiver, value);
+        }
+        Ok(deleted)
+    }
+
+    pub(super) fn map_for_each_set(
+        &mut self,
+        receiver: HeapId,
+        key: Value,
+        value: Value,
+        existed: bool,
+    ) {
+        for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            if existed {
+                if let Some(call) = callback.calls[callback.next_index..]
+                    .iter_mut()
+                    .find(|call| callback_argument_matches(call, 1, &key))
+                {
+                    *call = collection_callback(vec![value.clone(), key.clone()], receiver);
+                }
+            } else {
+                callback.calls.push(collection_callback(
+                    vec![value.clone(), key.clone()],
+                    receiver,
+                ));
+            }
+        }
+    }
+
+    pub(super) fn map_for_each_delete(&mut self, receiver: HeapId, key: &Value) {
+        for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            retain_pending_calls(callback, |call| !callback_argument_matches(call, 1, key));
+        }
+    }
+
+    pub(super) fn map_for_each_clear(&mut self, receiver: HeapId) {
+        clear_pending_calls(&mut self.frames, receiver);
+    }
+
+    pub(super) fn set_for_each_add(&mut self, receiver: HeapId, value: Value, existed: bool) {
+        if existed {
+            return;
+        }
+        for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            callback.calls.push(collection_callback(
+                vec![value.clone(), value.clone()],
+                receiver,
+            ));
+        }
+    }
+
+    pub(super) fn set_for_each_delete(&mut self, receiver: HeapId, value: &Value) {
+        for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            retain_pending_calls(callback, |call| !callback_argument_matches(call, 0, value));
+        }
+    }
+
+    pub(super) fn set_for_each_clear(&mut self, receiver: HeapId) {
+        clear_pending_calls(&mut self.frames, receiver);
+    }
+
     pub(super) fn begin_direct_function_call(
         &mut self,
         closure: Value,
@@ -275,6 +392,46 @@ impl<H: ExecutionHost> Vm<'_, H> {
             live_url_search_params: true,
         };
         self.begin_function_call(function, first, ReturnTarget::Callback(callback))
+    }
+}
+
+fn collection_callback(mut arguments: Vec<Value>, receiver: HeapId) -> Value {
+    arguments.push(Value::Ref(receiver));
+    Value::Tuple(arguments.into())
+}
+
+fn callback_argument_matches(call: &Value, index: usize, expected: &Value) -> bool {
+    matches!(call, Value::Tuple(arguments) if arguments.get(index).is_some_and(|actual| same_value_zero(actual, expected)))
+}
+
+fn callback_targets_receiver(callback: &CallbackDriver, receiver: HeapId) -> bool {
+    !callback.live_url_search_params
+        && callback.calls.iter().any(|call| {
+            matches!(call, Value::Tuple(arguments) if matches!(arguments.last(), Some(Value::Ref(id)) if *id == receiver))
+        })
+}
+
+fn live_collection_callbacks(
+    frames: &mut [CallFrame],
+    receiver: HeapId,
+) -> impl Iterator<Item = &mut CallbackDriver> {
+    frames.iter_mut().filter_map(move |frame| {
+        let ReturnTarget::Callback(callback) = &mut frame.return_target else {
+            return None;
+        };
+        callback_targets_receiver(callback, receiver).then_some(callback)
+    })
+}
+
+fn retain_pending_calls(callback: &mut CallbackDriver, mut retain: impl FnMut(&Value) -> bool) {
+    let mut pending = callback.calls.split_off(callback.next_index);
+    pending.retain(|call| retain(call));
+    callback.calls.extend(pending);
+}
+
+fn clear_pending_calls(frames: &mut [CallFrame], receiver: HeapId) {
+    for callback in live_collection_callbacks(frames, receiver) {
+        callback.calls.truncate(callback.next_index);
     }
 }
 

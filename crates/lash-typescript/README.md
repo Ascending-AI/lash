@@ -312,10 +312,10 @@ language semantics:
   comparison. String coercion—directly or through an array/Error-message join—
   rejects as `TS_DATE_STRING_COERCION_PENDING` and directs the author to
   `.toISOString()`; the VM never substitutes a host-local date string.
-- Map/Set `forEach` currently snapshots the callback sequence before the first
-  callback. Node's live cursor observes additions and skips entries deleted
-  before their turn; mutation during a Map/Set callback therefore remains an
-  assembly STOP rather than a silently claimed exact behavior.
+- Map, Set, and URLSearchParams `forEach` all use live durable cursors: entries
+  appended during a callback are visited, while entries deleted before their
+  turn are skipped. Deleting and reinserting a Map key or Set value schedules
+  it at the tail; URLSearchParams retains its WHATWG list-index behavior.
 - A block-scoped binding whose name shadows one already in scope is lowered to
   a generated slot, so that the inner binding cannot overwrite the outer one.
   At root that slot is a runtime global, which makes it the one place a
@@ -554,10 +554,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 519 rows, of which 446 are distinct
+The Node differential table carries 521 rows, of which 448 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 446 unique rows rather than of 519 distinct behaviours. Both counts
+that of the 448 unique rows rather than of 521 distinct behaviours. Both counts
 are pinned against the table by `committed_row_counts_match_the_register`, and
 the generator pins each lane's own row count, so neither this paragraph nor a
 lane can drift from the corpus in silence.

@@ -230,3 +230,5 @@ new RegExp(undefined,'g').source
 new RegExp(/a/g)
 new Set('a'.matchAll(/a/g)).size
 (() => { const m=/(?<x>a)(b)/.exec('ab'); m[0]='changed'; m.index=7; m['input']='input'; m.groups={x:'group'}; m.length=1; return `${m[0]}|${m.index}|${m.input}|${m.groups.x}|${m.length}`; })()
+(() => { const m=new Map([['a',1],['b',2],['d',4]]);const out=[];m.forEach((v,k)=>{out[out.length]=k+v;if(k==='a'&&v===1){m.delete('b');m.set('c',3);m.delete('a');m.set('a',10);}});return out.join(','); })()
+(() => { const s=new Set([1,2,4]);const out=[];const state={first:true};s.forEach(v=>{out[out.length]=v;if(state.first){state.first=false;s.delete(2);s.add(3);s.delete(1);s.add(1);}});return out.join(','); })()
