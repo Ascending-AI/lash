@@ -29,8 +29,9 @@ use crate::schema::responses_error_is_retryable;
 use crate::support::{OPENAI_FILE_MIMES, OPENAI_IMAGE_MIMES};
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
 use lash_core::llm::types::{
-    AttachmentSource, LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole,
-    LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta,
+    AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse,
+    LlmRole, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
+    ResponseTextMeta,
 };
 use lash_core::{
     SchemaContract, facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
@@ -659,7 +660,7 @@ pub fn response_from_stream_state(
         provider_usage: state.provider_usage,
         request_body,
         http_summary: Some(http_summary),
-        execution_evidence: None,
+        execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
     }
@@ -854,6 +855,7 @@ pub struct ResponsesStreamState {
     pub parts: Vec<LlmOutputPart>,
     pub usage: LlmUsage,
     pub provider_usage: Option<Value>,
+    pub execution_evidence: Option<ExecutionEvidence>,
     pub final_response: Option<Value>,
     /// Set only by a terminal Responses event, never merely by an event that
     /// happens to carry a `response` snapshot.
@@ -890,6 +892,55 @@ pub struct ResponsesStreamState {
 }
 
 impl ResponsesStreamState {
+    pub fn capture_execution_evidence(
+        &mut self,
+        response: &Value,
+        terminal_event: bool,
+    ) -> Result<(), LlmTransportError> {
+        let usage = response.get("usage").unwrap_or(&Value::Null);
+        let provider_finish_reason = terminal_event
+            .then(|| {
+                response
+                    .get("incomplete_details")
+                    .or_else(|| response.get("incompleteDetails"))
+                    .and_then(|details| details.get("reason"))
+                    .and_then(Value::as_str)
+                    .or_else(|| response.get("status").and_then(Value::as_str))
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+            .flatten();
+        let next = ExecutionEvidence {
+            served_model: response
+                .get("model")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            provider_response_id: response
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            provider_request_id: None,
+            reasoning_output_tokens: usage
+                .get("output_tokens_details")
+                .and_then(|details| details.get("reasoning_tokens"))
+                .and_then(Value::as_u64),
+            provider_finish_reason,
+            collection_interruption: None,
+        };
+        if next == ExecutionEvidence::default() {
+            return Ok(());
+        }
+        ExecutionEvidence::merge_optional(&mut self.execution_evidence, Some(next)).map_err(
+            |error| {
+                LlmTransportError::new(format!("Responses stream {error}"))
+                    .with_kind(ProviderFailureKind::Stream)
+                    .with_code(error.code())
+            },
+        )
+    }
+
     pub fn begin_message(&mut self, item: Option<&Value>, output_index: Option<usize>) {
         let item_id = item
             .and_then(|item| item.get("id").and_then(|v| v.as_str()))

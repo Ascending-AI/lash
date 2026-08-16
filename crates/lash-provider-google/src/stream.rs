@@ -455,7 +455,10 @@ impl GoogleOAuthProvider {
     ) -> LlmTerminalReason {
         let finish = Self::finish_reason_str(value).unwrap_or("");
         match finish {
-            "STOP" => LlmTerminalReason::Stop,
+            // Gemini uses STOP for both prose completion and a completed
+            // function-call candidate. Preserve the structured outcome when
+            // the payload actually contains a tool call.
+            "STOP" => terminal_reason_from_parts(parts),
             "MAX_TOKENS" => LlmTerminalReason::OutputLimit,
             "SAFETY"
             | "RECITATION"

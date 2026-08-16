@@ -42,6 +42,14 @@ pub fn process_sse_event(
         .and_then(Value::as_u64)
         .map(|value| value as usize);
 
+    let terminal_event = matches!(
+        event_type,
+        "response.completed" | "response.incomplete" | "response.done" | "response.failed"
+    );
+    if let Some(response) = event.get("response") {
+        state.capture_execution_evidence(response, terminal_event)?;
+    }
+
     if let Some(resp) = event.get("response") {
         state.final_response = Some(resp.clone());
         state.provider_usage = resp.get("usage").filter(|usage| !usage.is_null()).cloned();

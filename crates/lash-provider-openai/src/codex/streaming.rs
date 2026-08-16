@@ -18,8 +18,8 @@ use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
 use lash_core::llm::types::{
-    LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmUsage,
-    ProviderRouteIdentity,
+    ExecutionEvidence, LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence,
+    LlmTerminalReason, LlmUsage, ProviderRouteIdentity,
 };
 use lash_core::provider::{Provider, ProviderOptions, StreamTermination};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
@@ -372,8 +372,17 @@ impl CodexProvider {
             if let Err(error) = process_result {
                 let output_started = Self::response_state_started_output(&state);
                 let stale_previous_response = Self::is_stale_previous_response_error(&error);
+                let mut partial = shared::response_from_stream_state(
+                    state.clone(),
+                    Some(request_body.clone()),
+                    self.websocket_http_summary(&diagnostics),
+                );
+                partial.terminal_reason = LlmTerminalReason::Unknown;
+                partial.generation_disposition = Some(Self::generation_disposition(req, full_body));
                 return Err(CodexWebSocketAttemptError {
-                    error: error.with_request_body(request_body.clone()),
+                    error: error
+                        .with_request_body(request_body.clone())
+                        .with_partial_response(partial),
                     events_seen,
                     output_started,
                     stale_previous_response,
@@ -386,10 +395,11 @@ impl CodexProvider {
                 &prev_usage,
             );
             if let Some(tx) = &stream_events
-                && state.provider_usage.is_some()
+                && (state.provider_usage.is_some() || state.execution_evidence.is_some())
             {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     provider_usage: state.provider_usage.clone(),
+                    execution_evidence: state.execution_evidence.clone(),
                     ..Default::default()
                 }));
             }
@@ -783,6 +793,8 @@ impl Provider for CodexProvider {
         let status = resp.status;
         let content_type = first_header_value(&resp.headers, "content-type").map(str::to_string);
         let response_headers = resp.headers.clone();
+        let provider_request_id =
+            first_header_value(&response_headers, "x-request-id").map(str::to_string);
         let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
         let success = resp.is_success();
         let body = resp.body;
@@ -821,6 +833,12 @@ impl Provider for CodexProvider {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
+                execution_evidence: provider_request_id.clone().map(|provider_request_id| {
+                    ExecutionEvidence {
+                        provider_request_id: Some(provider_request_id),
+                        ..Default::default()
+                    }
+                }),
                 generation_disposition,
                 response_metadata: response_metadata.metadata(),
                 ..Default::default()
@@ -841,7 +859,15 @@ impl Provider for CodexProvider {
             response_metadata.capture_body_text(&text);
             emit_provider_trace(provider_trace.as_ref(), "codex", &text);
             if Self::looks_like_sse_payload(&text) {
-                let mut state = shared::ResponsesStreamState::default();
+                let mut state = shared::ResponsesStreamState {
+                    execution_evidence: provider_request_id.clone().map(|provider_request_id| {
+                        ExecutionEvidence {
+                            provider_request_id: Some(provider_request_id),
+                            ..Default::default()
+                        }
+                    }),
+                    ..Default::default()
+                };
                 shared::parse_sse_payload(PROVIDER, &text, &mut state)?;
                 let mut response = shared::response_from_stream_state(
                     state,
@@ -886,6 +912,17 @@ impl Provider for CodexProvider {
                 LlmTransportError::new(format!("Invalid Codex response JSON: {e}"))
                     .with_raw(text.clone())
             })?;
+            let mut evidence_state = shared::ResponsesStreamState {
+                execution_evidence: provider_request_id.map(|provider_request_id| {
+                    ExecutionEvidence {
+                        provider_request_id: Some(provider_request_id),
+                        ..Default::default()
+                    }
+                }),
+                ..Default::default()
+            };
+            evidence_state.capture_execution_evidence(&value, true)?;
+            let execution_evidence = evidence_state.execution_evidence;
             let content = shared::extract_text(&value);
             let provider_usage = value.get("usage").cloned();
             let usage = openai_usage_from_response_value(&value);
@@ -899,6 +936,7 @@ impl Provider for CodexProvider {
             if let Some(tx) = &stream_events {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     provider_usage: provider_usage.clone(),
+                    execution_evidence: execution_evidence.clone(),
                     ..Default::default()
                 }));
                 if usage != LlmUsage::default() {
@@ -918,7 +956,7 @@ impl Provider for CodexProvider {
                 provider_usage,
                 request_body,
                 http_summary: Some(format!("HTTP POST {}", self.responses_url)),
-                execution_evidence: None,
+                execution_evidence,
                 generation_disposition,
                 response_metadata: response_metadata.into_metadata(),
             });
@@ -933,7 +971,13 @@ impl Provider for CodexProvider {
             );
         }
 
-        let mut state = shared::ResponsesStreamState::default();
+        let mut state = shared::ResponsesStreamState {
+            execution_evidence: provider_request_id.map(|provider_request_id| ExecutionEvidence {
+                provider_request_id: Some(provider_request_id),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
         let expose_thinking = self.options.expose_thinking;
         let stream_result = drive_sse_response(
             body,
@@ -948,10 +992,11 @@ impl Provider for CodexProvider {
                 let mut emitted_parts = Vec::new();
                 shared::process_sse_event(PROVIDER, raw, &mut state, Some(&mut emitted_parts))?;
                 if let Some(tx) = &stream_events
-                    && state.provider_usage.is_some()
+                    && (state.provider_usage.is_some() || state.execution_evidence.is_some())
                 {
                     tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                         provider_usage: state.provider_usage.clone(),
+                        execution_evidence: state.execution_evidence.clone(),
                         ..Default::default()
                     }));
                 }

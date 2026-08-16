@@ -98,12 +98,20 @@ impl GoogleOAuthProvider {
                 request_body,
             ));
         }
+        let provider_request_id =
+            first_header_value(&resp.headers, "x-request-id").map(str::to_string);
         let mut response_metadata =
             ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {url} (stream)")),
+                execution_evidence: provider_request_id.clone().map(|provider_request_id| {
+                    ExecutionEvidence {
+                        provider_request_id: Some(provider_request_id),
+                        ..Default::default()
+                    }
+                }),
                 generation_disposition,
                 response_metadata: response_metadata.metadata(),
                 ..Default::default()
@@ -137,7 +145,20 @@ impl GoogleOAuthProvider {
                 })
                 .unwrap_or_default();
             let terminal_reason = Self::terminal_reason_from_value(&value, &parts);
-            let execution_evidence = Self::execution_evidence_from_value(&value);
+            let mut execution_evidence =
+                provider_request_id.map(|provider_request_id| ExecutionEvidence {
+                    provider_request_id: Some(provider_request_id),
+                    ..Default::default()
+                });
+            ExecutionEvidence::merge_optional(
+                &mut execution_evidence,
+                Self::execution_evidence_from_value(&value),
+            )
+            .map_err(|error| {
+                LlmTransportError::new(format!("Google response {error}"))
+                    .with_kind(ProviderFailureKind::Stream)
+                    .with_code(error.code())
+            })?;
             return Ok(LlmResponse {
                 full_text,
                 parts,
@@ -156,7 +177,11 @@ impl GoogleOAuthProvider {
         let mut full = String::new();
         let mut usage = LlmUsage::default();
         let mut provider_usage: Option<Value> = None;
-        let mut execution_evidence: Option<ExecutionEvidence> = None;
+        let mut execution_evidence =
+            provider_request_id.map(|provider_request_id| ExecutionEvidence {
+                provider_request_id: Some(provider_request_id),
+                ..Default::default()
+            });
         let mut output_parts: Vec<LlmOutputPart> = Vec::new();
         let mut tool_call_parts: Vec<LlmOutputPart> = Vec::new();
         let mut finish_event: Option<Value> = None;
