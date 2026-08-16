@@ -145,6 +145,47 @@ LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   2>&1 | tee "$artifact_dir/04-wake-turn-policy.log" | tee -a "$test_output"
 echo "scenario 4 evidence: EachWake produced separate claims and Coalesce produced one multi-batch claim on PostgreSQL" | tee -a "$test_output"
 
+DATABASE_URL="$postgres_url" \
+  cargo run --locked --release --quiet -p lash-restate-postgres-workers-e2e \
+    --bin lash-e2e-process-operator-flow -- selected-drain \
+  2>&1 | tee "$artifact_dir/08-selected-drain.jsonl" | tee -a "$test_output"
+python3 - "$artifact_dir/08-selected-drain.jsonl" <<'PY'
+import json
+import sys
+
+
+checkpoint = None
+with open(sys.argv[1], encoding="utf-8") as stream:
+    for line in stream:
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if value.get("checkpoint") == "selected_drain_scope_isolated":
+            checkpoint = value
+            break
+if checkpoint is None:
+    raise SystemExit("missing selected_drain_scope_isolated checkpoint")
+expected = {
+    "selected_satisfaction": "ClaimedNow",
+    "replay_satisfaction": "AlreadySatisfied",
+    "unselected_pending_after_claim": True,
+    "refusal": "UnclaimableTogether",
+    "provider_calls": 1,
+}
+for field, expected_value in expected.items():
+    if checkpoint.get(field) != expected_value:
+        raise SystemExit(
+            f"selected-drain field {field} was {checkpoint.get(field)!r}, "
+            f"expected {expected_value!r}: {checkpoint}"
+        )
+if checkpoint["unselected_batch_id"] not in checkpoint["pending_after_refusal"]:
+    raise SystemExit(f"selected drain settled unselected B: {checkpoint}")
+if checkpoint["refusal_unclaimed_batch_ids"] == []:
+    raise SystemExit(f"typed refusal named no unclaimed row: {checkpoint}")
+PY
+echo "scenario 8 evidence: selected A settled alone; unselected B remained pending; replay and refusal stayed typed" | tee -a "$test_output"
+
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   cargo test --locked -p lash-postgres-store --test conformance \
   postgres_process_trigger_retention_satisfies_conformance_when_configured \
@@ -210,4 +251,4 @@ if grep -Fn 'panicked at' "$test_output" >&2; then
   exit 1
 fi
 echo "panic gate: clean (no 'panicked at' lines in process-operations E2E output)" | tee -a "$test_output"
-echo "process-operations e2e passed: scenarios=7 artifacts=$artifact_dir" | tee -a "$test_output"
+echo "process-operations e2e passed: scenarios=8 artifacts=$artifact_dir" | tee -a "$test_output"

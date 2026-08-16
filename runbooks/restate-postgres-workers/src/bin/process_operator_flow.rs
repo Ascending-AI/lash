@@ -1,11 +1,11 @@
 //! Deterministic PostgreSQL harness for the graceful-drain and
-//! request-abandon judged runbooks.
+//! request-abandon judged runbooks plus the process-operations selected-drain
+//! isolation row.
 //!
 //! The fixtures use the public Lash facade and durable-process worker surfaces.
-//! Process inputs are inert external placeholders because neither scenario is
-//! testing process execution; the persisted disposition, first-started fact,
-//! lease, observer edge, abandon request, and terminal are the contract under
-//! judgment.
+//! Process inputs are inert external placeholders where execution is not under
+//! test. The selected-drain row uses scripted agent-frame work to exercise the
+//! public turn facade without model nondeterminism.
 
 use lash::sync::MutexExt;
 use std::collections::BTreeSet;
@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail, ensure};
+use lash::persistence::SessionStoreFactory as _;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::runtime::{
     AwaitEventResolver, ExecutionScope, InlineRuntimeEffectController, RuntimeEffectController,
@@ -39,7 +40,7 @@ const REQUEST_PROCESS_ID: &str = "request-abandon-owner-bound";
 async fn main() -> Result<()> {
     let scenario = std::env::args()
         .nth(1)
-        .context("usage: lash-e2e-process-operator-flow drain|request-abandon")?;
+        .context("usage: lash-e2e-process-operator-flow drain|request-abandon|selected-drain")?;
     let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
     let storage = PostgresStorage::connect(&database_url)
         .await
@@ -48,6 +49,7 @@ async fn main() -> Result<()> {
     match scenario.as_str() {
         "drain" => Box::pin(graceful_drain(&storage)).await,
         "request-abandon" => Box::pin(request_abandon(&storage)).await,
+        "selected-drain" => Box::pin(selected_drain_scope_isolation(&storage)).await,
         other => bail!("unknown process operator-flow scenario `{other}`"),
     }
 }
@@ -351,6 +353,186 @@ fn core(
             uuid::Uuid::new_v4().to_string(),
         ))
         .context("build process operator-flow core")
+}
+
+fn queued_batch_draft(
+    session_id: &str,
+    source_key: &str,
+    merge_key: &str,
+) -> lash::persistence::QueuedWorkBatchDraft {
+    lash::persistence::QueuedWorkBatchDraft::new(
+        session_id,
+        lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
+        vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
+            "process-operations-selected-drain-frame",
+            source_key,
+            None,
+        )],
+    )
+    .with_source_key(source_key)
+    .with_merge_key(merge_key)
+}
+
+async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()> {
+    const SESSION_ID: &str = "process-operations-selected-drain";
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("process-operations-selected-drain")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(scripted_response("selected A only"))
+            }
+        })
+        .build()
+        .into_handle();
+    let attachments = tempfile::tempdir().context("selected-drain attachment directory")?;
+    let core = core(storage, provider, &attachments)?;
+    let session = core.session(SESSION_ID).open().await?;
+    let store_factory = storage.session_store_factory_with_shared_process_registry();
+    let store = store_factory
+        .create_store(&lash::persistence::SessionStoreCreateRequest {
+            session_id: SESSION_ID.to_string(),
+            relation: lash::persistence::SessionRelation::Root,
+            policy: session.policy_snapshot(),
+        })
+        .await?;
+
+    let selected_a = store
+        .enqueue_queued_work(queued_batch_draft(
+            SESSION_ID,
+            "selected-drain:a",
+            "selected-drain:a",
+        ))
+        .await?;
+    let unselected_b = store
+        .enqueue_queued_work(queued_batch_draft(
+            SESSION_ID,
+            "selected-drain:b",
+            "selected-drain:b",
+        ))
+        .await?;
+
+    let claimed = session
+        .queued_turn()
+        .batch_ids([selected_a.batch_id.clone()])
+        .run()
+        .await?;
+    ensure!(
+        claimed.satisfied
+            == vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
+                batch_id: selected_a.batch_id.clone(),
+            }],
+        "selected A satisfaction was not exact: {:?}",
+        claimed.satisfied
+    );
+    ensure!(claimed.turn.is_some(), "selected A did not execute a turn");
+    ensure!(
+        provider_calls.load(Ordering::SeqCst) == 1,
+        "selected A executed an unexpected number of provider calls"
+    );
+    let pending_after_claim = session.queued_work().await?;
+    ensure!(
+        pending_after_claim
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>()
+            == vec![unselected_b.batch_id.as_str()],
+        "selected A settled or reordered unselected B: {pending_after_claim:?}"
+    );
+
+    let replay = session
+        .queued_turn()
+        .batch_ids([selected_a.batch_id.clone()])
+        .run()
+        .await?;
+    ensure!(replay.turn.is_none(), "idempotent A replay executed a turn");
+    ensure!(
+        replay.satisfied
+            == vec![
+                lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                    batch_id: selected_a.batch_id.clone(),
+                },
+            ],
+        "idempotent A replay was not AlreadySatisfied: {:?}",
+        replay.satisfied
+    );
+
+    let refusal_c1 = store
+        .enqueue_queued_work(queued_batch_draft(
+            SESSION_ID,
+            "selected-drain:c1",
+            "selected-drain:c",
+        ))
+        .await?;
+    let refusal_separator = store
+        .enqueue_queued_work(queued_batch_draft(
+            SESSION_ID,
+            "selected-drain:separator",
+            "selected-drain:separator",
+        ))
+        .await?;
+    let refusal_c2 = store
+        .enqueue_queued_work(queued_batch_draft(
+            SESSION_ID,
+            "selected-drain:c2",
+            "selected-drain:c",
+        ))
+        .await?;
+    let refusal = session
+        .queued_turn()
+        .batch_ids([refusal_c1.batch_id.clone(), refusal_c2.batch_id.clone()])
+        .run()
+        .await
+        .expect_err("a selection cannot jump one merge key across another");
+    let lash::EmbedError::SelectedQueuedWorkDrainRefused {
+        cause:
+            lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                unclaimed_batch_ids,
+            },
+    } = refusal
+    else {
+        bail!("selected-drain refusal lost its typed cause: {refusal:?}");
+    };
+    ensure!(
+        unclaimed_batch_ids == vec![refusal_c2.batch_id.clone()],
+        "selected-drain refusal named the wrong rows: {unclaimed_batch_ids:?}"
+    );
+    let pending_after_refusal = session.queued_work().await?;
+    let pending_ids = pending_after_refusal
+        .iter()
+        .map(|batch| batch.batch_id.clone())
+        .collect::<Vec<_>>();
+    ensure!(
+        pending_ids
+            == vec![
+                unselected_b.batch_id.clone(),
+                refusal_c1.batch_id.clone(),
+                refusal_separator.batch_id.clone(),
+                refusal_c2.batch_id.clone(),
+            ],
+        "typed refusal mutated pending rows: {pending_after_refusal:?}"
+    );
+    ensure!(
+        provider_calls.load(Ordering::SeqCst) == 1,
+        "typed refusal reached the provider"
+    );
+
+    emit(json!({
+        "checkpoint": "selected_drain_scope_isolated",
+        "selected_batch_id": selected_a.batch_id,
+        "selected_satisfaction": "ClaimedNow",
+        "replay_satisfaction": "AlreadySatisfied",
+        "unselected_batch_id": unselected_b.batch_id,
+        "unselected_pending_after_claim": true,
+        "refusal": "UnclaimableTogether",
+        "refusal_unclaimed_batch_ids": unclaimed_batch_ids,
+        "pending_after_refusal": pending_ids,
+        "provider_calls": provider_calls.load(Ordering::SeqCst),
+    }));
+    Ok(())
 }
 
 async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {

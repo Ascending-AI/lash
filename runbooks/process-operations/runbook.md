@@ -19,7 +19,7 @@ The companion owns isolated Restate, PostgreSQL, and MinIO ports derived from th
 kills a real worker container at the named crash checkpoint, and removes every container and
 volume it owns on exit. PostgreSQL uses the worktree block's `+46` offset unless
 `LASH_PROCESS_OPERATIONS_POSTGRES_PORT` overrides it.
-It emits `process-operations e2e passed: scenarios=7` only after all exact assertions pass. The
+It emits `process-operations e2e passed: scenarios=8` only after all exact assertions pass. The
 artifacts are the backend truth for this judged runbook.
 
 ## Scenario-specific golden rules
@@ -47,6 +47,10 @@ artifacts are the backend truth for this judged runbook.
    `ToolIntentParentEndOutcome`; a crash after the child side effect, between commands, or before
    plan clear must redrive without duplicating the child event. Concurrent startup scans may
    race, but only one durable cancellation may remain for each child.
+8. **Selected drains are closed over the requested batches.** A successful selected drain may
+   settle only its exact batch set. Unselected pending rows remain pending, absent selected ids
+   report `AlreadySatisfied`, and a present row that cannot join the exact composition retains its
+   typed refusal without provider execution or queue mutation.
 
 ## FIG-1292 parent-end atomicity preflight
 
@@ -226,10 +230,27 @@ that delivery.
 recovery resurrects pruned trigger work, compaction orphans a delivery, or a trigger-store survey
 failure permits compaction.
 
-## Phase 8 — Teardown and score
+## Phase 8 — Selected-drain scope isolation
+
+**Setup.** Inspect `08-selected-drain.jsonl`. The PostgreSQL fixture enqueues selected batch A
+followed by unselected batch B, then executes only A through the public selected-drain facade.
+
+**Action.** Require checkpoint `selected_drain_scope_isolated`, replay A by the same durable batch
+id, then inspect the deliberately unclaimable two-row selection separated by another merge key.
+
+**Expected observable evidence.** A reports `ClaimedNow` with exactly one provider call; B remains
+pending after A. Replaying A reports `AlreadySatisfied` without another provider call. The later
+selection reports `UnclaimableTogether`, names the unclaimed row, and leaves B plus every refusal
+fixture row pending in original order.
+
+**Judgment — FAIL if:** A's selected turn settles B, replay executes a turn, a present-row refusal
+is converted to satisfaction, the refusal reaches the provider, or any refusal-path row moves or
+disappears.
+
+## Phase 9 — Teardown and score
 
 Require the companion's final `panic gate: clean` and
-`process-operations e2e passed: scenarios=7` lines. Confirm its compose project and named crash
+`process-operations e2e passed: scenarios=8` lines. Confirm its compose project and named crash
 container no longer exist.
 
 | Item | Objective gate | Verdict | Evidence |
@@ -242,6 +263,7 @@ container no longer exist.
 | Worker crash recovery | kill at named seam; one receiver turn after restart | | `05-crash-*.jsonl`, `05-killed-exit-code.txt` |
 | Process-id reuse | fresh monotone sequence delivered; rewind typed and non-blocking | | `01-wake-delivery.log` |
 | Retention | receipts retained; delivery reconciliation; guard blocks compaction | | `07-retention.log` |
+| Selected-drain isolation | A claimed alone; B pending; replay/refusal typed and non-mutating | | `08-selected-drain.jsonl` |
 | Teardown | panic gate clean; no owned containers or volumes remain | | `process-operations-e2e.log`, container inventory |
 
 **Aggregate:** did the live durable substrate expose enough typed, actionable evidence for an

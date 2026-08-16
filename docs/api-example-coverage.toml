@@ -71938,9 +71938,9 @@ kind = "struct"
 availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder"]
 area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:74#) -> lash::SelectedQueuedTurnBuilder {"
-reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:109#.batch_ids([batch_id.clone()])"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:115#assert_eq!(claimed.satisfied, claimed_exact);"
 
 [[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::advanced"
@@ -71948,8 +71948,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::advanced"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add the advanced selected-drain scope path to a durable-controller example and assert its typed satisfaction outcome."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:158#.advanced()"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:162#assert_eq!(cancelled.satisfied, claimed_exact);"
 
 [[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::cancel"
@@ -71957,8 +71958,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::cancel"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add selected-drain cooperative cancellation to an embedding example and assert the cancellation outcome."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:157#.cancel(cancel)"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:164#assert_eq!(cancelled.outcome, TurnOutcome::Stopped(TurnStop::Cancelled));"
 
 [[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::cancel_with_origin"
@@ -71966,8 +71968,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::cancel_with_origin"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add selected-drain cancellation with host origin evidence to an embedding example and assert the recorded origin."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:187#.cancel_with_origin(cancel, Some(\"host-shutdown\".to_string()))"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:199#assert_eq!(evidence.origin.as_deref(), Some(\"host-shutdown\"));"
 
 [[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::drain_id"
@@ -72005,8 +72008,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::stream_to"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add direct selected-drain streaming to an embedding example and assert both emitted activity and typed satisfaction."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:110#.stream_to(&events)"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:115#assert_eq!(claimed.satisfied, claimed_exact);"
+reason = "The executable embedding law also asserts an emitted AssistantProseDelta beginning at line 120."
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkBatchSatisfaction"
@@ -72198,16 +72203,18 @@ symbol = "lash::turn::AdvancedSelectedQueuedTurn"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add the advanced selected-drain scope path to a durable-controller example and assert its typed satisfaction outcome."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:158#.advanced()"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:162#assert_eq!(cancelled.satisfied, claimed_exact);"
 
 [[api]]
 symbol = "lash::turn::AdvancedSelectedQueuedTurn::stream_to_with_scope"
 kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add an explicitly scoped selected drain to a durable-controller example and assert its typed satisfaction outcome."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:159#.stream_to_with_scope(&AppEvents::default(), scoped)"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:162#assert_eq!(cancelled.satisfied, claimed_exact);"
 
 [[api]]
 symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder"
