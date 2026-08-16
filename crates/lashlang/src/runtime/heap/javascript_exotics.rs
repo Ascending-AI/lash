@@ -429,6 +429,34 @@ impl Heap {
         })
     }
 
+    pub(crate) fn replace_javascript_list(
+        &mut self,
+        id: HeapId,
+        values: Vec<Value>,
+    ) -> Result<(), RuntimeError> {
+        self.update_object(id, |object| {
+            let HeapObject::List(current) = object else {
+                return false;
+            };
+            *current = values;
+            true
+        })
+    }
+
+    pub(crate) fn replace_javascript_record(
+        &mut self,
+        id: HeapId,
+        record: Record,
+    ) -> Result<(), RuntimeError> {
+        self.update_object(id, |object| {
+            let HeapObject::Record(current) = object else {
+                return false;
+            };
+            **current = record;
+            true
+        })
+    }
+
     fn update_object(
         &mut self,
         id: HeapId,

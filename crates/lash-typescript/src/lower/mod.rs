@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ListComprehensionClause,
-    ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessStartExpr, Program as LashProgram,
-    ResourceRefExpr, TryExpr, TypeExpr,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessParam,
+    ProcessSignalDecl, ProcessStartExpr, Program as LashProgram, ResourceRefExpr, TryExpr,
+    TypeExpr,
 };
 
 use crate::adapter::{
@@ -18,13 +18,16 @@ mod stdlib;
 use stdlib::*;
 mod loops;
 use loops::*;
+mod array_callbacks;
 mod array_map;
 mod await_expr;
 mod calls;
 mod constructs;
 mod graph;
+mod json_replacer;
 use constructs::*;
 use graph::{shortest_cycle_through, strongly_connected_components};
+use json_replacer::reject_json_parse_reviver;
 
 pub(crate) fn accepts_instance_method(method: &str) -> bool {
     stdlib::is_instance_stdlib_method(method)
@@ -540,6 +543,30 @@ impl Lowerer {
                     {
                         self.iterable_kinds
                             .insert(self.binding(name)?.internal.clone(), constructor.clone());
+                    }
+                    if let (Some(name), Some(Expr::Call { callee, .. })) =
+                        (process_name, declaration.init.as_ref())
+                        && let Expr::Member {
+                            object,
+                            property: MemberProperty::Field(method),
+                        } = callee.as_ref()
+                    {
+                        let kind = if matches!(object.as_ref(), Expr::Ident(owner) if owner == "Map")
+                            && method == "groupBy"
+                        {
+                            Some("Map")
+                        } else if matches!(
+                            method.as_str(),
+                            "union" | "intersection" | "difference" | "symmetricDifference"
+                        ) {
+                            Some("Set")
+                        } else {
+                            None
+                        };
+                        if let Some(kind) = kind {
+                            self.iterable_kinds
+                                .insert(self.binding(name)?.internal.clone(), kind.to_string());
+                        }
                     }
                     let value = if let Some(init) = declaration.init.as_ref()
                         && is_define_process_call(init)
@@ -1333,6 +1360,24 @@ impl Lowerer {
                 MemberProperty::Field(field) => field.as_str(),
                 MemberProperty::Index(_) => "computed property",
             };
+            let constant = match (owner.as_str(), name) {
+                ("Number", "EPSILON") => Some(f64::EPSILON),
+                ("Number", "MIN_SAFE_INTEGER") => Some(-9_007_199_254_740_991.0),
+                ("Number", "MAX_SAFE_INTEGER") => Some(9_007_199_254_740_991.0),
+                ("Number", "MAX_VALUE") => Some(f64::MAX),
+                ("Math", "PI") => Some(std::f64::consts::PI),
+                ("Math", "E") => Some(std::f64::consts::E),
+                ("Math", "LN2") => Some(std::f64::consts::LN_2),
+                ("Math", "LN10") => Some(std::f64::consts::LN_10),
+                ("Math", "LOG2E") => Some(std::f64::consts::LOG2_E),
+                ("Math", "LOG10E") => Some(std::f64::consts::LOG10_E),
+                ("Math", "SQRT2") => Some(std::f64::consts::SQRT_2),
+                ("Math", "SQRT1_2") => Some(std::f64::consts::FRAC_1_SQRT_2),
+                _ => None,
+            };
+            if let Some(value) = constant {
+                return Ok(LashExpr::Number(value));
+            }
             return Err(Diagnostic::new(
                 DiagnosticCode::MethodUnsupported,
                 format!("property `{owner}.{name}` is not in the TypeScript runtime surface"),

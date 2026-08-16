@@ -120,16 +120,6 @@ rejection_test!(
     Code::MethodUnsupported
 );
 rejection_test!(
-    rejects_array_from_mapping_callback,
-    "Array.from('ab', value => value.toUpperCase());",
-    Code::MethodUnsupported
-);
-rejection_test!(
-    rejects_missing_runtime_property,
-    "finish(Math.PI);",
-    Code::MethodUnsupported
-);
-rejection_test!(
     rejects_dynamic_process_config,
     "const config = {}; const worker = defineProcess(config);",
     Code::ProcessConfigLiteralRequired
@@ -199,7 +189,7 @@ fn instance_method_inventory_matches_the_lowerer() {
     let register = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))
         .expect("the register is readable");
     let documented = register
-        .split("The shipped instance methods are ")
+        .split("The shipped instance names are ")
         .nth(1)
         .expect("the register names its instance methods")
         .split('.')
@@ -230,20 +220,9 @@ fn instance_method_inventory_matches_the_lowerer() {
         unaccepted.is_empty(),
         "the register documents {unaccepted:?}, which the lowerer does not accept"
     );
-    let claimed = register
-        .split("38 static methods and\n")
-        .nth(1)
-        .and_then(|rest| rest.split(' ').next())
-        .and_then(|count| count.parse::<usize>().ok())
-        .expect("the register states an instance-method count");
-    assert_eq!(
-        claimed,
-        documented.len(),
-        "the stated instance-method count must match the documented list"
-    );
-    for candidate in [
-        "pop", "push", "shift", "unshift", "reduce", "flat", "substr",
-    ] {
+    assert_eq!(documented.len(), 68);
+    assert_eq!(lash_typescript::stdlib_name_count(), 125);
+    for candidate in ["pop", "push", "shift", "unshift", "substr"] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),
             "`{candidate}` is not documented, so it must not be accepted"
@@ -262,5 +241,28 @@ fn base64_globals_keep_the_dom_exception_repair_diagnostic() {
         );
         assert!(error.message.contains("DOMException"), "{error}");
         assert!(error.message.contains("host tool"), "{error}");
+    }
+}
+
+#[test]
+fn retained_stdlib_rejections_carry_exact_repairs() {
+    for (source, repair) in [
+        (
+            "finish('a'.localeCompare('b'));",
+            "a < b ? -1 : a > b ? 1 : 0",
+        ),
+        ("finish((1).toLocaleString());", "toFixed(digits)"),
+        (
+            "finish('e'.normalize());",
+            "Normalize text in a deterministic host tool",
+        ),
+        (
+            "finish(JSON.parse('{}',(k,v)=>v));",
+            "Parse first, then walk the returned value explicitly",
+        ),
+    ] {
+        let error = lash_typescript::validate(source).expect_err("call remains rejected");
+        assert_eq!(error.code.as_str(), "TS_METHOD_UNSUPPORTED", "{source}");
+        assert!(error.to_string().contains(repair), "{source}: {error}");
     }
 }

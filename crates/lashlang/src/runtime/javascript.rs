@@ -401,66 +401,8 @@ fn compare_utf16(left: &str, right: &str) -> std::cmp::Ordering {
 }
 
 fn javascript_number_to_string(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value == f64::INFINITY {
-        return "Infinity".to_string();
-    }
-    if value == f64::NEG_INFINITY {
-        return "-Infinity".to_string();
-    }
-    if value == 0.0 {
-        return "0".to_string();
-    }
-
-    let negative = value.is_sign_negative();
-    let mut buffer = ryu::Buffer::new();
-    let rendered = buffer.format_finite(value.abs());
-    let (mantissa, explicit_exponent) = rendered
-        .split_once(['e', 'E'])
-        .map_or((rendered, 0), |(mantissa, exponent)| {
-            (mantissa, exponent.parse::<i32>().expect("ryu exponent"))
-        });
-    let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
-    let mut digits = mantissa
-        .bytes()
-        .filter(|byte| *byte != b'.')
-        .map(char::from)
-        .collect::<String>();
-    while digits.len() > 1 && digits.ends_with('0') && mantissa.contains('.') {
-        digits.pop();
-    }
-    let n = decimal + explicit_exponent;
-    let k = digits.len() as i32;
-    let mut output = String::new();
-    if negative {
-        output.push('-');
-    }
-    if k <= n && n <= 21 {
-        output.push_str(&digits);
-        output.extend(std::iter::repeat_n('0', (n - k) as usize));
-    } else if 0 < n && n <= 21 {
-        let split = n as usize;
-        output.push_str(&digits[..split]);
-        output.push('.');
-        output.push_str(&digits[split..]);
-    } else if -6 < n && n <= 0 {
-        output.push_str("0.");
-        output.extend(std::iter::repeat_n('0', (-n) as usize));
-        output.push_str(&digits);
-    } else {
-        output.push(digits.as_bytes()[0] as char);
-        if digits.len() > 1 {
-            output.push('.');
-            output.push_str(&digits[1..]);
-        }
-        let exponent = n - 1;
-        output.push('e');
-        if exponent >= 0 {
-            output.push('+');
-        }
-        output.push_str(&exponent.to_string());
-    }
-    output
+    // Boa's `ryu-js` implements ECMA-262 Number::toString directly. Every
+    // scalar number-to-string consumer stays on this choke point: template
+    // interpolation/String, concatenation, array join, and JSON serialization.
+    ryu_js::Buffer::new().format(value).to_string()
 }

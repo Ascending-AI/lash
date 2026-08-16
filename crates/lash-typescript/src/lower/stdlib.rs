@@ -21,7 +21,7 @@ pub(super) fn static_stdlib_owner(expr: &Expr) -> Option<&str> {
     };
     matches!(
         name.as_str(),
-        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "URL"
+        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "Map" | "URL"
     )
     .then_some(name)
 }
@@ -35,6 +35,7 @@ pub(super) fn is_known_runtime_global(name: &str) -> bool {
             | "Number"
             | "JSON"
             | "Math"
+            | "Map"
             | "Date"
             | "Promise"
             | "URL"
@@ -43,44 +44,9 @@ pub(super) fn is_known_runtime_global(name: &str) -> bool {
 }
 
 pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
-    match owner {
-        "Object" => matches!(
-            method,
-            "keys" | "values" | "entries" | "fromEntries" | "hasOwn" | "is"
-        ),
-        "Array" => matches!(method, "isArray" | "of"),
-        "String" => matches!(method, "fromCodePoint"),
-        "Number" => matches!(
-            method,
-            "isFinite" | "isInteger" | "isNaN" | "isSafeInteger" | "parseFloat" | "parseInt"
-        ),
-        "JSON" => matches!(method, "parse" | "stringify"),
-        "Math" => matches!(
-            method,
-            "abs"
-                | "acos"
-                | "asin"
-                | "cbrt"
-                | "ceil"
-                | "cos"
-                | "exp"
-                | "floor"
-                | "log"
-                | "log10"
-                | "log2"
-                | "round"
-                | "sin"
-                | "tan"
-                | "trunc"
-                | "max"
-                | "min"
-                | "pow"
-                | "sqrt"
-                | "sign"
-        ),
-        "URL" => method == "canParse",
-        _ => false,
-    }
+    crate::signatures::STATIC_STDLIB_SIGNATURES
+        .iter()
+        .any(|signature| signature.owner == owner && signature.method == method)
 }
 
 /// Every instance standard-library method the lowerer accepts.
@@ -91,15 +57,22 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
 /// behind the lowerer was possible only while the two were separate.
 pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "at",
+    "concat",
     "charAt",
     "charCodeAt",
     "codePointAt",
-    "concat",
     "append",
     "delete",
     "entries",
     "endsWith",
     "filter",
+    "fill",
+    "find",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "flat",
+    "flatMap",
     "forEach",
     "get",
     "getAll",
@@ -109,16 +82,28 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "join",
     "lastIndexOf",
     "map",
+    "every",
     "padEnd",
     "padStart",
     "repeat",
     "replace",
     "replaceAll",
+    "reduce",
+    "reduceRight",
+    "reverse",
     "slice",
     "sort",
+    "some",
+    "splice",
     "split",
     "startsWith",
     "substring",
+    "toExponential",
+    "toFixed",
+    "toPrecision",
+    "toReversed",
+    "toSorted",
+    "toSpliced",
     "set",
     "keys",
     "toLowerCase",
@@ -129,11 +114,22 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "trimStart",
     "valueOf",
     "values",
+    "with",
+    "hasOwnProperty",
+    "union",
+    "intersection",
+    "difference",
+    "symmetricDifference",
+    "isSubsetOf",
+    "isSupersetOf",
+    "isDisjointFrom",
     "toJSON",
 ];
 
 pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
-    INSTANCE_STDLIB_METHODS.contains(&method)
+    crate::signatures::INSTANCE_STDLIB_SIGNATURES
+        .iter()
+        .any(|signature| signature.method == method)
 }
 
 pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> bool {
@@ -144,7 +140,6 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
                 | "charCodeAt"
                 | "codePointAt"
                 | "concat"
-                | "filter"
                 | "endsWith"
                 | "includes"
                 | "indexOf"
@@ -169,16 +164,40 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
         Expr::Array(_) => matches!(
             method,
             "at" | "concat"
+                | "every"
+                | "fill"
+                | "filter"
+                | "find"
+                | "findIndex"
+                | "findLast"
+                | "findLastIndex"
+                | "flat"
+                | "flatMap"
+                | "forEach"
                 | "includes"
                 | "indexOf"
                 | "join"
                 | "lastIndexOf"
                 | "map"
+                | "reduce"
+                | "reduceRight"
+                | "reverse"
                 | "slice"
+                | "some"
+                | "sort"
+                | "splice"
+                | "toReversed"
+                | "toSorted"
+                | "toSpliced"
                 | "toString"
+                | "with"
         ),
-        Expr::Number(_) | Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
-            matches!(method, "toString" | "valueOf")
+        Expr::Number(_) => matches!(
+            method,
+            "toExponential" | "toFixed" | "toPrecision" | "toString" | "valueOf"
+        ),
+        Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
+            matches!(method, "hasOwnProperty" | "toString" | "valueOf")
         }
         _ => true,
     }

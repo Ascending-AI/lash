@@ -1,6 +1,6 @@
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError,
-    State, Value,
+    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
+    ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
 };
 
 struct Host;
@@ -23,7 +23,9 @@ fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
 }
 
 fn finished(source: &str) -> Value {
-    match execute(source).expect("TypeScript should execute") {
+    match execute(source)
+        .unwrap_or_else(|error| panic!("TypeScript should execute: {source}: {error}"))
+    {
         ExecutionOutcome::Finished(value) => value,
         other => panic!("expected finish, got {other:?}"),
     }
@@ -194,6 +196,169 @@ fn agent_stdlib_regressions_match_ecmascript() {
 }
 
 #[test]
+fn widened_array_callback_surface_is_sequential_and_ecma_shaped() {
+    let cases = [
+        (
+            "finish([1,2,3].map((v,i,a)=>v+i+a.length).join(','));",
+            "4,6,8",
+        ),
+        (
+            "finish([1,2,3,4].filter((v,i,a)=>v%2===0&&a.length===4).join(','));",
+            "2,4",
+        ),
+        (
+            "finish(String([1,2,3].reduce((a,v,i,x)=>a+v+i+x.length,0)));",
+            "18",
+        ),
+        ("finish(String([1,2,3].reduceRight((a,v)=>a-v)));", "0"),
+        ("finish(String([1,3,4].find((v,i)=>v+i>4)));", "4"),
+        ("finish(String([1,3,4].findIndex((v,i)=>v+i>4)));", "2"),
+        ("finish(String([1,3,4].findLast(v=>v<4)));", "3"),
+        ("finish(String([1,3,4].findLastIndex(v=>v<4)));", "1"),
+        ("finish(String([1,2,3].some(v=>v===2)));", "true"),
+        ("finish(String([1,2,3].every(v=>v>0)));", "true"),
+        (
+            "const s={n:0}; [1,2,3].forEach(()=>s.n++); finish(String(s.n));",
+            "3",
+        ),
+        ("finish([1,2].flatMap(v=>[v,v+10]).join(','));", "1,11,2,12"),
+        (
+            "const a=[3,1,2]; const b=a.sort((x,y)=>x-y); finish(a.join(',')+'|'+(a===b));",
+            "1,2,3|true",
+        ),
+        (
+            "const a=[3,1,2]; const b=a.toSorted((x,y)=>y-x); finish(a.join(',')+'|'+b.join(','));",
+            "3,1,2|3,2,1",
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+
+    assert_eq!(
+        finished(
+            "const s={order:''}; function mark(x){s.order+=x;return x;} [1].reduce((a,v)=>a+v,mark('i'),mark('e')); finish(s.order);"
+        ),
+        Value::String("ie".into()),
+        "reduce evaluates initialValue before ignored excess arguments"
+    );
+    assert_eq!(
+        finished(
+            "const s={seen:false}; function mark(){s.seen=true;return {};}; const a=Array.from([1,2],v=>v+1,mark()); finish(a.join(',')+'|'+s.seen);"
+        ),
+        Value::String("2,3|true".into())
+    );
+}
+
+#[test]
+fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
+    let cases = [
+        (
+            "const a=[1,2,3]; const b=a.reverse(); finish(a.join(',')+'|'+(a===b));",
+            "3,2,1|true",
+        ),
+        (
+            "const a=[1,2,3,4]; const r=a.splice(-3,2,'x','y'); finish(a.join(',')+'|'+r.join(','));",
+            "1,x,y,4|2,3",
+        ),
+        (
+            "const a=[1,2,3]; a.fill('x',-2); finish(a.join(','));",
+            "1,x,x",
+        ),
+        ("finish([1,[2,[3]]].flat(Infinity).join(','));", "1,2,3"),
+        (
+            "const a=[3,1,2]; const b=a.toReversed(); const c=a.toSpliced(1,1,9); const d=a.with(-1,8); finish(a.join(',')+'|'+b.join(',')+'|'+c.join(',')+'|'+d.join(','));",
+            "3,1,2|2,1,3|3,9,2|3,1,8",
+        ),
+        (
+            "const a=[10,2,1]; const b=a.sort(); finish(a.join(',')+'|'+(a===b));",
+            "1,10,2|true",
+        ),
+        (
+            "finish(Array.from({0:'a',2:'c',length:3},(v,i)=>String(v)+i).join(','));",
+            "a0,undefined1,c2",
+        ),
+        (
+            "finish(String.fromCharCode(65,66)+String.fromCodePoint(0x1f600));",
+            "AB😀",
+        ),
+        (
+            "finish('abc'.replace('b',(match,index,input)=>match.toUpperCase()+index+input.length));",
+            "aB13c",
+        ),
+        (
+            "finish(String(Number.EPSILON)+'|'+String(Number.MIN_SAFE_INTEGER)+'|'+String(Math.PI));",
+            "2.220446049250313e-16|-9007199254740991|3.141592653589793",
+        ),
+        (
+            "finish([Math.atan2(1,1),Math.clz32(1),Math.imul(0xffffffff,5),Math.hypot(3,4)].join(','));",
+            "0.7853981633974483,31,-5,5",
+        ),
+        (
+            "finish((1.25).toFixed(1)+'|'+(123).toExponential(1)+'|'+(123).toPrecision(2));",
+            "1.3|1.2e+2|1.2e+2",
+        ),
+        (
+            "const a={x:1}; const b=Object.assign(a,{y:2}); finish(JSON.stringify(a)+'|'+(a===b)+'|'+a.hasOwnProperty('y'));",
+            "{\"x\":1,\"y\":2}|true|true",
+        ),
+        (
+            "const a=new Set([1,2]); const b=new Set([2,3]); const u=a.union(b); const i=a.intersection(b); finish([...u].join(',')+'|'+[...i].join(',')+'|'+a.isDisjointFrom(new Set([9])));",
+            "1,2,3|2|true",
+        ),
+        (
+            "finish(JSON.stringify(Object.groupBy([1,2,3,4],v=>v%2)));",
+            "{\"0\":[2,4],\"1\":[1,3]}",
+        ),
+        (
+            "const g=Map.groupBy([1,2,3],v=>v%2); finish(Array.from(g).map(([k,v])=>k+':'+v.join(',')).join('|'));",
+            "1:1,3|0:2",
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+    assert_eq!(
+        finished(
+            "const a=[1,2,3]; const b=a; a.length=0; finish(a.length+'|'+b.length+'|'+a.join(','));"
+        ),
+        Value::String("0|0|".into())
+    );
+}
+
+#[test]
+fn json_stringify_options_callbacks_cycles_and_to_json_are_exact() {
+    assert_eq!(
+        finished("finish(JSON.stringify({a:1,b:2,c:3},['c','a'],2));"),
+        Value::String("{\n  \"c\": 3,\n  \"a\": 1\n}".into())
+    );
+    assert_eq!(
+        finished(
+            "finish(JSON.stringify({a:1,b:2},(k,v)=>k==='b'?undefined:typeof v==='number'?v+10:v));"
+        ),
+        Value::String("{\"a\":11}".into())
+    );
+    assert_eq!(
+        finished(
+            "const thisValue=7; const x={a:1,toJSON(k){return {key:k,value:thisValue};}}; finish(JSON.stringify(x,(k,v)=>v));"
+        ),
+        Value::String("{\"key\":\"\",\"value\":7}".into())
+    );
+    assert_eq!(
+        finished(
+            "finish((()=>{try{const a={};a.self=a;JSON.stringify(a);}catch(error){return error.name+': '+error.message;}})());"
+        ),
+        Value::String(
+            "TypeError: Converting circular structure to JSON\n    --> starting at object with constructor 'Object'\n    --- property 'self' closes the circle".into()
+        )
+    );
+    assert_eq!(
+        finished("const x={toJSON(k){return {key:k,ok:true};}}; finish(JSON.stringify(x));"),
+        Value::String("{\"key\":\"\",\"ok\":true}".into())
+    );
+}
+
+#[test]
 fn every_string_growth_path_is_bounded_before_allocation() {
     for source in [
         "try { 'x'.repeat(1e100); } catch (error) { finish(error.code); }",
@@ -209,6 +374,22 @@ fn every_string_growth_path_is_bounded_before_allocation() {
             "{source}"
         );
     }
+
+    assert_eq!(
+        finished("try { Array.from({length: 4294967296}); } catch (error) { finish(error.name); }"),
+        Value::String("RangeError".into())
+    );
+    let program = lash_typescript::compile("finish(Array.from({length: 2000000}));")
+        .expect("large array-like source compiles without allocating");
+    let environment = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::Unbounded,
+        ExecutionBound::Unbounded,
+        ExecutionBound::logical_bytes(16 * 1024 * 1024),
+    ));
+    assert!(matches!(
+        futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment)),
+        Err(RuntimeError::MemoryLimitExceeded { .. })
+    ));
 }
 
 #[test]

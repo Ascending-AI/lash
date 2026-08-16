@@ -1,8 +1,11 @@
 use super::super::{
-    ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
+    ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
+    javascript_to_string,
 };
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
+pub(super) use super::javascript_stdlib::*;
 use super::*;
+use std::collections::BTreeSet;
 
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn is_truthy_for_dialect(&self, value: &Value) -> Result<bool, RuntimeError> {
@@ -210,11 +213,97 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         values.reverse();
         if let [Value::String(method), value] = values.as_slice()
-            && method.as_str() == "JSON.stringify"
-            && let Some(json) =
-                javascript_substrate::stringify_if_contains_heap_hook(&self.heap, value)?
+            && method.as_str() == "__jsonContainerKind"
         {
-            self.stack.push(Value::String(json.into()));
+            let kind = match value {
+                Value::Ref(id) => match self.heap.get(*id)? {
+                    HeapObject::List(_) | HeapObject::Tuple(_) => "array",
+                    HeapObject::Record(_) => "record",
+                    _ => "opaque",
+                },
+                Value::List(_) | Value::Tuple(_) => "array",
+                Value::Record(_) => "record",
+                _ => "scalar",
+            };
+            self.stack.push(Value::String(kind.into()));
+            return Ok(());
+        }
+        if let [Value::String(method), value] = values.as_slice()
+            && method.as_str() == "__jsonHasOwnToJSON"
+        {
+            let has = match value {
+                Value::Ref(id) => match self.heap.get(*id)? {
+                    HeapObject::Record(record) => record.get("toJSON").is_some(),
+                    _ => false,
+                },
+                Value::Record(record) => record.get("toJSON").is_some(),
+                _ => false,
+            };
+            self.stack.push(Value::Bool(has));
+            return Ok(());
+        }
+        if let [Value::String(method), Value::Ref(list)] = values.as_slice()
+            && method.as_str() == "__singleCallbackResult"
+        {
+            let (HeapObject::List(values) | HeapObject::Tuple(values)) = self.heap.get(*list)?
+            else {
+                return Err(js_stdlib_error(
+                    "callback result container must be an array",
+                ));
+            };
+            self.stack
+                .push(values.first().cloned().unwrap_or(Value::Undefined));
+            return Ok(());
+        }
+        if let [Value::String(method), value] = values.as_slice()
+            && method.as_str() == "__jsonHasCycle"
+        {
+            let has_cycle = javascript_json_has_cycle(
+                &self.heap,
+                value,
+                &mut BTreeSet::new(),
+                &mut BTreeSet::new(),
+            )?;
+            self.stack.push(Value::Bool(has_cycle));
+            return Ok(());
+        }
+        if let [Value::String(method), Value::Ref(active), needle] = values.as_slice()
+            && method.as_str() == "__jsonActiveContains"
+        {
+            let HeapObject::List(values) = self.heap.get(*active)? else {
+                return Err(js_stdlib_error(
+                    "JSON stringify active stack must be an array",
+                ));
+            };
+            self.stack
+                .push(Value::Bool(values.iter().any(|value| value == needle)));
+            return Ok(());
+        }
+        if let [Value::String(method), value, rest @ ..] = values.as_slice()
+            && method.as_str() == "JSON.stringify"
+        {
+            let result = javascript_substrate::javascript_json_stringify_with_options(
+                &self.heap,
+                value,
+                rest.first(),
+                rest.get(1),
+            );
+            match result {
+                Ok(Some(json)) => self.stack.push(Value::String(json.into())),
+                Ok(None) => self.stack.push(Value::Undefined),
+                Err(RuntimeError::ValidationFailed { reason })
+                    if reason.starts_with("TypeError: ") =>
+                {
+                    let error = self.heap.allocate_error(
+                        ErrorKind::TypeError,
+                        reason.trim_start_matches("TypeError: ").to_string(),
+                        None,
+                        None,
+                    )?;
+                    return Err(RuntimeError::UncaughtException { value: error });
+                }
+                Err(error) => return Err(error),
+            }
             return Ok(());
         }
         if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
@@ -233,6 +322,107 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 return Ok(());
             }
         }
+        if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
+            && matches!(
+                method.as_str(),
+                "Object.keys" | "Object.values" | "Object.entries"
+            )
+        {
+            let result = match self.heap.get(*receiver)? {
+                HeapObject::Record(record) => {
+                    let entries = ecma_record_entries(record);
+                    match method.as_str() {
+                        "Object.keys" => entries
+                            .into_iter()
+                            .map(|(key, _)| Value::String(key.into()))
+                            .collect(),
+                        "Object.values" => entries
+                            .into_iter()
+                            .map(|(_, value)| value.clone())
+                            .collect(),
+                        "Object.entries" => entries
+                            .into_iter()
+                            .map(|(key, value)| {
+                                Value::List(vec![Value::String(key.into()), value.clone()].into())
+                            })
+                            .collect(),
+                        _ => unreachable!(),
+                    }
+                }
+                HeapObject::List(items) | HeapObject::Tuple(items) => match method.as_str() {
+                    "Object.keys" => (0..items.len())
+                        .map(|index| Value::String(index.to_string().into()))
+                        .collect(),
+                    "Object.values" => items.to_vec(),
+                    "Object.entries" => items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, value)| {
+                            Value::List(
+                                vec![Value::String(index.to_string().into()), value.clone()].into(),
+                            )
+                        })
+                        .collect(),
+                    _ => unreachable!(),
+                },
+                _ => Vec::new(),
+            };
+            self.stack.push(Value::List(result.into()));
+            return Ok(());
+        }
+        if let [Value::String(method), Value::Ref(receiver), key] = values.as_slice()
+            && method.as_str() == "Object.hasOwn"
+        {
+            let key = self.heap.javascript_to_string(key)?;
+            let has = match self.heap.get(*receiver)? {
+                HeapObject::Record(record) => record.get(&key).is_some(),
+                HeapObject::List(values) | HeapObject::Tuple(values) => {
+                    key == "length"
+                        || array_index_property(&key)
+                            .is_some_and(|index| index < values.len() as u32)
+                }
+                _ => false,
+            };
+            self.stack.push(Value::Bool(has));
+            return Ok(());
+        }
+        if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
+            && method.as_str() == "Object.assign"
+            && matches!(self.heap.get(*receiver)?, HeapObject::Record(_))
+        {
+            let HeapObject::Record(target) = self.heap.get(*receiver)? else {
+                unreachable!("record receiver checked")
+            };
+            let mut output = target.as_ref().clone();
+            for source in args {
+                if matches!(source, Value::Null | Value::Undefined) {
+                    continue;
+                }
+                let source = match source {
+                    Value::Ref(id) => match self.heap.get(*id)? {
+                        HeapObject::Record(record) => Some(record.as_ref()),
+                        _ => None,
+                    },
+                    Value::Record(record) => Some(record.as_ref()),
+                    _ => None,
+                };
+                if let Some(source) = source {
+                    for (key, value) in ecma_record_entries(source) {
+                        output.insert(key.to_string(), value.clone());
+                    }
+                }
+            }
+            self.heap.replace_javascript_record(*receiver, output)?;
+            self.stack.push(Value::Ref(*receiver));
+            return Ok(());
+        }
+        if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
+            && !method.contains('.')
+            && matches!(self.heap.get(*receiver)?, HeapObject::List(_))
+            && self.execute_javascript_array_heap_method(method, *receiver, args)?
+        {
+            return Ok(());
+        }
         if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
             && !method.contains('.')
             && self.heap.is_javascript_exotic(*receiver)?
@@ -241,27 +431,72 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
             && method.as_str() == "Lash.ArrayFromIterable"
-            && let HeapObject::UrlSearchParams(params) = self.heap.get(*receiver)?
         {
-            self.stack.push(Value::List(
-                params
-                    .entries
-                    .iter()
-                    .map(|(name, value)| {
-                        Value::List(
-                            vec![Value::String(name.into()), Value::String(value.into())].into(),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .into(),
-            ));
-            return Ok(());
+            let output = match self.heap.get(*receiver)? {
+                HeapObject::UrlSearchParams(params) => Some(
+                    params
+                        .entries
+                        .iter()
+                        .map(|(name, value)| {
+                            Value::List(
+                                vec![Value::String(name.into()), Value::String(value.into())]
+                                    .into(),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                HeapObject::Map(map) => Some(
+                    map.entries
+                        .iter()
+                        .map(|(key, value)| Value::List(vec![key.clone(), value.clone()].into()))
+                        .collect(),
+                ),
+                HeapObject::Set(set) => Some(set.values.clone()),
+                _ => None,
+            };
+            if let Some(output) = output {
+                self.stack.push(Value::List(output.into()));
+                return Ok(());
+            }
         }
         if let [Value::String(method), args @ ..] = values.as_slice()
             && method.as_str() == "URL.canParse"
         {
             self.stack.push(self.execute_url_can_parse(args)?);
             return Ok(());
+        }
+        if let [Value::String(method), source] = values.as_slice()
+            && matches!(method.as_str(), "Array.from" | "Lash.ArrayFromIterable")
+        {
+            let record = match source {
+                Value::Ref(id) => match self.heap.get(*id)? {
+                    HeapObject::Record(record) => Some(record.as_ref()),
+                    _ => None,
+                },
+                Value::Record(record) => Some(record.as_ref()),
+                _ => None,
+            };
+            if let Some(record) = record {
+                let length = record
+                    .get("length")
+                    .map(javascript_to_number)
+                    .unwrap_or(0.0);
+                let length = if length.is_nan() || length <= 0.0 {
+                    0.0
+                } else {
+                    length.trunc()
+                };
+                if length > u32::MAX as f64 {
+                    let error = self.heap.allocate_error(
+                        ErrorKind::RangeError,
+                        "Invalid array length".to_string(),
+                        None,
+                        None,
+                    )?;
+                    return Err(RuntimeError::UncaughtException { value: error });
+                }
+                self.heap.ensure_list_allocation_len(length as usize)?;
+            }
         }
         for value in &mut values {
             if matches!(value, Value::Ref(_)) {
@@ -424,6 +659,83 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.begin_callback_driver(function.clone(), calls, false, true)?;
                 None
             }
+            (
+                "Set",
+                "union" | "intersection" | "difference" | "symmetricDifference",
+                [Value::Ref(other)],
+            ) if matches!(self.heap.get(*other)?, HeapObject::Set(_)) => {
+                let left = self
+                    .heap
+                    .set_values(receiver)?
+                    .expect("Set receiver was checked");
+                let right = self
+                    .heap
+                    .set_values(*other)?
+                    .expect("Set argument was checked");
+                let mut output = Vec::new();
+                match method {
+                    "union" => {
+                        output.extend(left.iter().cloned());
+                        for value in &right {
+                            if !self.heap.set_has(receiver, value)? {
+                                output.push(value.clone());
+                            }
+                        }
+                    }
+                    "intersection" => {
+                        for value in &left {
+                            if self.heap.set_has(*other, value)? {
+                                output.push(value.clone());
+                            }
+                        }
+                    }
+                    "difference" => {
+                        for value in &left {
+                            if !self.heap.set_has(*other, value)? {
+                                output.push(value.clone());
+                            }
+                        }
+                    }
+                    "symmetricDifference" => {
+                        for value in &left {
+                            if !self.heap.set_has(*other, value)? {
+                                output.push(value.clone());
+                            }
+                        }
+                        for value in &right {
+                            if !self.heap.set_has(receiver, value)? {
+                                output.push(value.clone());
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                Some(self.heap.allocate_set(output)?)
+            }
+            ("Set", "isSubsetOf" | "isSupersetOf" | "isDisjointFrom", [Value::Ref(other)])
+                if matches!(self.heap.get(*other)?, HeapObject::Set(_)) =>
+            {
+                let left = self
+                    .heap
+                    .set_values(receiver)?
+                    .expect("Set receiver was checked");
+                let right = self
+                    .heap
+                    .set_values(*other)?
+                    .expect("Set argument was checked");
+                Some(Value::Bool(match method {
+                    "isSubsetOf" => left
+                        .iter()
+                        .all(|value| self.heap.set_has(*other, value).unwrap_or(false)),
+                    "isSupersetOf" => right
+                        .iter()
+                        .all(|value| self.heap.set_has(receiver, value).unwrap_or(false)),
+                    "isDisjointFrom" => left
+                        .iter()
+                        .all(|value| !self.heap.set_has(*other, value).unwrap_or(false)),
+                    _ => unreachable!(),
+                }))
+            }
             _ => {
                 return Err(js_stdlib_error(format!(
                     "TS_METHOD_UNSUPPORTED: {kind}.{method} with {} argument(s)",
@@ -438,11 +750,47 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 }
 
+fn javascript_json_has_cycle(
+    heap: &Heap,
+    value: &Value,
+    active: &mut BTreeSet<HeapId>,
+    visited: &mut BTreeSet<HeapId>,
+) -> Result<bool, RuntimeError> {
+    let Value::Ref(id) = value else {
+        return Ok(false);
+    };
+    if active.contains(id) {
+        return Ok(true);
+    }
+    if visited.contains(id) {
+        return Ok(false);
+    }
+    let children: Vec<&Value> = match heap.get(*id)? {
+        HeapObject::List(values) | HeapObject::Tuple(values) => values.iter().collect(),
+        HeapObject::Record(record) => record.values().collect(),
+        _ => return Ok(false),
+    };
+    active.insert(*id);
+    for child in children {
+        if javascript_json_has_cycle(heap, child, active, visited)? {
+            return Ok(true);
+        }
+    }
+    active.remove(id);
+    visited.insert(*id);
+    Ok(false)
+}
+
 fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
     let Some(Value::String(method)) = values.first() else {
         return Err(js_stdlib_error("missing method discriminator"));
     };
     let args = &values[1..];
+    if method.as_str() == "__reduceEmpty" {
+        return Err(js_stdlib_error(
+            "TypeError: Reduce of empty array with no initial value",
+        ));
+    }
     if method.contains('.') {
         return javascript_static_stdlib(method, args);
     }
@@ -454,6 +802,7 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
         Value::List(items) | Value::Tuple(items) => {
             javascript_array_method(method, items.as_ref(), args)
         }
+        Value::Number(value) => javascript_number_method(method, *value, args),
         Value::Null | Value::Undefined if matches!(method.as_str(), "toString" | "valueOf") => {
             Err(js_stdlib_error(format!(
                 "TS_METHOD_UNSUPPORTED: cannot call `{method}` on null or undefined"
@@ -565,6 +914,26 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
             }
             Ok(Value::Record(std::sync::Arc::new(record)))
         }
+        ("Object.assign", [target, sources @ ..]) => {
+            let Value::Record(target) = target else {
+                return Err(js_stdlib_error(
+                    "TypeError: Object.assign target must be a prototype-free object",
+                ));
+            };
+            let mut output = target.as_ref().clone();
+            for source in sources {
+                if matches!(source, Value::Null | Value::Undefined) {
+                    continue;
+                }
+                let Value::Record(source) = source else {
+                    continue;
+                };
+                for (key, value) in ecma_record_entries(source) {
+                    output.insert(key.to_string(), value.clone());
+                }
+            }
+            Ok(Value::Record(std::sync::Arc::new(output)))
+        }
         ("Object.hasOwn", [Value::Record(record), key]) => Ok(Value::Bool(
             record.get(&javascript_to_string(key)).is_some(),
         )),
@@ -604,6 +973,60 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
                 .collect::<Vec<_>>()
                 .into(),
         )),
+        ("Lash.ArrayFromIterable", [Value::Record(record)]) => {
+            let length = record
+                .get("length")
+                .map(javascript_to_number)
+                .unwrap_or(0.0);
+            let length = if length.is_nan() || length <= 0.0 {
+                0
+            } else {
+                length.trunc().min(u32::MAX as f64) as usize
+            };
+            Ok(Value::List(
+                (0..length)
+                    .map(|index| {
+                        record
+                            .get(&index.to_string())
+                            .cloned()
+                            .unwrap_or(Value::Undefined)
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+            ))
+        }
+        ("Array.from", [Value::List(values) | Value::Tuple(values)]) => {
+            Ok(Value::List(values.to_vec().into()))
+        }
+        ("Array.from", [Value::String(value)]) => Ok(Value::List(
+            value
+                .chars()
+                .map(|character| Value::String(character.to_string().into()))
+                .collect::<Vec<_>>()
+                .into(),
+        )),
+        ("Array.from", [Value::Record(record)]) => {
+            let length = record
+                .get("length")
+                .map(javascript_to_number)
+                .unwrap_or(0.0);
+            let length = if length.is_nan() || length <= 0.0 {
+                0
+            } else {
+                length.trunc().min(u32::MAX as f64) as usize
+            };
+            Ok(Value::List(
+                (0..length)
+                    .map(|index| {
+                        record
+                            .get(&index.to_string())
+                            .cloned()
+                            .unwrap_or(Value::Undefined)
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+            ))
+        }
         ("Array.of", values) => Ok(Value::List(values.to_vec().into())),
         ("String.fromCharCode", values) => utf16_value(
             values
@@ -659,12 +1082,31 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
         ("Math.abs", [value]) => Ok(Value::Number(javascript_to_number(value).abs())),
         ("Math.acos", [value]) => Ok(Value::Number(javascript_to_number(value).acos())),
         ("Math.asin", [value]) => Ok(Value::Number(javascript_to_number(value).asin())),
+        ("Math.acosh", [value]) => Ok(Value::Number(javascript_to_number(value).acosh())),
+        ("Math.asinh", [value]) => Ok(Value::Number(javascript_to_number(value).asinh())),
+        ("Math.atan", [value]) => Ok(Value::Number(javascript_to_number(value).atan())),
+        ("Math.atan2", [y, x]) => Ok(Value::Number(
+            javascript_to_number(y).atan2(javascript_to_number(x)),
+        )),
+        ("Math.atanh", [value]) => Ok(Value::Number(javascript_to_number(value).atanh())),
         ("Math.cbrt", [value]) => Ok(Value::Number(javascript_to_number(value).cbrt())),
         ("Math.ceil", [value]) => Ok(Value::Number(javascript_to_number(value).ceil())),
+        ("Math.clz32", [value]) => Ok(Value::Number(
+            to_uint32(javascript_to_number(value)).leading_zeros() as f64,
+        )),
         ("Math.cos", [value]) => Ok(Value::Number(javascript_to_number(value).cos())),
+        ("Math.cosh", [value]) => Ok(Value::Number(javascript_to_number(value).cosh())),
         ("Math.exp", [value]) => Ok(Value::Number(javascript_to_number(value).exp())),
+        ("Math.expm1", [value]) => Ok(Value::Number(javascript_to_number(value).exp_m1())),
         ("Math.floor", [value]) => Ok(Value::Number(javascript_to_number(value).floor())),
+        ("Math.fround", [value]) => Ok(Value::Number(javascript_to_number(value) as f32 as f64)),
+        ("Math.hypot", values) => Ok(Value::Number(javascript_hypot(values))),
+        ("Math.imul", [left, right]) => Ok(Value::Number(
+            (to_uint32(javascript_to_number(left))
+                .wrapping_mul(to_uint32(javascript_to_number(right))) as i32) as f64,
+        )),
         ("Math.log", [value]) => Ok(Value::Number(javascript_to_number(value).ln())),
+        ("Math.log1p", [value]) => Ok(Value::Number(javascript_to_number(value).ln_1p())),
         ("Math.log10", [value]) => Ok(Value::Number(javascript_to_number(value).log10())),
         ("Math.log2", [value]) => Ok(Value::Number(javascript_to_number(value).log2())),
         ("Math.round", [value]) => Ok(Value::Number(javascript_round(javascript_to_number(value)))),
@@ -677,7 +1119,9 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
         ))),
         ("Math.sqrt", [value]) => Ok(Value::Number(javascript_to_number(value).sqrt())),
         ("Math.sin", [value]) => Ok(Value::Number(javascript_to_number(value).sin())),
+        ("Math.sinh", [value]) => Ok(Value::Number(javascript_to_number(value).sinh())),
         ("Math.tan", [value]) => Ok(Value::Number(javascript_to_number(value).tan())),
+        ("Math.tanh", [value]) => Ok(Value::Number(javascript_to_number(value).tanh())),
         ("Math.sign", [value]) => {
             let value = javascript_to_number(value);
             Ok(Value::Number(if value.is_nan() || value == 0.0 {
@@ -878,6 +1322,15 @@ fn javascript_array_method(
     let argument_count = args.len();
     let args = normalized_instance_arguments(method, args);
     match (method, args.as_slice()) {
+        ("__singleCallbackResult", []) => Ok(items.first().cloned().unwrap_or(Value::Undefined)),
+        ("__appendFlatMap", [value]) => {
+            let mut output = items.to_vec();
+            match value {
+                Value::List(values) | Value::Tuple(values) => output.extend(values.iter().cloned()),
+                value => output.push(value.clone()),
+            }
+            Ok(Value::List(output.into()))
+        }
         ("at", [index]) => Ok(relative_index(javascript_to_number(index), items.len())
             .map_or(Value::Undefined, |index| items[index].clone())),
         ("concat", values) => {
@@ -920,6 +1373,21 @@ fn javascript_array_method(
         ("join", [separator]) => Ok(Value::String(
             javascript_join(&Value::List(items.to_vec().into()), separator)?.into(),
         )),
+        ("flat", depth) => {
+            let depth = depth.first().map_or(1, |value| {
+                let depth = javascript_to_number(value);
+                if depth.is_nan() || depth <= 0.0 {
+                    0
+                } else if depth == f64::INFINITY {
+                    usize::MAX
+                } else {
+                    depth.trunc() as usize
+                }
+            });
+            let mut output = Vec::new();
+            flatten_array(items, depth, &mut output);
+            Ok(Value::List(output.into()))
+        }
         ("slice", bounds) => {
             let start = match bounds.first() {
                 None | Some(Value::Undefined) => 0.0,
@@ -956,645 +1424,153 @@ fn javascript_array_method(
     }
 }
 
-pub(super) fn js_stdlib_error(reason: impl Into<String>) -> RuntimeError {
-    RuntimeError::ValidationFailed {
-        reason: reason.into(),
-    }
-}
-
-fn normalized_static_arguments(method: &str, args: &[Value]) -> Vec<Value> {
-    let arity = match method {
-        "Object.keys"
-        | "Object.values"
-        | "Object.entries"
-        | "Object.fromEntries"
-        | "Array.isArray"
-        | "Number.isFinite"
-        | "Number.isInteger"
-        | "Number.isNaN"
-        | "Number.isSafeInteger"
-        | "Number.parseFloat"
-        | "Math.abs"
-        | "Math.acos"
-        | "Math.asin"
-        | "Math.cbrt"
-        | "Math.ceil"
-        | "Math.cos"
-        | "Math.exp"
-        | "Math.floor"
-        | "Math.log"
-        | "Math.log10"
-        | "Math.log2"
-        | "Math.round"
-        | "Math.sin"
-        | "Math.sqrt"
-        | "Math.tan"
-        | "Math.trunc"
-        | "Math.sign" => 1,
-        "Object.hasOwn" | "Object.is" | "Number.parseInt" | "Math.pow" => 2,
-        _ => return args.to_vec(),
-    };
-    normalized_arguments(args, arity)
-}
-
-fn normalized_instance_arguments(method: &str, args: &[Value]) -> Vec<Value> {
-    let arity = match method {
-        "at" | "charAt" | "charCodeAt" | "codePointAt" | "repeat" | "join" => 1,
-        "endsWith" | "includes" | "indexOf" | "lastIndexOf" | "padEnd" | "padStart" | "replace"
-        | "replaceAll" | "startsWith" => 2,
-        "slice" | "substring" => 2,
-        "toLowerCase" | "toUpperCase" | "trim" | "trimStart" | "trimEnd" | "toString"
-        | "valueOf" => 0,
-        _ => return args.to_vec(),
-    };
-    normalized_arguments(args, arity)
-}
-
-fn normalized_arguments(args: &[Value], arity: usize) -> Vec<Value> {
-    let mut normalized = args[..args.len().min(arity)].to_vec();
-    normalized.resize(arity, Value::Undefined);
-    normalized
-}
-
-pub(super) fn ecma_record_entries(record: &Record) -> Vec<(&str, &Value)> {
-    let mut indices = Vec::new();
-    let mut names = Vec::new();
-    for (key, value) in record.iter() {
-        match array_index_property(key) {
-            Some(index) => indices.push((index, key, value)),
-            None => names.push((key, value)),
-        }
-    }
-    indices.sort_unstable_by_key(|(index, _, _)| *index);
-    indices
-        .into_iter()
-        .map(|(_, key, value)| (key, value))
-        .chain(names)
-        .collect()
-}
-
-fn array_index_property(key: &str) -> Option<u32> {
-    if key.is_empty() || key.len() > 1 && key.starts_with('0') {
-        return None;
-    }
-    let index = key.parse::<u32>().ok()?;
-    (index != u32::MAX && index.to_string() == key).then_some(index)
-}
-
-/// `replaceAll`: every occurrence, with the same `$`-token expansion `replace`
-/// applies to the one occurrence it touches. Each match expands against its own
-/// prefix and suffix, so `` $` `` and `$'` mean what they mean at that match.
-fn replace_all_string(
-    value: &str,
-    needle: &str,
-    replacement: &str,
-) -> Result<String, RuntimeError> {
-    if needle.is_empty() {
-        // An empty search matches at every position *and* once past the last
-        // character, so `"abc".replaceAll("", "-")` is `-a-b-c-` and
-        // `"".replaceAll("", "-")` is `-`. Only `replace` — the single-match
-        // path — stops after the first, which is why this cannot delegate to
-        // it. Each match is empty, so the tokens around it see the whole string
-        // split at that position.
-        let mut output = String::new();
-        let mut index = 0;
-        loop {
-            expand_replacement_tokens(
-                &mut output,
-                replacement,
-                needle,
-                &value[..index],
-                &value[index..],
-            )?;
-            let Some(matched) = value[index..].chars().next() else {
-                return Ok(output);
-            };
-            if matched.len_utf16() != 1 {
-                // ECMA matches between the two code units of a surrogate pair,
-                // so node's answer here contains lone surrogates. Expanding per
-                // Unicode scalar instead would quietly give a different string;
-                // `split('')` refuses this same shape for this same reason.
-                return Err(js_stdlib_error(
-                    "TS_LONE_SURROGATE_UNSUPPORTED: replaceAll('') would create unrepresentable lone surrogates",
-                ));
-            }
-            ensure_javascript_string_size(output.len() + matched.len_utf8())?;
-            output.push(matched);
-            index += matched.len_utf8();
-        }
-    }
-    let mut output = String::new();
-    let mut searched = 0;
-    while let Some(offset) = value[searched..].find(needle) {
-        let start = searched + offset;
-        let end = start + needle.len();
-        ensure_javascript_string_size(output.len() + (start - searched))?;
-        output.push_str(&value[searched..start]);
-        // `$\`` and `$'` mean the text either side of *this* match in the whole
-        // string, not in the slice being scanned.
-        expand_replacement_tokens(
-            &mut output,
-            replacement,
-            needle,
-            &value[..start],
-            &value[end..],
-        )?;
-        searched = end;
-    }
-    ensure_javascript_string_size(output.len() + (value.len() - searched))?;
-    output.push_str(&value[searched..]);
-    Ok(output)
-}
-
-/// Append `replacement` to `output`, expanding the `$`-tokens ECMA defines for
-/// a match of `needle` sitting between `prefix` and `suffix`.
-fn expand_replacement_tokens(
-    output: &mut String,
-    replacement: &str,
-    needle: &str,
-    prefix: &str,
-    suffix: &str,
-) -> Result<(), RuntimeError> {
-    let mut chars = replacement.chars().peekable();
-    while let Some(character) = chars.next() {
-        if character != '$' {
-            output.push(character);
+fn javascript_number_method(
+    method: &str,
+    value: f64,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let digits = |default: i64, min: i64| -> Result<i64, RuntimeError> {
+        let value = args
+            .first()
+            .map(javascript_to_number)
+            .unwrap_or(default as f64);
+        let value = if value.is_nan() {
+            0
         } else {
-            match chars.peek().copied() {
-                Some('$') => {
-                    chars.next();
-                    output.push('$');
-                }
-                Some('&') => {
-                    chars.next();
-                    output.push_str(needle);
-                }
-                Some('`') => {
-                    chars.next();
-                    output.push_str(prefix);
-                }
-                Some('\'') => {
-                    chars.next();
-                    output.push_str(suffix);
-                }
-                _ => output.push('$'),
-            }
-        }
-        ensure_javascript_string_size(output.len())?;
-    }
-    Ok(())
-}
-
-fn replace_string(value: &str, needle: &str, replacement: &str) -> Result<String, RuntimeError> {
-    let Some(start) = value.find(needle) else {
-        ensure_javascript_string_size(value.len())?;
-        return Ok(value.to_string());
-    };
-    let end = start + needle.len();
-    let prefix = &value[..start];
-    let suffix = &value[end..];
-    let mut output_bytes = prefix
-        .len()
-        .checked_add(suffix.len())
-        .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
-    let mut chars = replacement.chars().peekable();
-    while let Some(character) = chars.next() {
-        let additional = if character != '$' {
-            character.len_utf8()
-        } else {
-            match chars.peek().copied() {
-                Some('$') => {
-                    chars.next();
-                    1
-                }
-                Some('&') => {
-                    chars.next();
-                    needle.len()
-                }
-                Some('`') => {
-                    chars.next();
-                    prefix.len()
-                }
-                Some('\'') => {
-                    chars.next();
-                    suffix.len()
-                }
-                _ => 1,
-            }
+            value.trunc() as i64
         };
-        output_bytes = output_bytes
-            .checked_add(additional)
-            .ok_or_else(|| javascript_string_size_error(usize::MAX))?;
-        ensure_javascript_string_size(output_bytes)?;
-    }
-
-    let mut output = String::with_capacity(output_bytes);
-    output.push_str(prefix);
-    let mut chars = replacement.chars().peekable();
-    while let Some(character) = chars.next() {
-        if character != '$' {
-            output.push(character);
-            continue;
+        if !(min..=100).contains(&value) {
+            return Err(js_stdlib_error(
+                "RangeError: precision must be between 0 and 100",
+            ));
         }
-        match chars.peek().copied() {
-            Some('$') => {
-                chars.next();
-                output.push('$');
-            }
-            Some('&') => {
-                chars.next();
-                output.push_str(needle);
-            }
-            Some('`') => {
-                chars.next();
-                output.push_str(prefix);
-            }
-            Some('\'') => {
-                chars.next();
-                output.push_str(suffix);
-            }
-            _ => output.push('$'),
+        Ok(value)
+    };
+    let rendered = match method {
+        "toFixed" => {
+            let digits = digits(0, 0)? as u8;
+            ryu_js::Buffer::new()
+                .format_to_fixed(value, digits)
+                .to_string()
+        }
+        "toExponential" => {
+            let fraction = if args.is_empty() || matches!(args, [Value::Undefined]) {
+                None
+            } else {
+                Some(digits(0, 0)? as usize)
+            };
+            javascript_exponential(value, fraction)
+        }
+        "toPrecision" if args.is_empty() || matches!(args, [Value::Undefined]) => {
+            javascript_to_string(&Value::Number(value))
+        }
+        "toPrecision" => javascript_precision(value, digits(1, 1)? as usize),
+        "toString" if args.is_empty() => javascript_to_string(&Value::Number(value)),
+        "valueOf" if args.is_empty() => return Ok(Value::Number(value)),
+        _ => {
+            return Err(js_stdlib_error(format!(
+                "TS_METHOD_UNSUPPORTED: Number.{method}"
+            )));
+        }
+    };
+    Ok(Value::String(rendered.into()))
+}
+
+fn javascript_exponential(value: f64, fraction: Option<usize>) -> String {
+    if !value.is_finite() {
+        return javascript_to_string(&Value::Number(value));
+    }
+    let value = if value == 0.0 { 0.0 } else { value };
+    let raw = match fraction {
+        Some(fraction) => format!("{value:.fraction$e}"),
+        None => {
+            let shortest = javascript_to_string(&Value::Number(value));
+            let parsed = shortest.parse::<f64>().unwrap_or(value);
+            format!("{parsed:e}")
+        }
+    };
+    normalize_exponent(raw, fraction)
+}
+
+fn normalize_exponent(raw: String, fraction: Option<usize>) -> String {
+    let (mantissa, exponent) = raw.split_once('e').expect("Rust exponent formatting");
+    let mut mantissa = mantissa.to_string();
+    if fraction.is_none() {
+        while mantissa.contains('.') && mantissa.ends_with('0') {
+            mantissa.pop();
+        }
+        if mantissa.ends_with('.') {
+            mantissa.pop();
         }
     }
-    output.push_str(suffix);
-    Ok(output)
+    let exponent = exponent.parse::<i32>().expect("Rust exponent digits");
+    format!(
+        "{mantissa}e{}{exponent}",
+        if exponent >= 0 { "+" } else { "" }
+    )
 }
 
-fn relative_index(value: f64, len: usize) -> Option<usize> {
-    let value = if value.is_nan() {
-        0
-    } else {
-        value.trunc() as isize
-    };
-    let index = if value < 0 {
-        len as isize + value
-    } else {
-        value
-    };
-    (index >= 0 && index < len as isize).then_some(index as usize)
-}
-
-fn relative_nonnegative_index(value: f64, len: usize) -> Option<usize> {
-    let value = if value.is_nan() {
-        0
-    } else {
-        value.trunc() as isize
-    };
-    (value >= 0 && value < len as isize).then_some(value as usize)
-}
-
-fn clamp_relative_index(value: f64, len: usize) -> usize {
-    if value.is_nan() {
-        return 0;
+fn javascript_precision(value: f64, precision: usize) -> String {
+    if !value.is_finite() {
+        return javascript_to_string(&Value::Number(value));
     }
-    if value <= -(len as f64) {
+    let absolute = value.abs();
+    let exponent = if absolute == 0.0 {
         0
-    } else if value < 0.0 {
-        (len as f64 + value.trunc()) as usize
     } else {
-        value.trunc().min(len as f64) as usize
+        absolute.log10().floor() as i32
+    };
+    if exponent >= precision as i32 || exponent < -6 {
+        javascript_exponential(value, Some(precision - 1))
+    } else {
+        let fraction = (precision as i32 - exponent - 1).max(0) as u8;
+        ryu_js::Buffer::new()
+            .format_to_fixed(value, fraction)
+            .to_string()
     }
 }
 
-fn clamp_nonnegative_index(value: f64, len: usize) -> usize {
-    if value.is_nan() || value <= 0.0 {
-        0
-    } else {
-        (value.trunc() as usize).min(len)
+fn flatten_array(items: &[Value], depth: usize, output: &mut Vec<Value>) {
+    for item in items {
+        if depth > 0 {
+            match item {
+                Value::List(values) | Value::Tuple(values) => {
+                    flatten_array(values, depth - 1, output);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        output.push(item.clone());
     }
 }
 
-fn string_starts_with(
-    units: &[u16],
-    needle: &Value,
-    position: usize,
-) -> Result<Value, RuntimeError> {
-    let needle = javascript_to_string(needle)
-        .encode_utf16()
-        .collect::<Vec<_>>();
-    Ok(Value::Bool(
-        units.get(position..position.saturating_add(needle.len())) == Some(needle.as_slice()),
-    ))
-}
-
-fn string_ends_with(units: &[u16], needle: &Value, end: usize) -> Result<Value, RuntimeError> {
-    let needle = javascript_to_string(needle)
-        .encode_utf16()
-        .collect::<Vec<_>>();
-    let start = end.saturating_sub(needle.len());
-    Ok(Value::Bool(
-        needle.len() <= end && units.get(start..end) == Some(needle.as_slice()),
-    ))
-}
-
-fn string_includes(units: &[u16], needle: &Value, position: usize) -> Result<Value, RuntimeError> {
-    let needle = javascript_to_string(needle)
-        .encode_utf16()
-        .collect::<Vec<_>>();
-    Ok(Value::Bool(
-        needle.is_empty()
-            || units
-                .get(position..)
-                .is_some_and(|tail| tail.windows(needle.len()).any(|window| window == needle)),
-    ))
-}
-
-fn string_index_of(units: &[u16], needle: &Value, position: usize) -> Result<Value, RuntimeError> {
-    let needle = javascript_to_string(needle)
-        .encode_utf16()
-        .collect::<Vec<_>>();
-    let index = if needle.is_empty() {
-        Some(position.min(units.len()))
+fn to_uint32(value: f64) -> u32 {
+    if !value.is_finite() || value == 0.0 {
+        0
     } else {
-        units
-            .get(position..)
-            .and_then(|tail| {
-                tail.windows(needle.len())
-                    .position(|window| window == needle)
-            })
-            .map(|index| position + index)
-    };
-    Ok(Value::Number(index.map_or(-1.0, |index| index as f64)))
+        value.trunc().rem_euclid(4_294_967_296.0) as u32
+    }
 }
 
-fn string_last_index_of(
-    units: &[u16],
-    needle: &Value,
-    position: usize,
-) -> Result<Value, RuntimeError> {
-    let needle = javascript_to_string(needle)
-        .encode_utf16()
-        .collect::<Vec<_>>();
-    let position = position.min(units.len());
-    let index = if needle.is_empty() {
-        Some(position)
-    } else {
-        let last_start = position.min(units.len().saturating_sub(needle.len()));
-        (0..=last_start)
-            .rev()
-            .find(|start| units.get(*start..start + needle.len()) == Some(needle.as_slice()))
-    };
-    Ok(Value::Number(index.map_or(-1.0, |index| index as f64)))
-}
-
-fn array_includes(items: &[Value], needle: &Value, start: usize) -> Result<Value, RuntimeError> {
-    use crate::runtime::javascript::javascript_strict_equal;
-    Ok(Value::Bool(items.get(start..).is_some_and(|tail| {
-        tail.iter().any(|item| {
-            javascript_strict_equal(item, needle)
-                || matches!((item, needle), (Value::Number(left), Value::Number(right)) if left.is_nan() && right.is_nan())
-        })
-    })))
-}
-
-fn array_index_of(items: &[Value], needle: &Value, start: usize) -> Result<Value, RuntimeError> {
-    use crate::runtime::javascript::javascript_strict_equal;
-    Ok(Value::Number(
-        items
-            .get(start..)
-            .and_then(|tail| {
-                tail.iter()
-                    .position(|item| javascript_strict_equal(item, needle))
-            })
-            .map_or(-1.0, |index| (start + index) as f64),
-    ))
-}
-
-fn array_last_index_of(items: &[Value], needle: &Value, end: usize) -> Result<Value, RuntimeError> {
-    use crate::runtime::javascript::javascript_strict_equal;
-    Ok(Value::Number(
-        items[..end.min(items.len())]
+fn javascript_hypot(values: &[Value]) -> f64 {
+    let values = values.iter().map(javascript_to_number).collect::<Vec<_>>();
+    if values.iter().any(|value| value.is_infinite()) {
+        return f64::INFINITY;
+    }
+    if values.iter().any(|value| value.is_nan()) {
+        return f64::NAN;
+    }
+    let scale = values
+        .iter()
+        .fold(0.0_f64, |scale, value| scale.max(value.abs()));
+    if scale == 0.0 {
+        return 0.0;
+    }
+    scale
+        * values
             .iter()
-            .rposition(|item| javascript_strict_equal(item, needle))
-            .map_or(-1.0, |index| index as f64),
-    ))
-}
-
-fn last_index_exclusive(value: f64, len: usize) -> Option<usize> {
-    if len == 0 {
-        return None;
-    }
-    let value = if value.is_nan() { 0.0 } else { value.trunc() };
-    if value < -(len as f64) {
-        None
-    } else if value < 0.0 {
-        Some((len as f64 + value) as usize + 1)
-    } else {
-        Some(value.min((len - 1) as f64) as usize + 1)
-    }
-}
-
-fn to_uint16(value: f64) -> u16 {
-    if !value.is_finite() || value == 0.0 {
-        return 0;
-    }
-    value.trunc().rem_euclid(65_536.0) as u16
-}
-
-fn javascript_round(value: f64) -> f64 {
-    if !value.is_finite() || value == 0.0 {
-        return value;
-    }
-    if (-0.5..0.0).contains(&value) {
-        return -0.0;
-    }
-    (value + 0.5).floor()
-}
-
-fn javascript_pow(base: f64, exponent: f64) -> f64 {
-    if base.abs() == 1.0 && exponent.is_infinite() {
-        f64::NAN
-    } else {
-        base.powf(exponent)
-    }
-}
-
-fn javascript_extreme(values: &[Value], maximum: bool) -> f64 {
-    use crate::runtime::javascript::javascript_to_number;
-    let mut result = if maximum {
-        f64::NEG_INFINITY
-    } else {
-        f64::INFINITY
-    };
-    for value in values {
-        let value = javascript_to_number(value);
-        if value.is_nan() {
-            return f64::NAN;
-        }
-        if (maximum
-            && (value > result || value == 0.0 && result == 0.0 && value.is_sign_positive()))
-            || (!maximum
-                && (value < result || value == 0.0 && result == 0.0 && value.is_sign_negative()))
-        {
-            result = value;
-        }
-    }
-    result
-}
-
-fn utf16_value(units: Vec<u16>) -> Result<Value, RuntimeError> {
-    String::from_utf16(&units)
-        .map(|value| Value::String(value.into()))
-        .map_err(|_| js_stdlib_error("TS_LONE_SURROGATE_UNSUPPORTED: result is not representable"))
-}
-
-fn code_point_at(units: &[u16], index: usize) -> Result<Value, RuntimeError> {
-    let Some(first) = units.get(index).copied() else {
-        return Ok(Value::Undefined);
-    };
-    let point = if (0xd800..=0xdbff).contains(&first)
-        && let Some(second @ 0xdc00..=0xdfff) = units.get(index + 1).copied()
-    {
-        0x10000 + (((first as u32 - 0xd800) << 10) | (second as u32 - 0xdc00))
-    } else {
-        first as u32
-    };
-    Ok(Value::Number(point as f64))
-}
-
-fn slice_utf16(units: &[u16], bounds: &[Value], relative: bool) -> Result<Value, RuntimeError> {
-    let to_number = crate::runtime::javascript::javascript_to_number;
-    let start_value = match bounds.first() {
-        None | Some(Value::Undefined) => 0.0,
-        Some(value) => to_number(value),
-    };
-    // Absent and explicitly `undefined` are the same thing here: end of input.
-    let end_value = match bounds.get(1) {
-        None | Some(Value::Undefined) => units.len() as f64,
-        Some(value) => to_number(value),
-    };
-    let start = if relative {
-        clamp_relative_index(start_value, units.len())
-    } else {
-        start_value.max(0.0) as usize
-    };
-    let end = if relative {
-        clamp_relative_index(end_value, units.len())
-    } else {
-        (end_value.max(0.0) as usize).min(units.len())
-    };
-    utf16_value(units[start..end.max(start)].to_vec())
-}
-
-fn substring_utf16(units: &[u16], bounds: &[Value]) -> Result<Value, RuntimeError> {
-    let to_number = crate::runtime::javascript::javascript_to_number;
-    // Absent and explicitly `undefined` both mean end-of-input; coercing the
-    // padded `Undefined` gives NaN, which clamps to zero and silently swaps the
-    // bounds below.
-    let mut start = match bounds.first() {
-        None | Some(Value::Undefined) => 0.0,
-        Some(value) => to_number(value),
-    }
-    .max(0.0) as usize;
-    let mut end = match bounds.get(1) {
-        None | Some(Value::Undefined) => units.len() as f64,
-        Some(value) => to_number(value),
-    }
-    .max(0.0) as usize;
-    start = start.min(units.len());
-    end = end.min(units.len());
-    if start > end {
-        std::mem::swap(&mut start, &mut end);
-    }
-    utf16_value(units[start..end].to_vec())
-}
-
-fn pad_string(value: &str, length: f64, fill: &str, start: bool) -> Result<Value, RuntimeError> {
-    let current = value.encode_utf16().count();
-    let length = if length.is_nan() {
-        0
-    } else {
-        length.max(0.0).trunc() as usize
-    };
-    if length <= current || fill.is_empty() {
-        return Ok(Value::String(value.into()));
-    }
-    // Size before allocating, as `repeat` and `concat` do. `'a'.padStart(1e15)`
-    // is a memory-limit rejection, never a host allocation abort.
-    let added = length - current;
-    ensure_javascript_string_size(
-        added
-            .checked_mul(std::mem::size_of::<u16>())
-            .and_then(|bytes| bytes.checked_add(value.len()))
-            .ok_or_else(|| javascript_string_size_error(usize::MAX))?,
-    )?;
-    let fill_units = fill.encode_utf16().collect::<Vec<_>>();
-    let padding = (0..added)
-        .map(|index| fill_units[index % fill_units.len()])
-        .collect::<Vec<_>>();
-    let padding = match utf16_value(padding)? {
-        Value::String(value) => value,
-        _ => unreachable!(),
-    };
-    Ok(Value::String(
-        if start {
-            format!("{padding}{value}")
-        } else {
-            format!("{value}{padding}")
-        }
-        .into(),
-    ))
-}
-
-fn parse_float_prefix(value: &str) -> f64 {
-    let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
-    for end in (1..=value.len()).rev() {
-        if let Some(prefix) = value.get(..end)
-            && let Ok(number) = prefix.parse::<f64>()
-        {
-            return number;
-        }
-    }
-    f64::NAN
-}
-
-fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
-    let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
-    let (negative, value) = value
-        .strip_prefix('-')
-        .map_or((false, value), |value| (true, value));
-    let value = value.strip_prefix('+').unwrap_or(value);
-    let radix = radix.map_or(0, to_int32);
-    if radix != 0 && !(2..=36).contains(&radix) {
-        return f64::NAN;
-    }
-    let (radix, value) = if radix == 0 {
-        value
-            .strip_prefix("0x")
-            .or_else(|| value.strip_prefix("0X"))
-            .map_or((10, value), |value| (16, value))
-    } else if radix == 16 {
-        (
-            16,
-            value
-                .strip_prefix("0x")
-                .or_else(|| value.strip_prefix("0X"))
-                .unwrap_or(value),
-        )
-    } else {
-        (radix as u32, value)
-    };
-    let digits = value
-        .chars()
-        .take_while(|character| character.is_digit(radix))
-        .collect::<String>();
-    if digits.is_empty() {
-        return f64::NAN;
-    }
-    let number = num_bigint::BigUint::parse_bytes(digits.as_bytes(), radix)
-        .and_then(|value| num_traits::ToPrimitive::to_f64(&value))
-        .unwrap_or(f64::INFINITY);
-    if negative { -number } else { number }
-}
-
-fn to_int32(value: f64) -> i64 {
-    if !value.is_finite() || value == 0.0 {
-        return 0;
-    }
-    let value = value.trunc().rem_euclid(4_294_967_296.0) as i64;
-    if value >= 2_147_483_648 {
-        value - 4_294_967_296
-    } else {
-        value
-    }
+            .map(|value| (value / scale).powi(2))
+            .sum::<f64>()
+            .sqrt()
 }

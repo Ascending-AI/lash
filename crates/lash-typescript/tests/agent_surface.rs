@@ -1275,18 +1275,28 @@ fn array_map_runs_its_callback_in_the_vm() {
     );
 }
 
-/// Shapes whose callback arity is not statically known reject by name rather
-/// than lowering something the VM's exact-arity check cannot run.
+/// Callback arity is ordinary ECMAScript call arity: named functions and
+/// three-argument callbacks are valid, while a missing callback rejects.
 #[test]
-fn array_map_rejects_shapes_it_cannot_run() {
-    let environment = two_leaf_web_environment();
+fn array_map_accepts_ecma_callback_shapes_and_rejects_a_missing_callback() {
+    assert_eq!(
+        run_typescript(
+            "function d(x: number): number { return x * 2; } finish([1,2].map(d).join('-'));"
+        ),
+        Value::String("2-4".into())
+    );
+    assert_eq!(
+        run_typescript("finish([1,2].map((x, i, all) => x+i+all.length).join('-'));"),
+        Value::String("3-5".into())
+    );
     for source in [
-        "function d(x: number): number { return x * 2; } finish([1,2].map(d).join('-'));",
-        "finish([1,2].map((x, i, all) => x).join('-'));",
         "finish([1,2].map().join('-'));",
+        "finish([1,2].filter().join('-'));",
+        "finish([1,2].reduce());",
     ] {
+        let environment = two_leaf_web_environment();
         let error = lash_typescript::link(source, &environment)
-            .expect_err("an unrunnable map shape must reject at link time");
+            .expect_err("a missing callback must reject at link time");
         assert_eq!(error.code.as_str(), "TS_METHOD_UNSUPPORTED", "{source}");
     }
 }

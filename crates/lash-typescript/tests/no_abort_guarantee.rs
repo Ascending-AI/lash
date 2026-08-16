@@ -62,7 +62,7 @@ fn abort_corpus() -> Vec<(String, String)> {
     // originally aborted. The distinct-label shape below carries the full bound.
     let duplicate_label_limit = 8 * 1024;
     // Grouped by the review round that found each shape.
-    let mut corpus: Vec<(String, String)> = Vec::with_capacity(32);
+    let mut corpus: Vec<(String, String)> = Vec::with_capacity(40);
     // Round 1: prefix operators, ternary and binary chains, delimiters.
     corpus.push(("round1-not".into(), fill("finish(", "!", "1);", "")));
     corpus.push((
@@ -75,6 +75,10 @@ fn abort_corpus() -> Vec<(String, String)> {
     corpus.push(("round1-paren".into(), fill("finish(", "(", "1", ")")));
     corpus.push(("round1-bracket".into(), fill("const x = ", "[", "1", "]")));
     corpus.push(("round1-brace".into(), fill("const x = ", "{a:", "1", "}")));
+    corpus.push((
+        "wpb-nested-array-callback".into(),
+        fill("finish([1].map(", "x => [x].filter(", "x => true", ")"),
+    ));
     // Round 3: prefix keywords across lines, postfix chains.
     corpus.push((
         "round3-typeof-newline".into(),

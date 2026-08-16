@@ -282,10 +282,62 @@ impl Lowerer {
                     _ => {}
                 }
             }
+            if matches!(object.as_ref(), Expr::Ident(name) if name == "JSON")
+                && !self.has_binding("JSON")
+            {
+                if method == "parse" && args.len() > 1 {
+                    return Err(reject_json_parse_reviver());
+                }
+                if method == "stringify" {
+                    if args.len() > 3 {
+                        return Err(Diagnostic::new(
+                            DiagnosticCode::MethodUnsupported,
+                            "JSON.stringify expects value, optional replacer, and optional space",
+                            None,
+                        ));
+                    }
+                    if args.is_empty() {
+                        return Ok(LashExpr::BuiltinCall {
+                            name: "__typescript_stdlib".into(),
+                            args: vec![
+                                LashExpr::String("JSON.stringify".into()),
+                                LashExpr::Undefined,
+                            ],
+                        });
+                    }
+                    let value = &args[0];
+                    let replacer = args.get(1);
+                    let function_replacer = replacer.filter(|replacer| {
+                        !matches!(replacer, Expr::Null | Expr::Undefined | Expr::Array(_))
+                    });
+                    let property_replacer =
+                        function_replacer.is_none().then_some(replacer).flatten();
+                    return self.lower_json_stringify(
+                        value,
+                        function_replacer,
+                        property_replacer,
+                        args.get(2),
+                    );
+                }
+            }
             if method == "localeCompare" {
                 return Err(Diagnostic::new(
                     DiagnosticCode::MethodUnsupported,
                     "Unsupported: localeCompare/Intl ordering is host-dependent. Use (a < b ? -1 : a > b ? 1 : 0).",
+                    None,
+                ));
+            }
+            if method == "normalize" {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: String.normalize depends on Unicode normalization data outside the pinned v1 VM. Normalize text in a deterministic host tool before the cell.",
+                    None,
+                ));
+            }
+            if method == "toLocaleString" {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: toLocaleString/Intl formatting is locale-dependent. For numbers use toFixed(digits); otherwise build the deterministic string explicitly.",
                     None,
                 ));
             }
@@ -439,20 +491,32 @@ impl Lowerer {
                 && method == "from"
                 && !self.has_binding("Array")
             {
-                let [value] = args else {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::MethodUnsupported,
-                        "Unsupported: Array.from mapping callbacks. Use Array.from(iterable).map(callback).",
-                        None,
-                    ));
+                let (value, mapping_args) = match args {
+                    [value] => (value, &[][..]),
+                    [value, callback] => (value, std::slice::from_ref(callback)),
+                    [value, _callback, _this_arg] => {
+                        (value, args.get(1..).expect("mapping arguments exist"))
+                    }
+                    _ => {
+                        return Err(Diagnostic::new(
+                            DiagnosticCode::MethodUnsupported,
+                            "Array.from expects a source and optional mapping callback",
+                            None,
+                        ));
+                    }
                 };
-                return Ok(LashExpr::BuiltinCall {
+                let array = LashExpr::BuiltinCall {
                     name: "__typescript_stdlib".into(),
                     args: vec![
                         LashExpr::String("Lash.ArrayFromIterable".into()),
                         self.lower_iterable_sink(value)?,
                     ],
-                });
+                };
+                return if mapping_args.is_empty() {
+                    Ok(array)
+                } else {
+                    self.lower_array_from_mapping(array, mapping_args)
+                };
             }
             if matches!(object.as_ref(), Expr::Ident(name) if name == "Object")
                 && method == "fromEntries"
@@ -473,57 +537,46 @@ impl Lowerer {
                     ],
                 });
             }
-            if method == "filter" {
-                let [callback] = args else {
+            if method == "hasOwnProperty" {
+                let [key] = args else {
                     return Err(Diagnostic::new(
                         DiagnosticCode::UnsupportedExpression,
-                        "Array.filter expects one callback",
+                        "hasOwnProperty expects exactly one key; use Object.hasOwn(object, key)",
                         None,
                     ));
                 };
-                let receiver = self.temporary("filter_receiver");
-                let entry = self.temporary("filter_entry");
-                let receiver_value = self.lower_expr(object)?;
-                let callback = self.lower_expr(callback)?;
-                let item = LashExpr::Index {
-                    target: Box::new(LashExpr::Variable(entry.as_str().into())),
-                    index: Box::new(LashExpr::Number(0.0)),
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_stdlib".into(),
+                    args: vec![
+                        LashExpr::String("Object.hasOwn".into()),
+                        self.lower_expr(object)?,
+                        self.lower_expr(key)?,
+                    ],
+                });
+            }
+            if method == "replace"
+                && let [needle, callback @ Expr::Function(_)] = args
+            {
+                return self.lower_string_replace_callback(object, needle, callback);
+            }
+            if matches!(object.as_ref(), Expr::Ident(owner) if matches!(owner.as_str(), "Object" | "Map"))
+                && method == "groupBy"
+                && !self.has_binding(match object.as_ref() {
+                    Expr::Ident(owner) => owner,
+                    _ => unreachable!(),
+                })
+            {
+                let [source, callback] = args else {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnsupportedExpression,
+                        "groupBy expects an iterable and one callback",
+                        None,
+                    ));
                 };
-                let index = LashExpr::Index {
-                    target: Box::new(LashExpr::Variable(entry.as_str().into())),
-                    index: Box::new(LashExpr::Number(1.0)),
+                let Expr::Ident(owner) = object.as_ref() else {
+                    unreachable!()
                 };
-                return Ok(LashExpr::Block(vec![
-                    LashExpr::Assign {
-                        target: AssignTarget::variable(receiver.as_str().into()),
-                        expr: Box::new(receiver_value),
-                    },
-                    LashExpr::ListComprehension {
-                        element: Box::new(item.clone()),
-                        clauses: vec![
-                            ListComprehensionClause::For {
-                                binding: entry.as_str().into(),
-                                iterable: LashExpr::BuiltinCall {
-                                    name: "__typescript_stdlib".into(),
-                                    args: vec![
-                                        LashExpr::String("__enumerate".into()),
-                                        LashExpr::Variable(receiver.as_str().into()),
-                                    ],
-                                },
-                            },
-                            ListComprehensionClause::If {
-                                condition: LashExpr::Call {
-                                    function: Box::new(callback),
-                                    args: vec![
-                                        item,
-                                        index,
-                                        LashExpr::Variable(receiver.as_str().into()),
-                                    ],
-                                },
-                            },
-                        ],
-                    },
-                ]));
+                return self.lower_group_by(owner, source, callback);
             }
             if let Some(static_owner) = static_stdlib_owner(object)
                 && !self.has_binding(static_owner)
@@ -556,12 +609,49 @@ impl Lowerer {
                     None,
                 ));
             }
-            // `map` drives a guest callback, so it cannot go through the
-            // stdlib builtin: that exports every argument across the host
-            // boundary, which refuses a function value. The VM already owns
-            // functions, frames and an in-VM map driver, so lower to that.
-            if method == "map" {
+            // Callback methods stay entirely inside the VM. The synchronous
+            // family shares the effect-rejecting callback frame; async `map`
+            // retains the durable sequential async-map path.
+            if method == "map" && matches!(args, [Expr::Function(function)] if function.is_async) {
                 return self.lower_array_map(object, args);
+            }
+            let receiver_is_callback_exotic = method == "forEach"
+                && match object.as_ref() {
+                    Expr::New { constructor, .. } => {
+                        matches!(constructor.as_str(), "Map" | "Set" | "URLSearchParams")
+                    }
+                    Expr::Ident(name) => self
+                        .binding(name)
+                        .ok()
+                        .and_then(|binding| self.iterable_kinds.get(&binding.internal))
+                        .is_some_and(|kind| {
+                            matches!(kind.as_str(), "Map" | "Set" | "URLSearchParams")
+                        }),
+                    _ => false,
+                };
+            if !receiver_is_callback_exotic
+                && matches!(
+                    method.as_str(),
+                    "map"
+                        | "filter"
+                        | "reduce"
+                        | "reduceRight"
+                        | "find"
+                        | "findIndex"
+                        | "findLast"
+                        | "findLastIndex"
+                        | "some"
+                        | "every"
+                        | "forEach"
+                        | "flatMap"
+                )
+                || !receiver_is_callback_exotic
+                    && matches!(method.as_str(), "sort" | "toSorted")
+                    && args
+                        .first()
+                        .is_some_and(|argument| !matches!(argument, Expr::Undefined))
+            {
+                return self.lower_array_callback_method(method, object, args);
             }
             if is_instance_stdlib_method(method) {
                 let mut builtin_args = vec![

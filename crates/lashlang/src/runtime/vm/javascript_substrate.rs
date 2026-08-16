@@ -403,53 +403,92 @@ fn reject_reserved_global_name(name: &str) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-pub(super) fn stringify_if_contains_heap_hook(
+pub(super) fn javascript_json_stringify_with_options(
     heap: &Heap,
     value: &Value,
+    replacer: Option<&Value>,
+    space: Option<&Value>,
 ) -> Result<Option<String>, RuntimeError> {
-    if !value_contains_json_hook(heap, value)? {
+    if matches!(value, Value::Undefined) {
         return Ok(None);
     }
-    javascript_json_stringify_with_errors(heap, value, &mut BTreeSet::new()).map(Some)
+    let whitelist = replacer
+        .filter(|value| !matches!(value, Value::Null | Value::Undefined))
+        .map(|value| json_property_whitelist(heap, value))
+        .transpose()?;
+    let gap = match space {
+        Some(value) => match heap.javascript_to_primitive_string_or_number(value)? {
+            Value::Number(value) => " ".repeat(if value.is_nan() || value <= 0.0 {
+                0
+            } else {
+                value.trunc().min(10.0) as usize
+            }),
+            Value::String(value) => value.chars().take(10).collect(),
+            _ => String::new(),
+        },
+        None => String::new(),
+    };
+    javascript_json_stringify_with_errors(
+        heap,
+        value,
+        &mut BTreeSet::new(),
+        whitelist.as_deref(),
+        &gap,
+        0,
+        false,
+    )
+    .map(Some)
 }
 
-fn value_contains_json_hook(heap: &Heap, value: &Value) -> Result<bool, RuntimeError> {
-    let mut pending = vec![value];
-    let mut visited = BTreeSet::new();
-    while let Some(value) = pending.pop() {
-        match value {
-            Value::Ref(id) if visited.insert(*id) => match heap.get(*id)? {
-                HeapObject::Error(_) | HeapObject::Url(_) | HeapObject::UrlSearchParams(_) => {
-                    return Ok(true);
-                }
-                HeapObject::Tuple(values) | HeapObject::List(values) => {
-                    pending.extend(values.iter())
-                }
-                HeapObject::Record(record) => pending.extend(record.values()),
-                HeapObject::Closure { captures, .. } => pending.extend(captures.iter()),
-                HeapObject::Map(map) => {
-                    pending.extend(map.entries.iter().flat_map(|(key, value)| [key, value]))
-                }
-                HeapObject::Set(set) => pending.extend(set.values.iter()),
-                HeapObject::RegExp(_) | HeapObject::Date(_) => {}
-            },
-            Value::Tuple(values) | Value::List(values) => pending.extend(values.iter()),
-            Value::Record(record) => pending.extend(record.values()),
-            _ => {}
+fn json_property_whitelist(heap: &Heap, value: &Value) -> Result<Vec<String>, RuntimeError> {
+    let values = match value {
+        Value::Ref(id) => match heap.get(*id)? {
+            HeapObject::List(values) | HeapObject::Tuple(values) => values.as_slice(),
+            HeapObject::Closure { .. } => {
+                return Err(js_stdlib_error(
+                    "TS_JSON_REPLACER_FUNCTION_INTERNAL: function replacers must stay in the VM",
+                ));
+            }
+            _ => {
+                return Err(js_stdlib_error(
+                    "TypeError: JSON.stringify replacer must be null, an array, or a function",
+                ));
+            }
+        },
+        Value::List(values) | Value::Tuple(values) => values.as_ref(),
+        _ => {
+            return Err(js_stdlib_error(
+                "TypeError: JSON.stringify replacer must be null, an array, or a function",
+            ));
+        }
+    };
+    let mut result = Vec::new();
+    for value in values {
+        if matches!(value, Value::String(_) | Value::Number(_)) {
+            let key = heap.javascript_to_string(value)?;
+            if !result.contains(&key) {
+                result.push(key);
+            }
         }
     }
-    Ok(false)
+    Ok(result)
 }
 
 fn javascript_json_stringify_with_errors(
     heap: &Heap,
     value: &Value,
     active: &mut BTreeSet<HeapId>,
+    whitelist: Option<&[String]>,
+    gap: &str,
+    depth: usize,
+    array_element: bool,
 ) -> Result<String, RuntimeError> {
     match value {
         Value::Ref(id) => {
             if !active.insert(*id) {
-                return Err(js_stdlib_error("JSON.stringify received a cyclic value"));
+                return Err(js_stdlib_error(
+                    "TypeError: Converting circular structure to JSON",
+                ));
             }
             let result = match heap.get(*id)? {
                 HeapObject::Error(_) | HeapObject::UrlSearchParams(_) => Ok("{}".to_string()),
@@ -458,11 +497,23 @@ fn javascript_json_stringify_with_errors(
                 HeapObject::List(values) | HeapObject::Tuple(values) => {
                     let values = values
                         .iter()
-                        .map(|value| javascript_json_stringify_with_errors(heap, value, active))
+                        .map(|value| {
+                            javascript_json_stringify_with_errors(
+                                heap,
+                                value,
+                                active,
+                                whitelist,
+                                gap,
+                                depth + 1,
+                                true,
+                            )
+                        })
                         .collect::<Result<Vec<_>, _>>()?;
-                    Ok(format!("[{}]", values.join(",")))
+                    Ok(join_json_container('[', ']', values, gap, depth))
                 }
-                HeapObject::Record(record) => stringify_heap_record(heap, record, active),
+                HeapObject::Record(record) => {
+                    stringify_heap_record(heap, record, active, whitelist, gap, depth)
+                }
                 object => Err(js_stdlib_error(format!(
                     "JSON.stringify received unsupported {} object",
                     object.kind_name()
@@ -474,11 +525,22 @@ fn javascript_json_stringify_with_errors(
         Value::Tuple(values) | Value::List(values) => {
             let values = values
                 .iter()
-                .map(|value| javascript_json_stringify_with_errors(heap, value, active))
+                .map(|value| {
+                    javascript_json_stringify_with_errors(
+                        heap,
+                        value,
+                        active,
+                        whitelist,
+                        gap,
+                        depth + 1,
+                        true,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(format!("[{}]", values.join(",")))
+            Ok(join_json_container('[', ']', values, gap, depth))
         }
-        Value::Record(record) => stringify_heap_record(heap, record, active),
+        Value::Record(record) => stringify_heap_record(heap, record, active, whitelist, gap, depth),
+        Value::Undefined if array_element => Ok("null".to_string()),
         value => javascript_json_stringify(value),
     }
 }
@@ -487,17 +549,58 @@ fn stringify_heap_record(
     heap: &Heap,
     record: &Record,
     active: &mut BTreeSet<HeapId>,
+    whitelist: Option<&[String]>,
+    gap: &str,
+    depth: usize,
 ) -> Result<String, RuntimeError> {
-    let entries = ecma_record_entries(record)
+    let ordered_entries = whitelist.map_or_else(
+        || ecma_record_entries(record),
+        |keys| {
+            keys.iter()
+                .filter_map(|key| record.get(key).map(|value| (key.as_str(), value)))
+                .collect()
+        },
+    );
+    let entries = ordered_entries
         .into_iter()
         .filter(|(_, value)| !matches!(value, Value::Undefined))
         .map(|(key, value)| {
+            let separator = if gap.is_empty() { ":" } else { ": " };
             Ok(format!(
-                "{}:{}",
+                "{}{separator}{}",
                 serde_json::to_string(key).expect("record keys are JSON strings"),
-                javascript_json_stringify_with_errors(heap, value, active)?
+                javascript_json_stringify_with_errors(
+                    heap,
+                    value,
+                    active,
+                    whitelist,
+                    gap,
+                    depth + 1,
+                    false,
+                )?
             ))
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
-    Ok(format!("{{{}}}", entries.join(",")))
+    Ok(join_json_container('{', '}', entries, gap, depth))
+}
+
+fn join_json_container(
+    open: char,
+    close: char,
+    entries: Vec<String>,
+    gap: &str,
+    depth: usize,
+) -> String {
+    if entries.is_empty() {
+        return format!("{open}{close}");
+    }
+    if gap.is_empty() {
+        return format!("{open}{}{close}", entries.join(","));
+    }
+    let current = gap.repeat(depth);
+    let nested = gap.repeat(depth + 1);
+    format!(
+        "{open}\n{nested}{}\n{current}{close}",
+        entries.join(&format!(",\n{nested}"))
+    )
 }

@@ -311,6 +311,23 @@ impl Heap {
         self.live_logical_bytes
     }
 
+    pub(crate) fn ensure_list_allocation_len(&self, len: usize) -> Result<(), RuntimeError> {
+        // Array-like constructors must reject against the VM budget before
+        // building their temporary Vec. Each missing element becomes an
+        // explicit `undefined` in the dense representation.
+        let list_bytes = OBJECT_HEADER_BYTES.saturating_add(
+            (VALUE_SLOT_BYTES + 1).saturating_mul(u64::try_from(len).unwrap_or(u64::MAX)),
+        );
+        let attempted = self.live_logical_bytes.saturating_add(list_bytes);
+        if attempted > self.logical_byte_limit {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: self.logical_byte_limit,
+                attempted,
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn schedule_version(&self) -> u32 {
         self.schedule_version
     }

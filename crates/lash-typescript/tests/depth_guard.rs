@@ -112,6 +112,22 @@ fn mixed_delimiters_share_one_source_nesting_budget() {
 }
 
 #[test]
+fn nested_stdlib_callbacks_share_the_source_nesting_budget() {
+    lash_typescript::parse(
+        "const a=[3,1,2]; finish(a.sort((x,y)=>[x,y].reduce((n,v)=>n+v,0)).join(','));",
+    )
+    .expect("a sort comparator calling reduce is an ordinary bounded callback tree");
+
+    let nested = format!(
+        "finish([1].map({}x{}));",
+        "x => [x].filter(".repeat(40),
+        ")".repeat(40)
+    );
+    let error = lash_typescript::parse(&nested).expect_err("nested callbacks must be bounded");
+    assert_eq!(error.code.as_str(), "TS_SOURCE_NESTING_LIMIT");
+}
+
+#[test]
 fn sequential_statement_forms_do_not_accumulate_source_nesting() {
     // Statement keywords open a recursive form that closes with the statement.
     // A flat sequence of them is one level deep however long the sequence is.

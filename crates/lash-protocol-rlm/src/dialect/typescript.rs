@@ -401,8 +401,11 @@ Declare durable work only as a top-level `const p = defineProcess({ name: "liter
 
 Use ordinary modern TypeScript control flow and expression syntax: destructuring (including defaults/rest), optional chaining, spread, compound/update operators, `switch`, `do...while`, `for...in`, `for...of`, parameter defaults/rest, and `var` are supported. Error-family constructors, Map/Set/Date/RegExp, and their restricted built-in `instanceof` checks are supported. Bare conversions and number parsers are available; array iterator methods must be consumed directly by `for...of`, spread, `Array.from`, `new Map|Set`, or `Object.fromEntries`. `globalThis.name` and top-level bindings address the durable session state.
 
-Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), regex literals (`TS_REGEXP_UNSUPPORTED`), `for await` (`TS_FOR_OF_UNSUPPORTED`), labels (`TS_LABEL_UNSUPPORTED`), arbitrary `new` (`TS_NEW_UNSUPPORTED`), and arbitrary `instanceof` (`TS_INSTANCEOF_UNSUPPORTED`) reject with a replacement in the diagnostic. Assigning to a captured `let` rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; mutate a captured object's field instead. `for...of` snapshots its input, so a body that aliases or mutates that input rejects as `TS_FOR_OF_UNSUPPORTED`. Promise chaining and `Promise.resolve`/`reject` reject: use direct `await` and `try/catch`. `Promise.race`/`any` reject pending FIG-1416; use `Promise.all`, `Promise.allSettled`, or durable `sleep`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. Static methods: `Object.keys/values/entries/fromEntries/hasOwn/is`, `Array.isArray/of`, `String.fromCodePoint`, `Number.isFinite/isInteger/isNaN/isSafeInteger/parseFloat/parseInt`, `JSON.parse/stringify`, and `Math.abs/acos/asin/cbrt/ceil/cos/exp/floor/log/log10/log2/round/sin/tan/trunc/max/min/pow/sqrt/sign`. Instance methods include `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `filter`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, and `valueOf`. `Date.now()` and `Math.random()` are journaled."#;
-        Ok(format!("{host_api}{tools}{host_surface}"))
+Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), regex literals (`TS_REGEXP_UNSUPPORTED`), `for await` (`TS_FOR_OF_UNSUPPORTED`), labels (`TS_LABEL_UNSUPPORTED`), arbitrary `new` (`TS_NEW_UNSUPPORTED`), and arbitrary `instanceof` (`TS_INSTANCEOF_UNSUPPORTED`) reject with a replacement in the diagnostic. Assigning to a captured `let` rejects as `TS_MUTABLE_CAPTURE_UNSUPPORTED`; mutate a captured object's field instead. `for...of` snapshots its input, so a body that aliases or mutates that input rejects as `TS_FOR_OF_UNSUPPORTED`. Promise chaining and `Promise.resolve`/`reject` reject: use direct `await` and `try/catch`. `Promise.race`/`any` reject pending FIG-1416; use `Promise.all`, `Promise.allSettled`, or durable `sleep`. Unsupported methods reject as `TS_METHOD_UNSUPPORTED`. `localeCompare` and locale formatting reject; use `(a < b ? -1 : a > b ? 1 : 0)` and `toFixed(digits)`. `Date.now()` and `Math.random()` are journaled.
+
+### Deterministic standard library"#;
+        let stdlib = lash_typescript::render_stdlib_contract();
+        Ok(format!("{host_api}\n\n{stdlib}{tools}{host_surface}"))
     }
 
     fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> &'static str {
@@ -775,6 +778,10 @@ mod tests {
             "{section}"
         );
         assert!(section.contains("TS_FOR_OF_UNSUPPORTED"), "{section}");
+        assert!(
+            section.contains(&lash_typescript::render_stdlib_contract()),
+            "the prompt stdlib inventory must come from the lowering signature table"
+        );
         insta::assert_snapshot!("typescript_execution_section", section);
     }
 

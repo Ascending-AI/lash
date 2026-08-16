@@ -110,6 +110,7 @@ pub(super) fn instruction_heap_plan(
         | I::Duplicate
         | I::JavaScriptUnary(_)
         | I::JavaScriptBinary(_)
+        | I::Pop
         | I::Intrinsic(
             IntrinsicOp::JavaScriptSplit
             | IntrinsicOp::JavaScriptJoin
@@ -158,7 +159,6 @@ pub(super) fn instruction_heap_plan(
         | I::JumpIfFalse(_)
         | I::JumpIfTrue(_)
         | I::Unary(_)
-        | I::Pop
         | I::BeginIter(_) => InstructionHeapPlan::stack(Top(1)),
 
         // Two-operand opcodes.

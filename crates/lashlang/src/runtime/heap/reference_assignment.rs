@@ -211,6 +211,30 @@ impl Heap {
             (HeapObject::Record(record), CompiledAssignPathStep::Field(field)) => {
                 record.insert_symbolized(names[field].symbol, names[field].text.clone(), imported);
             }
+            (HeapObject::List(values), CompiledAssignPathStep::Field(field))
+                if names[field].text.as_ref() == "length" =>
+            {
+                let length = crate::runtime::javascript_to_number(&imported);
+                if !length.is_finite()
+                    || length < 0.0
+                    || length.fract() != 0.0
+                    || length > u32::MAX as f64
+                {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: "RangeError: Invalid array length".to_string(),
+                    });
+                }
+                let length = length as usize;
+                if length > values.len() {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: format!(
+                            "TS_SPARSE_ARRAY_UNSUPPORTED: growing array length from {} to {length} would create holes; append values explicitly",
+                            values.len()
+                        ),
+                    });
+                }
+                values.truncate(length);
+            }
             (HeapObject::List(values), CompiledAssignPathStep::Index) => {
                 let index = indexes
                     .get(index_cursor)

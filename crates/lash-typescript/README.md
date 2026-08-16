@@ -111,8 +111,8 @@ params.entries(): Iterable<[string, string]>
 ```
 
 The params constructor preserves duplicate keys and insertion order. Object
-keys follow the dialect-wide ECMA order (integer-like keys first, then
-insertion). Serialization is UTF-8 `application/x-www-form-urlencoded`, so a
+keys follow the dialect-wide ECMA property-enumeration order. Serialization is
+UTF-8 `application/x-www-form-urlencoded`, so a
 space becomes `+` while a literal plus becomes `%2B`. Params are directly
 iterable as entries; `keys()`, `values()`, `entries()`, and the params object
 itself may be consumed directly by `for...of`.
@@ -192,7 +192,10 @@ language semantics:
   all unaffected.
 - Cyclic heap objects are rejected at durable capture. Shared acyclic object
   identity is preserved byte-for-byte. Cycle-capable durable graph encoding is
-  deferred; the front-end does not silently copy a cycle.
+  deferred; the front-end does not silently copy a cycle. `JSON.stringify`
+  therefore detects an existing cycle before invoking a function replacer: a
+  replacer cannot erase that cycle first, unlike Node. This is an explicit v1
+  deviation until the durable graph encoding can represent cycles.
 - Captures are by value. A closure may read a `let` (including a classic-for
   iteration value), but assigning to a captured lexical binding still rejects
   with `TS_MUTABLE_CAPTURE_UNSUPPORTED` until durable lexical cells exist.
@@ -276,30 +279,71 @@ The dialect intentionally reproduces these frequently surprising Node results:
 `arr[-1]` is `undefined`; `typeof null` is `"object"`; `Object.keys(new Map())`
 and `{...new Map()}` are empty; object string coercion is `"[object Object]"`;
 string `.length` counts UTF-16 units while `for...of` walks code points.
+Numbers use the ECMA binary64 (`f64`) model. One pinned `ryu-js` conversion
+provides shortest-round-trip decimal text for template interpolation,
+`String(number)`, `join`, and JSON; those string forms print negative zero as
+`0`, while numeric operations still preserve its sign. `%` has JavaScript
+remainder semantics for negative operands, `**` is right-associative and agrees
+with `Math.pow`, `Math.min()` is `Infinity`, and `Math.round(-0.5)` is `-0`.
 
 ## Standard-library inventory
 
-The v1 inventory contains 78 method names: 38 static methods and
-40 instance method names (with `toString`, `concat`, `includes`,
-`indexOf`, and `lastIndexOf` shared by more than one receiver kind).
+The v1 inventory contains 125 owner-qualified method names: 57 static methods
+and 68 instance method names. The signature table is also the source of the
+model prompt; optional arguments are explicit rather than hidden behind an
+"ECMA optional arguments" qualifier.
 
 `instance_method_inventory_matches_the_lowerer` pins the list below against
 `is_instance_stdlib_method`, so the register cannot drift from what the lowerer
 actually accepts.
 
-The shipped static methods are `Object.keys`, `values`, `entries`,
-`fromEntries`, `hasOwn`, and `is`; `Array.isArray` and `of`;
-`String.fromCodePoint`; `Number.isFinite`, `isInteger`,
-`isNaN`, `isSafeInteger`, `parseFloat`, and `parseInt`; `JSON.parse` and
-`stringify`; and `Math.abs`, `acos`, `asin`, `cbrt`, `ceil`, `cos`, `exp`,
-`floor`, `log`, `log10`, `log2`, `round`, `sin`, `tan`, `trunc`, `max`, `min`,
-`pow`, `sqrt`, and `sign`; and `URL.canParse`.
+The shipped static families are:
 
-The shipped instance methods are `at`, `append`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `delete`, `endsWith`, `entries`, `filter`, `forEach`, `get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `keys`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `set`, `slice`, `sort`, `split`, `startsWith`, `substring`, `toJSON`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, `valueOf`, and `values`. Missing methods reject with
-`TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
-named typed runtime failure when only its runtime type is known. Mutating array
-methods are deliberately absent; index assignment remains the supported
-mutation surface.
+- Object: `keys(value)`, `values(value)`, `entries(value)`,
+  `fromEntries(iterable)`, `assign(target, ...sources)`,
+  `groupBy(iterable, callback)`, `hasOwn(value, key)`, `is(left, right)`.
+- Array: `from(source[, mapFn[, thisArg]])`, `isArray(value)`, `of(...values)`.
+- String: `fromCharCode(...codeUnits)`, `fromCodePoint(...codePoints)`.
+- Map: `groupBy(iterable, callback)`.
+- Number: `isFinite(value)`, `isInteger(value)`, `isNaN(value)`,
+  `isSafeInteger(value)`, `parseFloat(value)`, `parseInt(value[, radix])`.
+- JSON: `parse(text)`, `stringify(value[, replacer[, space]])`.
+- Math: `abs`, `acos`, `asin`, `acosh`, `asinh`, `atan`, `atan2`, `atanh`,
+  `cbrt`, `ceil`, `clz32`, `cos`, `cosh`, `exp`, `expm1`, `floor`, `fround`,
+  `hypot`, `imul`, `log`, `log1p`, `log10`, `log2`, `round`, `sin`, `sinh`,
+  `tan`, `tanh`, `trunc`, `max`, `min`, `pow`, `sqrt`, and `sign`, with their
+  ordinary ECMA arities. `PI`, `E`, `LN2`, `LN10`, `LOG2E`, `LOG10E`,
+  `SQRT2`, and `SQRT1_2` are accepted constants.
+- URL: `canParse(input[, base])`.
+
+The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
+`codePointAt`, `append`, `delete`, `entries`, `endsWith`, `filter`, `fill`,
+`find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `forEach`,
+`get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`,
+`every`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `reduce`,
+`reduceRight`, `reverse`, `slice`, `sort`, `some`, `splice`, `split`,
+`startsWith`, `substring`, `toExponential`, `toFixed`, `toPrecision`,
+`toReversed`, `toSorted`, `toSpliced`, `set`, `keys`, `toLowerCase`,
+`toUpperCase`, `toString`, `trim`, `trimEnd`, `trimStart`, `valueOf`, `values`,
+`with`, `hasOwnProperty`, `union`, `intersection`, `difference`,
+`symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`, and
+`toJSON`. The signature table in `src/signatures.rs` gives every optional form.
+
+`Number.EPSILON`, `MIN_SAFE_INTEGER`, `MAX_SAFE_INTEGER`, and `MAX_VALUE` are
+accepted constants. Array callbacks run synchronously and sequentially inside
+the durable VM callback driver. `sort` is stable, mutates and returns its
+receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.
+The array representation is dense: `arr.length = 0` is accepted, while writes
+that would create holes reject as `TS_SPARSE_ARRAY_UNSUPPORTED` instead of
+silently changing callback semantics.
+
+`localeCompare`, `toLocaleString`, and `Intl` remain rejected because locale
+data is host-dependent. Rewrite comparisons as
+`a < b ? -1 : a > b ? 1 : 0`; format numbers with `toFixed(digits)`.
+`String.normalize` also remains rejected because the pinned VM has no Unicode
+normalization database; normalize in a deterministic host tool. JSON parse
+revivers remain rejected: parse first and walk the result explicitly. Missing
+methods reject with `TS_METHOD_UNSUPPORTED`.
 
 ## Source nesting budget
 
@@ -405,10 +449,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 384 rows, of which 311 are distinct
+The Node differential table carries 449 rows, of which 376 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 311 unique rows rather than of 384 distinct behaviours. Both counts
+that of the 376 unique rows rather than of 449 distinct behaviours. Both counts
 are pinned against the table by `committed_row_counts_match_the_register`, and
 the generator pins each lane's own row count, so neither this paragraph nor a
 lane can drift from the corpus in silence.
