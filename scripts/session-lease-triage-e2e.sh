@@ -41,7 +41,7 @@ if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
 fi
 echo "session-lease-triage backends: $backends" | tee "$test_output"
 
-# The four trace events are contract, so their unit coverage is part of the
+# The lease trace transitions are contract, so their unit coverage is part of the
 # companion rather than something the judged run takes on trust.
 cargo test --locked --quiet -p lash-core --lib session_lease_observability \
   2>&1 | tee "$artifact_dir/00-trace-event-tests.log" | tee -a "$test_output"
@@ -115,7 +115,8 @@ def require_identity_fields(record, name, entry, require_generation=True):
 
 
 # Phase 1: a healthy holder is the provider-hang shape, and it is silent.
-for backend, record in checkpoints("provider_hang_shape", "02-provider-hang.jsonl").items():
+hang_records = checkpoints("provider_hang_shape", "02-provider-hang.jsonl")
+for backend, record in hang_records.items():
     claimed = event(record, "session_execution_lease.acquired")
     require_identity_fields(record, "claimed", claimed)
     if claimed["level"] != "INFO":
@@ -124,6 +125,8 @@ for backend, record in checkpoints("provider_hang_shape", "02-provider-hang.json
         fail(f"{backend}: the reading did not name the worker running the parked turn: {record}")
     if not record["renewals_current_while_parked"]:
         fail(f"{backend}: a parked turn's lane must read as current: {record}")
+    if record["renewed_count"] < 1:
+        fail(f"{backend}: current is meaningful only after a renewal landed: {record}")
     if record["reading_while_parked"]["renewal"] != "current":
         fail(f"{backend}: parked reading was not current: {record['reading_while_parked']}")
     if not record["reading_while_parked"]["expires_in_ms"]:
@@ -140,7 +143,8 @@ for backend, record in checkpoints("provider_hang_shape", "02-provider-hang.json
 # Phase 2: the winner reports the takeover truthfully, and the dead holder
 # reports nothing at all. The second half is the whole point: an event emitted by
 # the displaced runner would be absent here.
-for backend, record in checkpoints("lease_takeover", "03-lease-takeover.jsonl").items():
+takeover_records = checkpoints("lease_takeover", "03-lease-takeover.jsonl")
+for backend, record in takeover_records.items():
     taken_over = event(record, "session_execution_lease.taken_over")
     require_identity_fields(record, "taken_over", taken_over)
     if taken_over["level"] != "INFO":
@@ -177,17 +181,16 @@ for backend, record in checkpoints("lease_takeover", "03-lease-takeover.jsonl").
         fail(f"{backend}: unexpected post-sweep reading: {after}")
     if after["fencing_token"] is not None and after["fencing_token"] <= before["fencing_token"]:
         fail(f"{backend}: a still-held lane must show a higher generation: {before} -> {after}")
-    # The doctrine under test: lease loss is not a turn verdict. Whichever way
-    # the sweeping turn settled, the run must record it, self-consistently.
-    if record["turn_committed_after_takeover"] and record["commit_cas_rejected_count"]:
-        fail(f"{backend}: a committed turn cannot also have lost the head CAS: {record}")
-    if not record["turn_committed_after_takeover"] and not record["turn_error_after_takeover"]:
-        fail(f"{backend}: the sweeping turn neither committed nor reported an error: {record}")
+    if not record["turn_committed_after_takeover"]:
+        fail(f"{backend}: the successor turn must commit after takeover: {record}")
+    if record["turn_error_after_takeover"] is not None or record["commit_cas_rejected_count"]:
+        fail(f"{backend}: the committed successor cannot also report an error or CAS loss: {record}")
 
 # Phase 3: livelock is *repeated* rejection under sustained misrouting, while the
 # writer still holds a lane. One collision is ordinary contention and is not what
 # the documented decision procedure keys on.
-for backend, record in checkpoints("commit_cas_livelock", "04-commit-cas-livelock.jsonl").items():
+livelock_records = checkpoints("commit_cas_livelock", "04-commit-cas-livelock.jsonl")
+for backend, record in livelock_records.items():
     if record["rounds_attempted"] < 2:
         fail(f"{backend}: recurrence needs more than one round: {record}")
     if record["rounds_with_a_rejection"] != record["rounds_attempted"]:
@@ -198,6 +201,13 @@ for backend, record in checkpoints("commit_cas_livelock", "04-commit-cas-liveloc
         )
     if record["commit_cas_rejected_count"] < record["rounds_attempted"]:
         fail(f"{backend}: expected at least one rejection per round: {record}")
+    if record["busy_advisory_count"] != record["rounds_attempted"]:
+        fail(f"{backend}: every busy claimant must proceed under the commit CAS: {record}")
+    if record["busy_wait_count"] or record["busy_gave_up_count"]:
+        fail(f"{backend}: an ordinary busy turn must neither wait nor give up: {record}")
+    for advisory in record["busy_advisory"]:
+        if advisory["outcome"] != "proceeding_under_commit_cas":
+            fail(f"{backend}: busy claimant recorded the wrong disposition: {advisory}")
     for round_record in record["rounds"]:
         if round_record["committed"] != 1:
             fail(f"{backend}: each round must have exactly one winner: {round_record}")
@@ -216,9 +226,63 @@ for backend, record in checkpoints("commit_cas_livelock", "04-commit-cas-liveloc
     if record["lease_lost_count"] or record["taken_over_count"]:
         fail(f"{backend}: livelock must be distinguishable from a handoff: {record}")
 
+# One normalized law artifact makes backend agreement reviewable as a single
+# row rather than requiring a reader to mentally join three phase files.
+dispositions = {}
+for backend in backends:
+    hang = hang_records[backend]
+    takeover = takeover_records[backend]
+    busy = livelock_records[backend]
+    dispositions[backend] = {
+        "provider_hang": {
+            "renewal": hang["reading_while_parked"]["renewal"],
+            "renewed": hang["renewed_count"] > 0,
+            "lease_trouble_counts": {
+                "lost": hang["lease_lost_count"],
+                "taken_over": hang["taken_over_count"],
+                "commit_cas_rejected": hang["commit_cas_rejected_count"],
+            },
+            "after_commit": hang["reading_after_commit"]["renewal"],
+        },
+        "successor_takeover": {
+            "event_level": takeover["taken_over"]["level"],
+            "outcome": takeover["taken_over"]["outcome"],
+            "displaced_owner_id": takeover["taken_over"]["displaced_owner_id"],
+            "displaced_fencing_token": takeover["taken_over"]["displaced_fencing_token"],
+            "lease_lost_count": takeover["lease_lost_count"],
+            "before": takeover["reading_before_takeover"]["renewal"],
+            "turn_committed": takeover["turn_committed_after_takeover"],
+        },
+        "busy_lane": {
+            "advisory_outcomes": [event["outcome"] for event in busy["busy_advisory"]],
+            "busy_wait_count": busy["busy_wait_count"],
+            "busy_gave_up_count": busy["busy_gave_up_count"],
+            "rejected_lane_held": [event["lane_held"] for event in busy["commit_cas_rejected"]],
+            "rejected_lease_lost": [event["lease_lost"] for event in busy["commit_cas_rejected"]],
+        },
+    }
+
+normalized = {json.dumps(value, sort_keys=True) for value in dispositions.values()}
+if len(normalized) != 1:
+    fail(f"backend recovery dispositions disagree: {dispositions}")
+(artifacts / "07-executor-recovery-law.json").write_text(
+    json.dumps(
+        {
+            "schema": "lash.session-execution-lease-recovery-law.v1",
+            "backends": backends,
+            "dispositions": dispositions,
+            "correction": "FIG-1380",
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+
 print(
     "session-lease-triage gates: provider hang, winner-emitted takeover of a dead holder, "
-    f"and recurring CAS livelock asserted on {', '.join(backends)}; all four lease events "
+    f"and recurring CAS livelock asserted on {', '.join(backends)}; recovery dispositions "
     "observed"
 )
 PY
