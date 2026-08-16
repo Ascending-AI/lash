@@ -396,6 +396,175 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
     );
 }
 
+/// The whole attachment GC fence state machine against the durable catalog:
+/// every transition is a conditional statement, none of them reads a clock.
+#[tokio::test]
+async fn attachment_gc_fence_state_machine_is_durable_and_clockless() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
+    let request = SessionStoreCreateRequest {
+        session_id: "fenced-attachment-writer".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create session store");
+    let attachment_id = lash_core::AttachmentId::new("c".repeat(64));
+    let intent = || lash_core::AttachmentIntent {
+        attachment_id: attachment_id.clone(),
+        session_id: request.session_id.clone(),
+        canonical_uri: format!("lash-attachment://sha256/{attachment_id}"),
+        intent_at_epoch_ms: 1,
+        owner_kind: None,
+        owner_id: None,
+    };
+
+    // A recorded intent is a root: the condemn CAS refuses.
+    assert!(matches!(
+        lash_core::AttachmentManifest::begin_attachment_write(&*store, intent())
+            .expect("first fenced write"),
+        lash_core::AttachmentWriteFence::Granted
+    ));
+    assert_eq!(
+        lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+            .await
+            .expect("condemn a rooted digest"),
+        lash_core::AttachmentCondemnation::RootPresent
+    );
+
+    // Drop the root and the digest becomes condemnable — once.
+    lash_core::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .expect("forget the ref");
+    assert_eq!(
+        lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+            .await
+            .expect("condemn"),
+        lash_core::AttachmentCondemnation::Condemned
+    );
+    assert_eq!(
+        lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+            .await
+            .expect("second condemn"),
+        lash_core::AttachmentCondemnation::AlreadyCondemned,
+        "a peer sweeper's condemnation is skipped, never waited on"
+    );
+
+    // A writer revokes the condemnation, so the delete can no longer be armed.
+    assert!(matches!(
+        lash_core::AttachmentManifest::begin_attachment_write(&*store, intent())
+            .expect("write against a condemned digest"),
+        lash_core::AttachmentWriteFence::Granted
+    ));
+    assert_eq!(
+        lash_core::AttachmentRootSet::arm_attachment_delete(&factory, &attachment_id)
+            .await
+            .expect("arm after revocation"),
+        lash_core::AttachmentDeleteArming::Revoked
+    );
+
+    // Armed: a writer now parks instead of writing bytes into an in-flight
+    // delete, and the release is what lets it through.
+    lash_core::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .expect("forget the ref again");
+    assert_eq!(
+        lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, u64::MAX)
+            .await
+            .expect("re-condemn"),
+        lash_core::AttachmentCondemnation::Condemned
+    );
+    assert_eq!(
+        lash_core::AttachmentRootSet::arm_attachment_delete(&factory, &attachment_id)
+            .await
+            .expect("arm"),
+        lash_core::AttachmentDeleteArming::Armed
+    );
+    assert!(matches!(
+        lash_core::AttachmentManifest::begin_attachment_write(&*store, intent())
+            .expect("write against an armed digest"),
+        lash_core::AttachmentWriteFence::ReclamationInFlight
+    ));
+    assert!(
+        !lash_core::AttachmentManifest::holds_ref(&*store, &request.session_id, &attachment_id)
+            .expect("holds_ref"),
+        "a parked writer must record no intent"
+    );
+    lash_core::AttachmentRootSet::release_attachment_condemnation(&factory, &attachment_id)
+        .await
+        .expect("release");
+    assert!(matches!(
+        lash_core::AttachmentManifest::begin_attachment_write(&*store, intent())
+            .expect("write after the release"),
+        lash_core::AttachmentWriteFence::Granted
+    ));
+}
+
+/// A fenced sweep against the SQLite catalog still collects real garbage, and
+/// leaves no condemnation behind to block the next writer.
+#[tokio::test]
+async fn fenced_sqlite_sweep_collects_an_orphan_and_releases_the_digest() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
+    let request = SessionStoreCreateRequest {
+        session_id: "fenced-sqlite-sweep".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create session store");
+    let backend = lash_core::attachments::InMemoryAttachmentStore::new();
+    let orphan = lash_core::AttachmentStore::put(
+        &backend,
+        b"sqlite-fenced-orphan".to_vec(),
+        lash_sansio::AttachmentCreateMeta::new(
+            lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
+            None,
+            Some("orphan".to_string()),
+        ),
+    )
+    .await
+    .expect("put orphan blob");
+
+    let report = lash_core::attachments::reclaim_unreferenced_attachments(
+        &factory,
+        &backend,
+        lash_core::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
+    )
+    .await
+    .expect("fenced sweep");
+
+    assert_eq!(report.fence, lash_core::AttachmentGcFence::Fenced);
+    assert_eq!(report.reclaimed_count, 1);
+    assert!(report.condemn_deferred_ids.is_empty());
+    assert!(report.deleted_while_referenced.is_empty());
+    assert!(matches!(
+        lash_core::AttachmentStore::get(&backend, &orphan.id).await,
+        Err(lash_core::AttachmentStoreError::NotFound(_))
+    ));
+    // The digest is `Free` again: the next writer is granted immediately.
+    assert!(matches!(
+        lash_core::AttachmentManifest::begin_attachment_write(
+            &*store,
+            lash_core::AttachmentIntent {
+                attachment_id: orphan.id.clone(),
+                session_id: request.session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{}", orphan.id),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+            }
+        )
+        .expect("write after the sweep"),
+        lash_core::AttachmentWriteFence::Granted
+    ));
+}
+
 #[tokio::test]
 async fn targeted_attachment_ref_probe_aborts_when_the_factory_catalog_is_missing() {
     let dir = tempfile::tempdir().expect("tempdir");

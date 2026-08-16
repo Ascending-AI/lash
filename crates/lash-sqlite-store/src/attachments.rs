@@ -315,6 +315,145 @@ impl lash_core::ProcessExecutionEnvStore for Store {
     }
 }
 
+/// The `EXISTS (...)` body that decides whether one digest still has a live
+/// root, parameterised `?1 = attachment_id`, `?2 = intent_grace_cutoff_ms`.
+/// Shared by the targeted probe and the condemn CAS so the fence and the probe
+/// cannot drift apart.
+fn live_ref_exists_sql(process_registry_attached: bool) -> String {
+    let process_dead = if process_registry_attached {
+        "OR (
+            manifest.owner_kind = 'process'
+            AND NOT EXISTS (
+                SELECT 1 FROM process_registry.processes AS process
+                WHERE process.process_id = manifest.owner_id
+            )
+        )"
+    } else {
+        ""
+    };
+    format!(
+        "SELECT 1 FROM attachment_manifest AS manifest
+         WHERE manifest.attachment_id = ?1
+           AND NOT (
+                manifest.committed_at_ms IS NULL
+                AND manifest.intent_at_ms <= ?2
+                AND (
+                    manifest.owner_kind IS NULL
+                    OR (
+                        manifest.owner_kind = 'turn'
+                        AND EXISTS (
+                            SELECT 1 FROM runtime_turn_commits AS turn_commit
+                            WHERE turn_commit.session_id = manifest.session_id
+                              AND turn_commit.turn_id <> manifest.owner_id
+                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                        )
+                    )
+                    {process_dead}
+                )
+           )
+         LIMIT 1"
+    )
+}
+
+impl Store {
+    /// `Free -> Condemned` for one digest, conditional on there being no live
+    /// root. The root predicate, the existing-condemnation check, and the insert
+    /// share one SQLite transaction, so this is one CAS against every concurrent
+    /// [`AttachmentManifest::begin_attachment_write`].
+    pub(crate) async fn condemn_attachment(
+        &self,
+        attachment_id: &AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<lash_core::AttachmentCondemnation, StoreError> {
+        let attachment_id = attachment_id.as_str().to_string();
+        let cutoff = intent_grace_cutoff_epoch_ms as i64;
+        let live_ref_sql = live_ref_exists_sql(self.process_registry_attached);
+        self.conn
+            .write_flow(move |tx| {
+                let outcome: Result<lash_core::AttachmentCondemnation, StoreError> = (|| {
+                    let rooted = tx
+                        .query_row(&live_ref_sql, params![attachment_id, cutoff], |_| Ok(()))
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some();
+                    if rooted {
+                        return Ok(lash_core::AttachmentCondemnation::RootPresent);
+                    }
+                    let condemned = tx
+                        .query_row(
+                            "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1",
+                            params![attachment_id],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some();
+                    if condemned {
+                        return Ok(lash_core::AttachmentCondemnation::AlreadyCondemned);
+                    }
+                    tx.execute(
+                        "INSERT INTO attachment_condemnations (attachment_id, phase)
+                         VALUES (?1, 'condemned')",
+                        params![attachment_id],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(lash_core::AttachmentCondemnation::Condemned)
+                })(
+                );
+                Ok(match outcome {
+                    Ok(condemnation) => TxOutcome::Commit(Ok(condemnation)),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    /// `Condemned -> Deleting`: the CAS that authorizes the physical delete. A
+    /// writer that revoked the condemnation removed the row, so the conditional
+    /// UPDATE matches nothing and the delete is never issued.
+    pub(crate) async fn arm_attachment_delete(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<lash_core::AttachmentDeleteArming, StoreError> {
+        let attachment_id = attachment_id.as_str().to_string();
+        let armed = self
+            .conn
+            .write(move |tx| {
+                tx.execute(
+                    "UPDATE attachment_condemnations SET phase = 'deleting'
+                     WHERE attachment_id = ?1 AND phase = 'condemned'",
+                    params![attachment_id],
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(if armed == 1 {
+            lash_core::AttachmentDeleteArming::Armed
+        } else {
+            lash_core::AttachmentDeleteArming::Revoked
+        })
+    }
+
+    /// Return a digest to `Free`.
+    pub(crate) async fn release_attachment_condemnation(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        let attachment_id = attachment_id.as_str().to_string();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "DELETE FROM attachment_condemnations WHERE attachment_id = ?1",
+                    params![attachment_id],
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+}
+
 impl AttachmentManifest for Store {
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
         block_on_store(async {
@@ -354,6 +493,83 @@ impl AttachmentManifest for Store {
                     })();
                     Ok(match outcome {
                         Ok(()) => TxOutcome::Commit(Ok(())),
+                        Err(err) => TxOutcome::Rollback(Err(err)),
+                    })
+                })
+                .await
+                .map_err(sqlite_error)?
+        })
+    }
+
+    /// The writer half of the GC fence: the condemnation check, the revoke, and
+    /// the intent insert are one SQLite transaction, so a sweeper's condemn CAS
+    /// either precedes this whole mutation or fails against the intent it wrote.
+    fn begin_attachment_write(
+        &self,
+        intent: AttachmentIntent,
+    ) -> Result<lash_core::AttachmentWriteFence, StoreError> {
+        block_on_store(async {
+            let attachment_id = intent.attachment_id.as_str().to_string();
+            let session_id = intent.session_id.as_str().to_string();
+            let canonical_uri = intent.canonical_uri.as_str().to_string();
+            let intent_at_ms = intent.intent_at_epoch_ms as i64;
+            let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
+            let owner_id = intent.owner_id;
+            self.conn
+                .write_flow(move |tx| {
+                    let outcome: Result<lash_core::AttachmentWriteFence, StoreError> = (|| {
+                        crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
+                        let phase = tx
+                            .query_row(
+                                "SELECT phase FROM attachment_condemnations
+                                 WHERE attachment_id = ?1",
+                                params![attachment_id],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        match phase.as_deref() {
+                            // The physical delete is already in flight: record
+                            // nothing, so these bytes cannot land inside it.
+                            Some("deleting") => {
+                                return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
+                            }
+                            // Take the digest back before the sweeper can arm.
+                            Some(_) => {
+                                tx.execute(
+                                    "DELETE FROM attachment_condemnations
+                                     WHERE attachment_id = ?1",
+                                    params![attachment_id],
+                                )
+                                .map_err(sqlite_error)?;
+                            }
+                            None => {}
+                        }
+                        tx.execute(
+                            "INSERT INTO attachment_manifest
+                            (attachment_id, session_id, canonical_uri, intent_at_ms,
+                             committed_at_ms, owner_kind, owner_id)
+                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)
+                         ON CONFLICT(session_id, attachment_id) DO UPDATE SET
+                            canonical_uri = excluded.canonical_uri,
+                            intent_at_ms = excluded.intent_at_ms,
+                            owner_kind = excluded.owner_kind,
+                            owner_id = excluded.owner_id",
+                            params![
+                                attachment_id,
+                                session_id,
+                                canonical_uri,
+                                intent_at_ms,
+                                owner_kind,
+                                owner_id
+                            ],
+                        )
+                        .map_err(sqlite_error)?;
+                        Ok(lash_core::AttachmentWriteFence::Granted)
+                    })(
+                    );
+                    Ok(match outcome {
+                        Ok(fence) => TxOutcome::Commit(Ok(fence)),
                         Err(err) => TxOutcome::Rollback(Err(err)),
                     })
                 })
@@ -523,49 +739,12 @@ impl AttachmentManifest for Store {
         block_on_store(async {
             let attachment_id = attachment_id.as_str().to_string();
             let cutoff = intent_grace_cutoff_epoch_ms as i64;
-            let process_registry_attached = self.process_registry_attached;
+            let sql = live_ref_exists_sql(self.process_registry_attached);
             self.conn
                 .call(move |conn| {
-                    let process_dead = if process_registry_attached {
-                        "OR (
-                            manifest.owner_kind = 'process'
-                            AND NOT EXISTS (
-                                SELECT 1 FROM process_registry.processes AS process
-                                WHERE process.process_id = manifest.owner_id
-                            )
-                        )"
-                    } else {
-                        ""
-                    };
-                    let sql = format!(
-                        "SELECT 1 FROM attachment_manifest AS manifest
-                         WHERE manifest.attachment_id = ?1
-                           AND NOT (
-                                manifest.committed_at_ms IS NULL
-                                AND manifest.intent_at_ms <= ?2
-                                AND (
-                                    manifest.owner_kind IS NULL
-                                    OR (
-                                        manifest.owner_kind = 'turn'
-                                        AND EXISTS (
-                                            SELECT 1 FROM runtime_turn_commits AS turn_commit
-                                            WHERE turn_commit.session_id = manifest.session_id
-                                              AND turn_commit.turn_id <> manifest.owner_id
-                                              AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                                        )
-                                    )
-                                    {process_dead}
-                                )
-                           )
-                         LIMIT 1"
-                    );
-                    conn.query_row(
-                        &sql,
-                        params![attachment_id, cutoff],
-                        |_| Ok(()),
-                    )
-                    .optional()
-                    .map(|found| found.is_some())
+                    conn.query_row(&sql, params![attachment_id, cutoff], |_| Ok(()))
+                        .optional()
+                        .map(|found| found.is_some())
                 })
                 .await
                 .map_err(sqlite_error)

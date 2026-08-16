@@ -249,6 +249,14 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
     PRIMARY KEY (session_id, attachment_id)
 );
 
+-- Attachment GC fence state, one row per condemned digest. Deliberately
+-- timestampless: the protocol is CAS transitions only (see
+-- `lash_core::AttachmentCondemnation`), never an expiry.
+CREATE TABLE IF NOT EXISTS attachment_condemnations (
+    attachment_id TEXT PRIMARY KEY,
+    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))
+);
+
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,

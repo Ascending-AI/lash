@@ -820,14 +820,59 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         id: &lash_core::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash_core::StoreError> {
+        let store = self.open_catalog_for_attachment_gc("root re-check").await?;
+        lash_core::AttachmentManifest::has_live_ref_for_id(&store, id, intent_grace_cutoff_epoch_ms)
+    }
+
+    fn fence(&self) -> lash_core::AttachmentGcFence {
+        lash_core::AttachmentGcFence::Fenced
+    }
+
+    async fn condemn_attachment(
+        &self,
+        id: &lash_core::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<lash_core::AttachmentCondemnation, lash_core::StoreError> {
+        let store = self.open_catalog_for_attachment_gc("condemnation").await?;
+        store
+            .condemn_attachment(id, intent_grace_cutoff_epoch_ms)
+            .await
+    }
+
+    async fn arm_attachment_delete(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<lash_core::AttachmentDeleteArming, lash_core::StoreError> {
+        let store = self.open_catalog_for_attachment_gc("delete arming").await?;
+        store.arm_attachment_delete(id).await
+    }
+
+    async fn release_attachment_condemnation(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        let store = self
+            .open_catalog_for_attachment_gc("condemnation release")
+            .await?;
+        store.release_attachment_condemnation(id).await
+    }
+}
+
+impl SqliteSessionStoreFactory {
+    /// Open the factory-wide catalog that owns both halves of the attachment GC
+    /// fence — the manifest rows and the condemnation state.
+    async fn open_catalog_for_attachment_gc(
+        &self,
+        operation: &str,
+    ) -> Result<Store, lash_core::StoreError> {
         let path = self.catalog_path();
         if !path.exists() {
             return Err(lash_core::StoreError::Backend(format!(
-                "attachment GC root re-check aborted: durable-core catalog {} does not exist, so live attachment refs cannot be probed",
+                "attachment GC {operation} aborted: durable-core catalog {} does not exist",
                 path.display()
             )));
         }
-        let store = Store::open_with_options_clock_and_process_registry(
+        Store::open_with_options_clock_and_process_registry(
             &path,
             self.options,
             Arc::clone(&self.clock),
@@ -838,11 +883,10 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         .await
         .map_err(|err| {
             lash_core::StoreError::Backend(format!(
-                "attachment GC root re-check aborted: durable-core catalog {} could not be opened: {err}",
+                "attachment GC {operation} aborted: durable-core catalog {} could not be opened: {err}",
                 path.display()
             ))
-        })?;
-        lash_core::AttachmentManifest::has_live_ref_for_id(&store, id, intent_grace_cutoff_epoch_ms)
+        })
     }
 }
 
