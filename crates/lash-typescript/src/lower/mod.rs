@@ -173,7 +173,6 @@ struct Lowerer {
     process_depth: usize,
     await_depth: usize,
     iterable_sink_depth: usize,
-    regexp_iterable_sink_depth: usize,
     declarations: Vec<Declaration>,
     process_bindings: BTreeMap<String, String>,
     process_handle_bindings: BTreeSet<String>,

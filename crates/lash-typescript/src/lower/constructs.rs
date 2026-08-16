@@ -137,16 +137,15 @@ impl Lowerer {
 
     /// Lowers `value` in a position that materializes an iterable at once.
     ///
-    /// There is one such position list, not two. `matchAll` used to accept
-    /// three of these sinks while the collection iterators accepted five, for
-    /// no reason either side could state: every sink here is a bounded
-    /// materialization, which is the whole property the restriction exists to
-    /// guarantee.
+    /// There is one such position list, not two, and one counter behind it.
+    /// `matchAll` used to accept three of these sinks while the collection
+    /// iterators accepted five, for no reason either side could state: every
+    /// sink here is a bounded materialization, which is the whole property the
+    /// restriction exists to guarantee. The second counter that tracked the
+    /// shorter list is gone with the list it tracked.
     pub(super) fn lower_iterable_sink(&mut self, value: &Expr) -> Result<LashExpr, Diagnostic> {
         self.iterable_sink_depth += 1;
-        self.regexp_iterable_sink_depth += 1;
         let result = self.lower_expr(value);
-        self.regexp_iterable_sink_depth -= 1;
         self.iterable_sink_depth -= 1;
         result
     }
