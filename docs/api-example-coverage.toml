@@ -76108,7 +76108,7 @@ availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:310#read_view.rlm_dialect().language_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:385#transcript_code_languages(&projected),"
+assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:386#transcript_code_languages(&projected),"
 
 [[api]]
 symbol = "lash::rlm::RlmSessionReadViewExt::rlm_dialect"
@@ -76117,7 +76117,7 @@ availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:310#read_view.rlm_dialect().language_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:385#transcript_code_languages(&projected),"
+assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:386#transcript_code_languages(&projected),"
 
 [[api]]
 symbol = "lash::plugins::PluginSessionContext::protocol_turn_options"

@@ -12,6 +12,7 @@ async fn run_turn_through_the_workbench_open_path(
 ) {
     let session = state
         .session_builder(session_id.to_string())
+        .session_spec(lash::SessionSpec::inherit().turn_budget(lash::TurnBudget::bounded(8)))
         .open()
         .await
         .expect("open through the workbench path");
@@ -657,6 +658,14 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
                 .iter()
                 .any(|(language, success)| language == dialect.language_id() && !success),
             "the {} scenario must render a failed cell of its own dialect: {blocks:?}",
+            dialect.language_id()
+        );
+        let answers = transcript_answers(&projected);
+        assert!(
+            answers
+                .iter()
+                .any(|answer| answer.contains("session recovered after code failure")),
+            "the {} code-failure scenario must recover and reach a finish within the turn budget: transcript answers {answers:?}",
             dialect.language_id()
         );
     }

@@ -990,12 +990,24 @@ mod tests {
         // that its neighbour is *not* scoped that way. Both halves are pinned
         // here, because a scope annotation that is wrong in the permissive
         // direction is worse than none.
+        //
+        // FIG-1398: assert the rendered prompt contains the exact refusal message
+        // the linker emits rather than checking a hardcoded literal against `refusal`.
+        // A prompt-sentence reword or diagnostic change turns this test red
+        // immediately without relying on an insta snapshot.
         let refusal = lash_typescript::link("await waitSignal(\"go\");", &host)
-            .expect_err("waitSignal outside a process body must reject")
-            .to_string();
+            .expect_err("waitSignal outside a process body must reject");
+        let prompt =
+            TypescriptDialect::prompt_only(lash_lashlang_runtime::LashlangSurface::default())
+                .render_execution_section(
+                    crate::protocol::RlmPromptFeatures::default(),
+                    &lash_core::ToolCatalog::default(),
+                )
+                .expect("typescript execution section");
+        let expected_quote = format!("\"{}\"", refusal.message);
         assert!(
-            refusal.contains("`waitSignal` can only be used inside a process body"),
-            "the prompt quotes this message verbatim: {refusal}"
+            prompt.contains(&expected_quote),
+            "the rendered prompt must quote the linker refusal verbatim: expected {expected_quote} in prompt"
         );
         lash_typescript::link("await sleep(1); finish(1);", &host)
             .expect("the prompt says sleep is also valid in a cell");

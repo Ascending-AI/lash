@@ -212,4 +212,20 @@ mod dialect_tests {
             lash::rlm::RlmDialect::Lashlang
         );
     }
+
+    /// FIG-1398: `is_dialect_pin_conflict` matches the exact error message the
+    /// protocol plugin emits when a session is reopened with a different dialect.
+    #[test]
+    fn dialect_pin_conflict_matches_the_protocol_plugins_exact_message() {
+        let error = lash::EmbedError::Session(lash_core::SessionError::Protocol(
+            "RLM dialect is durably pinned to `typescript` and cannot be reopened as `lashlang`"
+                .to_string(),
+        ));
+        assert!(crate::state::is_dialect_pin_conflict(&error));
+
+        let unrelated = lash::EmbedError::Session(lash_core::SessionError::Protocol(
+            "other protocol error".to_string(),
+        ));
+        assert!(!crate::state::is_dialect_pin_conflict(&unrelated));
+    }
 }
