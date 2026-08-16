@@ -499,8 +499,13 @@ impl ToolProvider for MockMailProvider {
     }
 
     fn supports_attempt_context(&self, tool_id: &lash::tools::ToolId) -> bool {
-        self.route(tool_id.as_str().trim_start_matches("tool:"))
-            .is_some_and(|(_, operation)| operation == "send")
+        self.route(
+            tool_id
+                .as_str()
+                .strip_prefix("tool:")
+                .unwrap_or(tool_id.as_str()),
+        )
+        .is_some_and(|(_, operation)| operation == "send")
     }
 
     async fn execute_attempt(&self, call: lash::tools::AttemptToolCall<'_>) -> ToolAttemptResult {
@@ -592,38 +597,47 @@ mod tests {
         assert_eq!(world.account_summaries()[0].total, 0);
     }
 
-    /// The shape this tool no longer has. Committing the row and then
-    /// emitting leaves a window in which the delivery is durable and the
-    /// `mail.received` occurrence never happened — the emission has no
-    /// committed cause to point at and the concierge never runs.
+    /// The route that made the partial effect possible is gone. `send` used to
+    /// run on the legacy signature, which commits the row and then emits, so a
+    /// failure in between left a durable delivery whose `mail.received`
+    /// occurrence never happened and whose concierge never ran. Sending now
+    /// exists only on the leaf attempt signature, which pairs the row with its
+    /// declaration; the legacy route refuses instead of committing half.
     #[tokio::test]
-    async fn committing_the_row_before_a_separate_emission_leaves_a_partial_effect() {
+    async fn send_exists_only_on_the_attempt_route_that_pairs_row_and_emission() {
         let world = MailWorld::new();
         world.add_account("Work").expect("add work");
-        let context = lash_core::testing::mock_tool_context();
+        let provider = MockMailProvider::new(world.clone());
+        let args = json!({ "title": "Contract", "text": "Please review." });
 
-        let delivered = world
-            .op_send_once(
-                "turn-1:call-1",
-                "work",
-                &json!({ "title": "Contract", "text": "Please review." }),
-            )
-            .expect("the row commits first");
-        let emitted = context
-            .triggers()
-            .emit(TriggerOccurrenceRequest::new(
-                MAIL_RECEIVED_SOURCE_TYPE,
-                empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE).expect("source key"),
-                json!({}),
-                format!("turn-1:call-1:mail.received:{}", delivered.message.id),
-            ))
+        assert!(
+            provider.supports_attempt_context(&lash::tools::ToolId::new("tool:inbox__work__send")),
+            "send must claim the leaf attempt signature or it silently keeps the legacy route"
+        );
+        assert!(
+            !provider.supports_attempt_context(&lash::tools::ToolId::new("tool:inbox__work__list")),
+            "only send owes an emission"
+        );
+
+        let refused = provider
+            .execute(ToolCall {
+                name: "inbox__work__send",
+                args: &args,
+                context: &lash_core::testing::mock_tool_context(),
+            })
             .await;
-
-        assert!(emitted.is_err(), "the separate emission can fail");
+        let ToolResult::Done(output) = refused else {
+            panic!("the legacy route must settle")
+        };
+        let message = serde_json::to_string(&output).expect("serialize the refusal");
+        assert!(
+            message.contains("requires the leaf AttemptContext signature"),
+            "the legacy route must refuse rather than commit the row: {message}"
+        );
         assert_eq!(
             world.inbox("work").expect("work inbox").len(),
-            1,
-            "the committed row survives the failed emission: a partial effect"
+            0,
+            "a refused legacy send commits nothing"
         );
     }
 

@@ -104,13 +104,15 @@ title you choose (e.g. `Standup notes`). Gates:
 1. `GET /api/accounts/work/inbox` contains a message with exactly that title, and the
    work inbox card shows it. This proves the `inbox.work` authority is live in the
    session.
-2. **The turn's tool outcome agrees.** Read the send turn's tool call in
-   `GET /api/state` (transcript) and require both halves of the send in one outcome:
-   the tool result succeeded, and it carries an executed `emit_trigger` intent outcome
-   for this call. The inbox row alone is not the gate — the row and the `mail.received`
-   emission are committed as one thing, and a row whose turn shows no executed
-   `emit_trigger` outcome is a partial effect, not a successful send. That is a
-   finding: the concierge in Phase 6 has nothing to fire on.
+2. **The turn's tool outcome agrees.** Read the send turn in `GET /api/state`
+   (transcript) and require its tool row for the send to report `success`. The inbox
+   row alone is not the gate: `send` runs only on the leaf attempt route, which
+   commits the delivery and declares its `mail.received` emission as one outcome, so a
+   row whose turn shows a failed send — or no send call at all — is a finding.
+   The emission itself has no surface to check here: nothing subscribes to
+   `mail.received` until Phase 5, and neither `GET /api/state` nor any other route
+   projects trigger occurrences or intent outcomes. Its acceptance is Phase 6 gate 2 —
+   the forwarded copy cannot appear unless the declaration this send made executed.
 
 Screenshot `04-agent-mail.png`.
 
