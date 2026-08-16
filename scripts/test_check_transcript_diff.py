@@ -7,7 +7,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -18,6 +20,60 @@ SPEC = importlib.util.spec_from_file_location("check_transcript_diff", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+# Every environment variable the script reads, read out of the script itself
+# rather than listed here: a hand-maintained list decays the moment the script
+# consults one more variable, and the decay is invisible — the tests keep
+# passing locally and start answering to the CI job's environment instead of
+# their own fixtures.
+ENV_READ = re.compile(
+    r"""os\.(?:environ\.get|getenv)\(\s*["'](?P<name>[A-Z0-9_]+)["']"""
+    r"""|os\.environ\[\s*["'](?P<subscript>[A-Z0-9_]+)["']"""
+)
+CONSULTED_ENV = frozenset(
+    match.group("name") or match.group("subscript")
+    for match in ENV_READ.finditer(SCRIPT.read_text(encoding="utf-8"))
+)
+# The extraction is only as good as its regex, so pin what it must have found.
+# If the script stops reading one of these, drop it here deliberately; if the
+# regex stops matching, this fails loudly instead of silently isolating nothing.
+KNOWN_CONSULTED_ENV = frozenset(
+    {
+        "GITHUB_EVENT_PATH",
+        "GITHUB_HEAD_REF",
+        "GITHUB_REF_NAME",
+        "GITHUB_TOKEN",
+        "GITHUB_REPOSITORY",
+        "GITHUB_STEP_SUMMARY",
+    }
+)
+
+
+class IsolatedEnvironmentTestCase(unittest.TestCase):
+    """A test case whose every test runs with no ambient GitHub context.
+
+    The gate is a program that reads its answer out of the environment, so a
+    test of it inherits the environment of whatever ran it. In a CI
+    `pull_request` job that environment is a live one: `GITHUB_EVENT_PATH`
+    points at the real payload of the very PR under test, `GITHUB_TOKEN` and
+    `GITHUB_REPOSITORY` are set, and `GITHUB_STEP_SUMMARY` points at the job's
+    real summary file. Tests that assert on the absence of a signal then pass
+    locally and answer to the PR body in CI, and tests that call `main` write
+    into the job summary and query the GitHub API for real.
+
+    Stripping the whole consulted set before every test — not patching the
+    variables a given test happens to think about — makes the isolation hold
+    for tests written later, which cannot know what the script grew to read.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in CONSULTED_ENV:
+            os.environ.pop(name, None)
 
 
 DURABLE_DIFF = """\
@@ -47,7 +103,17 @@ diff --git a/crates/demo/tests/transcript.rs b/crates/demo/tests/transcript.rs
 """
 
 
-class TranscriptDiffTests(unittest.TestCase):
+class TranscriptDiffTests(IsolatedEnvironmentTestCase):
+    def test_the_isolation_covers_every_variable_the_script_reads(self) -> None:
+        # The fixture is the thing under test here: whatever the script
+        # consults must be absent by the time a test body runs, and the
+        # extraction that decides "whatever the script consults" must still be
+        # finding the variables we know are in there.
+        self.assertTrue(KNOWN_CONSULTED_ENV.issubset(CONSULTED_ENV))
+        for name in CONSULTED_ENV:
+            with self.subTest(variable=name):
+                self.assertNotIn(name, os.environ)
+
     def test_enforcement_fails_an_unacknowledged_durable_change(self) -> None:
         completed = mock.Mock(stdout=DURABLE_DIFF)
         with (
@@ -197,17 +263,15 @@ class TranscriptDiffTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
 
     def test_no_credentials_means_no_query(self) -> None:
-        # Locally there is no token, so the gate must not try to reach the
-        # network at all — and must not treat the silence as approval.
-        with (
-            mock.patch.dict(
-                MODULE.os.environ,
-                {"GITHUB_TOKEN": "", "GITHUB_REPOSITORY": "", "GITHUB_HEAD_REF": ""},
-            ),
-            mock.patch.object(
-                MODULE.urllib.request, "urlopen", side_effect=AssertionError("queried")
-            ),
+        # Locally there is no token and no event payload, so the gate must not
+        # try to reach the network at all — and must not treat the silence as
+        # approval. The fixture's stripped environment is what makes this the
+        # real question: with an ambient payload in scope the gate would answer
+        # out of the surrounding job's PR body instead.
+        with mock.patch.object(
+            MODULE.urllib.request, "urlopen", side_effect=AssertionError("queried")
         ):
+            self.assertIsNone(MODULE.event_pull_request_body())
             self.assertIsNone(MODULE.queried_pull_request_body())
             self.assertFalse(MODULE.has_transcript_justification())
 
