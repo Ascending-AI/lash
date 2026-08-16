@@ -32,9 +32,22 @@ pub enum AbilityResult {
 }
 
 impl AbilityResult {
+    /// Takes the host's value, refusing one that carries a prototype-chain name
+    /// as a data key.
+    ///
+    /// A host result is the second way such a key can enter — a tool result, an
+    /// awaited process result, a signal payload — and this is the seam every
+    /// ability's value passes through. See
+    /// `access::prototype_chain_data_key_error` for why entry rather than the
+    /// first read is where it is refused.
     pub fn into_value(self, op: &'static str) -> Result<Value, ExecutionHostError> {
         match self {
-            Self::Value(value) => Ok(value),
+            Self::Value(value) => {
+                match crate::runtime::access::prototype_chain_data_key_error(&value) {
+                    Some(error) => Err(ExecutionHostError::new(format!("{op} returned {error}"))),
+                    None => Ok(value),
+                }
+            }
             Self::ResourceOperationBatch(_) => Err(ExecutionHostError::new(format!(
                 "{op} returned a resource operation batch result"
             ))),

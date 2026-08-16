@@ -166,7 +166,7 @@ pub(crate) fn read_javascript_index_direct(
 /// divergent from node, where `o[k]` with `k === '__proto__'` yields the
 /// prototype and `o[k] = v` changes what the object inherits — or a named
 /// rejection. It rejects.
-pub(crate) fn prototype_chain_key_error(key: &str) -> Option<RuntimeError> {
+pub(crate) fn is_prototype_chain_key(key: &str) -> bool {
     matches!(
         key,
         "__proto__"
@@ -175,11 +175,50 @@ pub(crate) fn prototype_chain_key_error(key: &str) -> Option<RuntimeError> {
             | "__lookupGetter__"
             | "__lookupSetter__"
     )
-    .then(|| RuntimeError::ValidationFailed {
+}
+
+pub(crate) fn prototype_chain_key_error(key: &str) -> Option<RuntimeError> {
+    is_prototype_chain_key(key).then(|| RuntimeError::ValidationFailed {
         reason: format!(
             "TS_PROTOTYPE_MUTATION_UNSUPPORTED: `{key}` reaches the prototype chain, which this value model does not have"
         ),
     })
+}
+
+/// Refuses a prototype-chain name carried as a data key by a value entering the
+/// runtime from outside the guest — parsed JSON, a host or tool result, a
+/// decoded wire heap.
+///
+/// The read guard above is only half of it. Nothing inside the guest can build
+/// such a key, but an external value could arrive already carrying one, and
+/// then `Object.keys` listed it while every read and `JSON.stringify` refused
+/// it: an enumerable key nothing could read and nothing could serialize,
+/// reachable from ordinary untrusted-JSON round-tripping. Refusing at entry
+/// makes the over-rejection uniform instead of stranding a value in a shape
+/// with no way out. Node parses `"__proto__"` as an ordinary data property, so
+/// this is a registered divergence rather than a conformance claim.
+pub(crate) fn prototype_chain_data_key_error(value: &Value) -> Option<RuntimeError> {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Record(record) => {
+                for entry in record.entries.iter() {
+                    if is_prototype_chain_key(&entry.name) {
+                        return Some(RuntimeError::ValidationFailed {
+                            reason: format!(
+                                "TS_PROTOTYPE_MUTATION_UNSUPPORTED: `{}` names the prototype chain, which this value model does not have, so a value entering from JSON.parse or a host result cannot carry it as a data key",
+                                entry.name
+                            ),
+                        });
+                    }
+                    pending.push(&entry.value);
+                }
+            }
+            Value::List(values) | Value::Tuple(values) => pending.extend(values.iter()),
+            _ => {}
+        }
+    }
+    None
 }
 
 pub(crate) fn read_javascript_index_direct_with_key(

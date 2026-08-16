@@ -137,7 +137,10 @@ impl CanonicalHeapObject {
             Self::Record { fields } => HeapObject::Record(Box::new(
                 fields
                     .into_iter()
-                    .map(|field| field.value.into_runtime().map(|value| (field.name, value)))
+                    .map(|field| {
+                        ensure_no_prototype_chain_wire_key(&field.name)?;
+                        field.value.into_runtime().map(|value| (field.name, value))
+                    })
                     .collect::<Result<_, _>>()?,
             )),
             Self::Closure { function, captures } => HeapObject::Closure {
@@ -326,7 +329,10 @@ impl CanonicalValue {
             Self::Record { fields } => Value::Record(Arc::new(
                 fields
                     .into_iter()
-                    .map(|field| field.value.into_runtime().map(|value| (field.name, value)))
+                    .map(|field| {
+                        ensure_no_prototype_chain_wire_key(&field.name)?;
+                        field.value.into_runtime().map(|value| (field.name, value))
+                    })
                     .collect::<Result<_, _>>()?,
             )),
             Self::Projected { value } => Value::Projected(
@@ -449,4 +455,21 @@ fn is_path_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some('_' | 'a'..='z' | 'A'..='Z'))
         && chars.all(|character| matches!(character, '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
+}
+
+/// The value-entry guard on the third way a record can arrive from outside:
+/// decoded wire bytes.
+///
+/// Nothing this runtime encodes can carry a prototype-chain data key any more —
+/// `JSON.parse` and every host result refuse one — so a wire that does is
+/// forged or from before the guard, and restoring it would recreate exactly the
+/// stranded state the guard exists to prevent: a key `Object.keys` lists and
+/// nothing can read or serialize.
+fn ensure_no_prototype_chain_wire_key(name: &str) -> Result<(), SnapshotDecodeError> {
+    if crate::runtime::access::is_prototype_chain_key(name) {
+        return Err(SnapshotDecodeError::InvalidEncoding(format!(
+            "record key `{name}` names the prototype chain, which this value model does not have"
+        )));
+    }
+    Ok(())
 }

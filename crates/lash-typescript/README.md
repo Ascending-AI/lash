@@ -198,9 +198,15 @@ language semantics:
   key that only resolves to one of these names at the access rejects at runtime
   under the same code, because the two alternatives are both silent: a read
   would answer `undefined` where Node answers the prototype, and a write would
-  store a data key that nothing ever reads through. One over-rejection follows
-  from having only the runtime name: `{ [key]: v }` with a computed
-  `"__proto__"` is an ordinary data property in Node, and refuses here.
+  store a data key that nothing ever reads through. The same names are refused
+  where a value *enters* — `JSON.parse`, a host or tool result, and a decoded
+  snapshot — so no value in the runtime ever carries one. Two over-rejections
+  follow, both registered: `{ [key]: v }` with a computed `"__proto__"`, and
+  `JSON.parse('{"__proto__":1}')`, are ordinary data properties in Node and
+  refuse here. The alternative was worse than the divergence: a parsed
+  `__proto__` key used to land as an enumerable property that `Object.keys`
+  listed, every read refused, and `JSON.stringify` then failed on — state with
+  no way out, reachable from ordinary untrusted-JSON round-tripping.
 - A `map` callback runs inside the VM and cannot perform effects. `console.log`,
   a tool call, or any other effect inside one terminates with the typed
   `EffectInBuiltinCallback` error. The callback is ordinary synchronous code:
@@ -596,7 +602,7 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 544 rows, of which 471 are distinct
+The Node differential table carries 546 rows, of which 473 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
 that of the 448 unique rows rather than of 521 distinct behaviours. Both counts

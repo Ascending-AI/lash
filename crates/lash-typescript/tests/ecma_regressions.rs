@@ -900,3 +900,92 @@ fn last_index_read_back_is_the_tolength_value_not_the_written_one() {
         assert_eq!(finished(source), Value::Number(expected), "{source}");
     }
 }
+
+/// A prototype-chain name arriving as a data key refuses where the value
+/// enters, not later.
+///
+/// The value model has no prototype chain, so every read of such a key already
+/// refused. A record could still be *built* with one from outside the guest,
+/// though: `JSON.parse('{"__proto__":1}')` succeeded, `Object.keys` listed the
+/// key, and `JSON.stringify` then failed — an enumerable key nothing could
+/// read and nothing could serialize, reachable from ordinary untrusted-JSON
+/// round-tripping. The over-rejection is uniform now: the key is refused at
+/// entry, so no value ever carries one.
+#[test]
+fn a_prototype_chain_key_refuses_at_json_parse() {
+    for source in [
+        r#"finish(JSON.parse('{"__proto__":1}'));"#,
+        r#"finish(Object.keys(JSON.parse('{"a":1,"__proto__":{"x":1}}')).length);"#,
+        r#"finish(JSON.parse('[{"__proto__":null}]'));"#,
+        r#"finish(JSON.parse('{"a":{"b":{"__defineGetter__":1}}}'));"#,
+    ] {
+        let error = execute(source).expect_err("a parsed prototype-chain key must refuse");
+        assert!(
+            error
+                .to_string()
+                .contains("TS_PROTOTYPE_MUTATION_UNSUPPORTED"),
+            "{source}: {error}"
+        );
+    }
+
+    // Everything else parses, including a name that merely looks similar.
+    assert_eq!(
+        finished(r#"finish(JSON.stringify(JSON.parse('{"__proto":1,"a":[1,2]}')));"#),
+        Value::String(r#"{"__proto":1,"a":[1,2]}"#.into())
+    );
+}
+
+struct ProtoToolHost;
+
+impl ExecutionHost for ProtoToolHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperation(_) => {
+                let mut record = lashlang::Record::new();
+                record.insert("__proto__".to_string(), Value::Number(1.0));
+                Ok(AbilityResult::Value(Value::Record(std::sync::Arc::new(
+                    record,
+                ))))
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unsupported proto-tool ability")),
+        }
+    }
+}
+
+/// The same refusal on the other value-entry path: a value handed back by the
+/// host — a tool result, an awaited process result — is external data by
+/// another route, and a record built from it is the same unreadable key.
+#[test]
+fn a_prototype_chain_key_refuses_when_a_tool_result_carries_it() {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_binding(
+            ["web"],
+            "Web",
+            "fetch",
+            "tool:web/fetch",
+            lashlang::ResourceOperationBinding {
+                input_ty: lashlang::TypeExpr::Any,
+                output_ty: lashlang::TypeExpr::Any,
+                output_from_input: None,
+            },
+        )
+        .expect("web binding");
+    let environment =
+        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+    let linked = lash_typescript::link(r#"finish(await web.fetch({ url: "u" }));"#, &environment)
+        .expect("TypeScript should link");
+    let error = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &ProtoToolHost,
+    ))
+    .expect_err("a tool result carrying a prototype-chain key must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("TS_PROTOTYPE_MUTATION_UNSUPPORTED"),
+        "{error}"
+    );
+}

@@ -543,3 +543,5 @@ findings	254	accept	"(() => { const xs=[]; xs.unshift(1); xs.push(2); return `${
 findings	255	accept	"new Map('a1b2'.matchAll(/([a-z])(\\d)/g)).size"	"2"	-
 findings	256	accept	"JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\\d)/g)))"	"{\"a1\":\"a\",\"b2\":\"b\"}"	-
 findings	257	accept	"new Set('a1b2'.matchAll(/[a-z]/g)).size"	"2"	-
+findings	258	runtime-reject	"JSON.stringify(JSON.parse('{\"__proto__\":1,\"a\":2}'))"	"{\"__proto__\":1,\"a\":2}"	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+findings	259	runtime-reject	"Object.keys(JSON.parse('{\"a\":1,\"__proto__\":2}')).join(',')"	"a,__proto__"	TS_PROTOTYPE_MUTATION_UNSUPPORTED

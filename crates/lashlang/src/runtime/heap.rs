@@ -26,7 +26,7 @@ pub(crate) use javascript_exotics::{
 pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
 };
-pub(crate) use validation::{MAX_RUNTIME_VALUE_DEPTH, PersistedRoots, ensure_value_depth};
+pub(crate) use validation::{PersistedRoots, ensure_value_depth};
 
 use super::{
     CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,

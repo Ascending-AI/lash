@@ -14,7 +14,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 257],
+  ['findings', 'findings-expressions.txt', 259],
 ];
 
 const rejected = new Map([
@@ -42,6 +42,19 @@ const runtimeRejected = new Map([
   ],
   ["'\\uD83D\\uDE00'[0]", 'TS_LONE_SURROGATE_UNSUPPORTED'],
   ["(() => /./.exec('😀')[0])()", 'TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED'],
+  // Node's `JSON.parse` creates `__proto__` as an ordinary own data property.
+  // This value model has no prototype chain, so every read of that name already
+  // refused; the key is now refused where the value enters instead, so a parsed
+  // object can never hold a key that `Object.keys` lists and nothing can read
+  // back. A registered over-rejection, not a conformance claim.
+  [
+    'JSON.stringify(JSON.parse(\'{"__proto__":1,"a":2}\'))',
+    'TS_PROTOTYPE_MUTATION_UNSUPPORTED',
+  ],
+  [
+    'Object.keys(JSON.parse(\'{"a":1,"__proto__":2}\')).join(\',\')',
+    'TS_PROTOTYPE_MUTATION_UNSUPPORTED',
+  ],
 ]);
 
 function expressions(file, expectedCount) {

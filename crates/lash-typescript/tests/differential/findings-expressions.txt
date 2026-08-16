@@ -255,3 +255,5 @@ new Set('a'.matchAll(/a/g)).size
 new Map('a1b2'.matchAll(/([a-z])(\d)/g)).size
 JSON.stringify(Object.fromEntries('a1b2'.matchAll(/([a-z])(\d)/g)))
 new Set('a1b2'.matchAll(/[a-z]/g)).size
+JSON.stringify(JSON.parse('{"__proto__":1,"a":2}'))
+Object.keys(JSON.parse('{"a":1,"__proto__":2}')).join(',')

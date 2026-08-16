@@ -359,14 +359,14 @@ fn ref_chain(heap: &mut Heap, refs: usize) -> Value {
 #[test]
 fn a_warm_export_cache_charges_the_same_depth_as_a_cold_walk() {
     let mut heap = Heap::default();
-    let at_ceiling = ref_chain(&mut heap, MAX_RUNTIME_VALUE_DEPTH);
+    let at_ceiling = ref_chain(&mut heap, validation::MAX_RUNTIME_VALUE_DEPTH);
     heap.export_for_instruction(&at_ceiling)
         .expect("a chain at the ceiling must export on a cold cache");
     heap.export_for_instruction(&at_ceiling)
         .expect("a chain at the ceiling must export on a warm cache");
 
     let mut heap = Heap::default();
-    let over_ceiling = ref_chain(&mut heap, MAX_RUNTIME_VALUE_DEPTH + 1);
+    let over_ceiling = ref_chain(&mut heap, validation::MAX_RUNTIME_VALUE_DEPTH + 1);
     assert!(matches!(
         heap.export_for_instruction(&over_ceiling),
         Err(RuntimeError::ValueDepthLimitExceeded { .. })
