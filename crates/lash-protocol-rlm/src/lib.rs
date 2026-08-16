@@ -8,6 +8,7 @@ mod control_tools;
 mod dialect;
 mod driver;
 mod executor;
+mod feedback;
 mod plugin;
 mod projection;
 mod protocol;

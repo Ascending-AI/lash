@@ -21,6 +21,15 @@
 //!   omitted; intermediate trajectory entries remain available. This is
 //!   derived from event/turn ordering, never message content. Without a
 //!   committed transcript, the trajectory renders unchanged.
+//! - **Repaired-failure scrub.** A failed cell stays in the transcript for the
+//!   repair turn — that is the whole point of showing it — but once a later
+//!   cell in the same turn runs clean, the failure has done its job. It, its
+//!   `Error:` observation, the prose folded into it, and the protocol feedback
+//!   written to repair it are omitted from every subsequent render
+//!   (`superseded_failure_indices`). A model re-reading its own dead ends
+//!   re-attempts them. The scrub is transcript-only: `history[N]` still carries
+//!   the failed step with its error and its index, so nothing is destroyed and
+//!   the re-fetch handles above stay stable.
 //! - **Cache fence.** The last history message is marked with a
 //!   `cache_breakpoint` (`mark_last_history_text_cache_breakpoint`) so the
 //!   provider can reuse the stable history prefix across iterations. Active-turn
@@ -149,12 +158,15 @@ pub(super) fn render_history_messages(
         .map(|cause| cause.id.as_str())
         .collect::<HashSet<_>>();
     let mut pending: Option<PendingProse> = None;
+    let superseded = superseded_failure_indices(input.events, input.turn_messages);
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
         if borrowed_entry_is_active_cause(entry, &active_cause_ids) {
             return;
         }
-        if history_projection.suppresses_chronological(entry.index) {
+        if history_projection.suppresses_chronological(entry.index)
+            || superseded.contains(&entry.index)
+        {
             pending = None;
             return;
         }
@@ -263,6 +275,107 @@ pub(super) fn render_history_messages(
     });
     flush_pending_prose(&mut messages, &mut pending);
     messages
+}
+
+/// Chronological indices of failed cells a later success has made obsolete,
+/// together with everything written to repair them.
+///
+/// A failed cell has to stay visible for the turn that repairs it — the model
+/// cannot fix a program it cannot see, and stripping it immediately is the
+/// classic way to get the same mistake twice. What it must not do is stay
+/// forever. Once a subsequent cell runs clean, the failure and its feedback are
+/// a worked-and-discarded branch, and a model re-reading its own dead ends
+/// re-attempts them: the transcript reads as if the broken approach were still
+/// live context rather than a closed question.
+///
+/// "Later" is scoped to the run of cells between turn boundaries. A user or
+/// event message opens new work, so a success after it repairs nothing that
+/// came before — those failures stay, because the model may still need them.
+///
+/// The scrub covers four entry kinds because a cell is stored as several
+/// entries: the trajectory entry itself, the assistant prose folded into it,
+/// the assistant-content event carrying that prose, and the protocol feedback
+/// message written after it. Dropping only the trajectory entry would leave its
+/// prose to fold into the *next* cell and its repair instruction pointing at
+/// nothing.
+///
+/// Every one of those four is identified by *provenance*, never by role or
+/// position. Only this plugin's own output is the plugin's to delete.
+fn superseded_failure_indices(
+    events: &[lash_core::SessionHistoryRecord],
+    turn_messages: &lash_core::facade_support::MessageSequence,
+) -> HashSet<usize> {
+    let mut superseded = HashSet::new();
+    // Entries belonging to failures not yet repaired, oldest first.
+    let mut pending_failure_entries: Vec<usize> = Vec::new();
+    // Prose entries seen since the last trajectory entry: they belong to
+    // whichever cell comes next, and only join the pending set if it failed.
+    let mut prose_entries: Vec<usize> = Vec::new();
+    let mut any_failure_pending = false;
+
+    lash_core::facade_support::visit_turn_view(events, turn_messages, |entry| {
+        match entry.payload {
+            BorrowedChronologicalPayload::Message(message) => match message.role {
+                lash_core::MessageRole::User | lash_core::MessageRole::Event => {
+                    pending_failure_entries.clear();
+                    prose_entries.clear();
+                    any_failure_pending = false;
+                }
+                lash_core::MessageRole::Assistant => prose_entries.push(entry.index),
+                // Protocol feedback is repair instruction for the failure it
+                // follows; it goes when the failure goes. Identity, not role:
+                // `System` is a shared channel, and the host puts its own
+                // messages on it — a plugin directive enqueued at a mid-turn
+                // checkpoint lands here too. Scrubbing by role would delete a
+                // policy reminder the host injected between a failed cell and
+                // the next good one, which is not ours to delete and not
+                // recoverable from anywhere.
+                lash_core::MessageRole::System => {
+                    if any_failure_pending && is_rlm_protocol_message(&message) {
+                        pending_failure_entries.push(entry.index);
+                    }
+                }
+            },
+            BorrowedChronologicalPayload::ProtocolEvent(event) => {
+                match decode_rlm_protocol_event(event) {
+                    Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(_)) => {
+                        prose_entries.push(entry.index);
+                    }
+                    Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
+                        if step.error.is_some() {
+                            pending_failure_entries.append(&mut prose_entries);
+                            pending_failure_entries.push(entry.index);
+                            any_failure_pending = true;
+                        } else {
+                            prose_entries.clear();
+                            superseded.extend(pending_failure_entries.drain(..));
+                            any_failure_pending = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    });
+
+    superseded
+}
+
+/// Whether this message is the RLM protocol's own durable output.
+///
+/// The one question the scrub is allowed to ask about a `System` message. A host
+/// or another plugin can write on the same channel, and their messages carry
+/// their own provenance.
+fn is_rlm_protocol_message(
+    message: &lash_core::facade_support::BorrowedChronologicalMessage<'_>,
+) -> bool {
+    matches!(
+        message.origin,
+        Some(lash_core::MessageOrigin::Plugin {
+            plugin_id,
+            transient: false,
+        }) if plugin_id == crate::plugin::RLM_PROTOCOL_PLUGIN_ID
+    )
 }
 
 /// Emit a buffered prose as a standalone assistant message (a prose-only
@@ -506,9 +619,16 @@ fn step_output_text(input: StepOutputInput<'_>) -> String {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
-        out.push_str("Error:\n");
-        out.push_str(error);
-        out.push_str("\n\nThis step failed; you may retry with a corrected program.");
+        // Two texts, not one paragraph: the evidence answers "what happened",
+        // the imperative answers "what do I write next", and the tag says which
+        // of the two failure shapes this is. A model that has already read the
+        // diagnostic needs only the second half.
+        let (kind, evidence) = crate::feedback::RlmFeedbackKind::split(error);
+        out.push_str(kind.tag());
+        out.push('\n');
+        out.push_str(evidence);
+        out.push_str("\n\n");
+        out.push_str(&kind.imperative(vocabulary.cell_noun));
     }
     if let Some(final_output) = final_output {
         if !out.is_empty() {

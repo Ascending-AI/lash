@@ -371,7 +371,7 @@ fn stdlib(method: &str, mut args: Vec<LashExpr>) -> LashExpr {
 }
 
 pub(super) fn reject_json_parse_reviver() -> Diagnostic {
-    Diagnostic::new(
+    Diagnostic::refusal(
         DiagnosticCode::MethodUnsupported,
         "Unsupported: JSON.parse reviver callbacks. Parse first, then walk the returned value explicitly in deterministic TypeScript.",
         None,

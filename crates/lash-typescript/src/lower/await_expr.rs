@@ -34,7 +34,7 @@ impl Lowerer {
                     unreachable!()
                 };
                 let [CallArg::Value(value)] = args.as_slice() else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         format!("Promise.{method} expects one iterable"),
                         None,
@@ -47,9 +47,10 @@ impl Lowerer {
                             && matches!(args.as_slice(), [CallArg::Value(Expr::Function(function))] if function.is_async)
                 );
                 if !matches!(value, Expr::Array(_)) && !async_map {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::with_repair(
                         DiagnosticCode::AwaitUnsupported,
                         format!("Promise.{method} currently requires an array iterable"),
+                        "build the array first, then pass it — or use `items.map(async (item) => ...)` directly",
                         None,
                     ));
                 }
@@ -79,16 +80,18 @@ impl Lowerer {
             return Ok(lowered);
         }
         if mode.is_some() && has_unsupported_aggregate_effect(&lowered) {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::AwaitUnsupported,
                 "Promise.all/allSettled currently aggregate tool promises and resolved values; process and timer promises require separate await expressions",
+                "await the process or timer promise on its own line, before the aggregate",
                 None,
             ));
         }
         if mode.is_some() && has_nested_aggregate_effect(&lowered) {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::AwaitUnsupported,
                 "Promise.all/allSettled tool promises must be top-level array elements",
+                "lift each tool call to its own element of the array literal",
                 None,
             ));
         }
@@ -96,9 +99,10 @@ impl Lowerer {
             && has_aggregate_effect_leaf(&lowered)
             && has_unbatchable_aggregate_value(&lowered)
         {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::AwaitUnsupported,
                 "Promise.all/allSettled cannot mix tool promises with computed function or assignment values in v1",
+                "bind the computed values first, then aggregate only the tool promises",
                 None,
             ));
         }
@@ -148,9 +152,10 @@ impl Lowerer {
                 lowered,
             )))));
         }
-        Err(Diagnostic::new(
+        Err(Diagnostic::with_repair(
             DiagnosticCode::AwaitUnsupported,
             "await supports tools, process handles, sleep, waitSignal, and Promise.all/allSettled",
+            "drop the `await`: this value is already settled",
             None,
         ))
     }

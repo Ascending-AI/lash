@@ -51,7 +51,7 @@ impl Lowerer {
             .iter()
             .map(|arg| match arg {
                 crate::adapter::CallArg::Value(value) => Ok(value.clone()),
-                crate::adapter::CallArg::Spread(_) => Err(Diagnostic::new(
+                crate::adapter::CallArg::Spread(_) => Err(Diagnostic::defect(
                     DiagnosticCode::MethodUnsupported,
                     "map does not accept spread callback arguments",
                     None,
@@ -68,14 +68,14 @@ impl Lowerer {
         settle: bool,
     ) -> Result<LashExpr, Diagnostic> {
         let [callback] = args else {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::defect(
                 DiagnosticCode::MethodUnsupported,
                 "map takes exactly one callback argument in v1",
                 None,
             ));
         };
         let Expr::Function(function) = callback else {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::defect(
                 DiagnosticCode::MethodUnsupported,
                 "map requires a function literal in v1 so its parameter count is known before it runs",
                 None,
@@ -134,7 +134,7 @@ impl Lowerer {
                     },
                 ]))
             }
-            other => Err(Diagnostic::new(
+            other => Err(Diagnostic::defect(
                 DiagnosticCode::MethodUnsupported,
                 format!(
                     "map callbacks take the value and optionally its index in v1; this one takes {other} parameters"

@@ -45,7 +45,7 @@ impl Lowerer {
             if matches!(name.as_str(), "parseInt" | "parseFloat") {
                 let expected = if name == "parseInt" { 1..=2 } else { 1..=1 };
                 if !expected.contains(&args.len()) {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         format!(
                             "{name} expects {} argument(s)",
@@ -78,7 +78,7 @@ impl Lowerer {
             }
             if matches!(name.as_str(), "isNaN" | "isFinite") {
                 let [value] = args else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         format!("{name} expects one argument"),
                         None,
@@ -104,7 +104,7 @@ impl Lowerer {
                 "encodeURIComponent" | "decodeURIComponent" | "encodeURI" | "decodeURI"
             ) {
                 let [value] = args else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         format!("{name} expects exactly one argument"),
                         None,
@@ -134,7 +134,7 @@ impl Lowerer {
                 });
             }
             if matches!(name.as_str(), "btoa" | "atob") {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     format!(
                         "Unsupported: {name}. Use a deterministic host tool until the runtime can preserve Node's DOMException identity."
@@ -143,7 +143,7 @@ impl Lowerer {
                 ));
             }
             if name == "structuredClone" {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     "Unsupported: structuredClone. For JSON-shaped data use JSON.parse(JSON.stringify(value)).",
                     None,
@@ -164,11 +164,12 @@ impl Lowerer {
                 return self.lower_constructor(name, &args);
             }
             return match (name.as_str(), args) {
-                ("finish", [_]) if self.process_depth > 0 => Err(Diagnostic::new(
+                ("finish", [_]) if self.process_depth > 0 => Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
-                    "finish is cell-only; return from defineProcess.run so enclosing finally blocks execute",
+                    "finish is cell-only",
                     None,
-                )),
+                )
+                .with_hint("return from defineProcess.run so enclosing finally blocks execute")),
                 ("finish", [value]) => Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?))),
                 ("print", [value]) => Ok(LashExpr::Print(Box::new(self.lower_expr(value)?))),
                 ("wake", [value]) => Ok(LashExpr::Wake(Box::new(self.lower_expr(value)?))),
@@ -214,7 +215,7 @@ impl Lowerer {
                     "finish" | "print" | "wake" | "sleep" | "waitSignal" | "start"
                     | "registerTrigger",
                     _,
-                ) => Err(Diagnostic::new(
+                ) => Err(Diagnostic::defect(
                     DiagnosticCode::UnsupportedExpression,
                     format!("invalid arguments for agent primitive `{name}`"),
                     None,
@@ -237,14 +238,14 @@ impl Lowerer {
                 && method == "randomUUID"
                 && !self.has_binding("crypto")
             {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     "Unsupported: crypto.randomUUID. Use a journaled host tool that returns an identifier.",
                     None,
                 ));
             }
             if matches!(method.as_str(), "then" | "catch" | "finally") {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     "Unsupported: Promise chaining with .then/.catch/.finally. Use direct await and try/catch/finally.",
                     None,
@@ -255,7 +256,7 @@ impl Lowerer {
             {
                 match method.as_str() {
                     "race" | "any" => {
-                        return Err(Diagnostic::new(
+                        return Err(Diagnostic::refusal(
                             DiagnosticCode::MethodUnsupported,
                             format!(
                                 "Unsupported: Promise.{method} requires durable partial-settlement ordering (FIG-1416). Use Promise.all/Promise.allSettled, or await durable sleep for timeout patterns."
@@ -264,7 +265,7 @@ impl Lowerer {
                         ));
                     }
                     "resolve" | "reject" => {
-                        return Err(Diagnostic::new(
+                        return Err(Diagnostic::refusal(
                             DiagnosticCode::MethodUnsupported,
                             format!(
                                 "Unsupported: Promise.{method}. Await values directly and use throw/try-catch for failures."
@@ -290,11 +291,7 @@ impl Lowerer {
                 }
                 if method == "stringify" {
                     if args.len() > 3 {
-                        return Err(Diagnostic::new(
-                            DiagnosticCode::MethodUnsupported,
-                            "JSON.stringify expects value, optional replacer, and optional space",
-                            None,
-                        ));
+                        return Err(Diagnostic::defect(DiagnosticCode::MethodUnsupported, "JSON.stringify expects value, optional replacer, and optional space", None).with_hint("call JSON.stringify(value), JSON.stringify(value, replacer), or JSON.stringify(value, replacer, space)"));
                     }
                     if args.is_empty() {
                         return Ok(LashExpr::BuiltinCall {
@@ -331,7 +328,7 @@ impl Lowerer {
                 "getMilliseconds" => Some("getUTCMilliseconds"),
                 _ => None,
             } {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     format!(
                         "Unsupported: Date.{method} is host-timezone dependent. Use d.{replacement}()."
@@ -349,7 +346,7 @@ impl Lowerer {
                     | "setUTCSeconds"
                     | "setUTCMilliseconds"
             ) {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     format!(
                         "Unsupported: Date.{method}; durable Date values are immutable. Use new Date(d.getTime() + n)."
@@ -366,7 +363,7 @@ impl Lowerer {
                     | "toLocaleDateString"
                     | "toLocaleTimeString"
             ) {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     format!(
                         "Unsupported: Date.{method} is timezone/locale dependent. Use Date.toISOString()."
@@ -375,21 +372,21 @@ impl Lowerer {
                 ));
             }
             if method == "localeCompare" {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     "Unsupported: localeCompare/Intl ordering is host-dependent. Use (a < b ? -1 : a > b ? 1 : 0).",
                     None,
                 ));
             }
             if method == "normalize" {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     "Unsupported: String.normalize depends on Unicode normalization data outside the pinned v1 VM. Normalize text in a deterministic host tool before the cell.",
                     None,
                 ));
             }
             if method == "toLocaleString" {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     "Unsupported: toLocaleString/Intl formatting is locale-dependent. For Date use d.toISOString(); for numbers use toFixed(digits); otherwise build the deterministic string explicitly.",
                     None,
@@ -544,11 +541,7 @@ impl Lowerer {
                 && static_stdlib_owner(object).is_none()
                 && self.iterable_sink_depth == 0
             {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::MethodUnsupported,
-                    "Unsupported: iterator methods may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries — wrap: [...expr]",
-                    None,
-                ));
+                return Err(Diagnostic::refusal(DiagnosticCode::MethodUnsupported, "Unsupported: iterator methods may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries", None).with_hint("wrap it at the point of use: `[...expr]`"));
             }
             if matches!(object.as_ref(), Expr::Ident(name) if name == "Array")
                 && method == "from"
@@ -561,10 +554,13 @@ impl Lowerer {
                         (value, args.get(1..).expect("mapping arguments exist"))
                     }
                     _ => {
-                        return Err(Diagnostic::new(
+                        return Err(Diagnostic::defect(
                             DiagnosticCode::MethodUnsupported,
                             "Array.from expects a source and optional mapping callback",
                             None,
+                        )
+                        .with_hint(
+                            "call Array.from(source) or Array.from(source, (item) => ...)",
                         ));
                     }
                 };
@@ -586,7 +582,7 @@ impl Lowerer {
                 && !self.has_binding("Object")
             {
                 let [value] = args else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         "Object.fromEntries expects one iterable",
                         None,
@@ -602,11 +598,12 @@ impl Lowerer {
             }
             if method == "hasOwnProperty" {
                 let [key] = args else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
-                        "hasOwnProperty expects exactly one key; use Object.hasOwn(object, key)",
+                        "hasOwnProperty expects exactly one key",
                         None,
-                    ));
+                    )
+                    .with_hint("use Object.hasOwn(object, key)"));
                 };
                 return Ok(LashExpr::BuiltinCall {
                     name: "__typescript_stdlib".into(),
@@ -630,7 +627,7 @@ impl Lowerer {
                 })
             {
                 let [source, callback] = args else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         "groupBy expects an iterable and one callback",
                         None,
@@ -666,7 +663,7 @@ impl Lowerer {
                 && has_literal_stdlib_receiver(object)
                 && !literal_supports_instance_method(object, method)
             {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     format!("method `{method}` is unavailable on this literal receiver"),
                     None,
@@ -778,7 +775,7 @@ impl Lowerer {
                     Some(owner) => format!("{owner}.{method}"),
                     None => method.to_string(),
                 };
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::MethodUnsupported,
                     format!("method `{name}` is not in the TypeScript runtime surface"),
                     None,
@@ -857,7 +854,7 @@ impl Lowerer {
                     ObjectProperty::KeyValue(PropertyKey::Static(name), value) => {
                         Ok((name.as_str().into(), self.lower_expr(value)?))
                     }
-                    _ => Err(Diagnostic::new(
+                    _ => Err(Diagnostic::refusal(
                         DiagnosticCode::UnsupportedExpression,
                         "start arguments require static properties without spread",
                         None,

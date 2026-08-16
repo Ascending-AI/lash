@@ -911,11 +911,10 @@ fn recursive_operator_extra_bytes(bytes: &[u8], index: usize) -> usize {
 }
 
 pub(super) fn source_nesting_diagnostic(span: Option<SourceSpan>) -> Diagnostic {
-    Diagnostic::new(
+    Diagnostic::with_repair(
         DiagnosticCode::SourceNestingLimit,
-        format!(
-            "TypeScript source nesting exceeds the {MAX_SOURCE_NESTING_DEPTH}-level limit; flatten the source"
-        ),
+        format!("TypeScript source nesting exceeds the {MAX_SOURCE_NESTING_DEPTH}-level limit"),
+        "flatten the source: name intermediate values instead of nesting expressions",
         span,
     )
 }

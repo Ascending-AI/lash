@@ -378,19 +378,24 @@ async fn execute_code_inner(
     }
     host_environment = host_environment.with_globals(live_global_names);
 
-    let compile_result: Result<_, String> = {
+    // The kind is decided here, while the failure is still a typed diagnostic.
+    // "Compilation failed" is not enough to classify it: a misspelled name and a
+    // forbidden construct both fail here and need opposite advice.
+    let compile_result: Result<_, (crate::feedback::RlmFeedbackKind, String)> = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
         match source_dialect {
             SourceDialect::Lashlang => state
                 .linked_programs
                 .get_or_compile(code, &host_environment)
                 .map_err(|error| match error {
-                    lashlang::LinkedProgramCacheError::Parse(error) => {
-                        format_rlm_parse_diagnostic(code, &error)
-                    }
-                    lashlang::LinkedProgramCacheError::Link(error) => {
-                        format_rlm_link_diagnostic(code, &error)
-                    }
+                    lashlang::LinkedProgramCacheError::Parse(error) => (
+                        lashlang_parse_feedback_kind(&error),
+                        format_rlm_parse_diagnostic(code, &error),
+                    ),
+                    lashlang::LinkedProgramCacheError::Link(error) => (
+                        lashlang_link_feedback_kind(&error),
+                        format_rlm_link_diagnostic(code, &error),
+                    ),
                 }),
             // TypeScript is parsed here rather than by the cache, so the cache
             // is asked first: otherwise every cell would pay a full parse even
@@ -406,8 +411,16 @@ async fn execute_code_inner(
                 // resolving at link; TypeScript resolves names at parse, so the
                 // names have to arrive here. `host_environment` already carries
                 // them — it is the same set the linker will check against.
+                // Rendered against the cell source, not `to_string()`: the
+                // diagnostic carries a span and the model needs the line it
+                // wrote. Lashlang's parse failures have always arrived this way.
                 None => lash_typescript::parse_with_globals(code, &host_environment.globals)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| {
+                        (
+                            typescript_feedback_kind(&error),
+                            lash_typescript::format_diagnostic(code, &error),
+                        )
+                    })
                     .and_then(|program| {
                         state
                             .linked_programs
@@ -417,14 +430,20 @@ async fn execute_code_inner(
                                 &host_environment,
                                 lashlang::CompilationDialect::Typescript,
                             )
-                            .map_err(|error| format_rlm_link_diagnostic(code, &error))
+                            .map_err(|error| {
+                                (
+                                    lashlang_link_feedback_kind(&error),
+                                    format_rlm_link_diagnostic(code, &error),
+                                )
+                            })
                     }),
             },
         }
     };
     let cached_program = match compile_result {
         Ok(program) => program,
-        Err(error) => {
+        Err((kind, error)) => {
+            let error = kind.label(error);
             return ExecResponse {
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
@@ -608,7 +627,10 @@ async fn execute_code_inner(
                 executed_calls: collected.executed_calls,
                 images: Vec::new(),
                 printed_images: collected.printed_images,
-                error: Some(format!("process failed in foreground execution: {value}")),
+                error: Some(
+                    crate::feedback::RlmFeedbackKind::Error
+                        .label(format!("process failed in foreground execution: {value}")),
+                ),
                 duration_ms: start.elapsed().as_millis() as u64,
                 terminal_finish: None,
             };
@@ -620,6 +642,14 @@ async fn execute_code_inner(
                     || !error.is_execution_bound_exhausted(),
                 "confidence execution exhausted a required Lashlang bound: {error}"
             );
+            // An exhausted execution bound is the runtime declining to keep
+            // going, and no amount of debugging the program changes that; every
+            // other runtime error is the program's own.
+            let kind = if error.is_execution_bound_exhausted() {
+                crate::feedback::RlmFeedbackKind::Policy
+            } else {
+                crate::feedback::RlmFeedbackKind::Error
+            };
             let failure = runtime_failure.unwrap_or(lashlang::RuntimeFailure { error, span: None });
             let collected = host.into_collected();
             return ExecResponse {
@@ -629,11 +659,11 @@ async fn execute_code_inner(
                 executed_calls: collected.executed_calls,
                 images: Vec::new(),
                 printed_images: collected.printed_images,
-                error: Some(lashlang::format_runtime_diagnostic(
+                error: Some(kind.label(lashlang::format_runtime_diagnostic(
                     code,
                     &failure.error,
                     failure.span,
-                )),
+                ))),
                 duration_ms: start.elapsed().as_millis() as u64,
                 terminal_finish: None,
             };
@@ -650,6 +680,58 @@ async fn execute_code_inner(
         error: None,
         duration_ms: start.elapsed().as_millis() as u64,
         terminal_finish,
+    }
+}
+
+/// Whether a TypeScript rejection refuses a construct or reports a wrong
+/// program.
+///
+/// Asked of the diagnostic, not of its code. Three codes carry both families —
+/// `TS_METHOD_UNSUPPORTED` covers `Promise.then` and `[].map()` alike — so only
+/// the site that emitted it knows, and it records the answer at construction.
+fn typescript_feedback_kind(
+    error: &lash_typescript::Diagnostic,
+) -> crate::feedback::RlmFeedbackKind {
+    if error.is_dialect_refusal() {
+        crate::feedback::RlmFeedbackKind::Policy
+    } else {
+        crate::feedback::RlmFeedbackKind::Error
+    }
+}
+
+/// Whether a Lashlang parse failure is a refusal or a wrong program.
+///
+/// Almost all of them are the program: a lex failure, an unexpected token, a
+/// missing `finish` value. The refusals are the retired forms and the rules
+/// about where a construct may appear — no rewrite of the same approach is
+/// accepted, so the model must be told to write a different one.
+fn lashlang_parse_feedback_kind(error: &lashlang::ParseError) -> crate::feedback::RlmFeedbackKind {
+    match error {
+        lashlang::ParseError::SubmitRemoved { .. }
+        | lashlang::ParseError::DeclarativeTriggerRemoved { .. }
+        | lashlang::ParseError::SessionProcessAdminOutsideBlock { .. }
+        | lashlang::ParseError::ForegroundControlInsideProcess { .. }
+        | lashlang::ParseError::NestingTooDeep { .. } => crate::feedback::RlmFeedbackKind::Policy,
+        _ => crate::feedback::RlmFeedbackKind::Error,
+    }
+}
+
+/// Whether a link failure is a refusal or a wrong program.
+///
+/// An unknown name, an unknown operation, an arity or type mismatch: those are
+/// the program. A bare tool call, a disabled feature, an opaque descriptor read,
+/// and the placement rules are the host declining, and no amount of debugging
+/// changes them.
+fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> crate::feedback::RlmFeedbackKind {
+    match error {
+        lashlang::LinkError::BareToolCall { .. }
+        | lashlang::LinkError::FeatureDisabled { .. }
+        | lashlang::LinkError::OpaqueHostDescriptorAccess { .. }
+        | lashlang::LinkError::ProcessLifecycleOutsideProcess { .. }
+        | lashlang::LinkError::TriggerEventOutsideInputs { .. } => {
+            crate::feedback::RlmFeedbackKind::Policy
+        }
+        _ => crate::feedback::RlmFeedbackKind::Error,
     }
 }
 
@@ -863,6 +945,91 @@ mod tests {
 
         assert!(diagnostic.contains("standalone `</lashlang>` line"));
         assert!(diagnostic.contains("inside multiline source text"));
+    }
+
+    /// A typo is not a policy refusal.
+    ///
+    /// Classifying every compile failure as `[POLICY]` produced the one thing
+    /// the split exists to prevent: `unknown name \`task\`` arrived under "the
+    /// runtime refused this cell; sending it again unchanged will be refused
+    /// again. Rewrite it in the form named above" — with no form named above,
+    /// because a misspelled identifier has no accepted alternative form. The
+    /// gate is the diagnostic code, not the fact that compilation failed.
+    #[test]
+    fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
+        let typo = lash_typescript::parse_with_globals("finish(taks);", &BTreeSet::new())
+            .expect_err("an unbound name is rejected");
+        assert_eq!(
+            typescript_feedback_kind(&typo),
+            crate::feedback::RlmFeedbackKind::Error,
+            "a misspelled name is the program being wrong: {typo}"
+        );
+
+        let forbidden = lash_typescript::parse_with_globals("class A {}", &BTreeSet::new())
+            .expect_err("classes are refused");
+        assert_eq!(
+            typescript_feedback_kind(&forbidden),
+            crate::feedback::RlmFeedbackKind::Policy,
+            "a construct outside the dialect is a refusal: {forbidden}"
+        );
+
+        // And the imperative the Policy branch chooses is only honest when the
+        // diagnostic really does name a form.
+        assert!(
+            !forbidden.suggestions.is_empty(),
+            "a Policy classification promises a named form: {forbidden:?}"
+        );
+
+        // One code, both families. `TS_METHOD_UNSUPPORTED` is emitted both for
+        // the determinism refusals — which the runtime will never run, however
+        // the model rewrites them — and for ordinary arity mistakes. Reading
+        // the code alone gets one of the two wrong whichever way it is read.
+        let nondeterministic = lash_typescript::parse_with_globals(
+            "finish('a'.localeCompare('b'));",
+            &BTreeSet::new(),
+        )
+        .expect_err("locale ordering is refused");
+        let miscounted =
+            lash_typescript::parse_with_globals("finish([1].map());", &BTreeSet::new())
+                .expect_err("map needs a callback");
+        assert_eq!(
+            nondeterministic.code.as_str(),
+            miscounted.code.as_str(),
+            "the premise of this check is that one code carries both"
+        );
+        assert_eq!(
+            typescript_feedback_kind(&nondeterministic),
+            crate::feedback::RlmFeedbackKind::Policy,
+            "the runtime will never run this: {nondeterministic}"
+        );
+        assert_eq!(
+            typescript_feedback_kind(&miscounted),
+            crate::feedback::RlmFeedbackKind::Error,
+            "the method exists and the call is wrong: {miscounted}"
+        );
+    }
+
+    /// The executor is where a TypeScript rejection becomes the text a model
+    /// reads, and for the whole of the dialect's life that conversion was
+    /// `error.to_string()` — which drops the span the diagnostic carries. The
+    /// model was told a construct was refused and left to find it.
+    #[test]
+    fn a_typescript_rejection_reaches_the_model_with_its_own_line_number() {
+        let code = "const rows = [1, 2, 3];\nconst total = 0;\nclass Accumulator {}\n";
+        let error = lash_typescript::parse_with_globals(code, &BTreeSet::new())
+            .expect_err("classes are refused");
+        let diagnostic = lash_typescript::format_diagnostic(code, &error);
+
+        assert!(
+            diagnostic.starts_with("TS_CLASS_UNSUPPORTED: "),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("--> line 3, column 1"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("\nclass Accumulator {}\n"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("\nhint: "), "{diagnostic}");
     }
     use crate::projection::{
         ProjectionRef, ProjectionRegistry, flow_record_to_json_value, flow_record_to_tool_args,
@@ -3064,7 +3231,16 @@ mod tests {
                 .as_deref()
                 .expect("bare tool call should fail at link time");
 
-            assert!(error.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC), "{error}");
+            let (kind, evidence) = crate::feedback::RlmFeedbackKind::split(error);
+            assert_eq!(
+                kind,
+                crate::feedback::RlmFeedbackKind::Policy,
+                "a link refusal is a policy failure, not a runtime one: {error}"
+            );
+            assert!(
+                evidence.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC),
+                "{error}"
+            );
             assert!(error.contains("hint: use `files.read`"), "{error}");
             assert!(response.tool_calls.is_empty());
             assert!(response.terminal_finish.is_none());

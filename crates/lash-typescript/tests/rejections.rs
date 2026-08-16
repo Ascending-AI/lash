@@ -45,8 +45,9 @@ fn retained_match_all_iterator_has_a_sink_repair() {
     let error = lash_typescript::validate("const matches = 'a'.matchAll(/a/g);")
         .expect_err("matchAll must be consumed directly");
     assert_eq!(error.code, Code::RegexIteratorPosition);
+    assert_eq!(error.suggestions, ["wrap: [...text.matchAll(regexp)]"]);
     assert!(
-        error.message.contains("[...text.matchAll(regexp)]"),
+        error.to_string().contains("[...text.matchAll(regexp)]"),
         "{error}"
     );
 }
@@ -283,8 +284,8 @@ fn base64_globals_keep_the_dom_exception_repair_diagnostic() {
             error.code,
             lash_typescript::DiagnosticCode::MethodUnsupported
         );
-        assert!(error.message.contains("DOMException"), "{error}");
-        assert!(error.message.contains("host tool"), "{error}");
+        assert!(error.to_string().contains("DOMException"), "{error}");
+        assert!(error.to_string().contains("host tool"), "{error}");
     }
 }
 
@@ -404,4 +405,80 @@ fn an_unknown_ecma_static_names_its_owner() {
         error.to_string().contains("`Error.isError`"),
         "the diagnostic must name the owner: {error}"
     );
+}
+
+/// A rejection the model cannot locate costs it a guess. Lashlang has echoed
+/// the offending line with a caret since it shipped; TypeScript dropped the
+/// span on the floor and sent `TS_CODE: message` alone.
+#[test]
+fn a_rejection_points_at_the_line_the_model_wrote() {
+    let source = "const rows = [1, 2, 3];\nconst total = 0;\nclass Accumulator {}\n";
+    let error = lash_typescript::validate(source).expect_err("classes are refused");
+    let rendered = lash_typescript::format_diagnostic(source, &error);
+
+    assert!(
+        rendered.contains("--> line 3, column 1"),
+        "the model must be given its own line numbers: {rendered}"
+    );
+    assert!(
+        rendered.contains("class Accumulator {}"),
+        "the offending line must be echoed back: {rendered}"
+    );
+    assert!(
+        rendered.contains("hint: "),
+        "the repair stays on its own line: {rendered}"
+    );
+}
+
+/// A code used at more than one site cannot rely on the per-code table alone.
+///
+/// `TS_AWAIT_UNSUPPORTED` is the clearest case: every site that emits it is
+/// about *what* may be awaited, and the table answered about *where* `await`
+/// may appear — advice for a problem the model does not have. `TS_METHOD_
+/// UNSUPPORTED` covers both "no such method" and "wrong arguments", and the
+/// table's "use a method the contract lists" is actively wrong for the second:
+/// the method is listed, the call shape is not.
+#[test]
+fn a_multi_use_code_gives_advice_that_matches_the_actual_refusal() {
+    for (source, must_contain, must_not_contain) in [
+        // What may be awaited, not where await may appear.
+        (
+            "const x = 1; finish(await x);",
+            "already settled",
+            "top level",
+        ),
+        (
+            "finish(await Promise.all('nope'));",
+            "build the array first",
+            "top level",
+        ),
+        // Arity, not availability.
+        (
+            "finish([1].map());",
+            "callback",
+            "the dialect's standard-library contract lists",
+        ),
+        (
+            "finish(JSON.stringify(1, null, 2, 3));",
+            "JSON.stringify(value, replacer, space)",
+            "the dialect's standard-library contract lists",
+        ),
+        // The iterator-sink refusal names the wrap, not "use another method".
+        (
+            "const it = [1].values(); finish(it);",
+            "[...expr]",
+            "the dialect's standard-library contract lists",
+        ),
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(must_contain),
+            "{source}: expected advice naming `{must_contain}`, got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains(must_not_contain),
+            "{source}: advice about `{must_not_contain}` does not fit this refusal:\n{rendered}"
+        );
+    }
 }

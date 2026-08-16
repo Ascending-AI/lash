@@ -918,7 +918,7 @@ impl Lowerer {
             .take(function.params.len().saturating_sub(1))
             .any(|param| matches!(param, Pattern::Rest(_)))
         {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 "rest parameters must be last",
                 None,
@@ -1027,7 +1027,7 @@ impl Lowerer {
                 self.lower_conversion_function(name)
             }
             Expr::Ident(name) if name == "globalThis" && !self.has_binding(name) => {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
                     "Unsupported: bare globalThis. Use globalThis.identifier for durable session state.",
                     None,
@@ -1159,9 +1159,10 @@ impl Lowerer {
         if entries.iter().any(|(key, _)| {
             !matches!(*key, "name" | "signals" | "run") || !seen_fields.insert(*key)
         }) {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::ProcessConfigFieldUnsupported,
                 "defineProcess accepts only name, signals, and run",
+                "drop the extra key; anything else the process needs arrives as a `run` parameter",
                 None,
             ));
         }
@@ -1206,9 +1207,10 @@ impl Lowerer {
             ));
         };
         if !run.is_async {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::AsyncUnsupported,
                 "defineProcess.run must be async",
+                "write it as `run: async (...) => { ... }`",
                 None,
             ));
         }
@@ -1322,7 +1324,7 @@ impl Lowerer {
             TsAssignTarget::Member { object, property } => {
                 self.member_assign_target(object, property)
             }
-            TsAssignTarget::Pattern(_) => Err(Diagnostic::new(
+            TsAssignTarget::Pattern(_) => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 "destructuring targets are lowered as a pattern, not a scalar assignment",
                 None,
@@ -1357,7 +1359,7 @@ impl Lowerer {
                 });
                 Ok((root, steps))
             }
-            _ => Err(Diagnostic::new(
+            _ => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 "assignment target must start at a lexical binding",
                 None,
@@ -1371,7 +1373,7 @@ impl Lowerer {
         property: &MemberProperty,
     ) -> Result<LashExpr, Diagnostic> {
         if matches!(property, MemberProperty::Field(field) if field == "stack") {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::refusal(
                 DiagnosticCode::MethodUnsupported,
                 "Unsupported: Error.stack is nondeterministic across engines. Inspect error.name and error.message instead.",
                 None,
@@ -1393,7 +1395,7 @@ impl Lowerer {
                     format!("globalThis.{field} is a reserved value identifier"),
                     None,
                 )),
-                MemberProperty::Index(_) => Err(Diagnostic::new(
+                MemberProperty::Index(_) => Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
                     "Unsupported: computed globalThis access. Use globalThis.identifier so session state remains statically named.",
                     None,
@@ -1426,7 +1428,7 @@ impl Lowerer {
             if let Some(value) = constant {
                 return Ok(LashExpr::Number(value));
             }
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::refusal(
                 DiagnosticCode::MethodUnsupported,
                 format!("property `{owner}.{name}` is not in the TypeScript runtime surface"),
                 None,
@@ -1518,9 +1520,10 @@ fn reject_mutual_recursion(
         .map(display)
         .collect::<Vec<_>>()
         .join(" -> ");
-    Err(Diagnostic::new(
+    Err(Diagnostic::with_repair(
         DiagnosticCode::MutualRecursionUnsupported,
         format!("mutually recursive function declarations are not supported in v1; cycle: {cycle}"),
+        "restructure so one function calls the other, or drive the recursion with an explicit work list",
         None,
     ))
 }

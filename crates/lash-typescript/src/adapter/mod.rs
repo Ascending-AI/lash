@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
-use swc_common::{BytePos, Span, Spanned};
+use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as swc;
 use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 
@@ -10,12 +10,14 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 mod enums;
 mod nesting;
 mod prototype_chain;
+mod rejections;
 
 use enums::{ConstEnumValue, enum_member_property_name};
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
 use prototype_chain::{
     check_property_key, is_prototype_chain_property, prototype_access_rejection,
 };
+use rejections::{parser_diagnostic, reject, reject_defect, reject_refusal, source_span};
 
 /// Maximum source-level statement or expression nesting accepted by the
 /// TypeScript dialect. This is deliberately below the shared AST and 2 MiB
@@ -408,12 +410,13 @@ fn parse_stack_size(source_bytes: usize) -> usize {
 
 fn guard_source_size(source: &str) -> Result<(), Diagnostic> {
     if source.len() > MAX_SOURCE_BYTES {
-        return Err(Diagnostic::new(
+        return Err(Diagnostic::with_repair(
             DiagnosticCode::SourceTooLarge,
             format!(
-                "TypeScript source is {} bytes, over the {MAX_SOURCE_BYTES}-byte limit; split the cell",
+                "TypeScript source is {} bytes, over the {MAX_SOURCE_BYTES}-byte limit",
                 source.len()
             ),
+            "split the work across several cells",
             None,
         ));
     }
@@ -855,7 +858,7 @@ impl Adapter {
                 Expr::Ident(name) => Pattern::Ident(name),
                 Expr::Member { object, property } => Pattern::Member { object, property },
                 _ => {
-                    return Err(reject(
+                    return Err(reject_defect(
                         DiagnosticCode::UnsupportedExpression,
                         "invalid destructuring assignment targets",
                         span,
@@ -921,7 +924,7 @@ impl Adapter {
                 Pattern::Object { properties, rest }
             }
             swc::Pat::Invalid(_) => {
-                return Err(reject(
+                return Err(reject_defect(
                     DiagnosticCode::UnsupportedExpression,
                     "invalid binding patterns",
                     span,
@@ -980,7 +983,7 @@ impl Adapter {
             .filter(|param| !matches!(param, Pattern::Ident(name) if name == "this"))
             .collect();
         let body = function.body.as_ref().ok_or_else(|| {
-            reject(
+            reject_refusal(
                 DiagnosticCode::UnsupportedStatement,
                 "function declarations without bodies",
                 span,
@@ -1275,7 +1278,7 @@ impl Adapter {
                 return Err(reject(DiagnosticCode::JsxUnsupported, "JSX", span));
             }
             swc::Expr::Invalid(_) => {
-                return Err(reject(
+                return Err(reject_defect(
                     DiagnosticCode::UnsupportedExpression,
                     "invalid expression",
                     span,
@@ -1309,7 +1312,7 @@ impl Adapter {
                 self.convert_property_key(&method.key)?,
                 Expr::Function(self.convert_function(None, &method.function)?),
             )),
-            swc::Prop::Assign(_) => Err(reject(
+            swc::Prop::Assign(_) => Err(reject_refusal(
                 DiagnosticCode::UnsupportedExpression,
                 "assignment properties",
                 Some(source_span(property.span())),
@@ -1502,7 +1505,7 @@ impl Adapter {
         match self.convert_expr(expr)? {
             Expr::Ident(name) => Ok(AssignTarget::Ident(name)),
             Expr::Member { object, property } => Ok(AssignTarget::Member { object, property }),
-            _ => Err(reject(
+            _ => Err(Diagnostic::refusal(
                 DiagnosticCode::UnsupportedExpression,
                 "Unsupported: update on a non-assignment target. Assign the expression to a variable first.",
                 Some(source_span(expr.span())),
@@ -1530,7 +1533,7 @@ impl Adapter {
                     self.convert_pattern(&pattern)?,
                 )))
             }
-            _ => Err(reject(
+            _ => Err(Diagnostic::refusal(
                 DiagnosticCode::UnsupportedExpression,
                 "Unsupported: this assignment target. Assign to an identifier, member, index, or destructuring pattern.",
                 Some(source_span(target.span())),
@@ -1566,33 +1569,5 @@ fn convert_assign_op(op: swc::AssignOp) -> AssignOp {
         S::AndAssign => AssignOp::Logical(LogicalOp::And),
         S::OrAssign => AssignOp::Logical(LogicalOp::Or),
         S::NullishAssign => AssignOp::Logical(LogicalOp::Nullish),
-    }
-}
-
-fn parser_diagnostic(error: swc_ecma_parser::error::Error, source: &str) -> Diagnostic {
-    let mut message = error.kind().msg().to_string();
-    if source.split_whitespace().any(|word| word == "raise") {
-        message.push_str("; JavaScript uses `throw new Error(...)`, not `raise Error(...)`");
-    }
-    let code = if message.contains("'with' statement") {
-        DiagnosticCode::WithUnsupported
-    } else {
-        DiagnosticCode::SyntaxError
-    };
-    Diagnostic::new(code, message, Some(source_span(error.span())))
-}
-
-fn reject(code: DiagnosticCode, construct: &str, span: Option<SourceSpan>) -> Diagnostic {
-    Diagnostic::new(
-        code,
-        format!("{construct} are not in the TypeScript dialect"),
-        span,
-    )
-}
-
-fn source_span(span: Span) -> SourceSpan {
-    SourceSpan {
-        start: span.lo.0 as usize,
-        end: span.hi.0 as usize,
     }
 }
