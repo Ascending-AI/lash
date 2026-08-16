@@ -53,6 +53,75 @@ impl TurnBudget {
     }
 }
 
+/// Per-turn bound on *consecutive unproductive* provider attempts: model calls
+/// that committed no successful execution to the turn.
+///
+/// [`TurnBudget`] bounds how much work a turn may do; this bounds how long a
+/// turn may fail to do any. A model that answers with an unreadable cell, or
+/// with a cell that only ever raises, re-enters the protocol loop without
+/// leaving a committed node behind, and a turn budget large enough for real
+/// work is far too large to stop that cheaply. Any attempt that commits a
+/// successful execution resets the count, so ordinary repair traffic — a model
+/// that mis-writes a cell and then fixes it — never approaches the bound.
+///
+/// Unlike [`TurnBudget`], this budget has a bounded default: an absent value
+/// is a host that never considered the stall, and the safe reading of silence
+/// is the bound rather than the loop. `Unbounded` remains available as an
+/// explicit host opt-in.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NoProgressBudget {
+    Bounded(std::num::NonZeroUsize),
+    Unbounded,
+}
+
+impl NoProgressBudget {
+    /// Consecutive unproductive attempts allowed when a host expresses none.
+    ///
+    /// Judged runbook traffic repairs a bad cell within a handful of attempts;
+    /// twelve leaves that headroom untouched while turning the measured
+    /// 1,223-call stall into twelve calls.
+    pub const DEFAULT_MAX_ATTEMPTS: usize = 12;
+
+    /// Construct a finite bound on consecutive unproductive attempts.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `max_attempts` is zero — a turn must always be allowed at
+    /// least one attempt. In a const context, a literal zero is rejected
+    /// during compilation.
+    pub const fn bounded(max_attempts: usize) -> Self {
+        match std::num::NonZeroUsize::new(max_attempts) {
+            Some(max_attempts) => Self::Bounded(max_attempts),
+            None => panic!(
+                "no-progress budget must be non-zero; use NoProgressBudget::Unbounded to opt out"
+            ),
+        }
+    }
+
+    /// The finite bound, or `None` when the host opted out of the bound.
+    pub fn max_attempts(self) -> Option<usize> {
+        match self {
+            Self::Bounded(max_attempts) => Some(max_attempts.get()),
+            Self::Unbounded => None,
+        }
+    }
+
+    /// Whether `attempts` consecutive unproductive attempts exhaust the bound.
+    pub fn is_exhausted_by(self, attempts: usize) -> bool {
+        self.max_attempts()
+            .is_some_and(|max_attempts| attempts >= max_attempts)
+    }
+}
+
+impl Default for NoProgressBudget {
+    fn default() -> Self {
+        Self::bounded(Self::DEFAULT_MAX_ATTEMPTS)
+    }
+}
+
 use crate::MessageOrigin;
 use crate::ToolDefinition;
 use crate::llm::types::LlmToolSpec;
@@ -588,7 +657,7 @@ pub fn model_tool_specs(tools: &[ToolDefinition]) -> Vec<LlmToolSpec> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ErrorEnvelope, SessionStreamEvent, TokenUsage, TurnBudget, TurnOutcome,
+        ErrorEnvelope, NoProgressBudget, SessionStreamEvent, TokenUsage, TurnBudget, TurnOutcome,
         TurnTerminationPolicyState,
     };
     use crate::llm::types::{LlmTerminalReason, ProviderFailureKind};
@@ -606,6 +675,40 @@ mod tests {
     #[should_panic(expected = "turn budget must be non-zero; use TurnBudget::Unbounded to opt out")]
     fn bounded_turn_budget_rejects_zero() {
         let _ = TurnBudget::bounded(0);
+    }
+
+    /// The no-progress budget is exhausted *at* its bound, not past it: the
+    /// nth consecutive unproductive attempt is the last one bought.
+    #[test]
+    fn a_bounded_no_progress_budget_is_exhausted_at_its_bound() {
+        let budget = NoProgressBudget::bounded(3);
+
+        assert!(!budget.is_exhausted_by(0));
+        assert!(!budget.is_exhausted_by(2));
+        assert!(budget.is_exhausted_by(3));
+        assert!(budget.is_exhausted_by(4));
+        assert_eq!(budget.max_attempts(), Some(3));
+    }
+
+    /// Unlike the turn budget, silence resolves to the bound. A default that
+    /// loops is the bug this budget exists to close.
+    #[test]
+    fn an_absent_no_progress_budget_is_bounded() {
+        assert_eq!(
+            NoProgressBudget::default().max_attempts(),
+            Some(NoProgressBudget::DEFAULT_MAX_ATTEMPTS)
+        );
+        assert!(NoProgressBudget::default().is_exhausted_by(usize::MAX));
+        assert!(!NoProgressBudget::Unbounded.is_exhausted_by(usize::MAX));
+        assert_eq!(NoProgressBudget::Unbounded.max_attempts(), None);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "no-progress budget must be non-zero; use NoProgressBudget::Unbounded to opt out"
+    )]
+    fn a_bounded_no_progress_budget_rejects_zero() {
+        let _ = NoProgressBudget::bounded(0);
     }
 
     #[test]

@@ -371,6 +371,10 @@ async fn durable_stores_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .turn_budget(lash::TurnBudget::bounded(50))
+        // The outer bound on one turn's work; the inner bound is how long a
+        // turn may fail to do any. This one defaults to bounded — name it to
+        // change it, or to opt out with `NoProgressBudget::Unbounded`.
+        .no_progress_budget(lash::NoProgressBudget::bounded(12))
         .build(crate::example_process_owner())?;
     // docs:end:durable-stores-core
     Ok(())

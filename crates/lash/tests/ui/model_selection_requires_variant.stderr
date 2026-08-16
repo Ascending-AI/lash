@@ -7,7 +7,7 @@ error[E0308]: mismatched types
   |                                                                           arguments to this method are incorrect
   |
 note: method defined here
- --> src/core.rs
+ --> src/core/session_policy.rs
   |
   |     pub fn model(mut self, model: lash_core::ModelSpec) -> Self {
   |            ^^^^^

@@ -2335,5 +2335,6 @@ finish initial
     include!("tests/turn_input_application.rs");
     include!("tests/tool_control.rs");
     include!("tests/concurrent_send.rs");
+    include!("tests/no_progress_budget.rs");
 
 }

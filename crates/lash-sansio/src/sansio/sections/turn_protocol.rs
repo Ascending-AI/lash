@@ -424,6 +424,10 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.config.turn_budget
     }
 
+    pub fn no_progress_budget(&self) -> crate::NoProgressBudget {
+        self.config.no_progress_budget
+    }
+
     pub fn generation(&self) -> &crate::llm::types::GenerationOptions {
         &self.config.generation
     }
@@ -603,6 +607,10 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     /// disables that refinement.
     pub max_context_tokens: Option<usize>,
     pub turn_budget: crate::TurnBudget,
+    /// Bound on consecutive provider attempts that commit no successful
+    /// execution. Enforced by the protocol driver, which is the only layer
+    /// that can tell a productive attempt from a stalled one.
+    pub no_progress_budget: crate::NoProgressBudget,
     pub model_variant: crate::ReasoningSelection,
     pub model_capability: crate::llm::capability::ModelCapability,
     pub generation: crate::llm::types::GenerationOptions,

@@ -1,3 +1,14 @@
+/// Outer bound on one workbench turn: how many model calls a single send may
+/// spend. Generous, because a real workbench task legitimately takes many
+/// steps; finite, because no send should be able to run forever.
+const WORKBENCH_MAX_TURNS: usize = 128;
+
+/// Inner bound on one workbench turn: how many consecutive model calls may
+/// commit no successful execution before the turn stops. Judged workbench
+/// traffic repairs a bad cell within a handful of attempts, so twelve is far
+/// above ordinary repair and far below a loop worth paying for.
+const WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS: usize = 12;
+
 fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
     tavily_api_key: String,
@@ -226,7 +237,17 @@ async fn async_main() -> AnyhowResult<()> {
     )
     .with_deferred_tool_resolver(deferred_tools.resolver())
     .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));
-    let builder = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
+    // second bound, so a turn whose cells never committed re-called the
+    // provider until someone noticed — one measured send bought 1,223 calls.
+    // The turn budget is the outer bound on how much work one send may do; the
+    // no-progress budget is the inner bound on how long it may fail to do any.
+    // Both are host policy, and a host that wants a turn to run unbounded now
+    // has to say so.
+    let builder = LashCore::rlm_builder(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS), factory)
+        .no_progress_budget(lash::NoProgressBudget::bounded(
+            WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
+        ))
         .provider(provider)
         .model(model_spec)
         .store_factory(Arc::clone(&core_store_factory))

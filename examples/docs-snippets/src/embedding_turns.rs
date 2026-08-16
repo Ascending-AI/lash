@@ -15,7 +15,11 @@ fn report_user_visible(_stop: TurnStop) {}
 
 fn offer_retry(_stop: TurnStop) {}
 
-fn suggest_higher_max_turns() {}
+/// `MaxTurns` has two causes, so the host's response is to read which bound
+/// was hit rather than to assume the turn budget. The `no_progress_budget`
+/// diagnostic on the turn's events names a no-progress stop; without it the
+/// turn budget is the bound that ran out.
+fn review_turn_bounds() {}
 
 fn record_for_diagnosis(_stop: TurnStop) {}
 
@@ -27,7 +31,9 @@ fn outcome_match(result: TurnResult) -> anyhow::Result<()> {
         TurnOutcome::Stopped(stop) => match stop {
             TurnStop::Cancelled | TurnStop::InvalidInput => report_user_visible(stop),
             TurnStop::ProviderError | TurnStop::Incomplete => offer_retry(stop),
-            TurnStop::MaxTurns => suggest_higher_max_turns(),
+            // Either bound: the turn budget, or the no-progress budget when
+            // consecutive attempts committed no successful execution.
+            TurnStop::MaxTurns => review_turn_bounds(),
             other => record_for_diagnosis(other),
         },
     }

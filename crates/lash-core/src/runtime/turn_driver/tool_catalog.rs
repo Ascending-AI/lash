@@ -113,6 +113,7 @@ impl RuntimeTurnDriver<'_> {
             turn_driver_preamble: execution_environment.turn_driver_preamble,
             prepared_prompt,
             turn_budget: session_policy.turn_budget,
+            no_progress_budget: session_policy.no_progress_budget,
             model_variant: session_policy.model.variant.clone(),
             model_capability: session_policy.model.capability.clone(),
             generation: session_policy.generation.clone(),

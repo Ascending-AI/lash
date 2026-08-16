@@ -780,6 +780,7 @@ pub(crate) fn session_store_request(
             session_id: Some(session_id.to_string()),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
+            no_progress_budget: Default::default(),
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         },

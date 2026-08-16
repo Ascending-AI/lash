@@ -62,6 +62,7 @@ pub async fn wake_delivery_crash_matrix(
             session_id: Some(target_session_id.to_string()),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
+            no_progress_budget: Default::default(),
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         },
