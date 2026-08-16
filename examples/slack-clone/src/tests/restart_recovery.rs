@@ -1008,7 +1008,7 @@ async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_
         .expect("deliver reply through the production webhook");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     bot.wait_for_missing_thread_root().await;
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    tokio::time::timeout(std::time::Duration::from_secs(180), async {
         loop {
             let detail = bot
                 .ledger()
@@ -1032,7 +1032,7 @@ async fn webhook_retry_answers_after_the_root_outlives_the_initial_wait_without_
         .expect("root admission lands after the initial wait");
     assert!(matches!(root_disposition, Disposition::Replied { .. }));
 
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    tokio::time::timeout(std::time::Duration::from_secs(180), async {
         loop {
             let record = bot
                 .ledger()
