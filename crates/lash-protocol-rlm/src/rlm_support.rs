@@ -230,6 +230,14 @@ pub(crate) fn render_bound_variables(
             "Small values are shown in full; larger ones show only a truncated preview (record keys, or the head and tail of a list/string) — but the variable still holds its COMPLETE value. A short preview never means state was lost; `{}` the variable (or the part you need) to see the rest.",
             vocabulary.print_call
         ),
+        // A wrong field name is the one mistake this runtime does not report.
+        // Reading a key that was never there yields `undefined`, which flows
+        // into arithmetic as `NaN` and into totals as nothing at all: the cell
+        // succeeds, the observation looks plausible, and the number is wrong.
+        // Every key of every value below is written out — in the row itself
+        // where the record is small enough, in the `Schema:` block otherwise —
+        // so there is never a reason to write one from memory.
+        "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.".to_string(),
     ];
 
     // Drop cache slots for variables that no longer exist.
@@ -502,9 +510,27 @@ fn render_value_size_hint(value: &serde_json::Value) -> Option<String> {
             }
         }
         serde_json::Value::Array(values) => Some(format!("len={}", values.len())),
-        serde_json::Value::Object(map) => Some(format!("keys={}", map.len())),
+        // The count alone tells a model how many keys it has not been shown,
+        // which is the question it cannot act on. Naming them puts the observed
+        // key set at the point of contact — the row the model reads just before
+        // writing `value.field` — instead of only in the `Schema:` block
+        // further down. Wide records keep the count and rely on that block:
+        // past a dozen names the row stops being scannable, which is the one
+        // thing it is for.
+        serde_json::Value::Object(map) => Some(if map.len() <= MAX_INLINE_KEY_SET {
+            format!(
+                "keys={} ({})",
+                map.len(),
+                map.keys().cloned().collect::<Vec<_>>().join(", ")
+            )
+        } else {
+            format!("keys={} (see Schema)", map.len())
+        }),
     }
 }
+
+/// How many keys a row will name before deferring to the `Schema:` block.
+const MAX_INLINE_KEY_SET: usize = 12;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum JsonShape {
@@ -921,6 +947,65 @@ mod bound_variable_tests {
 
         assert!(!s.contains("Runtime notes:"), "{s}");
         assert!(!s.contains("currently has"), "{s}");
+    }
+
+    /// The one mistake this runtime does not report is a wrong field name: the
+    /// read yields `undefined`, the arithmetic yields `NaN` or nothing, and the
+    /// cell succeeds with a wrong number. The rule that closes it has to be in
+    /// the section that renders the values it is about.
+    #[test]
+    fn the_bound_variables_section_forbids_guessing_field_names() {
+        let mut cache = BoundVariableRenderCache::default();
+        let s = render_with_cache(&mut cache, json!({ "task": "ship" }));
+
+        assert!(
+            s.contains("Never write a field name you haven't seen in the key sets below"),
+            "{s}"
+        );
+        assert!(
+            s.contains("guessed field names silently produce zeros rather than errors"),
+            "{s}"
+        );
+        assert!(
+            s.contains("If a name is not listed, it does not exist"),
+            "{s}"
+        );
+    }
+
+    /// A row that shows only a preview used to report `keys=4` and leave the
+    /// names to the `Schema:` block further down. The names belong at the point
+    /// of contact — the line the model reads just before writing `value.field`.
+    #[test]
+    fn a_previewed_record_names_its_observed_keys_on_its_own_row() {
+        let mut cache = BoundVariableRenderCache::default();
+        let body = "z".repeat(2_000);
+        let s = render_with_cache(
+            &mut cache,
+            json!({ "order": { "id": 1, "total": 2, "currency": "GBP", "body": body } }),
+        );
+
+        assert!(s.contains("keys=4 (body, currency, id, total)"), "{s}");
+    }
+
+    /// Past a dozen names the row stops being scannable, which is the one thing
+    /// it is for — so a wide record keeps the count and says where the names
+    /// are instead of burying the row in them.
+    #[test]
+    fn a_wide_record_defers_its_key_set_to_the_schema_block() {
+        let rooms = serde_json::Value::Object(
+            (0..30)
+                .map(|i| (format!("room_{i:02}"), json!({ "exits": ["n", "s"] })))
+                .collect(),
+        );
+        let mut cache = BoundVariableRenderCache::default();
+        let s = render_with_cache(&mut cache, json!({ "map": rooms }));
+
+        assert!(s.contains("keys=30 (see Schema)"), "{s}");
+        assert!(s.contains("Schema:"), "{s}");
+        // And the block it points at really does name every key.
+        for index in 0..30 {
+            assert!(s.contains(&format!("room_{index:02}")), "{s}");
+        }
     }
 
     #[test]
