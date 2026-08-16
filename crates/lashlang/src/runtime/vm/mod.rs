@@ -17,6 +17,7 @@ mod effects;
 mod exceptions;
 mod heap_plan;
 mod javascript;
+mod javascript_codec;
 mod javascript_json;
 mod javascript_substrate;
 mod reference_assignment;
@@ -1310,6 +1311,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptHeapInstanceOf => self.execute_javascript_instanceof()?,
             IntrinsicOp::JavaScriptGlobalDelete => self.execute_javascript_global_delete()?,
             IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
+            IntrinsicOp::JavaScriptGlobalSet => self.execute_javascript_global_set()?,
+            IntrinsicOp::JavaScriptUriCodec(codec) => self.execute_javascript_uri_codec(codec)?,
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;

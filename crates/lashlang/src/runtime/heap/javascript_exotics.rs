@@ -225,6 +225,10 @@ impl Heap {
         ))
     }
 
+    pub(crate) fn is_javascript_vm_object(&self, id: HeapId) -> Result<bool, RuntimeError> {
+        Ok(matches!(self.get(id)?, HeapObject::Closure { .. }) || self.is_javascript_exotic(id)?)
+    }
+
     pub(crate) fn javascript_instanceof(
         &self,
         value: &Value,

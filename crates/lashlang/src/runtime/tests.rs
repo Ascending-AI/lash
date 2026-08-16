@@ -1056,6 +1056,12 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::JavaScriptGlobalHas => {
             format!("intrinsic typescript_global_has argc={argc}")
         }
+        IntrinsicOp::JavaScriptGlobalSet => {
+            format!("intrinsic typescript_global_set argc={argc}")
+        }
+        IntrinsicOp::JavaScriptUriCodec(_) => {
+            format!("intrinsic typescript_uri_codec argc={argc}")
+        }
         IntrinsicOp::Trim => format!("intrinsic trim argc={argc}"),
         IntrinsicOp::Slice => format!("intrinsic slice argc={argc}"),
         IntrinsicOp::ToString => format!("intrinsic to_string argc={argc}"),

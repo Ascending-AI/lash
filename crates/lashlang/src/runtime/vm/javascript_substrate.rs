@@ -230,6 +230,39 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.stack.push(Value::Bool(present));
         Ok(())
     }
+
+    pub(super) fn execute_javascript_global_set(&mut self) -> Result<(), RuntimeError> {
+        self.require_typescript_intrinsic("global assignment")?;
+        let value = self.pop_stack()?;
+        let name = self.pop_stack()?;
+        let Value::String(name) = name else {
+            return Err(js_stdlib_error("global assignment name must be a string"));
+        };
+        reject_reserved_global_name(&name)?;
+        let slot = self
+            .chunk
+            .slot_names
+            .iter()
+            .position(|candidate| candidate.text.as_ref() == name.as_str());
+        let slots = if self.active_function.is_some() {
+            &mut self
+                .frames
+                .first_mut()
+                .expect("an active function has a root caller frame")
+                .slots
+        } else {
+            &mut self.slots
+        };
+        if let Some(slot) = slot {
+            slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+            slots.values[slot] = Some(value.clone());
+        } else {
+            slots.extras.insert(name.to_string(), value.clone());
+        }
+        self.assigned_globals.insert(name.to_string());
+        self.stack.push(value);
+        Ok(())
+    }
 }
 
 fn scalar_javascript_string(value: &Value) -> Result<String, RuntimeError> {
@@ -275,7 +308,7 @@ fn javascript_error_cause(heap: &Heap, options: &Value) -> Option<Value> {
 fn reject_reserved_global_name(name: &str) -> Result<(), RuntimeError> {
     if matches!(name, "undefined" | "NaN" | "Infinity") {
         return Err(js_stdlib_error(format!(
-            "TS_RESERVED_GLOBAL_NAME: `{name}` cannot be queried or deleted as session state"
+            "TS_RESERVED_GLOBAL_NAME: `{name}` cannot be used as session state"
         )));
     }
     Ok(())

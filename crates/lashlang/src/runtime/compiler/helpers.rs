@@ -32,6 +32,15 @@ fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
         "__typescript_heap_instanceof" => IntrinsicOp::JavaScriptHeapInstanceOf,
         "__typescript_global_delete" => IntrinsicOp::JavaScriptGlobalDelete,
         "__typescript_global_has" => IntrinsicOp::JavaScriptGlobalHas,
+        "__typescript_global_set" => IntrinsicOp::JavaScriptGlobalSet,
+        "__typescript_encode_uri_component" => {
+            IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::EncodeComponent)
+        }
+        "__typescript_decode_uri_component" => {
+            IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::DecodeComponent)
+        }
+        "__typescript_encode_uri" => IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::EncodeUri),
+        "__typescript_decode_uri" => IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::DecodeUri),
         "trim" => IntrinsicOp::Trim,
         "slice" => IntrinsicOp::Slice,
         "to_string" => IntrinsicOp::ToString,

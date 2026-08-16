@@ -8,7 +8,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn is_truthy_for_dialect(&self, value: &Value) -> Result<bool, RuntimeError> {
         if let Value::Ref(id) = value
             && self.reference_semantics
-            && self.heap.is_javascript_exotic(*id)?
+            && self.heap.is_javascript_vm_object(*id)?
         {
             return Ok(true);
         }

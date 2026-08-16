@@ -8,7 +8,7 @@
 //! * the runtime renders arity-mismatch diagnostics
 //!   (`invalid_arity_message`).
 //!
-//! All three consult [`BUILTINS`] here instead of re-spelling the name/arity
+//! All three consult the registries here instead of re-spelling the name/arity
 //! table, so adding or changing a builtin happens in exactly one place.
 
 /// Accepted argument count(s) for a builtin.
@@ -40,7 +40,7 @@ pub(crate) struct Builtin {
 }
 
 /// The canonical builtin registry, ordered for readability only.
-pub(crate) const BUILTINS: &[Builtin] = &[
+pub(crate) const SOURCE_BUILTINS: &[Builtin] = &[
     Builtin {
         name: "len",
         arity: Arity::Exact(1),
@@ -173,9 +173,12 @@ pub(crate) const BUILTINS: &[Builtin] = &[
         name: "reverse",
         arity: Arity::Exact(1),
     },
-    // Dialect-private intrinsics. They are registered here so the shared
-    // linker, compiler, runtime arity diagnostics, and profiler agree on the
-    // call contract; source Lashlang cannot spell the reserved names.
+];
+
+// Dialect-private intrinsics. They are registered here so the shared linker,
+// compiler, runtime arity diagnostics, and profiler agree on the call
+// contract; source Lashlang cannot spell or discover the reserved names.
+pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
     Builtin {
         name: "__typescript_split",
         arity: Arity::Exact(2),
@@ -192,12 +195,57 @@ pub(crate) const BUILTINS: &[Builtin] = &[
         name: "__typescript_heap_new",
         arity: Arity::AtLeast(1),
     },
+    Builtin {
+        name: "__typescript_heap_instanceof",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_global_delete",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_global_has",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_call_dynamic",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_async_map",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_closure",
+        arity: Arity::Exact(3),
+    },
+    Builtin {
+        name: "__typescript_global_set",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_encode_uri_component",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_decode_uri_component",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_encode_uri",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "__typescript_decode_uri",
+        arity: Arity::Exact(1),
+    },
 ];
 
 /// Looks up a builtin by name.
 pub(crate) fn lookup(name: &str) -> Option<Builtin> {
-    BUILTINS
+    SOURCE_BUILTINS
         .iter()
+        .chain(TYPESCRIPT_BUILTINS)
         .copied()
         .find(|builtin| builtin.name == name)
 }
@@ -208,9 +256,33 @@ pub(crate) fn is_builtin(name: &str) -> bool {
 }
 
 pub(crate) fn names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
-    // Dialect-private entries are deliberately kept at the end of the
-    // registry and never advertised as source Lashlang builtins.
-    BUILTINS[..BUILTINS.len() - 4]
-        .iter()
-        .map(|builtin| builtin.name)
+    SOURCE_BUILTINS.iter().map(|builtin| builtin.name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typescript_intrinsics_are_registered_but_not_advertised() {
+        let advertised = names().collect::<Vec<_>>();
+        for (name, arity) in [
+            ("__typescript_heap_instanceof", Arity::Exact(2)),
+            ("__typescript_global_delete", Arity::Exact(1)),
+            ("__typescript_global_has", Arity::Exact(1)),
+            ("__typescript_call_dynamic", Arity::Exact(2)),
+            ("__typescript_async_map", Arity::Exact(2)),
+            ("__typescript_closure", Arity::Exact(3)),
+            ("__typescript_global_set", Arity::Exact(2)),
+            ("__typescript_encode_uri_component", Arity::Exact(1)),
+            ("__typescript_decode_uri_component", Arity::Exact(1)),
+            ("__typescript_encode_uri", Arity::Exact(1)),
+            ("__typescript_decode_uri", Arity::Exact(1)),
+        ] {
+            assert_eq!(lookup(name).map(|builtin| builtin.arity), Some(arity));
+            assert!(!advertised.contains(&name));
+        }
+        assert!(lookup("__typescript_btoa").is_none());
+        assert!(lookup("__typescript_atob").is_none());
+    }
 }

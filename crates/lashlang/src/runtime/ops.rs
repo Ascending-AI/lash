@@ -151,7 +151,9 @@ pub(crate) async fn execute_intrinsic(
         | IntrinsicOp::JavaScriptHeapNew(_)
         | IntrinsicOp::JavaScriptHeapInstanceOf
         | IntrinsicOp::JavaScriptGlobalDelete
-        | IntrinsicOp::JavaScriptGlobalHas => {
+        | IntrinsicOp::JavaScriptGlobalHas
+        | IntrinsicOp::JavaScriptGlobalSet
+        | IntrinsicOp::JavaScriptUriCodec(_) => {
             Err(RuntimeError::ContextDependentIntrinsicMisdispatch {
                 context: "TypeScript container intrinsic".into(),
             })

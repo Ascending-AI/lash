@@ -392,6 +392,14 @@ pub(crate) enum Instruction {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum JavaScriptUriCodec {
+    EncodeComponent,
+    DecodeComponent,
+    EncodeUri,
+    DecodeUri,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) enum IntrinsicOp {
     Len,
     Empty,
@@ -411,6 +419,8 @@ pub(crate) enum IntrinsicOp {
     JavaScriptHeapInstanceOf,
     JavaScriptGlobalDelete,
     JavaScriptGlobalHas,
+    JavaScriptGlobalSet,
+    JavaScriptUriCodec(JavaScriptUriCodec),
     Trim,
     Slice,
     ToString,
@@ -574,7 +584,8 @@ impl IntrinsicOp {
             | IntrinsicOp::ValidateCompiled(_)
             | IntrinsicOp::PushAssign(_)
             | IntrinsicOp::JavaScriptGlobalDelete
-            | IntrinsicOp::JavaScriptGlobalHas => 1,
+            | IntrinsicOp::JavaScriptGlobalHas
+            | IntrinsicOp::JavaScriptUriCodec(_) => 1,
             IntrinsicOp::Contains
             | IntrinsicOp::GrepText
             | IntrinsicOp::StartsWith
@@ -584,6 +595,7 @@ impl IntrinsicOp {
             | IntrinsicOp::JavaScriptSplit
             | IntrinsicOp::JavaScriptJoin
             | IntrinsicOp::JavaScriptHeapInstanceOf
+            | IntrinsicOp::JavaScriptGlobalSet
             | IntrinsicOp::Validate
             | IntrinsicOp::CeilDiv
             | IntrinsicOp::FloorDiv
@@ -622,7 +634,9 @@ impl IntrinsicOp {
             IntrinsicOp::JavaScriptHeapNew(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::JavaScriptHeapInstanceOf
             | IntrinsicOp::JavaScriptGlobalDelete
-            | IntrinsicOp::JavaScriptGlobalHas => BuiltinProfileTag::TypeScriptStdlib,
+            | IntrinsicOp::JavaScriptGlobalHas
+            | IntrinsicOp::JavaScriptGlobalSet
+            | IntrinsicOp::JavaScriptUriCodec(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::Trim => BuiltinProfileTag::Trim,
             IntrinsicOp::Slice => BuiltinProfileTag::Slice,
             IntrinsicOp::ToString => BuiltinProfileTag::ToString,

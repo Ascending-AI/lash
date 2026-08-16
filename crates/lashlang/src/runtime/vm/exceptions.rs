@@ -291,6 +291,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         error: &RuntimeError,
         instruction_ip: usize,
     ) -> Result<Value, RuntimeError> {
+        if let RuntimeError::UncaughtException { value } = error {
+            return Ok(value.clone());
+        }
         if matches!(
             error,
             RuntimeError::CannotAssignField { actual, .. }

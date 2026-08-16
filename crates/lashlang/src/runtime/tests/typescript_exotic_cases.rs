@@ -1070,6 +1070,133 @@ async fn async_map_callbacks_park_before_and_after_work_and_replay_deterministic
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn stored_per_iteration_closures_stay_inside_the_vm_across_calls_and_parks() {
+    let callback = Expr::Function(Box::new(crate::FunctionExpr {
+        name: None,
+        params: Vec::new(),
+        captures: vec!["i".into()],
+        body: Box::new(Expr::Block(vec![
+            Expr::Print(Box::new(Expr::String("park inside stored closure".into()))),
+            Expr::Return(Box::new(Expr::Variable("i".into()))),
+        ])),
+    }));
+    let stored_call = |index| Expr::Call {
+        function: Box::new(Expr::Index {
+            target: Box::new(Expr::Variable("callbacks".into())),
+            index: Box::new(Expr::Number(index)),
+        }),
+        args: Vec::new(),
+    };
+    let program = Program::block(vec![
+        ts_assign("callbacks", Expr::List(Vec::new())),
+        Expr::For {
+            binding: "i".into(),
+            iterable: Box::new(private_builtin(
+                "range",
+                vec![Expr::Number(0.0), Expr::Number(2.0)],
+            )),
+            body: Box::new(Expr::Block(vec![ts_assign(
+                "callbacks",
+                private_builtin("push", vec![Expr::Variable("callbacks".into()), callback]),
+            )])),
+        },
+        Expr::Finish(Box::new(Expr::List(vec![
+            stored_call(0.0),
+            stored_call(1.0),
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![Value::Number(0.0), Value::Number(1.0)].into()
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn discarded_and_boolean_tested_closures_are_vm_internal_values() {
+    let closure = || {
+        Expr::Function(Box::new(crate::FunctionExpr {
+            name: None,
+            params: Vec::new(),
+            captures: Vec::new(),
+            body: Box::new(Expr::Return(Box::new(Expr::Number(1.0)))),
+        }))
+    };
+    let program = Program::block(vec![
+        closure(),
+        Expr::Finish(Box::new(Expr::If {
+            condition: Box::new(closure()),
+            then_block: Box::new(Expr::Bool(true)),
+            else_block: Box::new(Expr::Bool(false)),
+        })),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::Bool(true))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn async_map_all_settled_wrapper_collects_throws_in_input_order_across_parks() {
+    let callback = Expr::Function(Box::new(crate::FunctionExpr {
+        name: None,
+        params: vec!["value".into(), "index".into(), "array".into()],
+        captures: Vec::new(),
+        body: Box::new(Expr::Return(Box::new(Expr::Try(Box::new(
+            crate::TryExpr {
+                body: Box::new(Expr::Block(vec![
+                    Expr::Print(Box::new(Expr::String("park before settlement".into()))),
+                    Expr::If {
+                        condition: Box::new(Expr::JavaScriptBinary {
+                            left: Box::new(Expr::Variable("value".into())),
+                            op: crate::JavaScriptBinaryOp::StrictEqual,
+                            right: Box::new(Expr::Number(2.0)),
+                        }),
+                        then_block: Box::new(Expr::Throw(Box::new(Expr::String("boom".into())))),
+                        else_block: Box::new(Expr::Record(vec![
+                            ("status".into(), Expr::String("fulfilled".into())),
+                            ("value".into(), Expr::Variable("value".into())),
+                        ])),
+                    },
+                ])),
+                catch: Some(crate::CatchClause {
+                    binding: "reason".into(),
+                    body: Box::new(Expr::Record(vec![
+                        ("status".into(), Expr::String("rejected".into())),
+                        ("reason".into(), Expr::Variable("reason".into())),
+                    ])),
+                }),
+                finally: None,
+            },
+        ))))),
+    }));
+    let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
+        "__typescript_async_map",
+        vec![
+            Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
+            callback,
+        ],
+    )))]);
+    let mut fulfilled = crate::Record::new();
+    fulfilled.insert("status".into(), Value::String("fulfilled".into()));
+    fulfilled.insert("value".into(), Value::Number(1.0));
+    let mut rejected = crate::Record::new();
+    rejected.insert("status".into(), Value::String("rejected".into()));
+    rejected.insert("reason".into(), Value::String("boom".into()));
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::Record(fulfilled.into()),
+                Value::Record(rejected.into())
+            ]
+            .into()
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart() {
     let program = Program::block(vec![
         ts_assign("kept", Expr::Undefined),
@@ -1149,7 +1276,91 @@ async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn reserved_global_names_are_rejected_by_both_intrinsics() {
+async fn nested_global_set_is_durable_across_function_park_and_state_restore() {
+    let setter = Expr::Function(Box::new(crate::FunctionExpr {
+        name: None,
+        params: Vec::new(),
+        captures: Vec::new(),
+        body: Box::new(Expr::Block(vec![
+            Expr::Print(Box::new(Expr::String("park before global set".into()))),
+            Expr::Return(Box::new(private_builtin(
+                "__typescript_global_set",
+                vec![
+                    Expr::String("answer".into()),
+                    Expr::Record(vec![("value".into(), Expr::Number(42.0))]),
+                ],
+            ))),
+        ])),
+    }));
+    let setup = Program::block(vec![
+        Expr::Call {
+            function: Box::new(setter),
+            args: Vec::new(),
+        },
+        Expr::Finish(Box::new(field("answer", "value"))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(setup.clone()).await,
+        ExecutionOutcome::Finished(Value::Number(42.0))
+    );
+    let setup = compile_ast_with_dialect(&setup, CompilationDialect::Typescript)
+        .expect("compile nested global setter");
+    let mut state = State::new();
+    assert_eq!(
+        execute(&setup, &mut state, &Host)
+            .await
+            .expect("execute nested global setter"),
+        ExecutionOutcome::Finished(Value::Number(42.0))
+    );
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("encode global-set snapshot");
+    let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("decode global-set snapshot");
+    let mut restored = State::from_snapshot(snapshot);
+    let query = Program::block(vec![Expr::Finish(Box::new(field("answer", "value")))]);
+    let query = compile_ast_with_dialect(&query, CompilationDialect::Typescript)
+        .expect("compile global-set query");
+    assert_eq!(
+        execute(&query, &mut restored, &Host)
+            .await
+            .expect("query restored global"),
+        ExecutionOutcome::Finished(Value::Number(42.0))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn global_set_does_not_weaken_closure_session_persistence_policy() {
+    let closure = Expr::Function(Box::new(crate::FunctionExpr {
+        name: None,
+        params: Vec::new(),
+        captures: Vec::new(),
+        body: Box::new(Expr::Return(Box::new(Expr::Null))),
+    }));
+    let program = Program::block(vec![
+        private_builtin(
+            "__typescript_global_set",
+            vec![Expr::String("stored_function".into()), closure],
+        ),
+        Expr::Finish(Box::new(Expr::Null)),
+    ]);
+    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
+        .expect("compile closure global-set policy probe");
+    let mut state = State::new();
+    assert_eq!(
+        execute(&compiled, &mut state, &Host)
+            .await
+            .expect("closure-valued session globals retain the existing omission policy"),
+        ExecutionOutcome::Finished(Value::Null)
+    );
+    assert!(
+        state.snapshot().globals().get("stored_function").is_none(),
+        "closure-valued globals remain absent from the host-visible snapshot"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reserved_global_names_are_rejected_by_all_root_intrinsics() {
     for intrinsic in ["__typescript_global_delete", "__typescript_global_has"] {
         for name in ["undefined", "NaN", "Infinity"] {
             let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
@@ -1167,6 +1378,93 @@ async fn reserved_global_names_are_rejected_by_both_intrinsics() {
             );
         }
     }
+    for name in ["undefined", "NaN", "Infinity"] {
+        let program = Program::block(vec![Expr::Finish(Box::new(private_builtin(
+            "__typescript_global_set",
+            vec![Expr::String(name.into()), Expr::Number(1.0)],
+        )))]);
+        let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
+            .expect("compile reserved global set probe");
+        let error = execute(&compiled, &mut State::new(), &Host)
+            .await
+            .expect_err("reserved global set must reject");
+        assert!(
+            error.to_string().contains("TS_RESERVED_GLOBAL_NAME"),
+            "{error}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn uri_codec_intrinsics_match_node_and_throw_real_uri_errors() {
+    let caught_uri_error = |intrinsic: &str, input: &str| {
+        Expr::Try(Box::new(crate::TryExpr {
+            body: Box::new(private_builtin(intrinsic, vec![Expr::String(input.into())])),
+            catch: Some(crate::CatchClause {
+                binding: "caught".into(),
+                body: Box::new(Expr::List(vec![
+                    field("caught", "name"),
+                    field("caught", "message"),
+                    private_builtin(
+                        "__typescript_heap_instanceof",
+                        vec![
+                            Expr::Variable("caught".into()),
+                            Expr::String("URIError".into()),
+                        ],
+                    ),
+                ])),
+            }),
+            finally: None,
+        }))
+    };
+    let program = Program::block(vec![Expr::Finish(Box::new(Expr::List(vec![
+        private_builtin(
+            "__typescript_encode_uri_component",
+            vec![Expr::String("A Z;/?:@&=+$,#-_.!~*'()é😀".into())],
+        ),
+        private_builtin(
+            "__typescript_encode_uri",
+            vec![Expr::String("https://a.test/a b?x=é&y=#z".into())],
+        ),
+        private_builtin(
+            "__typescript_decode_uri_component",
+            vec![Expr::String(
+                "A%20Z%3B%2F%3F%3A%40%26%3D%2B%24%2C%23%C3%A9%F0%9F%98%80".into(),
+            )],
+        ),
+        private_builtin(
+            "__typescript_decode_uri",
+            vec![Expr::String("https://a.test/a%20b?x=%C3%A9&y=%23z".into())],
+        ),
+        caught_uri_error("__typescript_decode_uri_component", "%C0%AF"),
+        caught_uri_error("__typescript_decode_uri", "%E0%A4%A"),
+    ])))]);
+    let uri_error = || {
+        Value::List(
+            vec![
+                Value::String("URIError".into()),
+                Value::String("URI malformed".into()),
+                Value::Bool(true),
+            ]
+            .into(),
+        )
+    };
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::String(
+                    "A%20Z%3B%2F%3F%3A%40%26%3D%2B%24%2C%23-_.!~*'()%C3%A9%F0%9F%98%80".into(),
+                ),
+                Value::String("https://a.test/a%20b?x=%C3%A9&y=#z".into()),
+                Value::String("A Z;/?:@&=+$,#é😀".into()),
+                Value::String("https://a.test/a b?x=é&y=%23z".into()),
+                uri_error(),
+                uri_error(),
+            ]
+            .into(),
+        ))
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

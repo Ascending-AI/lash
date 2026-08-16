@@ -480,7 +480,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         )
                         && matches!(
                             &self.stack[index],
-                            Value::Ref(id) if self.heap.is_javascript_exotic(*id)?
+                            Value::Ref(id) if self.heap.is_javascript_vm_object(*id)?
                         ) {
                         self.stack[index].clone()
                     } else {
