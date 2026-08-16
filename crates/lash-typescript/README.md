@@ -182,6 +182,11 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- Durable state is a value *tree*. A cycle is usable inside a cell —
+  `JSON.stringify` throws Node's catchable
+  `TypeError: Converting circular structure to JSON` — but a durable binding
+  that still holds one when the cell ends cannot be written down, and refuses
+  by name at the boundary. Hold a key or index instead of the parent object.
 - The value model is dense records with no prototype chain, so `__proto__`,
   `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`, and
   `__lookupSetter__` all reject as `TS_PROTOTYPE_MUTATION_UNSUPPORTED` — as a

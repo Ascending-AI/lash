@@ -801,3 +801,39 @@ fn pushing_past_the_memory_budget_is_a_clean_refusal() {
         "an unbounded push loop must refuse against the budget"
     );
 }
+
+/// A cycle is ECMA-shaped where ECMA has an opinion, and named where the
+/// runtime does.
+///
+/// `JSON.stringify` on a circular structure throws Node's catchable
+/// `TypeError`, in the guest, with Node's message — this row is oracle-exempt
+/// because the message is pinned here rather than regenerated: Node's text
+/// names the constructor and the closing property, which is host detail no
+/// oracle row should carry.
+///
+/// Where the runtime does have an opinion is at the cell boundary. Durable
+/// state is a value *tree*, so a durable binding still holding a cycle when the
+/// cell ends cannot be written down. That refusal used to be a bare internal
+/// error naming an object id; it now says what the constraint is and what to do
+/// about it.
+#[test]
+fn a_cycle_is_a_guest_type_error_in_json_and_a_named_refusal_at_the_boundary() {
+    let stringified = finished(
+        "function build(): string { const node: any = {}; node.self = node; try { return JSON.stringify(node); } catch (error: any) { return error.name + '|' + error.message; } } finish(build());",
+    );
+    let Value::String(rendered) = &stringified else {
+        panic!("expected a string, got {stringified:?}");
+    };
+    assert!(
+        rendered.starts_with("TypeError|Converting circular structure to JSON"),
+        "the guest must catch Node's circular-structure TypeError: {rendered}"
+    );
+
+    let error = execute("const node: any = {}; node.self = node; finish(1);")
+        .expect_err("a durable cycle cannot be persisted");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("contains a cycle") && rendered.contains("value trees"),
+        "the boundary refusal must state the constraint: {rendered}"
+    );
+}
