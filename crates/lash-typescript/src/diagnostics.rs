@@ -287,29 +287,93 @@ impl DiagnosticCode {
         })
     }
 
-    /// Whether this code refuses something the dialect does not allow, as
+    /// Whether this code refuses a construct the dialect does not support, as
     /// opposed to reporting a defect in the program.
     ///
-    /// The two need different words to a model. A refusal means no version of
+    /// The two need opposite words to a model. A refusal means no version of
     /// this approach will be accepted and the fix is to write the *other*
-    /// construct; a defect means the approach was fine and the program was
-    /// wrong. Telling a model its program is broken when the dialect refused
-    /// the construct sends it debugging something it cannot fix, and telling it
-    /// a construct is forbidden when it merely misspelled a name sends it
-    /// rewriting working code.
+    /// construct; a defect means the approach was fine and the code was not.
+    /// Telling a model its program is broken when the dialect refused the
+    /// construct sends it debugging something it cannot fix; telling it a
+    /// construct is forbidden when it merely miscounted arguments sends it
+    /// rewriting code that was already the right shape.
+    ///
+    /// This is deliberately *not* "does the code have an accepted idiom". The
+    /// two questions look alike and are not: several codes can name a better
+    /// form while still reporting an ordinary mistake. `TS_EXPRESSION_
+    /// UNSUPPORTED` covers thirty sites, nearly all of them program defects —
+    /// "rest parameters must be last", "const enum member needs an
+    /// initializer", "parseInt expects one or two argument(s)" — and its idiom
+    /// is the generic "rewrite with the constructs the prompt lists", which as
+    /// a *refusal* would tell a model to stop writing a construct that is
+    /// perfectly legal. `TS_METHOD_UNSUPPORTED` covers both "no such method"
+    /// and "wrong argument count"; `TS_AWAIT_REQUIRED` is a forgotten `await`.
+    /// All three keep their hints — a hint is useful on an `[ERROR]` too — and
+    /// none of them is a refusal.
     ///
     /// A misspelled identifier, an unterminated string, a `return` outside a
-    /// function, a use before its declaration: all of those are the program
-    /// being wrong, even though the dialect is what reported them. They are the
-    /// codes this returns `false` for.
+    /// function, a use before its declaration, a wrong argument count: all of
+    /// those are the program being wrong, even though the dialect is what
+    /// reported them.
     pub const fn is_dialect_restriction(self) -> bool {
-        // Refusing a construct and being able to name its replacement are the
-        // same fact, so this is the idiom table and nothing else. Keeping them
-        // as one answer is what guarantees the refusal wording stays honest:
-        // the `[POLICY]` feedback tells the model to "rewrite it in the form
-        // named above", and a restriction with no named form would make that a
-        // lie. `a_refusal_always_has_a_form_to_name` holds the pair together.
-        self.accepted_idiom().is_some()
+        matches!(
+            self,
+            // Constructs the dialect does not have. Writing one again in any
+            // form is refused again; the fix is the other construct.
+            Self::ClassUnsupported
+                | Self::GeneratorUnsupported
+                | Self::AsyncUnsupported
+                | Self::WithUnsupported
+                | Self::EvalUnsupported
+                | Self::FunctionConstructorUnsupported
+                | Self::LabelUnsupported
+                | Self::RegexFlagUnsupported
+                | Self::RegexIndicesFlagUnsupported
+                | Self::RegexUnicodeSetsFlagUnsupported
+                | Self::AccessorUnsupported
+                | Self::PrototypeMutationUnsupported
+                | Self::ThisUnsupported
+                | Self::NamespaceUnsupported
+                | Self::DecoratorUnsupported
+                | Self::DynamicImportUnsupported
+                | Self::JsxUnsupported
+                | Self::ImportExportUnsupported
+                | Self::UsingUnsupported
+                | Self::NewUnsupported
+                | Self::ForUnsupported
+                | Self::ForOfUnsupported
+                | Self::AwaitUnsupported
+                | Self::YieldUnsupported
+                | Self::TaggedTemplateUnsupported
+                | Self::SuperUnsupported
+                | Self::MetaPropertyUnsupported
+                | Self::BigIntUnsupported
+                | Self::PrivateNameUnsupported
+                | Self::SequenceUnsupported
+                | Self::InstanceOfUnsupported
+                | Self::DebuggerUnsupported
+                | Self::LoneSurrogateLiteralUnsupported
+                | Self::DeclareUnsupported
+                | Self::MutualRecursionUnsupported
+                | Self::MutableCaptureUnsupported
+                | Self::ProcessConfigFieldUnsupported
+                | Self::ProcessCaptureUnsupported
+                // Rules about size, placement, and shape. No single construct
+                // to name, but just as much a refusal: the runtime will not
+                // accept this program however it is debugged.
+                | Self::RegexIteratorPosition
+                | Self::RegexPatternTooLong
+                | Self::RegexNestingLimit
+                | Self::SourceNestingLimit
+                | Self::SourceTooLarge
+                | Self::ReservedIdentifier
+                | Self::ProcessDefinitionNotTopLevel
+                | Self::ProcessConfigLiteralRequired
+                | Self::ProcessNameLiteralRequired
+                | Self::ProcessSignalsLiteralRequired
+                | Self::ProcessRunLiteralRequired
+                | Self::ProcessTargetStaticRequired
+        )
     }
 
     /// The stable machine-readable diagnostic name.
@@ -638,35 +702,110 @@ mod tests {
 
     /// `[POLICY]` feedback tells the model to rewrite the cell "in the form
     /// named above". A restriction with no named form makes that instruction a
-    /// lie, and a lie in the repair loop costs a whole turn. The two answers are
-    /// therefore the same answer.
+    /// lie, and a lie in the repair loop costs a whole turn.
+    ///
+    /// One direction only. Every refusal must name a form; the converse is
+    /// false on purpose, because a code can offer a useful hint while still
+    /// reporting an ordinary mistake — see `is_dialect_restriction`.
     #[test]
     fn a_refusal_always_has_a_form_to_name() {
         for code in DiagnosticCode::ALL {
-            assert_eq!(
-                code.is_dialect_restriction(),
+            if code.is_dialect_restriction() {
+                assert!(
+                    code.accepted_idiom().is_some(),
+                    "{} refuses without naming a replacement",
+                    code.as_str()
+                );
+            }
+        }
+    }
+
+    /// The predicate must not drift back into "does this code have a hint".
+    ///
+    /// That equality is exactly where the defect lived: it swept in three
+    /// multi-purpose families whose hints are real but whose failures are
+    /// ordinary mistakes, and every one of their sites began telling the model
+    /// the runtime had refused a construct it is perfectly willing to run.
+    #[test]
+    fn a_hint_does_not_make_a_code_a_refusal() {
+        for code in [
+            DiagnosticCode::UnsupportedExpression,
+            DiagnosticCode::UnsupportedStatement,
+            DiagnosticCode::MethodUnsupported,
+            DiagnosticCode::AwaitRequired,
+        ] {
+            assert!(
                 code.accepted_idiom().is_some(),
-                "{} refuses without naming a replacement",
+                "{} is only interesting here because it does have a hint",
+                code.as_str()
+            );
+            assert!(
+                !code.is_dialect_restriction(),
+                "{} reports ordinary mistakes and must not read as a refusal",
                 code.as_str()
             );
         }
     }
 
-    /// The distinction is only useful if it actually separates the two families,
-    /// so both directions are checked: every construct refusal is a restriction,
-    /// and the codes that report a wrong program are not.
+    /// The distinction is only useful if it actually separates the two families.
+    ///
+    /// The first version of this test hand-picked twelve codes and missed the
+    /// ones that mattered: it never named `TS_EXPRESSION_UNSUPPORTED`,
+    /// `TS_METHOD_UNSUPPORTED`, or `TS_AWAIT_REQUIRED`, so the predicate could
+    /// misclassify thirty-odd sites and still pass. It now drives *sources*,
+    /// which cannot be hand-picked around: the program that provokes a
+    /// diagnostic is what decides which family it belongs to.
     #[test]
     fn a_wrong_program_is_not_a_dialect_restriction() {
-        for code in DiagnosticCode::ALL
-            .iter()
-            .filter(|code| code.as_str().ends_with("_UNSUPPORTED"))
-        {
+        // Real programs, each an ordinary mistake the dialect is perfectly
+        // willing to run once it is written correctly.
+        for (source, label) in [
+            (
+                "function f(...rest, last) {}",
+                "rest parameters must be last",
+            ),
+            (
+                "const enum E { a = 1 / 0 }",
+                "const enum member without a finite value",
+            ),
+            (
+                "enum E { a = \"x\".length, b }",
+                "enum member after a computed one",
+            ),
+            ("finish(parseInt());", "parseInt arity"),
+            ("finish([1].map());", "Array.map arity"),
+            (
+                "finish(JSON.stringify(1, null, 2, 3));",
+                "JSON.stringify arity",
+            ),
+            ("const x = 1; x = 2;", "assignment to a const"),
+            ("finish(taks);", "misspelled name"),
+        ] {
+            let error = crate::validate(source).expect_err(label);
             assert!(
-                code.is_dialect_restriction(),
-                "{} refuses a construct and must read as a refusal",
-                code.as_str()
+                !error.code.is_dialect_restriction(),
+                "{label}: {} reports a wrong program, not a forbidden construct",
+                error.code.as_str()
             );
         }
+
+        // And a genuinely refused construct still is one, so the block above
+        // cannot pass by declaring everything an ordinary mistake.
+        for (source, label) in [
+            ("class A {}", "classes"),
+            ("function* g() {}", "generators"),
+            ("label: while (true) { break; }", "labels"),
+            ("const r = /x/v;", "the unicode-sets flag"),
+            ("const n = 1n;", "bigint literals"),
+        ] {
+            let error = crate::validate(source).expect_err(label);
+            assert!(
+                error.code.is_dialect_restriction(),
+                "{label}: {} refuses a construct",
+                error.code.as_str()
+            );
+        }
+
         for code in [
             DiagnosticCode::SyntaxError,
             DiagnosticCode::UnknownBinding,
