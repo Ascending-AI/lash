@@ -564,12 +564,12 @@ fn sort_body(receiver: &str, callback: &str, lowerer: &mut Lowerer) -> LashExpr 
 fn callback_arity(method: &str, expected: &str) -> Diagnostic {
     // Arity, not availability: the generic "use a listed method" advice would
     // send the model looking for a different method than the correct one.
-    Diagnostic::with_repair(
+    Diagnostic::defect(
         DiagnosticCode::MethodUnsupported,
         format!("Array.{method} expects {expected}"),
-        format!("call `{method}` with {expected}"),
         None,
     )
+    .with_hint(format!("call `{method}` with {expected}"))
 }
 
 fn variable(name: &str) -> LashExpr {

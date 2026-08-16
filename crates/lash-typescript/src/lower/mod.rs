@@ -918,7 +918,7 @@ impl Lowerer {
             .take(function.params.len().saturating_sub(1))
             .any(|param| matches!(param, Pattern::Rest(_)))
         {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 "rest parameters must be last",
                 None,
@@ -1027,7 +1027,7 @@ impl Lowerer {
                 self.lower_conversion_function(name)
             }
             Expr::Ident(name) if name == "globalThis" && !self.has_binding(name) => {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
                     "Unsupported: bare globalThis. Use globalThis.identifier for durable session state.",
                     None,
@@ -1324,7 +1324,7 @@ impl Lowerer {
             TsAssignTarget::Member { object, property } => {
                 self.member_assign_target(object, property)
             }
-            TsAssignTarget::Pattern(_) => Err(Diagnostic::new(
+            TsAssignTarget::Pattern(_) => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 "destructuring targets are lowered as a pattern, not a scalar assignment",
                 None,
@@ -1359,7 +1359,7 @@ impl Lowerer {
                 });
                 Ok((root, steps))
             }
-            _ => Err(Diagnostic::new(
+            _ => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 "assignment target must start at a lexical binding",
                 None,
@@ -1373,7 +1373,7 @@ impl Lowerer {
         property: &MemberProperty,
     ) -> Result<LashExpr, Diagnostic> {
         if matches!(property, MemberProperty::Field(field) if field == "stack") {
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::refusal(
                 DiagnosticCode::MethodUnsupported,
                 "Unsupported: Error.stack is nondeterministic across engines. Inspect error.name and error.message instead.",
                 None,
@@ -1395,7 +1395,7 @@ impl Lowerer {
                     format!("globalThis.{field} is a reserved value identifier"),
                     None,
                 )),
-                MemberProperty::Index(_) => Err(Diagnostic::new(
+                MemberProperty::Index(_) => Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
                     "Unsupported: computed globalThis access. Use globalThis.identifier so session state remains statically named.",
                     None,
@@ -1428,7 +1428,7 @@ impl Lowerer {
             if let Some(value) = constant {
                 return Ok(LashExpr::Number(value));
             }
-            return Err(Diagnostic::new(
+            return Err(Diagnostic::refusal(
                 DiagnosticCode::MethodUnsupported,
                 format!("property `{owner}.{name}` is not in the TypeScript runtime surface"),
                 None,

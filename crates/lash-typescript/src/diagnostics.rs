@@ -287,93 +287,104 @@ impl DiagnosticCode {
         })
     }
 
-    /// Whether this code refuses a construct the dialect does not support, as
-    /// opposed to reporting a defect in the program.
+    /// What this code says about *whose* fault the failure is.
     ///
-    /// The two need opposite words to a model. A refusal means no version of
-    /// this approach will be accepted and the fix is to write the *other*
-    /// construct; a defect means the approach was fine and the code was not.
-    /// Telling a model its program is broken when the dialect refused the
-    /// construct sends it debugging something it cannot fix; telling it a
-    /// construct is forbidden when it merely miscounted arguments sends it
-    /// rewriting code that was already the right shape.
+    /// A refusal means no version of this approach will be accepted and the fix
+    /// is to write the other construct; a defect means the approach was fine
+    /// and the code was not. Telling a model its program is broken when the
+    /// runtime refused the construct sends it debugging something it cannot
+    /// fix; telling it a construct is forbidden when it merely miscounted
+    /// arguments sends it rewriting code that was already the right shape.
     ///
-    /// This is deliberately *not* "does the code have an accepted idiom". The
-    /// two questions look alike and are not: several codes can name a better
-    /// form while still reporting an ordinary mistake. `TS_EXPRESSION_
-    /// UNSUPPORTED` covers thirty sites, nearly all of them program defects —
-    /// "rest parameters must be last", "const enum member needs an
-    /// initializer", "parseInt expects one or two argument(s)" — and its idiom
-    /// is the generic "rewrite with the constructs the prompt lists", which as
-    /// a *refusal* would tell a model to stop writing a construct that is
-    /// perfectly legal. `TS_METHOD_UNSUPPORTED` covers both "no such method"
-    /// and "wrong argument count"; `TS_AWAIT_REQUIRED` is a forgotten `await`.
-    /// All three keep their hints — a hint is useful on an `[ERROR]` too — and
-    /// none of them is a refusal.
-    ///
-    /// A misspelled identifier, an unterminated string, a `return` outside a
-    /// function, a use before its declaration, a wrong argument count: all of
-    /// those are the program being wrong, even though the dialect is what
-    /// reported them.
-    pub const fn is_dialect_restriction(self) -> bool {
-        matches!(
-            self,
+    /// Three codes cannot answer for themselves. `TS_METHOD_UNSUPPORTED` covers
+    /// the whole determinism-refusal set — `Promise.then`, `Promise.race`,
+    /// `crypto.randomUUID`, `localeCompare`, local-time `Date` readers, and the
+    /// methods simply absent from the runtime surface — *and* ordinary arity
+    /// mistakes like `[].map()` with no callback. `TS_EXPRESSION_UNSUPPORTED`
+    /// and `TS_STATEMENT_UNSUPPORTED` are catch-alls that likewise carry both
+    /// the `globalThis` addressing rules and plain malformed code. For those,
+    /// only the emitting site knows, so [`Diagnostic::refusal`] and
+    /// [`Diagnostic::defect`] make it say — and `every_ambiguous_code_site_
+    /// classifies_itself` refuses to let a site stay silent.
+    pub const fn classification(self) -> CodeClassification {
+        match self {
             // Constructs the dialect does not have. Writing one again in any
             // form is refused again; the fix is the other construct.
             Self::ClassUnsupported
-                | Self::GeneratorUnsupported
-                | Self::AsyncUnsupported
-                | Self::WithUnsupported
-                | Self::EvalUnsupported
-                | Self::FunctionConstructorUnsupported
-                | Self::LabelUnsupported
-                | Self::RegexFlagUnsupported
-                | Self::RegexIndicesFlagUnsupported
-                | Self::RegexUnicodeSetsFlagUnsupported
-                | Self::AccessorUnsupported
-                | Self::PrototypeMutationUnsupported
-                | Self::ThisUnsupported
-                | Self::NamespaceUnsupported
-                | Self::DecoratorUnsupported
-                | Self::DynamicImportUnsupported
-                | Self::JsxUnsupported
-                | Self::ImportExportUnsupported
-                | Self::UsingUnsupported
-                | Self::NewUnsupported
-                | Self::ForUnsupported
-                | Self::ForOfUnsupported
-                | Self::AwaitUnsupported
-                | Self::YieldUnsupported
-                | Self::TaggedTemplateUnsupported
-                | Self::SuperUnsupported
-                | Self::MetaPropertyUnsupported
-                | Self::BigIntUnsupported
-                | Self::PrivateNameUnsupported
-                | Self::SequenceUnsupported
-                | Self::InstanceOfUnsupported
-                | Self::DebuggerUnsupported
-                | Self::LoneSurrogateLiteralUnsupported
-                | Self::DeclareUnsupported
-                | Self::MutualRecursionUnsupported
-                | Self::MutableCaptureUnsupported
-                | Self::ProcessConfigFieldUnsupported
-                | Self::ProcessCaptureUnsupported
-                // Rules about size, placement, and shape. No single construct
-                // to name, but just as much a refusal: the runtime will not
-                // accept this program however it is debugged.
-                | Self::RegexIteratorPosition
-                | Self::RegexPatternTooLong
-                | Self::RegexNestingLimit
-                | Self::SourceNestingLimit
-                | Self::SourceTooLarge
-                | Self::ReservedIdentifier
-                | Self::ProcessDefinitionNotTopLevel
-                | Self::ProcessConfigLiteralRequired
-                | Self::ProcessNameLiteralRequired
-                | Self::ProcessSignalsLiteralRequired
-                | Self::ProcessRunLiteralRequired
-                | Self::ProcessTargetStaticRequired
-        )
+            | Self::GeneratorUnsupported
+            | Self::AsyncUnsupported
+            | Self::WithUnsupported
+            | Self::EvalUnsupported
+            | Self::FunctionConstructorUnsupported
+            | Self::LabelUnsupported
+            | Self::RegexFlagUnsupported
+            | Self::RegexIndicesFlagUnsupported
+            | Self::RegexUnicodeSetsFlagUnsupported
+            | Self::AccessorUnsupported
+            | Self::PrototypeMutationUnsupported
+            | Self::ThisUnsupported
+            | Self::NamespaceUnsupported
+            | Self::DecoratorUnsupported
+            | Self::DynamicImportUnsupported
+            | Self::JsxUnsupported
+            | Self::ImportExportUnsupported
+            | Self::UsingUnsupported
+            | Self::NewUnsupported
+            | Self::ForUnsupported
+            | Self::ForOfUnsupported
+            | Self::AwaitUnsupported
+            | Self::YieldUnsupported
+            | Self::TaggedTemplateUnsupported
+            | Self::SuperUnsupported
+            | Self::MetaPropertyUnsupported
+            | Self::BigIntUnsupported
+            | Self::PrivateNameUnsupported
+            | Self::SequenceUnsupported
+            | Self::InstanceOfUnsupported
+            | Self::DebuggerUnsupported
+            | Self::LoneSurrogateLiteralUnsupported
+            | Self::DeclareUnsupported
+            | Self::MutualRecursionUnsupported
+            | Self::MutableCaptureUnsupported
+            | Self::ProcessConfigFieldUnsupported
+            | Self::ProcessCaptureUnsupported
+            // Rules about size, placement, and shape. No single construct to
+            // name, but just as much a refusal: the runtime will not accept
+            // this program however it is debugged.
+            | Self::RegexIteratorPosition
+            | Self::RegexPatternTooLong
+            | Self::RegexNestingLimit
+            | Self::SourceNestingLimit
+            | Self::SourceTooLarge
+            | Self::ReservedIdentifier
+            | Self::ProcessDefinitionNotTopLevel
+            | Self::ProcessConfigLiteralRequired
+            | Self::ProcessNameLiteralRequired
+            | Self::ProcessSignalsLiteralRequired
+            | Self::ProcessRunLiteralRequired
+            | Self::ProcessTargetStaticRequired => CodeClassification::AlwaysRefusal,
+
+            // Both families, decided per site.
+            Self::MethodUnsupported
+            | Self::UnsupportedExpression
+            | Self::UnsupportedStatement => CodeClassification::PerSite,
+
+            // The program is wrong: a typo, a malformed literal, a rule of
+            // ordinary JavaScript scoping, or a host resource failure.
+            Self::SyntaxError
+            | Self::RegexInvalid
+            | Self::ParseResourcesUnavailable
+            | Self::MissingInitializer
+            | Self::DuplicateBinding
+            | Self::TemporalDeadZone
+            | Self::UnknownBinding
+            | Self::AssignConst
+            | Self::AwaitRequired
+            | Self::ReturnOutsideFunction
+            | Self::LoopControlOutsideLoop
+            | Self::InvalidAst
+            | Self::LinkError => CodeClassification::AlwaysDefect,
+        }
     }
 
     /// The stable machine-readable diagnostic name.
@@ -449,6 +460,26 @@ impl DiagnosticCode {
     }
 }
 
+/// Whether a code answers the refusal-or-defect question by itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodeClassification {
+    /// Always the dialect refusing a construct.
+    AlwaysRefusal,
+    /// Always the program being wrong.
+    AlwaysDefect,
+    /// Both, depending on which site emitted it. The site must say.
+    PerSite,
+}
+
+/// Whose fault a rejection is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagnosticKind {
+    /// The dialect will not run this construct, however it is debugged.
+    Refusal,
+    /// The construct is allowed; this instance of it is wrong.
+    ProgramDefect,
+}
+
 /// Byte offsets in the submitted TypeScript source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceSpan {
@@ -463,6 +494,9 @@ pub struct Diagnostic {
     /// What the dialect refused. The refusal only.
     pub message: String,
     pub span: Option<SourceSpan>,
+    /// Whose fault this is. Read by the RLM feedback layer to choose between
+    /// "the runtime refused this" and "the defect is in the program".
+    pub kind: DiagnosticKind,
     /// What to write instead: the structured repair channel.
     ///
     /// A rejection a model cannot act on costs a whole turn. The dialect has
@@ -490,6 +524,58 @@ impl Diagnostic {
         message: impl Into<String>,
         span: Option<SourceSpan>,
     ) -> Self {
+        Self::classified(code, message, span, kind_from_code(code))
+    }
+
+    /// The dialect refusing a construct, from a site whose code cannot say so
+    /// on its own. See [`DiagnosticCode::classification`].
+    pub(crate) fn refusal(
+        code: DiagnosticCode,
+        message: impl Into<String>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        debug_assert!(
+            code.classification() != CodeClassification::AlwaysDefect,
+            "{} never refuses a construct",
+            code.as_str()
+        );
+        Self::classified(code, message, span, DiagnosticKind::Refusal)
+    }
+
+    /// The program being wrong, from a site whose code cannot say so on its
+    /// own. See [`DiagnosticCode::classification`].
+    pub(crate) fn defect(
+        code: DiagnosticCode,
+        message: impl Into<String>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        debug_assert!(
+            code.classification() != CodeClassification::AlwaysRefusal,
+            "{} always refuses a construct",
+            code.as_str()
+        );
+        Self::classified(code, message, span, DiagnosticKind::ProgramDefect)
+    }
+
+    /// Replaces the repair text, for a site whose rewrite is more specific than
+    /// anything the code-level idiom table can say.
+    pub(crate) fn with_hint(mut self, repair: impl Into<String>) -> Self {
+        self.suggestions = vec![repair.into()];
+        self
+    }
+
+    /// Whether the dialect refused the construct, as opposed to reporting a
+    /// defect in an allowed one.
+    pub fn is_dialect_refusal(&self) -> bool {
+        self.kind == DiagnosticKind::Refusal
+    }
+
+    fn classified(
+        code: DiagnosticCode,
+        message: impl Into<String>,
+        span: Option<SourceSpan>,
+        kind: DiagnosticKind,
+    ) -> Self {
         let message = message.into();
         let (message, suggestion) = split_inline_repair(message);
         let suggestions = suggestion
@@ -500,6 +586,7 @@ impl Diagnostic {
             code,
             message,
             span,
+            kind,
             suggestions,
         }
     }
@@ -520,7 +607,23 @@ impl Diagnostic {
             code,
             message: message.into(),
             span,
+            kind: kind_from_code(code),
             suggestions: vec![repair.into()],
+        }
+    }
+}
+
+/// The kind a code answers with on its own.
+///
+/// `PerSite` codes must not reach here — [`Diagnostic::refusal`] and
+/// [`Diagnostic::defect`] are their only constructors, and a source-walking
+/// test enforces it — so their arm is unreachable in practice rather than a
+/// silent default that would quietly file one family under the other.
+fn kind_from_code(code: DiagnosticCode) -> DiagnosticKind {
+    match code.classification() {
+        CodeClassification::AlwaysRefusal => DiagnosticKind::Refusal,
+        CodeClassification::AlwaysDefect | CodeClassification::PerSite => {
+            DiagnosticKind::ProgramDefect
         }
     }
 }
@@ -635,7 +738,84 @@ fn line_column_snippet(source: &str, offset: usize) -> (usize, usize, usize, Str
 
 #[cfg(test)]
 mod tests {
-    use super::DiagnosticCode;
+    use super::{CodeClassification, DiagnosticCode};
+
+    /// Every module that constructs diagnostics, read as source.
+    pub(super) fn emitting_sources() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("adapter/mod.rs", include_str!("adapter/mod.rs")),
+            ("adapter/enums.rs", include_str!("adapter/enums.rs")),
+            ("adapter/nesting.rs", include_str!("adapter/nesting.rs")),
+            (
+                "adapter/prototype_chain.rs",
+                include_str!("adapter/prototype_chain.rs"),
+            ),
+            ("lower/mod.rs", include_str!("lower/mod.rs")),
+            ("lower/calls.rs", include_str!("lower/calls.rs")),
+            ("lower/constructs.rs", include_str!("lower/constructs.rs")),
+            ("lower/loops.rs", include_str!("lower/loops.rs")),
+            ("lower/regex.rs", include_str!("lower/regex.rs")),
+            ("lower/array_map.rs", include_str!("lower/array_map.rs")),
+            (
+                "lower/array_callbacks.rs",
+                include_str!("lower/array_callbacks.rs"),
+            ),
+            ("lower/await_expr.rs", include_str!("lower/await_expr.rs")),
+            (
+                "lower/json_replacer.rs",
+                include_str!("lower/json_replacer.rs"),
+            ),
+            ("lower/stdlib.rs", include_str!("lower/stdlib.rs")),
+            ("lower/graph.rs", include_str!("lower/graph.rs")),
+            (
+                "adapter/rejections.rs",
+                include_str!("adapter/rejections.rs"),
+            ),
+            ("regex.rs", include_str!("regex.rs")),
+            ("signatures.rs", include_str!("signatures.rs")),
+            ("diagnostics.rs", include_str!("diagnostics.rs")),
+            ("lib.rs", include_str!("lib.rs")),
+        ]
+    }
+
+    /// The walker below reads a hand-written file list, and a hand-written list
+    /// beside a growing crate is the same drift shape `all_codes_are_listed`
+    /// exists to catch. A module the crate gains and this list lacks would make
+    /// the totality check quietly partial — the exact failure mode that let two
+    /// earlier versions of the classification ship. So the list is checked
+    /// against the crate's own `mod` declarations.
+    #[test]
+    fn the_source_walker_reads_every_module() {
+        let listed = emitting_sources()
+            .into_iter()
+            .map(|(path, _)| path.to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let mut missing = Vec::new();
+        for (parent, source) in [
+            ("", include_str!("lib.rs")),
+            ("adapter/", include_str!("adapter/mod.rs")),
+            ("lower/", include_str!("lower/mod.rs")),
+        ] {
+            for line in source.lines().map(str::trim) {
+                let Some(rest) = line.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')) else {
+                    continue;
+                };
+                let candidates = [
+                    format!("{parent}{rest}.rs"),
+                    format!("{rest}/mod.rs"),
+                    format!("{parent}{rest}/mod.rs"),
+                ];
+                if !candidates.iter().any(|path| listed.contains(path)) {
+                    missing.push(candidates[0].clone());
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "these modules can emit diagnostics the walker never reads: {missing:?}"
+        );
+    }
 
     /// `ALL` is only useful if it is complete, and a hand-maintained list beside
     /// the enum is exactly the drift shape that put a nonexistent code in the
@@ -701,16 +881,12 @@ mod tests {
     }
 
     /// `[POLICY]` feedback tells the model to rewrite the cell "in the form
-    /// named above". A restriction with no named form makes that instruction a
-    /// lie, and a lie in the repair loop costs a whole turn.
-    ///
-    /// One direction only. Every refusal must name a form; the converse is
-    /// false on purpose, because a code can offer a useful hint while still
-    /// reporting an ordinary mistake — see `is_dialect_restriction`.
+    /// named above". A refusal with no named form makes that instruction a lie,
+    /// and a lie in the repair loop costs a whole turn.
     #[test]
     fn a_refusal_always_has_a_form_to_name() {
         for code in DiagnosticCode::ALL {
-            if code.is_dialect_restriction() {
+            if code.classification() == CodeClassification::AlwaysRefusal {
                 assert!(
                     code.accepted_idiom().is_some(),
                     "{} refuses without naming a replacement",
@@ -720,77 +896,197 @@ mod tests {
         }
     }
 
-    /// The predicate must not drift back into "does this code have a hint".
+    /// The three per-site codes must never be answered by a table.
     ///
-    /// That equality is exactly where the defect lived: it swept in three
-    /// multi-purpose families whose hints are real but whose failures are
-    /// ordinary mistakes, and every one of their sites began telling the model
-    /// the runtime had refused a construct it is perfectly willing to run.
+    /// This is the check that would have caught both earlier attempts. Deriving
+    /// the answer from `accepted_idiom().is_some()` filed every arity mistake
+    /// under "refused"; excluding the codes wholesale filed the entire
+    /// determinism-refusal set — `Promise.then`, `crypto.randomUUID`,
+    /// `localeCompare`, the local-time `Date` readers — under "your program is
+    /// wrong", which sends a model debugging something the runtime will never
+    /// run. Neither a default nor an exclusion is available now: the site says,
+    /// or the crate does not compile past this test.
+    ///
+    /// Read from the crate's own sources rather than exercised through inputs,
+    /// because the property is about *every* site, including ones no fixture
+    /// reaches.
     #[test]
-    fn a_hint_does_not_make_a_code_a_refusal() {
-        for code in [
-            DiagnosticCode::UnsupportedExpression,
-            DiagnosticCode::UnsupportedStatement,
-            DiagnosticCode::MethodUnsupported,
-            DiagnosticCode::AwaitRequired,
-        ] {
-            assert!(
-                code.accepted_idiom().is_some(),
-                "{} is only interesting here because it does have a hint",
-                code.as_str()
-            );
-            assert!(
-                !code.is_dialect_restriction(),
-                "{} reports ordinary mistakes and must not read as a refusal",
-                code.as_str()
-            );
+    fn every_ambiguous_code_site_classifies_itself() {
+        let per_site = DiagnosticCode::ALL
+            .iter()
+            .filter(|code| code.classification() == CodeClassification::PerSite)
+            .map(|code| format!("{code:?}"))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            per_site.len(),
+            3,
+            "the walker below is written for exactly these: {per_site:?}"
+        );
+
+        // The constructors and helpers that state a family. Anything else
+        // building a per-site code is a site that never chose.
+        const CLASSIFYING: &[&str] = &[
+            "Diagnostic::refusal",
+            "Diagnostic::defect",
+            "reject_refusal",
+            "reject_defect",
+        ];
+
+        let mut unclassified = Vec::new();
+        let mut classified = 0usize;
+        for (path, source) in emitting_sources() {
+            // Production code only. A test fixture naming a code emits nothing
+            // to a model, and this file's own fixtures would otherwise trip it.
+            let source = source.split("#[cfg(test)]").next().unwrap_or_default();
+            for (offset, _) in source.match_indices("DiagnosticCode::") {
+                let name = source[offset + "DiagnosticCode::".len()..]
+                    .split(|ch: char| !ch.is_alphanumeric())
+                    .next()
+                    .unwrap_or_default();
+                if !per_site.contains(name) {
+                    continue;
+                }
+                // The callee whose argument list this code opens: step back over
+                // whitespace to the `(`, then read the identifier before it.
+                // Reading the nearest preceding `Diagnostic::` instead would
+                // walk past helper calls and land on an unrelated constructor.
+                let head = source[..offset].trim_end();
+                let Some(head) = head.strip_suffix('(') else {
+                    unclassified.push(format!(
+                        "{path}: `{name}` is not the first argument of a call"
+                    ));
+                    continue;
+                };
+                let callee = head
+                    .rsplit(|ch: char| !(ch.is_alphanumeric() || ch == '_' || ch == ':'))
+                    .next()
+                    .unwrap_or_default();
+                if CLASSIFYING.contains(&callee) {
+                    classified += 1;
+                } else {
+                    unclassified.push(format!("{path}: `{name}` built by `{callee}`"));
+                }
+            }
         }
+
+        assert!(
+            unclassified.is_empty(),
+            "a per-site code must say which family it is: {unclassified:#?}"
+        );
+        assert!(
+            classified > 40,
+            "the walker found only {classified} sites, so it is not reading the crate"
+        );
     }
 
-    /// The distinction is only useful if it actually separates the two families.
+    /// Both families of `TS_METHOD_UNSUPPORTED`, through real programs.
     ///
-    /// The first version of this test hand-picked twelve codes and missed the
-    /// ones that mattered: it never named `TS_EXPRESSION_UNSUPPORTED`,
-    /// `TS_METHOD_UNSUPPORTED`, or `TS_AWAIT_REQUIRED`, so the predicate could
-    /// misclassify thirty-odd sites and still pass. It now drives *sources*,
-    /// which cannot be hand-picked around: the program that provokes a
-    /// diagnostic is what decides which family it belongs to.
+    /// The determinism refusals are the half an exclusion silently broke: the
+    /// runtime will never run `Promise.then` or `localeCompare` however they are
+    /// written, and telling a model the defect is in its program sends it
+    /// debugging instead of rewriting.
     #[test]
-    fn a_wrong_program_is_not_a_dialect_restriction() {
-        // Real programs, each an ordinary mistake the dialect is perfectly
-        // willing to run once it is written correctly.
+    fn one_code_carries_both_families() {
         for (source, label) in [
             (
-                "function f(...rest, last) {}",
-                "rest parameters must be last",
+                "finish(Promise.resolve(1).then((v) => v));",
+                "Promise chaining",
             ),
+            ("finish(Promise.race([]));", "Promise.race"),
+            ("finish('a'.localeCompare('b'));", "localeCompare"),
+            ("finish((1).toLocaleString());", "toLocaleString"),
+            ("finish('e'.normalize());", "String.normalize"),
+            ("finish(crypto.randomUUID());", "crypto.randomUUID"),
+            ("finish(structuredClone({}));", "structuredClone"),
+            ("finish(new Date(0).getHours());", "local-time Date reader"),
+            ("finish(btoa('x'));", "base64 globals"),
             (
-                "const enum E { a = 1 / 0 }",
-                "const enum member without a finite value",
+                "finish(JSON.parse('{}', (k, v) => v));",
+                "JSON.parse reviver",
             ),
-            (
-                "enum E { a = \"x\".length, b }",
-                "enum member after a computed one",
-            ),
-            ("finish(parseInt());", "parseInt arity"),
+        ] {
+            let error = crate::validate(source).expect_err(label);
+            assert!(
+                error.is_dialect_refusal(),
+                "{label}: the runtime will never run this, so it must read as a refusal ({})",
+                error.code.as_str()
+            );
+            assert!(
+                !error.suggestions.is_empty(),
+                "{label}: a refusal owes the reader a replacement"
+            );
+        }
+
+        for (source, label) in [
             ("finish([1].map());", "Array.map arity"),
             (
                 "finish(JSON.stringify(1, null, 2, 3));",
                 "JSON.stringify arity",
             ),
-            ("const x = 1; x = 2;", "assignment to a const"),
-            ("finish(taks);", "misspelled name"),
+            ("finish(Array.from());", "Array.from arity"),
+            ("finish('a'.replace());", "regex-method arity"),
         ] {
             let error = crate::validate(source).expect_err(label);
             assert!(
-                !error.code.is_dialect_restriction(),
-                "{label}: {} reports a wrong program, not a forbidden construct",
+                !error.is_dialect_refusal(),
+                "{label}: the method exists and the call is wrong ({})",
+                error.code.as_str()
+            );
+        }
+    }
+
+    /// The catch-all expression code carries both families too, and its
+    /// `globalThis` half is the one an exclusion breaks.
+    #[test]
+    fn the_expression_catch_all_carries_both_families() {
+        for (source, label) in [
+            ("finish(globalThis);", "bare globalThis"),
+            (
+                "globalThis['x'] = 1; finish(1);",
+                "computed globalThis access",
+            ),
+        ] {
+            let error = crate::validate(source).expect_err(label);
+            assert!(
+                error.is_dialect_refusal(),
+                "{label}: a globalThis addressing rule is a refusal ({})",
                 error.code.as_str()
             );
         }
 
-        // And a genuinely refused construct still is one, so the block above
-        // cannot pass by declaring everything an ordinary mistake.
+        for (source, label) in [
+            ("finish(parseInt());", "parseInt arity"),
+            ("const enum E { a = 1 / 0 }", "const enum finite value"),
+            (
+                "function f(...rest, last) {}",
+                "rest parameters must be last",
+            ),
+        ] {
+            let error = crate::validate(source).expect_err(label);
+            assert!(
+                !error.is_dialect_refusal(),
+                "{label}: ordinary mistake ({})",
+                error.code.as_str()
+            );
+        }
+    }
+
+    /// Codes that answer for themselves still answer correctly end to end.
+    #[test]
+    fn a_wrong_program_is_not_a_dialect_refusal() {
+        for (source, label) in [
+            ("const x = 1; x = 2;", "assignment to a const"),
+            ("finish(taks);", "misspelled name"),
+            ("const y: int = ;", "syntax error"),
+        ] {
+            let error = crate::validate(source).expect_err(label);
+            assert!(
+                !error.is_dialect_refusal(),
+                "{label}: {} reports a wrong program",
+                error.code.as_str()
+            );
+        }
+
         for (source, label) in [
             ("class A {}", "classes"),
             ("function* g() {}", "generators"),
@@ -800,30 +1096,9 @@ mod tests {
         ] {
             let error = crate::validate(source).expect_err(label);
             assert!(
-                error.code.is_dialect_restriction(),
+                error.is_dialect_refusal(),
                 "{label}: {} refuses a construct",
                 error.code.as_str()
-            );
-        }
-
-        for code in [
-            DiagnosticCode::SyntaxError,
-            DiagnosticCode::UnknownBinding,
-            DiagnosticCode::DuplicateBinding,
-            DiagnosticCode::TemporalDeadZone,
-            DiagnosticCode::AssignConst,
-            DiagnosticCode::MissingInitializer,
-            DiagnosticCode::ReturnOutsideFunction,
-            DiagnosticCode::LoopControlOutsideLoop,
-            DiagnosticCode::RegexInvalid,
-            DiagnosticCode::LinkError,
-            DiagnosticCode::InvalidAst,
-            DiagnosticCode::ParseResourcesUnavailable,
-        ] {
-            assert!(
-                !code.is_dialect_restriction(),
-                "{} reports a wrong program, not a forbidden construct",
-                code.as_str()
             );
         }
     }

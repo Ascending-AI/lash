@@ -503,7 +503,7 @@ impl Lowerer {
             Pattern::Rest(target) => self.lower_pattern(target, value, mode),
             Pattern::Member { object, property } => {
                 if matches!(mode, PatternMode::Initialize) {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::refusal(
                         DiagnosticCode::UnsupportedExpression,
                         "member targets are not valid binding patterns",
                         None,
@@ -616,7 +616,7 @@ impl Lowerer {
             TsAssignTarget::Member { object, property } => {
                 if let Some(global) = global_this_member_name(object, property) {
                     if self.current_function() != 0 {
-                        return Err(Diagnostic::new(
+                        return Err(Diagnostic::refusal(
                             DiagnosticCode::UnsupportedExpression,
                             "Unsupported: assigning a direct globalThis property inside a function. Pass a session-state object into the function and mutate one of its nested fields.",
                             None,
@@ -661,7 +661,7 @@ impl Lowerer {
                     },
                 ))
             }
-            TsAssignTarget::Pattern(_) => Err(Diagnostic::new(
+            TsAssignTarget::Pattern(_) => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 "a destructuring pattern is not a scalar reference",
                 None,
@@ -712,7 +712,7 @@ impl Lowerer {
         }
         if let TsAssignTarget::Pattern(pattern) = target {
             if !matches!(op, AssignOp::Assign) {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
                     "destructuring targets only support plain assignment",
                     None,
@@ -930,7 +930,7 @@ impl Lowerer {
             if matches!(right, Expr::Ident(name) if name == "globalThis" && !self.has_binding(name))
             {
                 let Expr::String(name) = left else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::refusal(
                         DiagnosticCode::UnsupportedExpression,
                         "globalThis presence checks require a string literal key",
                         None,

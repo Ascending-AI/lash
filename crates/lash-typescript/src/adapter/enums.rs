@@ -88,7 +88,7 @@ impl Adapter {
                 (constant, value?)
             } else {
                 let value = next_numeric.ok_or_else(|| {
-                    Diagnostic::new(
+                    Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         format!(
                             "enum member `{name}` needs an initializer after a computed member"
@@ -99,7 +99,7 @@ impl Adapter {
                 (Some(ConstEnumValue::Number(value)), Expr::Number(value))
             };
             if declaration.is_const && constant.is_none() {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::defect(
                     DiagnosticCode::UnsupportedExpression,
                     format!("const enum member `{name}` must have a constant initializer"),
                     Some(source_span(member.span)),
@@ -108,7 +108,7 @@ impl Adapter {
             if declaration.is_const
                 && matches!(constant, Some(ConstEnumValue::Number(value)) if !value.is_finite())
             {
-                return Err(Diagnostic::new(
+                return Err(Diagnostic::defect(
                     DiagnosticCode::UnsupportedExpression,
                     format!("const enum member `{name}` must have a finite value"),
                     Some(source_span(member.span)),

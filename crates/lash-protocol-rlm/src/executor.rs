@@ -686,11 +686,13 @@ async fn execute_code_inner(
 /// Whether a TypeScript rejection refuses a construct or reports a wrong
 /// program.
 ///
-/// The dialect owns this distinction, so it is asked rather than guessed.
+/// Asked of the diagnostic, not of its code. Three codes carry both families —
+/// `TS_METHOD_UNSUPPORTED` covers `Promise.then` and `[].map()` alike — so only
+/// the site that emitted it knows, and it records the answer at construction.
 fn typescript_feedback_kind(
     error: &lash_typescript::Diagnostic,
 ) -> crate::feedback::RlmFeedbackKind {
-    if error.code.is_dialect_restriction() {
+    if error.is_dialect_refusal() {
         crate::feedback::RlmFeedbackKind::Policy
     } else {
         crate::feedback::RlmFeedbackKind::Error
@@ -976,6 +978,34 @@ mod tests {
         assert!(
             !forbidden.suggestions.is_empty(),
             "a Policy classification promises a named form: {forbidden:?}"
+        );
+
+        // One code, both families. `TS_METHOD_UNSUPPORTED` is emitted both for
+        // the determinism refusals — which the runtime will never run, however
+        // the model rewrites them — and for ordinary arity mistakes. Reading
+        // the code alone gets one of the two wrong whichever way it is read.
+        let nondeterministic = lash_typescript::parse_with_globals(
+            "finish('a'.localeCompare('b'));",
+            &BTreeSet::new(),
+        )
+        .expect_err("locale ordering is refused");
+        let miscounted =
+            lash_typescript::parse_with_globals("finish([1].map());", &BTreeSet::new())
+                .expect_err("map needs a callback");
+        assert_eq!(
+            nondeterministic.code.as_str(),
+            miscounted.code.as_str(),
+            "the premise of this check is that one code carries both"
+        );
+        assert_eq!(
+            typescript_feedback_kind(&nondeterministic),
+            crate::feedback::RlmFeedbackKind::Policy,
+            "the runtime will never run this: {nondeterministic}"
+        );
+        assert_eq!(
+            typescript_feedback_kind(&miscounted),
+            crate::feedback::RlmFeedbackKind::Error,
+            "the method exists and the call is wrong: {miscounted}"
         );
     }
 

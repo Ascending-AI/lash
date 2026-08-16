@@ -34,7 +34,7 @@ impl Lowerer {
                     unreachable!()
                 };
                 let [CallArg::Value(value)] = args.as_slice() else {
-                    return Err(Diagnostic::new(
+                    return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
                         format!("Promise.{method} expects one iterable"),
                         None,

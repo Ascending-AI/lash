@@ -51,7 +51,9 @@ pub fn accepted_instance_methods() -> &'static [&'static str] {
     lower::accepted_instance_methods()
 }
 
-pub use diagnostics::{Diagnostic, DiagnosticCode, SourceSpan, format_diagnostic};
+pub use diagnostics::{
+    CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan, format_diagnostic,
+};
 pub use signatures::{render_stdlib_contract, render_tool_signature, stdlib_name_count};
 
 /// Parses and lowers a TypeScript dialect program into the VM's shared AST.
