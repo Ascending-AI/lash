@@ -322,8 +322,12 @@ visibility during redrive.
 The chat composer can upload one PNG (up to 1 MiB) through
 `POST /api/attachments`, then includes the returned content-addressed id as
 `attachment_id` in `POST /api/turn`. The Restate workflow resolves the durable file-store
-blob and supplies it through Lash's `TurnInput::with_image_ref` contract. The same bytes
-remain available at `GET /api/attachments/{attachment_id}` across a workbench restart.
+blob and supplies it as a stored MIME-tagged `AttachmentSource` through Lash's generic turn
+contract. The Workbench's PNG-only check is a host-surface policy: Lash's provider transports
+enforce their own image/file allowlists from `crates/lash-core/src/llm/transport.rs`, and an
+unsupported MIME/source combination returns the typed `unsupported_attachment_capability`
+refusal before wire serialization. The same bytes remain available at
+`GET /api/attachments/{attachment_id}` across a workbench restart.
 That retrieval route is deliberately not session-gated so reloads and retired sessions still render: the unguessable SHA-256 content address is an unexpiring bearer capability with no session data in its URL, blobs outlive sessions pending ADR 0024 reclamation, and hosts MUST gate the route if their ids are not content addresses or ids can reach viewers who may not read the blob.
 `GET /api/state` includes the canonical `session.usage_report()` projection; the left rail
 renders its total plus input/output counters. Run the model-free SQLite/Postgres persistence

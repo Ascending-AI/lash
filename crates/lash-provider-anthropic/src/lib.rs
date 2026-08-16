@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod attachment_tests;
 mod config;
 mod policy;
 mod provider;
@@ -691,30 +693,6 @@ mod tests {
             err.message,
             "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`"
         );
-    }
-
-    #[test]
-    fn unsupported_image_mime_is_rejected_at_request_boundary() {
-        let provider = AnthropicProvider::new("key");
-        let mut req = request(vec![LlmMessage::new(
-            LlmRole::User,
-            vec![LlmContentBlock::Attachment { attachment_idx: 0 }],
-        )]);
-        req.attachments = vec![AttachmentSource::inline(
-            lash_core::MediaType::parse("image/bmp").unwrap(),
-            vec![0x42, 0x4D],
-        )];
-
-        let err = provider
-            .build_request_body(&req)
-            .expect_err("bmp should be rejected before wire");
-
-        assert_eq!(
-            err.code.as_deref(),
-            Some("unsupported_attachment_capability")
-        );
-        assert!(err.message.contains("Anthropic"));
-        assert!(err.message.contains("image/bmp"));
     }
 
     #[test]

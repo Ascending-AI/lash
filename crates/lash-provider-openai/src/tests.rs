@@ -457,6 +457,7 @@ fn chat_unsupported_image_mime_is_rejected_at_request_boundary() {
     let err = provider
         .build_chat_request_body(&req, false)
         .expect_err("bmp should be rejected before wire");
+    assert_eq!(err.kind, ProviderFailureKind::Validation);
     assert_eq!(
         err.code.as_deref(),
         Some("unsupported_attachment_capability")
@@ -517,6 +518,7 @@ fn responses_unsupported_image_mime_is_rejected_at_request_boundary() {
         .build_responses_request_body(&req, false)
         .expect_err("bmp should be rejected before wire");
 
+    assert_eq!(err.kind, ProviderFailureKind::Validation);
     assert_eq!(
         err.code.as_deref(),
         Some("unsupported_attachment_capability")
