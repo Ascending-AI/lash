@@ -762,13 +762,25 @@ impl Lowerer {
             let receiver_is_module_authority = module_path(object)
                 .and_then(|path| path.first().cloned())
                 .is_some_and(|root| !self.has_binding(&root));
-            if matches!(object.as_ref(), Expr::Ident(owner) if is_known_runtime_global(owner) && !self.has_binding(owner))
+            let ecma_owner = match object.as_ref() {
+                Expr::Ident(owner)
+                    if is_ecma_global_namespace(owner) && !self.has_binding(owner) =>
+                {
+                    Some(owner.as_str())
+                }
+                _ => None,
+            };
+            if ecma_owner.is_some()
                 || has_literal_stdlib_receiver(object)
                 || (!receiver_is_module_authority && !is_instance_stdlib_method(method))
             {
+                let name = match ecma_owner {
+                    Some(owner) => format!("{owner}.{method}"),
+                    None => method.to_string(),
+                };
                 return Err(Diagnostic::new(
                     DiagnosticCode::MethodUnsupported,
-                    format!("method `{method}` is not in the TypeScript runtime surface"),
+                    format!("method `{name}` is not in the TypeScript runtime surface"),
                     None,
                 ));
             }

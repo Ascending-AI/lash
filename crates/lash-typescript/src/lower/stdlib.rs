@@ -44,6 +44,61 @@ pub(super) fn is_known_runtime_global(name: &str) -> bool {
     )
 }
 
+/// Every ECMA global namespace an author could reasonably call a static method
+/// on, whether or not the dialect implements it.
+///
+/// A tool module is addressed by an explicit path root, and none of these names
+/// is one. Without this list a call like `Error.isError(x)` fell through to the
+/// tool-call branch and reported `TS_AWAIT_REQUIRED` — an instruction to add
+/// `await` to a method that does not exist, which sends the reader to fix the
+/// one thing that is not wrong. The census names `TS_METHOD_UNSUPPORTED` for
+/// exactly these rows, and the census probes now hold that claim to the code.
+pub(super) fn is_ecma_global_namespace(name: &str) -> bool {
+    is_known_runtime_global(name)
+        || matches!(
+            name,
+            "Error"
+                | "AggregateError"
+                | "EvalError"
+                | "RangeError"
+                | "ReferenceError"
+                | "SyntaxError"
+                | "TypeError"
+                | "URIError"
+                | "Set"
+                | "WeakMap"
+                | "WeakSet"
+                | "WeakRef"
+                | "FinalizationRegistry"
+                | "Symbol"
+                | "Reflect"
+                | "Proxy"
+                | "BigInt"
+                | "Boolean"
+                | "Function"
+                | "Iterator"
+                | "AsyncFunction"
+                | "Temporal"
+                | "Intl"
+                | "Atomics"
+                | "ArrayBuffer"
+                | "SharedArrayBuffer"
+                | "DataView"
+                | "Int8Array"
+                | "Uint8Array"
+                | "Uint8ClampedArray"
+                | "Int16Array"
+                | "Uint16Array"
+                | "Int32Array"
+                | "Uint32Array"
+                | "Float16Array"
+                | "Float32Array"
+                | "Float64Array"
+                | "BigInt64Array"
+                | "BigUint64Array"
+        )
+}
+
 pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
     crate::signatures::STATIC_STDLIB_SIGNATURES
         .iter()

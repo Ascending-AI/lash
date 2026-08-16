@@ -362,3 +362,35 @@ rejection_test!(
     "const o: any = {}; finish(o.__lookupGetter__('x'));",
     Code::PrototypeMutationUnsupported
 );
+
+// An unknown static on an ECMA global is a missing method, not a tool call.
+// These reported `TS_AWAIT_REQUIRED` — an instruction to add `await` to a
+// method that does not exist — because the receiver was not on the list of
+// names that can never be a tool module. The diagnostic now names the owner
+// too, so `isError` and `fromBase64` are attributed to `Error` and
+// `Uint8Array` rather than floating free.
+rejection_test!(
+    rejects_unknown_error_static,
+    "finish(Error.isError(new Error('x')));",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_typed_array_static,
+    "finish(Uint8Array.fromBase64('AAA='));",
+    Code::MethodUnsupported
+);
+rejection_test!(
+    rejects_unknown_reflect_static,
+    "finish(Reflect.ownKeys({}));",
+    Code::MethodUnsupported
+);
+
+#[test]
+fn an_unknown_ecma_static_names_its_owner() {
+    let error = lash_typescript::validate("finish(Error.isError(new Error('x')));")
+        .expect_err("an unknown static must reject");
+    assert!(
+        error.to_string().contains("`Error.isError`"),
+        "the diagnostic must name the owner: {error}"
+    );
+}

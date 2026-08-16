@@ -113,7 +113,7 @@ function compareOrWrite(path, contents) {
 compareOrWrite(join(root, "inventory.tsv"), inventory);
 if (mode === "inventory") process.exit(0);
 
-const censusRows = rows(join(root, "census.tsv"), 4);
+const censusRows = rows(join(root, "census.tsv"), 5);
 const census = new Map(censusRows.map(([kind, name, status, reason]) => [`${kind}:${name}`, { status, reason }]));
 const inventoryKeys = new Set(inventory.trimEnd().split("\n").map((line) => line.replace("\t", ":")));
 if (census.size !== censusRows.length) throw new Error("census.tsv has duplicate entries");

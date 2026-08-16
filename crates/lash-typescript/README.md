@@ -167,7 +167,11 @@ version, while Test262 pins agreement with ECMA-262.
 
 The inventory/census pair is the exhaustive policy index: every upstream
 feature tag and top-level directory is accepted, rejected by a real `TS_*`
-code, or skipped by an explicit ticket/deviation ruling. The path-level skip
+code, or skipped by an explicit ticket/deviation ruling. A rejected row also
+carries a **probe** — a source that must reject with exactly the diagnostic the
+row names — or an explicit `probe-exempt:` reason. Naming a diagnostic is a
+claim about the code, and until the probes existed the claim and the code were
+connected by nothing. The path-level skip
 register accounts for every non-passing upstream test. Counts are pinned by
 area, and executable skips are negative ratchets: a new failure, a changed
 rejection, or an unexpectedly compiling skip fails CI. Tests use no network or

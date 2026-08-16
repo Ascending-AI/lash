@@ -94,7 +94,7 @@ fn inventory_census_and_skip_register_are_exhaustive() {
         .into_iter()
         .map(|fields| (fields[0].clone(), fields[1].clone()))
         .collect::<BTreeSet<_>>();
-    let census_rows = data_lines("census.tsv", 4);
+    let census_rows = data_lines("census.tsv", 5);
     let census = census_rows
         .iter()
         .map(|fields| (fields[0].clone(), fields[1].clone()))
@@ -125,6 +125,19 @@ fn inventory_census_and_skip_register_are_exhaustive() {
                 fields[3]
             ),
             status => panic!("unknown census status `{status}`"),
+        }
+        if fields[2] == "rejected" {
+            assert_ne!(
+                fields[4], "-",
+                "rejected census row {}:{} needs a probe or a probe-exempt reason",
+                fields[0], fields[1]
+            );
+        } else {
+            assert_eq!(
+                fields[4], "-",
+                "only rejected census rows carry a probe: {}:{}",
+                fields[0], fields[1]
+            );
         }
     }
 
@@ -196,7 +209,7 @@ fn inventory_census_and_skip_register_are_exhaustive() {
 }
 
 fn load_census() -> BTreeMap<(String, String), (String, String)> {
-    data_lines("census.tsv", 4)
+    data_lines("census.tsv", 5)
         .into_iter()
         .map(|fields| {
             (
@@ -549,4 +562,59 @@ fn typescript_type_syntax_status_is_pinned() {
         let error = lash_typescript::compile(source).expect_err("construct stays rejected");
         assert_eq!(error.code, expected, "source: {source}");
     }
+}
+
+/// Every rejected census row's named diagnostic is the one that actually fires.
+///
+/// The census is a claim about what this dialect does with each Test262
+/// feature, and until now the claim and the code were only connected by whoever
+/// wrote the row. They had drifted apart in both directions: `__proto__` was
+/// listed as `TS_PROTOTYPE_MUTATION_UNSUPPORTED` while it compiled and ran;
+/// `Error.isError` and `Uint8Array.fromBase64` were listed as
+/// `TS_METHOD_UNSUPPORTED` while they reported `TS_AWAIT_REQUIRED`, telling the
+/// reader to `await` a method that does not exist; `async-iteration`,
+/// `await-dictionary`, and `import.meta` each named a diagnostic no code path
+/// produces; and `well-formed-json-stringify` named a method rejection for a
+/// feature the value model refuses one level down, at the lone surrogate.
+///
+/// So each rejected row now carries a source that must reject with exactly the
+/// diagnostic the row names. A row whose feature has no derivable one-line
+/// probe says `probe-exempt:` and why, which is a claim a reader can check
+/// rather than an omission they cannot see.
+#[test]
+fn rejected_census_rows_name_the_diagnostic_that_fires() {
+    let mut probed = 0;
+    let mut exempt = 0;
+    for fields in data_lines("census.tsv", 5)
+        .into_iter()
+        .filter(|fields| fields[2] == "rejected")
+    {
+        let [kind, name, _, expected, probe] = &fields[..] else {
+            unreachable!("census rows have five columns")
+        };
+        if let Some(reason) = probe.strip_prefix("probe-exempt:") {
+            assert!(
+                reason.len() > 20,
+                "{kind}:{name} must say why it has no probe"
+            );
+            exempt += 1;
+            continue;
+        }
+        let error = lash_typescript::validate(probe)
+            .expect_err(&format!("{kind}:{name} probe `{probe}` must reject"));
+        assert_eq!(
+            error.code.as_str(),
+            expected,
+            "{kind}:{name} claims {expected} but `{probe}` reports {error}"
+        );
+        probed += 1;
+    }
+    assert!(
+        probed >= 40,
+        "the probe coverage ratchet slipped: only {probed} rows are probed"
+    );
+    assert!(
+        exempt <= 1,
+        "{exempt} rows claim exemption; each one is a claim nothing checks"
+    );
 }

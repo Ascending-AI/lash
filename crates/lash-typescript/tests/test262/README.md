@@ -13,6 +13,14 @@ must have exactly one explicit ruling in `census.tsv`: `accepted`, `rejected`
 with a real `TS_*` diagnostic, or `skip` with a ticket/deviation reason. There
 is no fallback or wildcard row. The Rust harness fails if the two sets differ.
 
+A `rejected` row also carries a fifth column, the **probe**: a source that must
+reject with exactly the diagnostic the row names. Naming a diagnostic is a claim
+about the code, and before the probes existed nothing connected the two — rows
+named codes that no path produced, and rows named rejections for constructs that
+compiled and ran. A feature with no derivable one-line probe writes
+`probe-exempt:` and the reason, which a reader can check; a bare omission is not
+available. Non-rejected rows carry `-`.
+
 `manifest.tsv` selects 42 executable probes and assigns each an area plus a
 `pass` or ratcheted `skip` disposition. `skip-register.tsv` names every other
 upstream test path and its reason, so the 53,578-test source tree has no silent
