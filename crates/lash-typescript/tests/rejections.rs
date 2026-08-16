@@ -406,3 +406,26 @@ fn an_unknown_ecma_static_names_its_owner() {
         "the diagnostic must name the owner: {error}"
     );
 }
+
+/// A rejection the model cannot locate costs it a guess. Lashlang has echoed
+/// the offending line with a caret since it shipped; TypeScript dropped the
+/// span on the floor and sent `TS_CODE: message` alone.
+#[test]
+fn a_rejection_points_at_the_line_the_model_wrote() {
+    let source = "const rows = [1, 2, 3];\nconst total = 0;\nclass Accumulator {}\n";
+    let error = lash_typescript::validate(source).expect_err("classes are refused");
+    let rendered = lash_typescript::format_diagnostic(source, &error);
+
+    assert!(
+        rendered.contains("--> line 3, column 1"),
+        "the model must be given its own line numbers: {rendered}"
+    );
+    assert!(
+        rendered.contains("class Accumulator {}"),
+        "the offending line must be echoed back: {rendered}"
+    );
+    assert!(
+        rendered.contains("hint: "),
+        "the repair stays on its own line: {rendered}"
+    );
+}

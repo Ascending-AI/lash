@@ -406,8 +406,11 @@ async fn execute_code_inner(
                 // resolving at link; TypeScript resolves names at parse, so the
                 // names have to arrive here. `host_environment` already carries
                 // them — it is the same set the linker will check against.
+                // Rendered against the cell source, not `to_string()`: the
+                // diagnostic carries a span and the model needs the line it
+                // wrote. Lashlang's parse failures have always arrived this way.
                 None => lash_typescript::parse_with_globals(code, &host_environment.globals)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| lash_typescript::format_diagnostic(code, &error))
                     .and_then(|program| {
                         state
                             .linked_programs
@@ -863,6 +866,29 @@ mod tests {
 
         assert!(diagnostic.contains("standalone `</lashlang>` line"));
         assert!(diagnostic.contains("inside multiline source text"));
+    }
+
+    /// The executor is where a TypeScript rejection becomes the text a model
+    /// reads, and for the whole of the dialect's life that conversion was
+    /// `error.to_string()` — which drops the span the diagnostic carries. The
+    /// model was told a construct was refused and left to find it.
+    #[test]
+    fn a_typescript_rejection_reaches_the_model_with_its_own_line_number() {
+        let code = "const rows = [1, 2, 3];\nconst total = 0;\nclass Accumulator {}\n";
+        let error = lash_typescript::parse_with_globals(code, &BTreeSet::new())
+            .expect_err("classes are refused");
+        let diagnostic = lash_typescript::format_diagnostic(code, &error);
+
+        assert!(
+            diagnostic.starts_with("TS_CLASS_UNSUPPORTED: "),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("--> line 3, column 1"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("\nclass Accumulator {}\n"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("\nhint: "), "{diagnostic}");
     }
     use crate::projection::{
         ProjectionRef, ProjectionRegistry, flow_record_to_json_value, flow_record_to_tool_args,
