@@ -593,9 +593,16 @@ fn step_output_text(input: StepOutputInput<'_>) -> String {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
-        out.push_str("Error:\n");
-        out.push_str(error);
-        out.push_str("\n\nThis step failed; you may retry with a corrected program.");
+        // Two texts, not one paragraph: the evidence answers "what happened",
+        // the imperative answers "what do I write next", and the tag says which
+        // of the two failure shapes this is. A model that has already read the
+        // diagnostic needs only the second half.
+        let (kind, evidence) = crate::feedback::RlmFeedbackKind::split(error);
+        out.push_str(kind.tag());
+        out.push('\n');
+        out.push_str(evidence);
+        out.push_str("\n\n");
+        out.push_str(&kind.imperative(vocabulary.cell_noun));
     }
     if let Some(final_output) = final_output {
         if !out.is_empty() {

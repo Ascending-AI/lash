@@ -427,7 +427,10 @@ async fn execute_code_inner(
     };
     let cached_program = match compile_result {
         Ok(program) => program,
+        // A compile or link failure is a refusal, not a bug in what the program
+        // did: the same source will be refused again.
         Err(error) => {
+            let error = crate::feedback::RlmFeedbackKind::Policy.label(error);
             return ExecResponse {
                 observations: Vec::new(),
                 observation_truncation: Vec::new(),
@@ -611,7 +614,10 @@ async fn execute_code_inner(
                 executed_calls: collected.executed_calls,
                 images: Vec::new(),
                 printed_images: collected.printed_images,
-                error: Some(format!("process failed in foreground execution: {value}")),
+                error: Some(
+                    crate::feedback::RlmFeedbackKind::Error
+                        .label(format!("process failed in foreground execution: {value}")),
+                ),
                 duration_ms: start.elapsed().as_millis() as u64,
                 terminal_finish: None,
             };
@@ -623,6 +629,14 @@ async fn execute_code_inner(
                     || !error.is_execution_bound_exhausted(),
                 "confidence execution exhausted a required Lashlang bound: {error}"
             );
+            // An exhausted execution bound is the runtime declining to keep
+            // going, and no amount of debugging the program changes that; every
+            // other runtime error is the program's own.
+            let kind = if error.is_execution_bound_exhausted() {
+                crate::feedback::RlmFeedbackKind::Policy
+            } else {
+                crate::feedback::RlmFeedbackKind::Error
+            };
             let failure = runtime_failure.unwrap_or(lashlang::RuntimeFailure { error, span: None });
             let collected = host.into_collected();
             return ExecResponse {
@@ -632,11 +646,11 @@ async fn execute_code_inner(
                 executed_calls: collected.executed_calls,
                 images: Vec::new(),
                 printed_images: collected.printed_images,
-                error: Some(lashlang::format_runtime_diagnostic(
+                error: Some(kind.label(lashlang::format_runtime_diagnostic(
                     code,
                     &failure.error,
                     failure.span,
-                )),
+                ))),
                 duration_ms: start.elapsed().as_millis() as u64,
                 terminal_finish: None,
             };
@@ -3090,7 +3104,16 @@ mod tests {
                 .as_deref()
                 .expect("bare tool call should fail at link time");
 
-            assert!(error.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC), "{error}");
+            let (kind, evidence) = crate::feedback::RlmFeedbackKind::split(error);
+            assert_eq!(
+                kind,
+                crate::feedback::RlmFeedbackKind::Policy,
+                "a link refusal is a policy failure, not a runtime one: {error}"
+            );
+            assert!(
+                evidence.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC),
+                "{error}"
+            );
             assert!(error.contains("hint: use `files.read`"), "{error}");
             assert!(response.tool_calls.is_empty());
             assert!(response.terminal_finish.is_none());

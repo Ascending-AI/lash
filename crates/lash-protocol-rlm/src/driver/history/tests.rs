@@ -198,14 +198,14 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
     - module.ok → ok
     - module.fail → err
 
-    Error:
+    [ERROR]
     read failed at secret.txt; cache failed at .cache/lash/state
 
-    This step failed; you may retry with a corrected program.
+    Next: the program ran and failed. Fix the cause named above, then send the corrected block.
     "#);
     assert!(observation.contains("Calls:\n- module.ok → ok\n- module.fail → err"));
     assert!(!observation.contains("secret: 1"), "arguments stay elided");
-    assert!(observation.contains("This step failed; you may retry with a corrected program."));
+    assert!(observation.contains("Next: the program ran and failed."));
     assert!(observation.contains("secret.txt"));
     assert!(observation.contains(".cache/lash/state"));
 }
@@ -373,4 +373,35 @@ fn every_failure_in_the_repaired_run_is_scrubbed() {
     assert!(!transcript.contains("first_bad"), "{transcript}");
     assert!(!transcript.contains("second_bad"), "{transcript}");
     assert!(transcript.contains("print 1"), "{transcript}");
+}
+
+/// A refusal and a runtime failure call for opposite next moves, and until the
+/// tag existed both arrived as `Error:` followed by prose. The observation now
+/// says which it is and puts the instruction in its own text, so the model can
+/// read the second half without re-reading the first.
+#[test]
+fn a_refusal_and_a_runtime_failure_read_differently() {
+    let refused = rendered_text(&render(&[failed_step_event(
+        "lashlang_step_0",
+        "class A {}",
+        &crate::feedback::RlmFeedbackKind::Policy.label("TS_CLASS_UNSUPPORTED: classes"),
+    )]));
+    assert!(
+        refused.contains("[POLICY]\nTS_CLASS_UNSUPPORTED: classes"),
+        "{refused}"
+    );
+    assert!(
+        refused.contains("sending it again unchanged will be refused again"),
+        "{refused}"
+    );
+    assert!(!refused.contains("the program ran and failed"), "{refused}");
+
+    let threw = rendered_text(&render(&[failed_step_event(
+        "lashlang_step_0",
+        "print rows[9]",
+        &crate::feedback::RlmFeedbackKind::Error.label("index out of range"),
+    )]));
+    assert!(threw.contains("[ERROR]\nindex out of range"), "{threw}");
+    assert!(threw.contains("the program ran and failed"), "{threw}");
+    assert!(!threw.contains("refused"), "{threw}");
 }
