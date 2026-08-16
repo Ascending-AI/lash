@@ -324,11 +324,6 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
                         } => {
                             send_ws_json(
                                 &mut ws,
-                                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":message_id,"status":"in_progress","phase":"final_answer","content":[]}}),
-                            )
-                            .await;
-                            send_ws_json(
-                                &mut ws,
                                 json!({"type":"response.output_text.delta","output_index":0,"item_id":message_id,"delta":text}),
                             )
                             .await;
@@ -350,11 +345,6 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
                             .await;
                             send_ws_json(
                                 &mut ws,
-                                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":message_id,"status":"in_progress","phase":"final_answer","content":[]}}),
-                            )
-                            .await;
-                            send_ws_json(
-                                &mut ws,
                                 json!({"type":"response.output_text.delta","output_index":0,"item_id":message_id,"delta":text}),
                             )
                             .await;
@@ -365,11 +355,6 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
                             tokio::time::sleep(Duration::from_secs(60)).await;
                         }
                         ScriptedWsAction::IdleAfterStart { message_id, text } => {
-                            send_ws_json(
-                                &mut ws,
-                                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":message_id,"status":"in_progress","phase":"final_answer","content":[]}}),
-                            )
-                            .await;
                             send_ws_json(
                                 &mut ws,
                                 json!({"type":"response.output_text.delta","output_index":0,"item_id":message_id,"delta":text}),
