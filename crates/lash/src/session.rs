@@ -1094,7 +1094,11 @@ impl Stream for RemoteSessionObservationEventStream {
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(Ok(event))) => {
-                let remote = RemoteSessionObservationEvent::from_core(self.next_sequence, event);
+                let remote =
+                    match RemoteSessionObservationEvent::from_core(self.next_sequence, event) {
+                        Ok(remote) => remote,
+                        Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                    };
                 self.next_sequence = self.next_sequence.saturating_add(1);
                 Poll::Ready(Some(Ok(remote)))
             }
@@ -1123,7 +1127,11 @@ impl Stream for RemoteSessionObservationStream {
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(Ok(SessionObservationStreamItem::Event(event)))) => {
-                let remote = RemoteSessionObservationEvent::from_core(self.next_sequence, event);
+                let remote =
+                    match RemoteSessionObservationEvent::from_core(self.next_sequence, event) {
+                        Ok(remote) => remote,
+                        Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                    };
                 self.next_sequence = self.next_sequence.saturating_add(1);
                 Poll::Ready(Some(Ok(RemoteSessionObservationStreamItem::Event(remote))))
             }

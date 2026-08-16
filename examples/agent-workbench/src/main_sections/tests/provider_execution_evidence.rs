@@ -76,7 +76,8 @@ async fn next_terminal_replacement(
                     let remote = lash::remote::observations::RemoteSessionObservationEvent::from_core(
                         sequence,
                         Arc::clone(&event),
-                    );
+                    )
+                    .expect("remote event");
                     return serde_json::json!({
                         "type": "terminal_replacement",
                         "event": remote,

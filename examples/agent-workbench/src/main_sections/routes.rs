@@ -1225,7 +1225,9 @@ async fn forward_session_observations(
     while let Some(item) = stream.next().await {
         match item {
             Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {
-                let event = RemoteSessionObservationEvent::from_core(sequence, event);
+                let Ok(event) = RemoteSessionObservationEvent::from_core(sequence, event) else {
+                    break;
+                };
                 sequence = sequence.saturating_add(1);
                 if tx
                     .send(ObservationStreamItem::Observation {
@@ -1242,7 +1244,9 @@ async fn forward_session_observations(
                 snapshot,
                 ..
             }) => {
-                let event = RemoteSessionObservationEvent::from_core(sequence, event);
+                let Ok(event) = RemoteSessionObservationEvent::from_core(sequence, event) else {
+                    break;
+                };
                 sequence = sequence.saturating_add(1);
                 if tx
                     .send(ObservationStreamItem::TerminalReplacement {

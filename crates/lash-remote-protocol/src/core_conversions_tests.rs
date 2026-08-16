@@ -910,7 +910,8 @@ fn remote_turn_result_maps_core_semantics() {
         lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {
             record: call_record.clone(),
         }),
-    );
+    )
+    .expect("model call recorded activity");
     let intent_outcome = RemoteToolIntentExecutionOutcome::Executed {
         identity: RemoteToolIntentIdentity {
             session_id: "session".to_string(),
@@ -973,7 +974,8 @@ fn remote_turn_result_maps_core_semantics() {
         lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {
             record: call_record,
         }),
-    );
+    )
+    .expect("model call recorded activity");
     let RemoteTurnEvent::ModelCallRecorded { record } = activity.event else {
         panic!("model-call ledger becomes a typed remote activity");
     };
@@ -1023,7 +1025,8 @@ fn assert_terminal_call_record_converts_and_validates(
         lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded {
             record: record.clone(),
         }),
-    );
+    )
+    .expect("model call recorded activity");
     activity
         .validate()
         .expect("ModelCallRecorded conversion validates");
@@ -1141,7 +1144,8 @@ fn core_diagnostics_do_not_cross_the_public_remote_projection() {
     let activity = RemoteTurnActivity::from_core(
         1,
         lash_core::TurnActivity::independent(lash_core::TurnEvent::ModelCallRecorded { record }),
-    );
+    )
+    .expect("model call recorded activity");
     for value in [
         serde_json::to_value(remote_record).expect("serialize remote result record"),
         serde_json::to_value(activity).expect("serialize remote activity"),
@@ -1231,7 +1235,7 @@ fn remote_activity_preserves_semantic_fields_and_collapses_runtime_diagnostics()
             parent_call_id: None,
         },
     );
-    let remote = RemoteTurnActivity::from_core(9, activity);
+    let remote = RemoteTurnActivity::from_core(9, activity).expect("tool call completed activity");
     assert_eq!(remote.sequence, 9);
     match remote.event {
         RemoteTurnEvent::ToolCallCompleted {
@@ -1259,7 +1263,7 @@ fn remote_activity_preserves_typed_tool_intent_refusal_payload() {
             refusal: lash_core::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 2 },
         },
     });
-    let remote = RemoteTurnActivity::from_core(10, activity);
+    let remote = RemoteTurnActivity::from_core(10, activity).expect("tool intent outcome activity");
     assert_eq!(remote.sequence, 10);
     assert_eq!(
         remote.event,
@@ -1282,7 +1286,7 @@ fn remote_activity_preserves_model_attempt_reset_targets() {
         reasoning_correlation_ids: vec![lash_core::TurnActivityId::new("reasoning")],
     });
 
-    let remote = RemoteTurnActivity::from_core(4, activity);
+    let remote = RemoteTurnActivity::from_core(4, activity).expect("model attempt reset activity");
     assert_eq!(
         remote.event,
         RemoteTurnEvent::ModelAttemptReset {
@@ -1306,7 +1310,8 @@ fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
             applications: vec![application],
         });
 
-    let remote = RemoteTurnActivity::from_core(5, activity);
+    let remote =
+        RemoteTurnActivity::from_core(5, activity).expect("queued input accepted activity");
     remote.validate().expect("typed application validates");
     assert_eq!(
         remote.event,
@@ -1379,8 +1384,11 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         .cloned()
         .enumerate()
         .map(|(sequence, activity)| {
-            serde_json::to_string(&RemoteTurnActivity::from_core(sequence as u64, activity))
-                .expect("serialize expected remote activity")
+            serde_json::to_string(
+                &RemoteTurnActivity::from_core(sequence as u64, activity)
+                    .expect("remote turn activity"),
+            )
+            .expect("serialize expected remote activity")
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -1498,7 +1506,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
             Some("activity-turn"),
             lash_core::SessionObservationEventPayload::TurnActivity(activity),
         ),
-    );
+    )
+    .expect("remote observation event");
     assert_eq!(remote.turn_id.as_deref(), Some("activity-turn"));
     assert!(!remote.replay_incarnation_id.is_empty());
     let encoded = serde_json::to_value(&remote).expect("serialize activity envelope");
@@ -1521,7 +1530,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
             Some("committed-turn"),
             lash_core::SessionObservationEventPayload::Committed { read_view },
         ),
-    );
+    )
+    .expect("remote observation event");
     assert_eq!(remote.turn_id.as_deref(), Some("committed-turn"));
     assert!(matches!(
         remote.event,
@@ -1536,7 +1546,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
                 frame_id: "frame-1".to_string(),
             },
         ),
-    );
+    )
+    .expect("remote observation event");
     assert_eq!(remote.turn_id, None);
     let encoded = serde_json::to_value(&remote).expect("serialize frame envelope");
     assert!(
@@ -1561,7 +1572,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
                 batch_ids: vec!["batch-1".to_string()],
             },
         ),
-    );
+    )
+    .expect("remote observation event");
     assert_eq!(remote.turn_id, None);
     assert!(matches!(
         remote.event,
@@ -1579,7 +1591,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
                 process_ids: vec!["process-1".to_string()],
             },
         ),
-    );
+    )
+    .expect("remote observation event");
     assert_eq!(remote.turn_id, None);
     assert!(matches!(
         remote.event,
@@ -1952,4 +1965,86 @@ fn every_generation_option_disposition_crosses_the_boundary_in_both_directions()
             .expect("serialize"),
         serde_json::json!("suppressed_protocol_owned")
     );
+}
+
+struct UnencodableTestValue;
+
+impl serde::Serialize for UnencodableTestValue {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom("unencodable payload"))
+    }
+}
+
+#[test]
+fn encode_remote_json_surfaces_typed_invalid_envelope_error() {
+    let err = encode_remote_json(UnencodableTestValue, "RemoteTurnEvent", "output")
+        .expect_err("unencodable output must return an error instead of shipping null");
+    match err {
+        RemoteProtocolError::InvalidEnvelope { type_name, message } => {
+            assert_eq!(type_name, "RemoteTurnEvent");
+            assert!(
+                message.starts_with("cannot encode output:"),
+                "expected 'cannot encode output:' message prefix, got: {message}"
+            );
+        }
+        other => panic!("expected InvalidEnvelope error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn decode_remote_json_surfaces_typed_invalid_envelope_error() {
+    let err = decode_remote_json::<String>(serde_json::json!(42), "RemoteTurnEvent", "output")
+        .expect_err("decoding invalid value must return an error");
+    match err {
+        RemoteProtocolError::InvalidEnvelope { type_name, message } => {
+            assert_eq!(type_name, "RemoteTurnEvent");
+            assert!(
+                message.starts_with("invalid output:"),
+                "expected 'invalid output:' message prefix, got: {message}"
+            );
+        }
+        other => panic!("expected InvalidEnvelope error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
+    let output = lash_core::ToolCallOutput::success(serde_json::json!({ "result": "hello" }));
+    let event = lash_core::TurnEvent::ToolCallCompleted {
+        call_id: Some("call-1".to_string()),
+        name: "test_tool".to_string(),
+        args: serde_json::json!({ "arg": 1 }),
+        output,
+        duration_ms: 100,
+        graph_key: None,
+        parent_call_id: None,
+    };
+    let remote_event = RemoteTurnEvent::try_from(event).expect("turn event converts");
+    match remote_event {
+        RemoteTurnEvent::ToolCallCompleted {
+            call_id,
+            name,
+            args,
+            output,
+            duration_ms,
+            graph_key,
+            parent_call_id,
+        } => {
+            assert_eq!(call_id.as_deref(), Some("call-1"));
+            assert_eq!(name, "test_tool");
+            assert_eq!(args, serde_json::json!({ "arg": 1 }));
+            assert_eq!(output["outcome"]["status"], "success");
+            assert_eq!(
+                output["outcome"]["payload"],
+                serde_json::json!({ "result": "hello" })
+            );
+            assert_eq!(duration_ms, 100);
+            assert_eq!(graph_key, None);
+            assert_eq!(parent_call_id, None);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
 }
