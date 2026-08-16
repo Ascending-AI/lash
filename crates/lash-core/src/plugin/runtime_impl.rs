@@ -33,6 +33,10 @@ pub struct SessionAuthorityContext {
     pub tool_access: SessionToolAccess,
     pub subagent: Option<SubagentSessionContext>,
     pub plugin_options: PluginOptions,
+    /// Durable protocol-owned options already recorded for this session.
+    /// Factories use these when reconstructing language-specific contributions
+    /// before protocol restore runs.
+    pub protocol_turn_options: crate::ProtocolTurnOptions,
 }
 
 impl PluginHost {
@@ -199,6 +203,7 @@ impl PluginHost {
             tool_access: authority.tool_access.clone(),
             subagent: authority.subagent.clone(),
             plugin_options: authority.plugin_options.clone(),
+            protocol_turn_options: authority.protocol_turn_options.clone(),
             extensions: self.extensions.clone(),
             parent_session_id,
         };
@@ -283,6 +288,7 @@ impl PluginHost {
             tool_access: SessionToolAccess::default(),
             subagent: None,
             plugin_options: PluginOptions::default(),
+            protocol_turn_options: crate::ProtocolTurnOptions::default(),
             extensions: self.extensions.clone(),
             parent_session_id: None,
         };

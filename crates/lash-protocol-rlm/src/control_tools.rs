@@ -9,16 +9,21 @@ use std::sync::Arc;
 
 use crate::projection::RlmSeed;
 
-pub(crate) struct RlmControlToolsProvider;
+pub(crate) struct RlmControlToolsProvider {
+    /// The dialect this session's model writes, so the `continue_as` doc shows
+    /// a call it can actually make.
+    pub(crate) vocabulary: crate::dialect::DialectPromptVocabulary,
+}
 
 #[async_trait]
 impl ToolProvider for RlmControlToolsProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
-        vec![continue_as_tool_definition().manifest()]
+        vec![continue_as_tool_definition_for(self.vocabulary).manifest()]
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (name == "continue_as").then(|| Arc::new(continue_as_tool_definition().contract()))
+        (name == "continue_as")
+            .then(|| Arc::new(continue_as_tool_definition_for(self.vocabulary).contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
@@ -30,17 +35,22 @@ impl ToolProvider for RlmControlToolsProvider {
     }
 }
 
+/// Public API shape, unchanged: the default dialect's doc and example.
 pub fn continue_as_tool_definition() -> ToolDefinition {
+    continue_as_tool_definition_for(crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY)
+}
+
+pub(crate) fn continue_as_tool_definition_for(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> ToolDefinition {
     ToolDefinition::raw(
         "tool:continue_as",
         "continue_as",
-        "Tail-call into a fresh RLM AgentFrame inside the current session with a clean window.\n\nThe new frame inherits **nothing** implicitly — no variables or message history. Pass everything it needs via `seed: { name: value, ... }`. Seed values copied from read-only values stay read-only in the new frame; computed expressions become writable variables.\n\n- Use when the current trajectory is stale, dominated by failed attempts, or the context budget is tight.\n- Treat `control.continue_as(...)` as a terminal control action: make it the last meaningful statement in the lashlang block, and do not call `finish` or perform more work after it.\n- `task` packs the concrete goal, constraints, and next steps the new frame must act on.\n- `seed` packs the concrete state (paths, facts already learned, partial results, read-only values) the new frame needs in scope; leave bulky raw output behind.\n- `continue_as` only changes the active AgentFrame. It does not start, transfer, list, cancel, or otherwise manage processes.",
+        format!("Tail-call into a fresh RLM AgentFrame inside the current session with a clean window.\n\nThe new frame inherits **nothing** implicitly — no variables or message history. Pass everything it needs via `seed: {{ name: value, ... }}`. Seed values copied from read-only values stay read-only in the new frame; computed expressions become writable variables.\n\n- Use when the current trajectory is stale, dominated by failed attempts, or the context budget is tight.\n- Treat `control.continue_as(...)` as a terminal control action: make it the last meaningful statement in the {cell_noun}, and do not call `finish` or perform more work after it.\n- `task` packs the concrete goal, constraints, and next steps the new frame must act on.\n- `seed` packs the concrete state (paths, facts already learned, partial results, read-only values) the new frame needs in scope; leave bulky raw output behind.\n- `continue_as` only changes the active AgentFrame. It does not start, transfer, list, cancel, or otherwise manage processes.", cell_noun = vocabulary.cell_noun),
         continue_as_input_schema(),
         continue_as_output_schema(),
     )
-    .with_examples(vec![
-        r#"await control.continue_as({ task: "continue the audit from the summarized findings", seed: { problem: input.prompt, findings: findings } })?"#.into(),
-    ])
+    .with_examples(vec![vocabulary.continue_as_example.into()])
     .with_lashlang_binding(LashlangToolBinding::new(["control"], "continue_as"))
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
         "seed",
@@ -177,7 +187,8 @@ mod tests {
 
     #[test]
     fn continue_as_contract_documents_switch_result() {
-        let definition = continue_as_tool_definition();
+        let definition =
+            continue_as_tool_definition_for(crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY);
 
         assert_eq!(
             definition.contract.output_schema.canonical["required"],
@@ -211,7 +222,9 @@ mod tests {
     #[test]
     fn continue_as_tool_definition_preserves_projected_seed_refs_by_metadata() {
         assert_eq!(
-            continue_as_tool_definition().manifest.argument_projection,
+            continue_as_tool_definition_for(crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY)
+                .manifest
+                .argument_projection,
             ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed")
         );
     }
@@ -453,7 +466,9 @@ mod tests {
 
     #[test]
     fn rlm_control_definitions_include_continue_as_only() {
-        let provider = RlmControlToolsProvider;
+        let provider = RlmControlToolsProvider {
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        };
         let names = provider
             .tool_manifests()
             .into_iter()
@@ -494,7 +509,9 @@ mod tests {
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()
         });
-        let provider = RlmControlToolsProvider;
+        let provider = RlmControlToolsProvider {
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        };
 
         let args = json!({
             "task": "finish from here",
@@ -551,7 +568,9 @@ mod tests {
 
     #[tokio::test]
     async fn continue_as_redrive_derives_the_same_frame_identity() {
-        let provider = RlmControlToolsProvider;
+        let provider = RlmControlToolsProvider {
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        };
         let args = json!({ "task": "continue deterministically" });
         let manager = Arc::new(BatonManager::default());
 
@@ -571,7 +590,9 @@ mod tests {
 
     #[tokio::test]
     async fn identical_continue_as_tasks_at_distinct_calls_derive_distinct_keys() {
-        let provider = RlmControlToolsProvider;
+        let provider = RlmControlToolsProvider {
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        };
         let args = json!({ "task": "same task" });
         let manager = Arc::new(BatonManager::default());
 
@@ -607,7 +628,9 @@ mod tests {
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()
         });
-        let provider = RlmControlToolsProvider;
+        let provider = RlmControlToolsProvider {
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        };
 
         let args = json!({
             "task": "finish from here",
@@ -665,7 +688,9 @@ mod tests {
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()
         });
-        let provider = RlmControlToolsProvider;
+        let provider = RlmControlToolsProvider {
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        };
 
         let args = json!({
             "task": "continue with background work",
@@ -718,7 +743,9 @@ mod tests {
             created: Mutex::new(Vec::new()),
             ..BatonManager::default()
         });
-        let provider = RlmControlToolsProvider;
+        let provider = RlmControlToolsProvider {
+            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        };
 
         let args = json!({
             "task": "continue",

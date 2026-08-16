@@ -48,6 +48,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         tool_access: request.tool_access.clone(),
         subagent: request.subagent.clone(),
         plugin_options: request.plugin_options.clone(),
+        protocol_turn_options: initial_runtime_state.protocol_turn_options.clone(),
     };
 
     let relation = request

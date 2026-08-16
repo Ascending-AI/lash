@@ -1,5 +1,5 @@
-mod lashlang;
-mod typescript;
+pub(crate) mod lashlang;
+pub(crate) mod typescript;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -87,8 +87,81 @@ pub(crate) trait RlmDialectSession: Send {
     ) -> Result<BoundVariablesPromptRender, SessionError>;
 }
 
+/// The dialect-specific words and call forms every shared prompt fragment
+/// needs.
+///
+/// Prompt copy was dialect-aware only where it was obviously a *cell* — the
+/// execution section, the retry copy, the finalization copy. Everything else
+/// assembled around those (bound variables, read-only variables, tool docs,
+/// budget escalation, the final-answer instruction) was written when Lashlang
+/// was the only dialect and hardcoded its syntax. A TypeScript session was
+/// therefore told, in the same prompt, to write `<typescript>` cells and that
+/// its variables were "bound in lashlang ... in `<lashlang>` blocks". A model
+/// cannot follow both; the judged battery caught one spending reasoning tokens
+/// reconciling the contradiction.
+///
+/// One struct rather than a dozen trait methods, so a new fragment has an
+/// obvious place to read its words from and `no_cross_dialect_text_in_the_
+/// assembled_prompt` has one source of truth to check against.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DialectPromptVocabulary {
+    /// How the prompt names the language in prose.
+    pub(crate) language_name: &'static str,
+    /// The opening cell tag, quoted in prose that points at cells.
+    pub(crate) cell_open_tag: &'static str,
+    /// What the prompt calls one unit of code: Lashlang says "block".
+    pub(crate) cell_noun: &'static str,
+    /// The call that prints a value for inspection.
+    pub(crate) print_call: &'static str,
+    /// `print x` vs `console.log(x)`, ready to take a value expression.
+    pub(crate) print_statement_prefix: &'static str,
+    pub(crate) print_statement_suffix: &'static str,
+    /// The finish form as the prompt spells it in prose.
+    pub(crate) finish_statement: &'static str,
+    /// The continue-as control call, as a model would write it.
+    pub(crate) continue_as_call: &'static str,
+    /// A complete continue-as example for the tool doc.
+    pub(crate) continue_as_example: &'static str,
+}
+
+impl Default for DialectPromptVocabulary {
+    /// The default dialect's words, matching `RlmDialect::default()`.
+    fn default() -> Self {
+        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY
+    }
+}
+
+impl DialectPromptVocabulary {
+    /// `print x` / `console.log(x)` for one expression.
+    pub(crate) fn print_statement(&self, expression: &str) -> String {
+        format!(
+            "{}{expression}{}",
+            self.print_statement_prefix, self.print_statement_suffix
+        )
+    }
+}
+
 pub(crate) trait RlmDialect: Send + Sync {
     fn language_id(&self) -> &'static str;
+
+    /// The words shared prompt fragments use when they name this dialect's
+    /// syntax. See [`DialectPromptVocabulary`].
+    fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
+
+    /// The call path a model writes to invoke `tool` in this dialect.
+    fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> Result<String, SessionError>;
+
+    /// One authored tool example, in this dialect's syntax.
+    ///
+    /// Examples are authored once, as Lashlang source, next to the tool that
+    /// owns them (`await web.search({ query: "..." })?`). They are a second
+    /// model-facing surface on top of the call path, and the `?` try-operator
+    /// that six of seven examples in the resident catalog carry is a *syntax
+    /// error* in TypeScript: a judged row's saved prompt showed a TypeScript
+    /// session being shown seven examples it could not have run.
+    fn render_tool_example(&self, example: &str) -> String {
+        example.to_string()
+    }
 
     fn snapshot_engine_id(&self) -> &'static str;
 
@@ -118,6 +191,24 @@ pub(crate) trait RlmDialect: Send + Sync {
 
     fn invalid_cell_retry_copy(&self, error_text: &str) -> String;
 
+    /// What to tell a model that wrote a cell in a registered dialect this
+    /// session is not running.
+    ///
+    /// Written from the vocabulary, so the correction is in the reader's own
+    /// words: naming the tag it wrote and the one it must write is the whole
+    /// content, and both are facts the dialect already owns.
+    fn foreign_cell_retry_copy(&self, foreign_open_tag: &str) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let tags = self.cell_tags();
+        format!(
+            "That reply put its code in a `{foreign_open_tag}` {noun}, which this session does not run. This session executes {language}: send the same work again inside one paired `{open}` … `{close}` {noun}.",
+            noun = vocabulary.cell_noun,
+            language = vocabulary.language_name,
+            open = tags.open,
+            close = tags.close,
+        )
+    }
+
     fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String;
 
     fn code_stream_kind(&self) -> &'static str;
@@ -127,6 +218,13 @@ pub(crate) trait RlmDialect: Send + Sync {
     fn stream_cell_start_event_name(&self) -> &'static str;
 
     fn stream_cell_end_event_name(&self) -> &'static str;
+}
+
+/// The TypeScript dialect's words, for assertions that need a vocabulary which
+/// is provably not the default.
+#[cfg(test)]
+pub(crate) fn typescript_prompt_vocabulary() -> DialectPromptVocabulary {
+    typescript::TYPESCRIPT_PROMPT_VOCABULARY
 }
 
 #[derive(Clone)]
@@ -199,4 +297,72 @@ mod tests {
             "typescript"
         );
     }
+
+    /// `RlmDialect::ALL` is what every host offers a dialect choice from, so it
+    /// has to name exactly the dialects this registry can activate. Checked
+    /// against the dialect implementations themselves rather than against a
+    /// second list of names: a dialect the registry gains and the array lacks
+    /// is a create form that cannot select it, and a name the array gains
+    /// without a dialect is a create form that offers one the executor refuses.
+    #[test]
+    fn the_public_dialect_array_names_every_registered_dialect() {
+        let registry = RlmDialectRegistry::new([
+            Arc::new(lashlang_test_dialect()) as Arc<dyn RlmDialect>,
+            Arc::new(typescript_test_dialect()) as Arc<dyn RlmDialect>,
+        ]);
+
+        let mut registered = registry.dialects.keys().copied().collect::<Vec<_>>();
+        registered.sort_unstable();
+        let mut published = lash_rlm_types::RlmDialect::ALL
+            .iter()
+            .map(|dialect| dialect.language_id())
+            .collect::<Vec<_>>();
+        published.sort_unstable();
+
+        assert_eq!(published, registered);
+        for language_id in registered {
+            assert_eq!(
+                lash_rlm_types::RlmDialect::from_language_id(language_id)
+                    .expect("a registered language id resolves to a typed dialect")
+                    .language_id(),
+                language_id
+            );
+        }
+        assert_eq!(
+            lash_rlm_types::RlmDialect::from_language_id("lashscript"),
+            None,
+            "an unregistered language id must refuse rather than default"
+        );
+    }
 }
+
+#[cfg(test)]
+pub(crate) fn test_dialect_services() -> LashlangDialectServices {
+    LashlangDialectServices {
+        projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+        artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
+        deferred_tool_resolver: None,
+        execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+        execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn lashlang_test_dialect() -> LashlangDialect {
+    LashlangDialect::new(
+        lash_lashlang_runtime::LashlangSurface::default(),
+        test_dialect_services(),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn typescript_test_dialect() -> TypescriptDialect {
+    TypescriptDialect::new(
+        lash_lashlang_runtime::LashlangSurface::default(),
+        test_dialect_services(),
+    )
+}
+
+#[cfg(test)]
+#[path = "dialect/prompt_walker_tests.rs"]
+mod prompt_walker_tests;

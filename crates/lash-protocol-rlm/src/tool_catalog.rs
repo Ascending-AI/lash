@@ -16,22 +16,36 @@ pub(crate) fn rlm_tool_catalog(
     Ok(ToolCatalogContribution::default())
 }
 
-/// Render every catalog member as a full prompt doc under its Lashlang
-/// call-path. Being a member *is* being presented.
-pub(crate) fn rlm_prompt_tool_docs(tool_catalog: &ToolCatalog) -> String {
+/// Render every catalog member as a full prompt doc under **this dialect's**
+/// call path. Being a member *is* being presented.
+///
+/// This used to render every doc under the Lashlang path unconditionally, so a
+/// TypeScript session was handed a tool list it could not call: the typed
+/// declarations in its execution section said one thing and the doc block said
+/// another. Registration already requires both bindings on every non-internal
+/// tool, so the dialect's path is always available.
+pub(crate) fn rlm_prompt_tool_docs(
+    tool_catalog: &ToolCatalog,
+    dialect: &dyn crate::dialect::RlmDialect,
+) -> String {
     tool_catalog
         .tools
         .iter()
         .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
         .filter_map(|tool| {
             let contract = tool_catalog.resolve_contract(&tool.manifest.name)?;
-            let binding = required_tool_lashlang_executable(&tool.manifest)
-                .expect("RLM tool catalog registration must validate explicit Lashlang bindings");
-            Some(
-                contract
-                    .compact_contract_with_signature_name(&tool.manifest, &binding.call_path())
-                    .render_markdown(),
-            )
+            let call_path = dialect
+                .tool_call_path(&tool.manifest)
+                .expect("RLM tool catalog registration validates both dialects' bindings");
+            let mut compact =
+                contract.compact_contract_with_signature_name(&tool.manifest, &call_path);
+            // Authored examples are Lashlang source; the dialect spells them.
+            compact.examples = compact
+                .examples
+                .iter()
+                .map(|example| dialect.render_tool_example(example))
+                .collect();
+            Some(compact.render_markdown())
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -53,6 +67,7 @@ fn validate_rlm_language_bindings(ctx: &ToolCatalogContext) -> Result<(), Plugin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dialect::lashlang_test_dialect;
     use lash_core::{
         ToolContract, ToolDefinition, facade_support::ToolCatalogBuildInput,
         facade_support::build_tool_catalog,
@@ -107,7 +122,7 @@ mod tests {
 
         assert!(catalog.has_callable_tool("fetch_url"));
         assert!(catalog.has_callable_tool("read_file"));
-        let docs = rlm_prompt_tool_docs(&catalog);
+        let docs = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect());
         assert!(docs.contains("web.fetch"), "{docs}");
         assert!(docs.contains("files.read"), "{docs}");
         // No legacy catalogue notes or tier filtering.
@@ -246,7 +261,7 @@ mod tests {
             contributions: vec![contribution],
         });
 
-        let docs = rlm_prompt_tool_docs(&catalog);
+        let docs = rlm_prompt_tool_docs(&catalog, &lashlang_test_dialect());
         assert!(docs.len() <= 768, "plan.update docs exceeded budget");
         assert!(docs.contains("plan.update("), "{docs}");
         assert!(

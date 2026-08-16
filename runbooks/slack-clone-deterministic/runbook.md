@@ -3,9 +3,9 @@
 This scripted harness follows the repository-wide [runbook rules](../RULES.md).
 
 This is the executable, hermetic companion to the manual judged
-[`slack-clone-bot`](../slack-clone-bot/runbook.md) and
-[`slack-clone-mcp-client-depth`](../slack-clone-mcp-client-depth/runbook.md)
-runbooks. Run it with:
+[`slack-clone-bot`](../slack-clone-bot/runbook.md) runbook, whose Phase 3M
+absorbed the former `slack-clone-mcp-client-depth` scenario once this harness
+was shown to cover its whole scorecard. Run it with:
 
 ```bash
 just slack-clone-full-host-e2e
@@ -36,7 +36,7 @@ checkpoint.
 | Bot phase 5T | **NONE** — the deterministic suite proves the same kill/recovery machinery on the channel route; child-route mid-turn recovery remains judged/manual and has focused Rust coverage |
 | Bot phase 6 | **NONE** — platform-outbox crash recovery is orthogonal to the FIG-1341 bot full-host acceptance and remains judged/manual plus focused Rust coverage |
 | Bot phase 7 | Both independent contexts reload to the same top-level API/database projection |
-| MCP phases 0-3 | One rendered turn invokes sampling, form elicitation, URL elicitation/completion, and roots over the bundled stdio child; four committed results and four exact trace attempts |
+| Bot phase 3M (MCP client depth) | One rendered turn invokes sampling, form elicitation, URL elicitation/completion, and roots over the bundled stdio child; four committed results and four exact trace attempts. **NOT covered:** that sampling is served by the bot's configured real provider — a scripted provider has no model id to name, which is why phase 3M survives as a judged step |
 
 The deterministic provider is compiled only by the `e2e` Cargo feature and
 requires the explicit `SLACK_CLONE_E2E_PROVIDER=scripted-v1` selector. Omitting

@@ -761,7 +761,7 @@ impl<'module> Linker<'module> {
         )?;
         if !scope.process_body {
             return Err(LinkError::ProcessLifecycleOutsideProcess {
-                keyword: "wait_signal",
+                keyword: self.wait_signal_keyword(),
                 span: scope.span,
             });
         }

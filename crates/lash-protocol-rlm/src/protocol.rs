@@ -1,8 +1,8 @@
 mod actions;
 mod cell;
 mod driver;
-mod finish;
-mod prompt;
+pub(crate) mod finish;
+pub(crate) mod prompt;
 mod state;
 #[cfg(test)]
 mod tests;

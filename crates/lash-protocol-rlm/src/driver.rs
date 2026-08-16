@@ -1,5 +1,5 @@
 use lash_sansio::sync::RwLockExt;
-mod history;
+pub(crate) mod history;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -70,6 +70,8 @@ pub fn build_rlm_preamble(
     let bound_variables_prompt = Arc::new(RwLock::new(crate::rlm_support::render_bound_variables(
         &mut cache,
         &[],
+        // This preamble path constructs a prompt-only Lashlang dialect below.
+        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
     )));
     build_rlm_preamble_with_bound_variables(input, config, bound_variables_prompt)
 }
@@ -107,7 +109,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_names_fingerprint = tool_catalog.tool_names_fingerprint();
     let mut prompt_contributions = Vec::new();
 
-    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog);
+    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, dialect.as_ref());
     if !tool_docs.trim().is_empty() {
         prompt_contributions.push(PromptContribution::execution("Tools", tool_docs));
     }
@@ -306,12 +308,14 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             .expect("RLM turn options are validated before prompt projection");
         let finalization = self.dialect.finalization_copy(&options.termination);
         let required_output = required_output_block(&options.termination);
-        let final_answer_format = final_answer_format_prompt(&options);
+        let vocabulary = self.dialect.prompt_vocabulary();
+        let final_answer_format = final_answer_format_prompt(&options, vocabulary);
         let guard = self.last_prompt_usage.read_recover();
-        let budget_suffix = crate::rlm_support::format_budget_suffix(
+        let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
             ctx.protocol_iteration + 1,
             guard.as_ref(),
             self.max_budget_tokens,
+            vocabulary,
         );
         let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
 
@@ -381,7 +385,10 @@ fn required_output_block(termination: &RlmTermination) -> Option<String> {
     }
 }
 
-fn final_answer_format_prompt(options: &RlmCreateExtras) -> Option<String> {
+fn final_answer_format_prompt(
+    options: &RlmCreateExtras,
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> Option<String> {
     if matches!(
         options.termination,
         RlmTermination::FinishRequired { schema: Some(_) }
@@ -389,18 +396,17 @@ fn final_answer_format_prompt(options: &RlmCreateExtras) -> Option<String> {
         return None;
     }
     match options.final_answer_format.as_ref()? {
-        RlmFinalAnswerFormat::Markdown => Some(
-            match options.termination {
-                RlmTermination::FinishRequired { schema: None } => {
-                    "When finishing, call `finish <value>` with a nicely formatted Markdown string, not a raw record/list/tool-result value."
-                }
-                RlmTermination::Natural => {
-                    "Write prose-only final answers as nicely formatted Markdown. If you intentionally use `finish <value>`, use a Markdown string for user-facing answers, not a raw record/list/tool-result value."
-                }
-                RlmTermination::FinishRequired { schema: Some(_) } => unreachable!(),
-            }
-            .to_string(),
-        ),
+        RlmFinalAnswerFormat::Markdown => Some(match options.termination {
+            RlmTermination::FinishRequired { schema: None } => format!(
+                "When finishing, call `{}` with a nicely formatted Markdown string, not a raw record/list/tool-result value.",
+                vocabulary.finish_statement
+            ),
+            RlmTermination::Natural => format!(
+                "Write prose-only final answers as nicely formatted Markdown. If you intentionally use `{}`, use a Markdown string for user-facing answers, not a raw record/list/tool-result value.",
+                vocabulary.finish_statement
+            ),
+            RlmTermination::FinishRequired { schema: Some(_) } => unreachable!(),
+        }),
         RlmFinalAnswerFormat::Custom { guidance } => {
             let guidance = guidance.trim();
             (!guidance.is_empty()).then(|| guidance.to_string())
@@ -547,6 +553,15 @@ pub(crate) fn render_conformance_history_message(
 
 #[cfg(test)]
 mod tests {
+    /// These fixtures cover the Lashlang wording; the cross-dialect walker in
+    /// `dialect::prompt_walker_tests` covers both.
+    fn final_answer_format_prompt_test(options: &RlmCreateExtras) -> Option<String> {
+        final_answer_format_prompt(
+            options,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        )
+    }
+
     use super::*;
     use lash_core::session_model::{ConversationRecord, MessageRole, Part, SessionHistoryRecord};
     use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
@@ -628,7 +643,11 @@ mod tests {
             max_budget_tokens: None,
             last_prompt_usage: Arc::new(RwLock::new(None)),
             bound_variables_prompt: Arc::new(RwLock::new(
-                crate::rlm_support::render_bound_variables(&mut bound_variables_cache, &[]),
+                crate::rlm_support::render_bound_variables(
+                    &mut bound_variables_cache,
+                    &[],
+                    crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                ),
             )),
             dialect: Arc::new(LashlangDialect::prompt_only(LashlangSurface::default())),
         }
@@ -644,7 +663,11 @@ mod tests {
             .iter()
             .map(|(name, value)| (name.clone(), lashlang::from_json(value.clone())))
             .collect::<Vec<_>>();
-        crate::rlm_support::render_bound_variables(cache, &globals)
+        crate::rlm_support::render_bound_variables(
+            cache,
+            &globals,
+            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        )
     }
 
     fn project_iteration_request(
@@ -1029,7 +1052,7 @@ mod tests {
         let projector = projector(10);
         let history = projector.format_history(&[user_event("u1", "abcdefghijklmnopqrstuvwxyz")]);
 
-        assert!(history.contains("re-print history[0].content"));
+        assert!(history.contains("re-run `print history[0].content`"));
         assert!(history.contains("... (16 characters omitted) ..."));
         assert!(!history.contains("user_input_"));
     }
@@ -1045,7 +1068,7 @@ mod tests {
         let output = "x".repeat(60 * 1024);
         let history = projector.format_history(&[step_event(0, "print big", &output)]);
 
-        assert!(history.contains("re-print history[0].output[0]"));
+        assert!(history.contains("re-run `print history[0].output[0]`"));
         assert!(history.contains("full value retained"));
         assert!(history.contains("...truncated..."));
     }
@@ -1055,14 +1078,15 @@ mod tests {
         // A truncated preview must read as display-only, not lost state — the
         // inference gpt-5.5 got wrong when it stopped a /spring-cleaning
         // mid-task ("I can't continue from the previous tool state"). The note
-        // names the re-print handle and states the value is retained.
+        // names the re-read handle, in this dialect's own print call, and
+        // states the value is retained.
         let projector = projector(10);
         let output = "x".repeat(60 * 1024);
         let history = projector.format_history(&[step_event(0, "print big", &output)]);
 
         assert!(history.contains("full value retained"), "{history}");
         assert!(
-            history.contains("re-print history[0].output[0]"),
+            history.contains("re-run `print history[0].output[0]`"),
             "{history}"
         );
         // The bare, easily-misread "chars, full: <ref>" framing is gone.
@@ -1083,7 +1107,7 @@ mod tests {
         let history = projector.format_history(&[step_event(0, "print result", &raw)]);
 
         assert!(
-            history.contains("re-print history[0].output[0]"),
+            history.contains("re-run `print history[0].output[0]`"),
             "{history}"
         );
         let status = history.find(r#""status":"failed""#).expect("status field");
@@ -1452,7 +1476,8 @@ mod tests {
 
     #[test]
     fn final_answer_format_guidance_renders_markdown_for_unstructured_turns() {
-        let guidance = final_answer_format_prompt(&RlmCreateExtras {
+        let guidance = final_answer_format_prompt_test(&RlmCreateExtras {
+            dialect: None,
             termination: RlmTermination::FinishRequired { schema: None },
             final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
         })
@@ -1464,7 +1489,8 @@ mod tests {
 
     #[test]
     fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
-        let custom = final_answer_format_prompt(&RlmCreateExtras {
+        let custom = final_answer_format_prompt_test(&RlmCreateExtras {
+            dialect: None,
             termination: RlmTermination::Natural,
             final_answer_format: Some(RlmFinalAnswerFormat::Custom {
                 guidance: "  Finish concise release-note Markdown.  ".to_string(),
@@ -1474,7 +1500,8 @@ mod tests {
         assert_eq!(custom, "Finish concise release-note Markdown.");
 
         assert!(
-            final_answer_format_prompt(&RlmCreateExtras {
+            final_answer_format_prompt_test(&RlmCreateExtras {
+                dialect: None,
                 termination: RlmTermination::FinishRequired { schema: None },
                 final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
             })
@@ -1484,7 +1511,8 @@ mod tests {
 
     #[test]
     fn required_output_schema_suppresses_final_answer_format_guidance() {
-        let guidance = final_answer_format_prompt(&RlmCreateExtras {
+        let guidance = final_answer_format_prompt_test(&RlmCreateExtras {
+            dialect: None,
             termination: RlmTermination::FinishRequired {
                 schema: Some(serde_json::json!({ "type": "object" })),
             },

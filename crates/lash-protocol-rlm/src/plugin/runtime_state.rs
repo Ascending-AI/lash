@@ -43,6 +43,11 @@ impl RlmRuntimeState {
 
     #[cfg(test)]
     pub(super) fn new_lashlang_for_tests() -> Result<Self, SessionError> {
+        Self::new_for_tests("lashlang")
+    }
+
+    #[cfg(test)]
+    fn new_for_tests(active_language: &str) -> Result<Self, SessionError> {
         let services = crate::dialect::LashlangDialectServices {
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
@@ -58,17 +63,26 @@ impl RlmRuntimeState {
             lash_lashlang_runtime::LashlangSurface::default(),
             services,
         ));
-        Self::new(
-            RlmDialectRegistry::new([Arc::clone(&dialect), typescript]),
-            dialect,
-        )
+        let active = match active_language {
+            "lashlang" => Arc::clone(&dialect),
+            "typescript" => Arc::clone(&typescript),
+            other => panic!("unknown test dialect `{other}`"),
+        };
+        Self::new(RlmDialectRegistry::new([dialect, typescript]), active)
     }
 
     pub(super) async fn projected_binding_prompt_contributions(
         &self,
     ) -> Vec<lash_core::PromptContribution> {
         let bindings = self.session_projected_bindings.lock().await;
-        RlmProjectionExtension::prompt_contributions_for(&bindings)
+        RlmProjectionExtension::prompt_contributions_for(
+            &bindings,
+            self.dialect.prompt_vocabulary(),
+        )
+    }
+
+    pub(super) fn dialect_prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
+        self.dialect.prompt_vocabulary()
     }
 
     pub(super) fn shared_bound_variables_prompt(&self) -> SharedBoundVariablesPrompt {
@@ -87,7 +101,7 @@ impl RlmRuntimeState {
         let rendered = prepared.map_or_else(
             || {
                 let mut cache = BoundVariableRenderCache::default();
-                render_bound_variables(&mut cache, &[])
+                render_bound_variables(&mut cache, &[], self.dialect.prompt_vocabulary())
             },
             crate::dialect::BoundVariablesPromptRender::render,
         );
@@ -503,30 +517,75 @@ mod tests {
     }
 
     #[test]
-    fn execute_code_rejects_a_registered_inactive_language_before_execution() {
+    fn execute_code_uses_the_selected_typescript_dialect_and_rejects_unknown_languages() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
-                let error = state
+                let state = RlmRuntimeState::new_for_tests("typescript").expect("runtime state");
+                let response = state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
                         lash_core::ExecRequest {
                             language: "typescript".to_string(),
-                            code: "finish null".to_string(),
+                            code: "const answer: number = 40 + 2; finish(answer);".to_string(),
                             accept_finish: true,
                         },
                     )
                     .await
-                    .expect_err("inactive language must be rejected");
+                    .expect("selected TypeScript dialect must execute");
+                assert_eq!(response.error, None);
+                assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
+
+                let error = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        lash_core::ExecRequest {
+                            language: "python".to_string(),
+                            code: "finish(42)".to_string(),
+                            accept_finish: true,
+                        },
+                    )
+                    .await
+                    .expect_err("unregistered language must be rejected");
 
                 assert!(matches!(
                     error,
                     SessionError::Protocol(message)
-                        if message == "RLM language `typescript` is registered but session language `lashlang` is pinned"
+                        if message == "RLM language `python` is not registered"
                 ));
+
+                // The registered-but-inactive case is the one that matters for
+                // dialect integrity: `lashlang` is a real, registered dialect,
+                // and this session is pinned to `typescript`. Without this
+                // fence a TypeScript session would execute a `<lashlang>` cell
+                // — the cross-dialect violation `runbooks/RULES.md` treats as
+                // an abort-and-RCA event. An earlier revision of this test
+                // covered only the unregistered language, and deleting the
+                // fence left the whole package green.
+                let inactive = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        lash_core::ExecRequest {
+                            language: "lashlang".to_string(),
+                            code: "finish(42)".to_string(),
+                            accept_finish: true,
+                        },
+                    )
+                    .await
+                    .expect_err("a registered but inactive dialect must be rejected");
+
+                assert!(
+                    matches!(
+                        &inactive,
+                        SessionError::Protocol(message)
+                            if message
+                                == "RLM language `lashlang` is registered but session \
+                                    language `typescript` is pinned"
+                    ),
+                    "{inactive:?}"
+                );
             });
     }
 }

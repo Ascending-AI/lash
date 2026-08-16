@@ -1,7 +1,93 @@
 
 impl AppState {
+    /// Opens a session, asking for the ambient dialect and accepting the one
+    /// already recorded.
+    ///
+    /// A dialect becomes durable at the session's first *commit*, not at open.
+    /// An earlier version of this applied `LASH_RUNBOOK_DIALECT` only on the
+    /// two call sites that create, and both of those open and drop without
+    /// running a turn — so the pin evaporated with the handle and the first
+    /// real turn, opening with no dialect and finding nothing recorded,
+    /// committed `lashlang` permanently. A workbench told to serve TypeScript
+    /// served Lashlang.
+    ///
+    /// So every open asks, and a session that already recorded a different
+    /// dialect keeps its own: asking is what makes the pin land at the first
+    /// commit, and accepting the recorded answer is what stops a store from an
+    /// earlier row failing every route. Observably this is still create-only —
+    /// the ambient value can only take effect on a session that has recorded
+    /// nothing.
+    ///
+    /// Which dialect is asked for is per session, not per process: a session
+    /// the operator created with a dialect asks for that one for the rest of
+    /// its life (FIG-1306), and a session the roster does not know asks for the
+    /// ambient `LASH_RUNBOOK_DIALECT`. Same mechanism, one source of the answer.
+    fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
+        use lash::rlm::RlmSessionBuilderExt as _;
+
+        let session_id = session_id.into();
+        let dialect = self.requested_dialect(&session_id);
+        let builder = self.core.session(session_id);
+        match dialect {
+            lash::rlm::RlmDialect::Lashlang => builder,
+            lash::rlm::RlmDialect::Typescript => builder
+                .rlm_dialect(lash::rlm::RlmDialect::Typescript)
+                .expect("the typed TypeScript session option must serialize"),
+        }
+    }
+
+    /// The dialect this session is opened with: its roster row's, or the
+    /// ambient default for a session the roster never recorded.
+    fn requested_dialect(&self, session_id: &str) -> lash::rlm::RlmDialect {
+        self.sessions
+            .dialect_for(session_id)
+            .unwrap_or(self.rlm_dialect)
+    }
+
+    /// The dialect this session *recorded*, which is the one every label reads.
+    ///
+    /// A session that has committed nothing has recorded nothing, and reads as
+    /// the ambient default; what it will be opened with is the honest answer
+    /// for it, so that is what a fresh session's badge shows.
+    async fn recorded_dialect(&self, session_id: &str) -> lash::rlm::RlmDialect {
+        use lash::rlm::RlmSessionReadViewExt as _;
+
+        let Ok(session) = self.open_session(session_id).await else {
+            return self.requested_dialect(session_id);
+        };
+        let read_view = session.read_view();
+        // Absence is Lashlang for a session that ran, and unknown for one that
+        // has not committed yet — reading the default back for a session
+        // created as TypeScript would badge it as the dialect it is about to
+        // stop being. So absence defers to what the next open will ask for.
+        let recorded = read_view
+            .protocol_turn_options()
+            .payload
+            .get("dialect")
+            .is_some()
+            .then(|| read_view.rlm_dialect());
+        drop(session);
+        recorded.unwrap_or_else(|| self.requested_dialect(session_id))
+    }
+
+    /// Opens through [`Self::session_builder`], falling back to the recorded
+    /// dialect when this session was pinned to a different one.
+    ///
+    /// The fallback is what keeps a carried-over store from failing every
+    /// route; `runbooks/RULES.md` still requires a fresh data directory per
+    /// parity row, for evidence purity rather than to avoid an error.
+    async fn open_session(&self, session_id: &str) -> Result<lash::LashSession, lash::EmbedError> {
+        match self.session_builder(session_id.to_string()).open().await {
+            Ok(session) => Ok(session),
+            Err(error) if is_dialect_pin_conflict(&error) => {
+                self.core.session(session_id.to_string()).open().await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn current_session_id(&self) -> String {
-        self.session_ids.current()
+        self.sessions.current()
     }
 
     fn selected_model(&self) -> ModelSelection {
@@ -14,13 +100,26 @@ impl AppState {
         *self.selected_model.lock_recover() = model;
     }
 
-    fn settings_for_session(&self, session_id: String) -> Settings {
+    /// The settings panel for one session, labelled with the dialect that
+    /// session *recorded* rather than the one this process is configured with —
+    /// the two differ exactly when the label matters (FIG-1306, ADR 0063).
+    fn settings_for_session(
+        &self,
+        session_id: String,
+        rlm_dialect: lash::rlm::RlmDialect,
+    ) -> Settings {
         let selected_model = self.selected_model();
         Settings {
             model: selected_model.model,
             model_variant: selected_model.model_variant,
             web_configured: self.web_configured,
             model_variants: vec!["", "low", "medium", "high"],
+            session_name: self
+                .sessions
+                .entry(&session_id)
+                .map(|entry| entry.name)
+                .unwrap_or_else(|| session_id.clone()),
+            rlm_dialect: rlm_dialect.language_id(),
             session_id,
         }
     }
@@ -251,9 +350,7 @@ impl AppState {
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let session = self
-            .core
-            .session(session_id)
-            .open()
+            .open_session(session_id)
             .await
             .map_err(|error| {
                 self.session_admission_error(session_id, "api.turn.cancel", error)
@@ -490,18 +587,52 @@ fn trace_work_item(item: &WorkItem) -> Value {
     })
 }
 
-#[derive(Clone, Debug)]
-struct WorkbenchSessionIds {
-    current: Arc<Mutex<String>>,
-    path: Option<Arc<PathBuf>>,
+/// One row of the workbench's durable session roster.
+///
+/// `dialect` is the dialect the session was *created with*, which is what every
+/// later open has to ask for again — the pin only becomes durable at the
+/// session's first commit, so a roster that forgot it would let the ambient
+/// default overwrite an operator's choice on the very first turn. What a
+/// session actually *recorded* is read back from its own read view, never from
+/// this row (FIG-1306).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct WorkbenchSessionEntry {
+    session_id: String,
+    /// The operator's name for this session, or the id when they gave none.
+    name: String,
+    dialect: lash::rlm::RlmDialect,
+    created_at_ms: i64,
+    last_active_ms: i64,
 }
 
-impl WorkbenchSessionIds {
+/// The sessions this workbench knows about, and which one is current.
+///
+/// Two durable files, because they answer two questions and the first is
+/// load-bearing for every driver in the battery: `session-id` stays exactly
+/// what it was — the plain-text id a query-less `/api/` call resolves to, which
+/// the runbooks read and write directly — and `sessions.json` beside it is the
+/// roster the session list renders, one row per session with the dialect it was
+/// created with.
+///
+/// A session the roster does not know still resolves: it is served on the
+/// ambient `LASH_RUNBOOK_DIALECT`, which is how every pre-roster deployment and
+/// every ad-hoc `?session_id=` tab reads.
+#[derive(Clone, Debug)]
+struct WorkbenchSessions {
+    current: Arc<Mutex<String>>,
+    path: Option<Arc<PathBuf>>,
+    roster: Arc<Mutex<BTreeMap<String, WorkbenchSessionEntry>>>,
+    roster_path: Option<Arc<PathBuf>>,
+}
+
+impl WorkbenchSessions {
     #[cfg(test)]
     fn fresh() -> Self {
         Self {
             current: Arc::new(Mutex::new(new_session_id())),
             path: None,
+            roster: Arc::new(Mutex::new(BTreeMap::new())),
+            roster_path: None,
         }
     }
 
@@ -515,9 +646,25 @@ impl WorkbenchSessionIds {
                     .with_context(|| format!("read workbench session id `{}`", path.display()));
             }
         };
+        let roster_path = path.with_file_name(SESSION_ROSTER_FILE_NAME);
+        let roster = match std::fs::read(&roster_path) {
+            Ok(bytes) => serde_json::from_slice::<Vec<WorkbenchSessionEntry>>(&bytes)
+                .with_context(|| format!("decode workbench sessions `{}`", roster_path.display()))?
+                .into_iter()
+                .map(|entry| (entry.session_id.clone(), entry))
+                .collect(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("read workbench sessions `{}`", roster_path.display())
+                });
+            }
+        };
         let ids = Self {
             current: Arc::new(Mutex::new(current)),
             path: Some(Arc::new(path)),
+            roster: Arc::new(Mutex::new(roster)),
+            roster_path: Some(Arc::new(roster_path)),
         };
         ids.persist();
         Ok(ids)
@@ -534,7 +681,144 @@ impl WorkbenchSessionIds {
         *current = new.clone();
         drop(current);
         self.persist();
+        // A reset replaces the session behind the same roster slot, so the new
+        // id inherits the retired one's name and dialect: an operator who
+        // created a TypeScript session and pressed reset is still in one.
+        let carried = self.roster.lock_recover().get(&old).cloned();
+        if let Some(carried) = carried {
+            self.record(new.clone(), carried.name, carried.dialect);
+            self.forget(&old);
+        }
         (old, new)
+    }
+
+    /// Add a session to the roster, or refresh the row of one already there.
+    fn record(
+        &self,
+        session_id: String,
+        name: String,
+        dialect: lash::rlm::RlmDialect,
+    ) -> WorkbenchSessionEntry {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut roster = self.roster.lock_recover();
+        let entry = roster
+            .entry(session_id.clone())
+            .and_modify(|entry| {
+                entry.name = name.clone();
+                entry.last_active_ms = now_ms;
+            })
+            .or_insert(WorkbenchSessionEntry {
+                session_id,
+                name,
+                dialect,
+                created_at_ms: now_ms,
+                last_active_ms: now_ms,
+            })
+            .clone();
+        self.persist_roster(&roster);
+        entry
+    }
+
+    /// Register a session the roster has not seen, keeping any row it has.
+    ///
+    /// This is how the boot session joins the roster: its dialect is the
+    /// ambient one, and a row that already exists wins, because that row is
+    /// what the session's durable pin was created from.
+    fn ensure(&self, session_id: &str, dialect: lash::rlm::RlmDialect) {
+        if self.roster.lock_recover().contains_key(session_id) {
+            return;
+        }
+        self.record(session_id.to_string(), session_id.to_string(), dialect);
+    }
+
+    fn forget(&self, session_id: &str) {
+        let mut roster = self.roster.lock_recover();
+        if roster.remove(session_id).is_some() {
+            self.persist_roster(&roster);
+        }
+    }
+
+    fn touch(&self, session_id: &str) {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut roster = self.roster.lock_recover();
+        let Some(entry) = roster.get_mut(session_id) else {
+            return;
+        };
+        entry.last_active_ms = now_ms;
+        self.persist_roster(&roster);
+    }
+
+    /// A row for a session the roster never recorded, so the selector can show
+    /// it without the read side writing to the roster.
+    fn unrostered_entry(
+        &self,
+        session_id: String,
+        dialect: lash::rlm::RlmDialect,
+    ) -> WorkbenchSessionEntry {
+        WorkbenchSessionEntry {
+            name: session_id.clone(),
+            session_id,
+            dialect,
+            created_at_ms: 0,
+            last_active_ms: 0,
+        }
+    }
+
+    fn entry(&self, session_id: &str) -> Option<WorkbenchSessionEntry> {
+        self.roster.lock_recover().get(session_id).cloned()
+    }
+
+    /// The dialect this session must be opened with, if the roster knows it.
+    fn dialect_for(&self, session_id: &str) -> Option<lash::rlm::RlmDialect> {
+        self.entry(session_id).map(|entry| entry.dialect)
+    }
+
+    /// The roster, oldest first, which is the order the selector renders.
+    fn list(&self) -> Vec<WorkbenchSessionEntry> {
+        let mut entries = self
+            .roster
+            .lock_recover()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            left.created_at_ms
+                .cmp(&right.created_at_ms)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+        });
+        entries
+    }
+
+    /// Make a rostered session the one a query-less API call resolves to.
+    ///
+    /// Selection is durable for the same reason the boot id is: a reload, a
+    /// restart, and the drivers that read `<data-dir>/session-id` must all
+    /// agree on which session the workbench is serving.
+    fn select(&self, session_id: &str) -> Option<WorkbenchSessionEntry> {
+        let entry = self.entry(session_id)?;
+        *self.current.lock_recover() = session_id.to_string();
+        self.persist();
+        self.touch(session_id);
+        Some(entry)
+    }
+
+    fn persist_roster(&self, roster: &BTreeMap<String, WorkbenchSessionEntry>) {
+        let Some(path) = self.roster_path.as_deref() else {
+            return;
+        };
+        let entries = roster.values().cloned().collect::<Vec<_>>();
+        let encoded =
+            serde_json::to_vec_pretty(&entries).expect("workbench session roster serializes");
+        let temporary = path.with_extension("json.tmp");
+        std::fs::write(&temporary, encoded)
+            .unwrap_or_else(|err| panic!("write session roster `{}`: {err}", temporary.display()));
+        std::fs::rename(&temporary, path).unwrap_or_else(|err| {
+            panic!(
+                "replace session roster `{}` from `{}`: {err}",
+                path.display(),
+                temporary.display()
+            )
+        });
     }
 
     fn persist(&self) {
@@ -1042,4 +1326,14 @@ mod app_error_tests {
             })
         );
     }
+}
+
+/// Whether opening a session failed because it already recorded a different
+/// dialect, as opposed to failing for any other reason.
+///
+/// Matched on the message because the pin lives in the protocol plugin and
+/// surfaces as a protocol error. A wrong answer here can only make a genuinely
+/// broken open retry once without the dialect and fail again.
+fn is_dialect_pin_conflict(error: &lash::EmbedError) -> bool {
+    error.to_string().contains("RLM dialect is durably pinned")
 }

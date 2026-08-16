@@ -458,6 +458,66 @@ finish result
     );
 }
 
+/// A session tree is one dialect: a TypeScript parent's children read a
+/// TypeScript prompt.
+///
+/// Children used to be created with no dialect, which resolves to the Lashlang
+/// default, so a TypeScript parent silently spawned Lashlang children. The
+/// parity battery judges a row as "typescript" while the child's prompt says
+/// otherwise — evidence that disagrees with its own label. This drives a real
+/// spawn and reads the prompt the child was actually given.
+#[tokio::test]
+async fn a_typescript_parent_spawns_typescript_children() {
+    let (_outcome, prompt) = run_seed_probe_with_parent_dialect(
+        r#"<lashlang>
+result = await agents.spawn({
+  capability: "default",
+  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  seed: { chunk: ["a", "b"] },
+  output: Type { len: int }
+})?
+finish result
+</lashlang>"#,
+        TurnInput::text("spawn a child from a typescript parent"),
+        lash_rlm_types::RlmDialect::Typescript,
+    )
+    .await;
+
+    assert!(
+        prompt.contains("## TypeScript execution"),
+        "the child of a TypeScript parent must read the TypeScript prompt:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("<typescript>"),
+        "the child must be told to write TypeScript cells:\n{prompt}"
+    );
+}
+
+/// The other direction, so the test above cannot pass by the prompt being
+/// TypeScript for everyone.
+#[tokio::test]
+async fn a_lashlang_parent_still_spawns_lashlang_children() {
+    let (_outcome, prompt) = run_seed_probe_with_parent_dialect(
+        r#"<lashlang>
+result = await agents.spawn({
+  capability: "default",
+  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  seed: { chunk: ["a", "b"] },
+  output: Type { len: int }
+})?
+finish result
+</lashlang>"#,
+        TurnInput::text("spawn a child from a lashlang parent"),
+        lash_rlm_types::RlmDialect::Lashlang,
+    )
+    .await;
+
+    assert!(
+        !prompt.contains("## TypeScript execution"),
+        "a Lashlang parent's child must not read the TypeScript prompt:\n{prompt}"
+    );
+}
+
 #[tokio::test]
 async fn rlm_spawn_record_shorthand_returns_child_final_value() {
     let (outcome, _) = run_seed_probe(
@@ -777,18 +837,47 @@ async fn run_seed_probe(
     run_seed_probe_with_graph_store(parent_response, input, None).await
 }
 
+/// The probe with the parent session already pinned to a dialect, so the
+/// captured child prompt shows what a child of that parent actually reads.
+async fn run_seed_probe_with_parent_dialect(
+    parent_response: &'static str,
+    input: TurnInput,
+    parent_dialect: lash_rlm_types::RlmDialect,
+) -> (lash_core::facade_support::TurnOutcome, String) {
+    run_seed_probe_inner_dispatch(
+        parent_response.to_string(),
+        input,
+        None,
+        Some(parent_dialect),
+    )
+    .await
+}
+
 async fn run_seed_probe_with_graph_store(
     parent_response: &'static str,
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
 ) -> (lash_core::facade_support::TurnOutcome, String) {
-    let parent_response = parent_response.to_string();
+    run_seed_probe_inner_dispatch(parent_response.to_string(), input, graph_store, None).await
+}
+
+async fn run_seed_probe_inner_dispatch(
+    parent_response: String,
+    input: TurnInput,
+    graph_store: Option<Arc<TraceLashlangGraphStore>>,
+    parent_dialect: Option<lash_rlm_types::RlmDialect>,
+) -> (lash_core::facade_support::TurnOutcome, String) {
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("subagent-seed-probe".to_string())
         .stack_size(STACK_BUDGET_BYTES)
         .spawn(move || {
-            let test = Box::pin(run_seed_probe_inner(parent_response, input, graph_store));
+            let test = Box::pin(run_seed_probe_inner(
+                parent_response,
+                input,
+                graph_store,
+                parent_dialect,
+            ));
             let result = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -804,6 +893,7 @@ async fn run_seed_probe_inner(
     parent_response: String,
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
+    parent_dialect: Option<lash_rlm_types::RlmDialect>,
 ) -> (lash_core::facade_support::TurnOutcome, String) {
     let captured_child_prompt: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let state = Arc::new(SeedProbeState {
@@ -946,6 +1036,19 @@ async fn run_seed_probe_inner(
         RuntimeSessionState {
             session_id: "root".to_string(),
             policy,
+            protocol_turn_options: match parent_dialect {
+                Some(dialect) => {
+                    lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+                        dialect: Some(dialect),
+                        termination: lash_rlm_types::RlmTermination::FinishRequired {
+                            schema: None,
+                        },
+                        final_answer_format: None,
+                    })
+                    .expect("encode parent dialect")
+                }
+                None => lash_core::ProtocolTurnOptions::default(),
+            },
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
@@ -1011,6 +1114,7 @@ async fn subagents_plugin_builds_without_mode_context() {
         subagent: None,
         extensions: Default::default(),
         plugin_options: Default::default(),
+        protocol_turn_options: Default::default(),
         parent_session_id: None,
     };
     let plugin = factory.build(&ctx).expect("plugin");
@@ -1041,6 +1145,7 @@ async fn rlm_provider_does_not_require_process_support() {
         subagent: None,
         extensions: Default::default(),
         plugin_options: Default::default(),
+        protocol_turn_options: Default::default(),
         parent_session_id: None,
     };
 

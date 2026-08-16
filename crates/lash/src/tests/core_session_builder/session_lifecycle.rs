@@ -1,7 +1,9 @@
 use lash_sansio::sync::MutexExt;
 use super::*;
 #[cfg(feature = "rlm")]
-use crate::rlm::{RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _};
+use crate::rlm::{
+    RlmDialect, RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _,
+};
 #[cfg(feature = "rlm")]
 use lash_lashlang_runtime::LashlangArtifactStore as _;
 
@@ -1223,6 +1225,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     assert!(err.to_string().contains("invalid RLM create options"));
     Ok(())
 }
+
 
 #[cfg(feature = "rlm")]
 #[tokio::test]

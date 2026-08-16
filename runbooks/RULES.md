@@ -30,8 +30,114 @@ judged. **Manual judged** is the semantic browser or static-page runbook layer.
 | `agent-service` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs `Test workspace shard`. | `Functional E2E (agent-service)` runs `agent-service-restate-e2e`, including the Restate ingress and process-workflow live test; it is not a browser journey. | [`agent-service-branching`](agent-service-branching/runbook.md) and [`tictactoe-full-game`](tictactoe-full-game/runbook.md). |
 | `agent-workbench` | `Test docs + build cache` runs `Check workspace (all targets)` and the package-scoped workbench check; `Test shard ${{ matrix.shard }}/3` runs `Test workspace shard`. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. |
 | `docs-snippets` | `Test docs + build cache` runs `Check workspace (all targets)`, which compiles the snippet target, and the docs/API checks. | None. `Publish docs` publishes the checked-in static docs; it does not judge a hosted quickstart journey. | [`docs-quickstart`](docs-quickstart/runbook.md). |
-| `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md) and [`slack-clone-mcp-client-depth`](slack-clone-mcp-client-depth/runbook.md). |
+| `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md), whose Phase 3M carries MCP client depth. |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/3` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
+
+## Dialect parity is mandatory
+
+Every judged scenario **that runs an RLM session** is a two-row acceptance matrix: run it
+once with the session pinned to `lashlang` and once with the session pinned to
+`typescript`. This includes scenarios whose primary mechanism is dialect-independent. Use a
+fresh session id, data directory, ports, trace offset, and artifact directory for each row;
+never reuse one dialect's evidence for the other. The machine-readable inventory is
+[`parity-matrix.toml`](parity-matrix.toml).
+
+The exception is named there rather than argued per scenario: a **standard-mode** host
+(`LashCore::standard_builder`, a native tool loop) has no RLM session, so it has no dialect
+to pin and no honest twin. A second row would buy an identical judged run, an identical
+bill, and a `dialect` label describing a session that does not exist. Those scenarios sit
+in `standard_mode_only` and emit one row each, labelled `standard` — the mode, not a
+language. Adding a scenario to that list is a claim about the host's builder, and the claim
+is checkable in the host's source.
+
+Set `LASH_RUNBOOK_DIALECT` to the row's language id and make the host pass that value in
+the RLM session-creation contract. Absence is allowed only for a Lashlang row and must be
+recorded as the default substitution. A TypeScript row that receives a Lashlang prompt,
+cell tag, execution event, or restored engine id is a contract violation and triggers the
+normal Abort/RCA rule. This includes a subagent's prompt: a session tree is one dialect in
+v1, and children inherit the parent's, so a TypeScript row whose child session reads a
+Lashlang prompt is the same violation. Letting a host pick a different dialect per child
+is future work.
+
+The data directory must be fresh per row, not merely per scenario, and this is the rule
+most likely to be silently violated. A session's dialect is durably pinned at its **first
+commit**, and the recorded pin always wins: both shipped hosts ask for the ambient
+`LASH_RUNBOOK_DIALECT` on every session open, and a session that already recorded a
+different one keeps its own — the workbench falls back to the recorded dialect, and
+`agent-service` catches the same conflict and reopens. So reopening a carried-over store
+under the other row's `LASH_RUNBOOK_DIALECT` does **not** fail: every route stays green and
+serves the *recorded* dialect while the environment claims the other one. Green routes are
+therefore no evidence at all that the store is clean, and the row's whole bundle is
+mislabeled evidence — the exact defect this matrix exists to catch. A fresh data directory
+is the only thing that makes the environment variable and the served dialect the same fact.
+Confirm the served dialect from the row's own evidence (prompt, cell tag, execution events),
+never from the environment.
+
+Runbook prose predating the parity matrix may say “Lashlang cell/program/source.” Read
+that as “the active dialect's cell/program/source” unless it names a stable product API,
+artifact filename, trace field, or historical term (for example
+`/api/lashlang-graphs` or `lashlang-execution.jsonl`). Prompts ask for outcomes, not
+ready-made source, in both rows. Deterministic providers must expose equivalent fixed
+programs for both dialect ids; silently feeding their Lashlang program to a TypeScript
+row is a failed harness, not a skipped row.
+
+Independent scenario/dialect rows may execute concurrently from the start, subject to the
+repository's two-heavy-job limit and each runbook's port/container isolation rules.
+Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
+or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
+stable JSON work shard. The matrix currently expands to **62 rows**: 30 RLM scenarios in two
+dialects, one standard-mode row, and one TypeScript-only composite. The arithmetic is
+asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave this
+number stale without turning CI red.
+
+Score a `cargo test`/`cargo nextest` run by its **passed count**, never by its exit code. A
+filter that matches nothing exits `0` and prints `0 passed; N filtered out`, which reads as
+a green gate and is evidence of nothing. Two shards of an earlier round were reported green
+on exactly that.
+
+## Execution tiers
+
+A row's execution model is a **claim about what the row is testing**, not a uniform quality
+floor. The earlier blanket `gpt-5.6-sol` execution floor bought a frontier model for rows
+whose every gate is a row count, an id, or a byte comparison — evidence any competent driver
+produces identically. `runbooks/parity-matrix.toml` therefore carries a `tier` and the
+concrete `model` slug per scenario, and the emitted shard carries both on every row.
+
+- **`deterministic`** — the row makes **no provider network call**. A scripted or in-process
+  fixture provider supplies every reply, so the model's choices are not the judged subject at
+  all. A deterministic row is only honest when the runbook names its public environment
+  selector, expected exact output, and dev-only startup warning (the real-token rule below).
+  The matrix refuses a deterministic scenario that names a real model slug.
+- **`economy`** — `deepseek/deepseek-v4-flash`, or `deepseek/deepseek-v4-pro` where the row
+  needs the driver to author a non-trivial durable program or discover an affordance rather
+  than follow an instruction the runbook states outright. Every gate is still a count, an id,
+  a durable fact, or a literal the operator supplied.
+- **`frontier`** — `openai/gpt-5.6-sol`. Reserved for rows where model **behaviour is the
+  judged subject**, so a weaker driver changes the verdict rather than the prose: the organic
+  `continue_as` lever, first-shot codemode fluency, and the pinned-program-shape rows whose
+  documented failure mode is an Abort rather than a retry.
+
+Three rules keep the tiers honest:
+
+1. **The tier is not a licence to weaken a gate.** If a gate only passes at `frontier`, the
+   row is `frontier`; do not retune the answer key downward to fit a cheaper driver.
+2. **Record the served model from the row's own evidence**, never from the environment — the
+   same rule the dialect pin already carries. Any substitution (a slug that is unavailable, a
+   tier raised mid-row after a repeated model failure) is recorded on the row's scorecard with
+   the reason, exactly as a dialect substitution is.
+3. **A tier change is a matrix change.** Running a row at a model the matrix does not name for
+   it produces mislabeled evidence in the same way a carried-over data directory does. Move
+   the scenario's tier in `parity-matrix.toml` first, in its own commit, with the reason.
+
+Where a runbook is half mechanics and half behaviour, the mechanical half runs deterministic
+and only the residue is funded: `parity-matrix.toml` records that split per scenario in
+`deterministic_phases`. A companion shared by two scenarios
+(`agent-workbench-attachment-usage-gate` serves both `workbench-attachments` and
+`workbench-usage-ledger`) is run **once per battery** and cited by both rows; re-running it
+per row buys an identical log.
+
+The judge is separate and unchanged: `judge_model_floor` stays `gpt-5.6-sol`. A cheap driver
+producing the evidence does not license a cheap reader of it.
 
 ## What you're testing
 
@@ -93,10 +199,11 @@ Apply every rule below to the browser surface:
 **Real tokens, deliberate runs.** Except for an explicitly documented, dev-only provider
 scenario in a runbook, the examples call OpenRouter (and Tavily for web tools) with keys
 from the environment / repo `.env`. Browser scenarios are deliberate, token-spending,
-and model-nondeterministic unless their runbook names that exception. Gate real-provider
-runs on **structural outcomes** (a terminal game state, a message present in an inbox),
-never on exact model prose. A missing required key is a harness gap → Abort; do not add an
-ad hoc stub. A deterministic provider is valid only when the runbook names its public
+and model-nondeterministic unless their runbook names that exception. Export the model the
+row's tier names (`OPENROUTER_MODEL`, and confirm it from the row's own evidence rather than
+the environment). Gate real-provider runs on **structural outcomes** (a terminal game state,
+a message present in an inbox), never on exact model prose. A missing required key is a
+harness gap → Abort; do not add an ad hoc stub. A deterministic provider is valid only when the runbook names its public
 environment selector, expected exact output, and dev-only startup warning.
 
 **Boot and teardown are part of the run.** Phase 0 boots the example (`cargo run -p

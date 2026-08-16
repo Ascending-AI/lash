@@ -45,6 +45,8 @@ mod tests {
     include!("tests/recoverable_chat.rs");
     include!("tests/recoverable_chat_bare_prose.rs");
     include!("tests/recoverable_chat_failures.rs");
+    include!("tests/typescript_dialect.rs");
+    include!("tests/multi_session.rs");
     include!("tests/continue_as_projection.rs");
     include!("tests/tool_catalog.rs");
     include!("tests/deferred_tools.rs");
@@ -192,7 +194,7 @@ mod tests {
 
     #[test]
     fn reset_session_rotation_replaces_workbench_session_id() {
-        let ids = WorkbenchSessionIds::fresh();
+        let ids = WorkbenchSessions::fresh();
         let original = ids.current();
         let (old, new) = ids.rotate();
         assert_eq!(old, original);
@@ -207,9 +209,9 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let session_path = temp.path().join("session-id");
         let turns_path = temp.path().join("active-turns.json");
-        let session_ids =
-            WorkbenchSessionIds::persistent(session_path.clone()).expect("session ids");
-        let session_id = session_ids.current();
+        let sessions =
+            WorkbenchSessions::persistent(session_path.clone()).expect("session ids");
+        let session_id = sessions.current();
         let turns = ActiveTurns::persistent(turns_path.clone()).expect("active turns");
         turns.insert_with_prompt(
             &session_id,
@@ -217,9 +219,9 @@ mod tests {
             Some("actual restored prompt".into()),
             None,
         );
-        drop(session_ids);
+        drop(sessions);
         drop(turns);
-        let recovered_ids = WorkbenchSessionIds::persistent(session_path).expect("recover ids");
+        let recovered_ids = WorkbenchSessions::persistent(session_path).expect("recover ids");
         let recovered_turns = ActiveTurns::persistent(turns_path).expect("recover turns");
         assert_eq!(recovered_ids.current(), session_id);
         assert_eq!(
@@ -433,11 +435,12 @@ mod tests {
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -512,11 +515,12 @@ mod tests {
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -781,11 +785,12 @@ finish "gap source"
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -898,7 +903,7 @@ finish "gap source"
         mail_world.add_account("test").expect("add test");
         let provider = catalog_lifecycle_provider();
         let model = test_model();
-        let session_id = WorkbenchSessionIds::fresh().current();
+        let session_id = WorkbenchSessions::fresh().current();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
@@ -981,7 +986,7 @@ finish initial
             .build()
             .into_handle();
         let model = test_model();
-        let session_id = WorkbenchSessionIds::fresh().current();
+        let session_id = WorkbenchSessions::fresh().current();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
@@ -1044,7 +1049,7 @@ finish initial
             .build()
             .into_handle();
         let model = test_model();
-        let session_ids = WorkbenchSessionIds::fresh();
+        let sessions = WorkbenchSessions::fresh();
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
@@ -1061,11 +1066,12 @@ finish initial
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids,
+            sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -1257,11 +1263,12 @@ finish initial
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -1420,11 +1427,12 @@ finish initial
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(vec![ChatMessage {
                 id: "message".to_string(),
                 role: "user".to_string(),
@@ -1787,14 +1795,14 @@ finish initial
         data_dir: &std::path::Path,
         restate_ingress_url: String,
         provider: ProviderHandle,
-        session_ids: WorkbenchSessionIds,
+        sessions: WorkbenchSessions,
         active_turns: ActiveTurns,
     ) -> LiveWorkbenchRestateHarness {
         live_workbench_restate_state_with_provider_and_database(
             data_dir,
             restate_ingress_url,
             provider,
-            session_ids,
+            sessions,
             active_turns,
             None,
             lash::durability::LeaseTimings::default(),
@@ -1806,7 +1814,7 @@ finish initial
         data_dir: &std::path::Path,
         restate_ingress_url: String,
         provider: ProviderHandle,
-        session_ids: WorkbenchSessionIds,
+        sessions: WorkbenchSessions,
         active_turns: ActiveTurns,
         database_url: Option<&str>,
         lease_timings: lash::durability::LeaseTimings,
@@ -1850,7 +1858,7 @@ finish initial
         );
         let queued_work_driver =
             lash::runtime::QueuedWorkDriver::new(Arc::new(WorkbenchQueuedWorkSubmitter {
-                session_ids: session_ids.clone(),
+                sessions: sessions.clone(),
                 store_factory: Arc::clone(&core_store_factory),
                 restate_ingress_url: restate_ingress_url.clone(),
                 restate_http: restate_http.clone(),
@@ -1898,11 +1906,12 @@ finish initial
                 .expect("open durable product events");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store,
             process_observer,
             process_work_driver: process_deployment.process_work_driver(),
-            session_ids,
+            sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "mock-model".to_string(),
@@ -2061,7 +2070,7 @@ finish initial
         let trigger_store_path = data_dir.join("triggers.db");
         let artifact_store_path = data_dir.join("artifacts.db");
         let process_env_store_path = data_dir.join("process-env.db");
-        let session_id = WorkbenchSessionIds::fresh().current();
+        let session_id = WorkbenchSessions::fresh().current();
 
         {
             let artifact_store = Arc::new(
@@ -2239,174 +2248,7 @@ finish initial
         assert_eq!(output.final_value(), Some(&serde_json::json!("registered")));
     }
 
-    async fn assert_remote_trigger_subscription_records_round_trip(
-        data_dir: &std::path::Path,
-        session_id: &str,
-    ) -> Vec<lash::triggers::TriggerSubscriptionRecord> {
-        let store = lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-            .await
-            .expect("open trigger store for remote DTO round trip");
-        let filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
-        let remote_filter =
-            lash_remote_protocol::RemoteTriggerSubscriptionFilter::from(filter.clone());
-        remote_filter
-            .validate()
-            .expect("remote trigger subscription filter should validate");
-        let round_trip_filter: lash::triggers::TriggerSubscriptionFilter = remote_filter
-            .try_into()
-            .expect("remote trigger subscription filter should convert back");
-        assert_eq!(round_trip_filter, filter);
-
-        let records = lash::triggers::TriggerStore::list_subscriptions(&store, filter)
-            .await
-            .expect("list persisted trigger subscriptions for remote DTO round trip");
-        let remote_list =
-            lash_remote_protocol::RemoteTriggerListSubscriptionsResponse::try_from(records.clone())
-                .expect("remote trigger subscription list");
-        remote_list
-            .validate()
-            .expect("remote trigger subscription list should validate");
-        let round_trip_records: Vec<lash::triggers::TriggerSubscriptionRecord> = remote_list
-            .try_into()
-            .expect("remote trigger subscription list should convert back");
-        assert_eq!(round_trip_records, records);
-
-        for record in &records {
-            let remote_record =
-                lash_remote_protocol::RemoteTriggerSubscriptionRecord::try_from(record.clone())
-                    .expect("remote trigger subscription record");
-            remote_record
-                .validate("WorkbenchTriggerSubscription")
-                .expect("remote trigger subscription record should validate");
-            let round_trip_record: lash::triggers::TriggerSubscriptionRecord = remote_record
-                .try_into()
-                .expect("remote trigger subscription record should convert back");
-            assert_eq!(&round_trip_record, record);
-
-            let remote_result =
-                lash_remote_protocol::RemoteTriggerRegisterSubscriptionResult::try_from(
-                    record.clone(),
-                )
-                .expect("remote trigger register result");
-            remote_result
-                .validate()
-                .expect("remote trigger register result should validate");
-            let round_trip_result: lash::triggers::TriggerSubscriptionRecord = remote_result
-                .try_into()
-                .expect("remote trigger register result should convert back");
-            assert_eq!(&round_trip_result, record);
-        }
-
-        records
-    }
-
-    fn assert_remote_trigger_emit_report_round_trip(report: &lash::triggers::TriggerEmitReport) {
-        let remote = lash_remote_protocol::RemoteTriggerEmitReport::from(report.clone());
-        remote
-            .validate()
-            .expect("remote trigger emit report should validate");
-        let round_trip: lash::triggers::TriggerEmitReport = remote
-            .try_into()
-            .expect("remote trigger emit report should convert back");
-        assert_eq!(&round_trip, report);
-    }
-
-    async fn assert_remote_started_process_surface(
-        core: &LashCore,
-        registry: &dyn lash::process::ProcessRegistry,
-        session_id: &str,
-        process_ids: &[String],
-    ) {
-        let filter = lash::process::ProcessListFilter {
-            definition: None,
-            status: lash::process::ProcessStatusFilter::Any,
-            waiting: None,
-            ..Default::default()
-        };
-        let observed = core
-            .processes()
-            .list(&filter)
-            .await
-            .expect("list observed processes for remote DTO round trip");
-        let remote_list =
-            lash_remote_protocol::RemoteProcessListResponse::try_from(observed.clone())
-                .expect("observed process list should convert to remote DTO");
-        remote_list
-            .validate()
-            .expect("remote process list should validate");
-        let round_trip_observed: Vec<lash::process::ObservedProcess> = remote_list
-            .try_into()
-            .expect("remote process list should convert back");
-        for process_id in process_ids {
-            assert!(
-                round_trip_observed
-                    .iter()
-                    .any(|process| process.process_id == *process_id),
-                "remote process list did not include started process {process_id}"
-            );
-        }
-
-        let snapshot = core
-            .processes()
-            .session_snapshot(session_id)
-            .await
-            .expect("capture process work snapshot for remote DTO round trip");
-        let remote_snapshot = lash_remote_protocol::RemoteProcessWorkSnapshot::try_from(snapshot)
-            .expect("process work snapshot should convert to remote DTO");
-        remote_snapshot
-            .validate()
-            .expect("remote process work snapshot should validate");
-        let round_trip_snapshot: lash::process::ProcessWorkSnapshot = remote_snapshot
-            .try_into()
-            .expect("remote process work snapshot should convert back");
-        assert_eq!(round_trip_snapshot.session_id, session_id);
-
-        for process_id in process_ids {
-            let record = registry
-                .get_process(process_id)
-                .await
-                .expect("process read should succeed")
-                .expect("started process record should exist");
-            let remote_record = lash_remote_protocol::RemoteProcessRecord::try_from(record)
-                .expect("started process record should convert to remote DTO");
-            remote_record
-                .validate("WorkbenchStartedProcessRecord")
-                .expect("remote started process record should validate");
-            let round_trip_record: lash::process::ProcessRecord = remote_record
-                .try_into()
-                .expect("remote started process record should convert back");
-            assert_eq!(&round_trip_record.id, process_id);
-
-            let events = registry
-                .recent_events(process_id, 32)
-                .await
-                .expect("load started process event tail for remote DTO round trip");
-            let expected_tail = events
-                .iter()
-                .map(|event| (event.sequence, event.event_type.clone()))
-                .collect::<Vec<_>>();
-            let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
-                process_id.clone(),
-                events,
-            ))
-            .expect("process events serialize for the remote protocol");
-            remote_events
-                .validate()
-                .expect("remote started process event tail should validate");
-            let (round_trip_process_id, round_trip_events): (
-                String,
-                Vec<lash::process::ProcessEvent>,
-            ) = remote_events
-                .try_into()
-                .expect("remote started process event tail should convert back");
-            let round_trip_tail = round_trip_events
-                .iter()
-                .map(|event| (event.sequence, event.event_type.clone()))
-                .collect::<Vec<_>>();
-            assert_eq!(round_trip_process_id, *process_id);
-            assert_eq!(round_trip_tail, expected_tail);
-        }
-    }
+    include!("tests/remote_trigger_assertions.rs");
 
     async fn emit_test_button_trigger(
         core: &LashCore,

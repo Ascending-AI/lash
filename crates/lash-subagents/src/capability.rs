@@ -47,6 +47,31 @@ pub struct SubagentSpawnContext<'a> {
 }
 
 impl SubagentSpawnContext<'_> {
+    /// The dialect a child session is created with: whatever the parent runs.
+    ///
+    /// A session tree is one dialect in v1. Children used to be created with no
+    /// dialect at all, which resolves to the Lashlang default, so a TypeScript
+    /// parent silently spawned Lashlang children — a mixed-dialect tree whose
+    /// child prompts contradict the row label the parity battery is judging,
+    /// while the row still nominally passes. Letting a host choose a different
+    /// dialect per child is future work; until there is a reason to mix them,
+    /// inheriting is the rule that cannot produce evidence which disagrees with
+    /// itself.
+    ///
+    /// A parent with no recorded dialect is a pre-layer session, and its
+    /// children inherit the same Lashlang default it resolves to.
+    pub fn inherited_rlm_dialect(&self) -> Result<lash_rlm_types::RlmDialect, String> {
+        let options = &self.parent_snapshot.protocol_turn_options;
+        if options.is_empty() {
+            return Ok(lash_rlm_types::RlmDialect::default());
+        }
+        Ok(options
+            .decode::<lash_rlm_types::RlmCreateExtras>()
+            .map_err(|err| format!("failed to read the parent session's dialect: {err}"))?
+            .dialect
+            .unwrap_or_default())
+    }
+
     pub fn base_policy(&self) -> SessionPolicy {
         self.session_spec
             .resolve_against(&self.parent_snapshot.policy)
@@ -69,6 +94,7 @@ impl SubagentSpawnContext<'_> {
         let plugin_options = PluginOptions::typed(
             lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
             lash_rlm_types::RlmCreateExtras {
+                dialect: Some(self.inherited_rlm_dialect()?),
                 termination,
                 final_answer_format: Some(self.final_answer_format.clone()),
             },

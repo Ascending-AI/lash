@@ -94,9 +94,9 @@ async fn run_attachment_usage_gate(
 ) {
     let trace_path = data_dir.join("trace.jsonl");
     let session_id_path = data_dir.join("session-id");
-    let session_ids = WorkbenchSessionIds::persistent(session_id_path.clone())
+    let sessions = WorkbenchSessions::persistent(session_id_path.clone())
         .expect("create gate session id");
-    let session_id = session_ids.current();
+    let session_id = sessions.current();
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
             .await
@@ -151,7 +151,7 @@ async fn run_attachment_usage_gate(
         core,
         Arc::clone(&attachment_store),
         Arc::clone(&process_registry),
-        session_ids,
+        sessions,
     );
     let png_bytes = base64::engine::general_purpose::STANDARD
         .decode(ATTACHMENT_USAGE_GATE_PNG_BASE64)
@@ -299,7 +299,7 @@ async fn run_attachment_usage_gate(
         None,
     );
     let resumed_session_ids =
-        WorkbenchSessionIds::persistent(session_id_path).expect("reopen gate session id");
+        WorkbenchSessions::persistent(session_id_path).expect("reopen gate session id");
     assert_eq!(resumed_session_ids.current(), session_id);
     let resumed_state = attachment_usage_gate_state(
         resumed_core,
@@ -379,7 +379,7 @@ fn attachment_usage_gate_state(
     core: LashCore,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     process_registry: Arc<dyn lash::process::ProcessRegistry>,
-    session_ids: WorkbenchSessionIds,
+    sessions: WorkbenchSessions,
 ) -> AppState {
     let process_observer = core
         .processes()
@@ -387,11 +387,12 @@ fn attachment_usage_gate_state(
         .expect("gate process observer configured");
     AppState {
         core,
+        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store,
         trigger_store: in_memory_trigger_store(),
         process_observer,
         process_work_driver: inert_process_work_driver(process_registry),
-        session_ids,
+        sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_model: Arc::new(Mutex::new(ModelSelection {
             model: "test-model".to_string(),

@@ -955,13 +955,19 @@ finish "done through route"
             "mock-model".to_string(),
             None,
             AgentServiceDurability::Local,
+            // The scripted provider answers with a `<lashlang>` cell, so this
+            // fixture is Lashlang by construction rather than by omission.
+            lash::rlm::RlmDialect::Lashlang,
             None,
         );
         let chat = state
             .with_db(|db| db.create_chat("route replay", "mock-model", None))
             .await
             .expect("create chat");
-        let response = send_message(
+        // Boxed: the handler's future is large enough that holding it inline
+        // in a test frame trips `clippy::large_futures` under the `restate`
+        // feature, where this target is only ever built.
+        let response = Box::pin(send_message(
             State(state.clone()),
             AxumPath(chat.id.clone()),
             Json(SendMessageRequest {
@@ -970,7 +976,7 @@ finish "done through route"
                 model: None,
                 model_variant: Default::default(),
             }),
-        )
+        ))
         .await
         .expect("send message");
         let turn_id = response

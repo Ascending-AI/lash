@@ -17,12 +17,16 @@ async fn app_state(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| state.session_admission_error(&session_id, "api.state", error))?;
     let observation_snapshot = session.observe().recoverable_chat_snapshot();
+    // The badge reads the dialect this session recorded, from the same read
+    // view the transcript labels its cells from (FIG-1306).
+    let recorded_dialect = {
+        use lash::rlm::RlmSessionReadViewExt as _;
+        observation_snapshot.read_view.rlm_dialect()
+    };
     let active_turns = state.active_turns.for_session(&session_id);
     let active_turn_ids = active_turns
         .iter()
@@ -106,7 +110,7 @@ async fn app_state(
     Ok(Json(StateReadSnapshot {
         transcript,
         state: StateSnapshot {
-            settings: state.settings_for_session(session_id.clone()),
+            settings: state.settings_for_session(session_id.clone(), recorded_dialect),
             messages,
             observation,
             product_events,
@@ -286,9 +290,7 @@ async fn session_observations(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.observations", error)
@@ -326,11 +328,12 @@ async fn send_turn(
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
             session_id: session_id.clone(),
         })?;
+    // Last-active is a fact about use, so it moves when a turn is sent rather
+    // than when a poll reads the session.
+    state.sessions.touch(&session_id);
     drop(
         state
-            .core
-            .session(session_id.clone())
-            .open()
+            .open_session(&session_id)
             .await
             .map_err(|error| {
                 state.session_admission_error(&session_id, "api.turn", error)
@@ -710,9 +713,7 @@ async fn enqueue_tool_catalog_refresh(
 ) -> Result<lash::SessionCommandReceipt, AppError> {
     let session_id = state.current_session_id();
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
@@ -832,7 +833,7 @@ async fn reset_chat(
     )
     .await?;
     state.event_tx.remove(&old_session_id);
-    let (rotated_old, new_session_id) = state.session_ids.rotate();
+    let (rotated_old, new_session_id) = state.sessions.rotate();
     if rotated_old != old_session_id {
         eprintln!(
             "warning: workbench session changed during reset; deleted {old_session_id}, rotated {rotated_old}"
@@ -847,9 +848,7 @@ async fn reset_chat(
         }),
     );
     let session = state
-        .core
-        .session(new_session_id.clone())
-        .open()
+        .open_session(&new_session_id)
         .await
         .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
@@ -864,8 +863,12 @@ async fn reset_chat(
     state.messages.lock_recover().clear();
     state.lashlang_execution.clear();
     state.mail_world.clear();
+    // The rotated session has committed nothing yet, so it has recorded no
+    // dialect: the badge shows the dialect it will be opened with, which the
+    // rotation carried over from the session it replaced.
+    let rotated_dialect = state.requested_dialect(&new_session_id);
     Ok(Json(StateSnapshot {
-        settings: state.settings_for_session(new_session_id),
+        settings: state.settings_for_session(new_session_id, rotated_dialect),
         messages: Vec::new(),
         observation: session.observe().current_remote_observation(),
         product_events: ProductEventSnapshot::default(),
@@ -933,9 +936,7 @@ async fn list_queued_work(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.queued_work.list", error)
@@ -960,9 +961,7 @@ async fn run_queued_work_batch(
         ));
     }
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.queued_work.run", error)
@@ -1021,9 +1020,7 @@ async fn cancel_queued_work_batch(
             session_id: session_id.clone(),
         })?;
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id)
         .await
         .map_err(|error| {
             state.session_admission_error(&session_id, "api.queued_work.cancel", error)

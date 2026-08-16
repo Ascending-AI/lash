@@ -30,11 +30,23 @@ pub(crate) fn test_config() -> TurnMachineConfig {
 pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> TurnMachineConfig {
     test_config_with_protocol_turn_options(
         lash_core::ProtocolTurnOptions::typed(RlmCreateExtras {
+            dialect: None,
             termination: rlm_termination,
             final_answer_format: None,
         })
         .expect("valid rlm turn options"),
     )
+}
+
+/// A config whose protocol driver runs `language`, for assertions that must
+/// hold in a session that is not the default dialect.
+pub(crate) fn test_config_with_dialect(language: &str) -> TurnMachineConfig {
+    let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
+        Arc::new(RlmDriver::for_language(Arc::from([]), language));
+    TurnMachineConfig {
+        protocol_driver,
+        ..test_config()
+    }
 }
 
 pub(crate) fn test_config_with_protocol_turn_options(

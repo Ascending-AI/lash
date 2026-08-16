@@ -133,7 +133,7 @@ async fn start_live_restate_cron_scenario(
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessionIds::fresh(),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -224,7 +224,7 @@ async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCronScenario) {
 
 fn rotate_cron_session_out_of_current(state: &AppState) -> String {
     let cron_session_id = state.current_session_id();
-    let (rotated_session_id, new_current_session_id) = state.session_ids.rotate();
+    let (rotated_session_id, new_current_session_id) = state.sessions.rotate();
     assert_eq!(rotated_session_id, cron_session_id);
     assert_ne!(new_current_session_id, cron_session_id);
     cron_session_id

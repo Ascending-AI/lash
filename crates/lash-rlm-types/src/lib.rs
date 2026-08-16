@@ -161,18 +161,111 @@ pub enum RlmFinalAnswerFormat {
     RawFinalValue,
 }
 
+/// Source language pinned to an RLM session for its entire durable lifetime.
+///
+/// The serialized names are the language ids registered by the first-party RLM
+/// dialect registry. Keeping this an enum makes an unknown language a typed
+/// create-contract error instead of a late execution failure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RlmDialect {
+    /// The default RLM language when a host omits the field.
+    #[default]
+    Lashlang,
+    /// The ECMA-exact TypeScript dialect.
+    Typescript,
+}
+
+impl RlmDialect {
+    /// Every dialect the first-party registry can activate, in id order.
+    ///
+    /// A host that offers a dialect choice — a create form, a CLI flag, an
+    /// environment variable — must offer *these*, not a list it writes itself:
+    /// a hand-written list is a second source of truth that goes stale the day
+    /// a dialect is added, and the failure it produces is an operator being
+    /// unable to select a dialect the substrate runs.
+    /// `lash-protocol-rlm` checks this array against the registry's own
+    /// dialects, so adding one that is not listed here fails that crate's
+    /// tests rather than shipping a menu with a hole in it.
+    pub const ALL: [Self; 2] = [Self::Lashlang, Self::Typescript];
+
+    /// Return the registered code-execution language id for this dialect.
+    pub const fn language_id(self) -> &'static str {
+        match self {
+            Self::Lashlang => "lashlang",
+            Self::Typescript => "typescript",
+        }
+    }
+
+    /// Resolve a registered language id, refusing an unknown one.
+    ///
+    /// This is the typed create-contract refusal in the shape a host receives
+    /// the choice in: a string off a form, a flag, or an environment variable.
+    /// Returning `None` rather than defaulting is the whole point — a typo that
+    /// silently selected Lashlang would pin the wrong dialect for the session's
+    /// durable lifetime.
+    pub fn from_language_id(language_id: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|dialect| dialect.language_id() == language_id)
+    }
+
+    /// The registered language ids, comma-separated, for a refusal message.
+    pub fn registered_language_ids() -> String {
+        Self::ALL
+            .iter()
+            .map(|dialect| format!("`{}`", dialect.language_id()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 /// RLM protocol session config. Natural turns finish with prose-only model
-/// responses or explicit `finish <value>` from lashlang. Programmatic turns can
-/// require an explicit finish value, optionally validated against a schema.
+/// responses or the active dialect's explicit `finish` operation. Programmatic
+/// turns can require an explicit finish value, optionally validated against a schema.
 /// `final_answer_format` is a session presentation preference; schema-required
 /// turns ignore it.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmCreateExtras {
+    /// Session-wide language choice. Absence is the ratified Lashlang default.
+    ///
+    /// An *explicit* `null` is refused rather than read as absence: see
+    /// [`reject_explicit_null_dialect`].
+    #[serde(
+        default,
+        deserialize_with = "reject_explicit_null_dialect",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dialect: Option<RlmDialect>,
     #[serde(default)]
     pub termination: RlmTermination,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_answer_format: Option<RlmFinalAnswerFormat>,
+}
+
+/// Reads a present `dialect` key, refusing an explicit `null`.
+///
+/// Absence and `null` are the same value to serde by default, and that made
+/// `null` the one tampered shape that did not fail closed: an unknown id, a
+/// case-drifted id and a junk extra key are all refused, but a `null` silently
+/// downgraded a recorded TypeScript session to the Lashlang default. Absence
+/// has to keep meaning Lashlang — that is how every pre-layer session decodes —
+/// so the two cases must be told apart rather than merged. Serde only calls
+/// this when the key is present, so absence still takes the `default`.
+fn reject_explicit_null_dialect<'de, D>(deserializer: D) -> Result<Option<RlmDialect>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize as _;
+    use serde::de::Error as _;
+
+    match Option::<RlmDialect>::deserialize(deserializer)? {
+        Some(dialect) => Ok(Some(dialect)),
+        None => Err(D::Error::custom(
+            "`dialect` is present but null; omit the key for the Lashlang default",
+        )),
+    }
 }
 
 /// Wire-format snapshot of a set of projected bindings. Pairs of
@@ -245,4 +338,58 @@ impl TurnProtocol for RlmTurnProtocol {
     type Event = RlmProtocolEvent;
     type Termination = RlmTermination;
     type DriverState = serde_json::Value;
+}
+
+#[cfg(test)]
+mod dialect_serde_tests {
+    use super::{RlmCreateExtras, RlmDialect};
+
+    /// Absence is the pre-layer compatibility answer and must stay Lashlang.
+    #[test]
+    fn an_absent_dialect_is_the_lashlang_default() {
+        let extras: RlmCreateExtras = serde_json::from_str("{}").expect("pre-layer state decodes");
+        assert_eq!(extras.dialect, None);
+    }
+
+    /// An explicit `null` is not the same statement as saying nothing.
+    ///
+    /// Every other tampered value fails closed: an unknown id, a case-drifted
+    /// id, a junk extra key. `null` was the one shape that silently downgraded
+    /// a recorded TypeScript session to Lashlang, because serde cannot tell it
+    /// from an absent key by default. The field is never written as `null` —
+    /// it is skipped when absent — so a `null` in durable state is a store that
+    /// has been edited, and failing closed is the same answer the other tamper
+    /// shapes already get.
+    #[test]
+    fn an_explicit_null_dialect_fails_closed() {
+        let error = serde_json::from_str::<RlmCreateExtras>(r#"{"dialect":null}"#)
+            .expect_err("an explicit null must be refused");
+        assert!(
+            error.to_string().contains("dialect"),
+            "the refusal names the field: {error}"
+        );
+    }
+
+    #[test]
+    fn a_named_dialect_decodes() {
+        let extras: RlmCreateExtras =
+            serde_json::from_str(r#"{"dialect":"typescript"}"#).expect("named dialect decodes");
+        assert_eq!(extras.dialect, Some(RlmDialect::Typescript));
+    }
+
+    #[test]
+    fn an_unknown_dialect_still_fails_closed() {
+        serde_json::from_str::<RlmCreateExtras>(r#"{"dialect":"python"}"#)
+            .expect_err("an unknown id must be refused");
+    }
+
+    /// The create path is unchanged: `None` still round-trips by being skipped,
+    /// so a session that asks for no dialect writes no key and stays decodable.
+    #[test]
+    fn none_round_trips_as_an_absent_key() {
+        let encoded = serde_json::to_string(&RlmCreateExtras::default()).expect("encode");
+        assert!(!encoded.contains("dialect"), "{encoded}");
+        let decoded: RlmCreateExtras = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded.dialect, None);
+    }
 }

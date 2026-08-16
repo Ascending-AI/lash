@@ -117,18 +117,35 @@ pub(super) fn invalid_cell_message(
     }
 }
 
-pub(super) fn output_limit_retry_message(id: String, output_token_cap: Option<usize>) -> Message {
+/// The retry copy a model reads after the output limit truncated its answer.
+///
+/// Vocabulary-taking so the walker can render it in both dialects: "per cell"
+/// is TypeScript's noun for a unit of code, and a Lashlang reader has only ever
+/// been shown blocks.
+pub(crate) fn output_limit_retry_copy(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+    output_token_cap: Option<usize>,
+) -> String {
     let cap = output_token_cap
         .map(|cap| format!(" (the request cap was {cap} tokens)"))
         .unwrap_or_default();
+    let noun = vocabulary.cell_noun;
+    format!(
+        "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per {noun} and continue in a later step."
+    )
+}
+
+pub(super) fn output_limit_retry_message(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+    id: String,
+    output_token_cap: Option<usize>,
+) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            format!(
-                "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per cell and continue in a later step."
-            ),
+            output_limit_retry_copy(vocabulary, output_token_cap),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {

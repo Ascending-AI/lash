@@ -170,9 +170,14 @@ impl TraceSink for TraceLashlangGraphStore {
         let TraceEvent::LanguageExecution { language, event } = &record.event else {
             return Ok(());
         };
-        if language != "lashlang" {
-            return Ok(());
-        }
+        // Any dialect's executions reduce into this projection. The events
+        // describe the *substrate*'s node and edge lifecycle, which is the
+        // Lashlang VM under every dialect — the `language` field describes the
+        // source that ran, and dropping a session's graph because its source
+        // was TypeScript would empty the execution view of every TypeScript
+        // session. The filter existed when `lashlang` was the only value this
+        // field could take.
+        let _ = language;
         let event_key = lashlang_execution_event_key(event);
         let mut state = self.inner.lock_recover();
         if !state.seen_event_keys.insert(event_key.to_string()) {
@@ -581,8 +586,15 @@ mod tests {
         );
     }
 
+    /// A TypeScript session's executions reduce into the same projection.
+    ///
+    /// This test used to assert the opposite, from when `lashlang` was the only
+    /// value the field could take. Now that a record carries the dialect of the
+    /// source that ran, ignoring anything else would empty the execution view
+    /// of every TypeScript session — the projection describes substrate node
+    /// and edge lifecycle, which is the same VM under both dialects.
     #[test]
-    fn graph_store_ignores_other_language_execution_events() {
+    fn graph_store_reduces_every_dialects_execution_events() {
         let store = TraceLashlangGraphStore::default();
         store
             .append(&TraceRecord::new(
@@ -592,9 +604,9 @@ mod tests {
                     event: started_event("start"),
                 },
             ))
-            .expect("append other-language execution event");
+            .expect("append a TypeScript execution event");
 
-        assert!(store.graphs().is_empty());
+        assert!(!store.graphs().is_empty());
     }
 
     #[test]

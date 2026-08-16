@@ -43,3 +43,47 @@ fn typescript_linking_and_schema_signatures_use_shared_lash_types() {
         "declare function search(input: { query: string }): Promise<Array<string>>;"
     );
 }
+
+#[test]
+fn flagship_codemode_examples_stay_valid_in_both_dialects() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../codemode-parity");
+    let host = {
+        let mut catalog = lashlang::LashlangHostCatalog::new();
+        catalog
+            .add_module_operation_binding(
+                ["web"],
+                "Web",
+                "fetch",
+                "tool:web/fetch",
+                lashlang::ResourceOperationBinding {
+                    input_ty: lashlang::TypeExpr::Any,
+                    output_ty: lashlang::TypeExpr::Any,
+                    output_from_input: None,
+                },
+            )
+            .expect("example web binding");
+        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
+    };
+
+    let lashlang_turn = std::fs::read_to_string(root.join("turn.lash")).expect("Lashlang turn");
+    lashlang::LinkedModule::link(
+        lashlang::parse(&lashlang_turn).expect("parse Lashlang turn"),
+        &host,
+    )
+    .expect("link Lashlang turn");
+    let typescript_turn = std::fs::read_to_string(root.join("turn.ts")).expect("TypeScript turn");
+    lash_typescript::link(&typescript_turn, &host).expect("link TypeScript turn");
+
+    let lashlang_process =
+        std::fs::read_to_string(root.join("durable-process.lash")).expect("Lashlang process");
+    let lashlang_program = lashlang::parse(&lashlang_process).expect("parse Lashlang process");
+    lashlang::LinkedModule::link(lashlang_program, &host).expect("link Lashlang process");
+    let typescript_process =
+        std::fs::read_to_string(root.join("durable-process.ts")).expect("TypeScript process");
+    let linked =
+        lash_typescript::link(&typescript_process, &host).expect("link TypeScript process");
+    assert_eq!(
+        linked.artifact.compilation_dialect,
+        lashlang::CompilationDialect::Typescript
+    );
+}

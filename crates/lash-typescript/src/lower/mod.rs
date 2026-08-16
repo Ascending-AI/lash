@@ -34,7 +34,55 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
 
 pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
-    let mut lowerer = Lowerer::default();
+    lower_with_ambient(program, &std::collections::BTreeSet::new())
+}
+
+/// Lowers `program` with `ambient` names already in scope.
+///
+/// The RLM session model is that top-level bindings persist across cells: cell
+/// A writes `const findings = ...`, and cell B reads `findings` while the
+/// prompt lists it under `=== BOUND VARIABLES ===` with its value. Lashlang
+/// parses permissively and resolves those names at *link*, where the live
+/// session globals are known. This lowerer resolves every name at parse against
+/// source-local scopes, so cell B rejected with `TS_UNKNOWN_BINDING` for a name
+/// the session was showing it — which breaks every stateful multi-cell
+/// TypeScript session.
+///
+/// The names arrive as an ambient root scope beneath the program's own: they
+/// are initialized (no temporal dead zone), immutable (a bare `findings = 1`
+/// with no declaration is still refused, and a capture of one is legal), and
+/// they never mangle, because a root declaration of the same name keeps the
+/// author's spelling — which is how a cell rebinds a session global.
+///
+/// A name in neither the source nor the session is still `TS_UNKNOWN_BINDING`
+/// at parse. That distinction is the whole contract: "unknown everywhere"
+/// stays an error, "known to the session" does not.
+pub(crate) fn lower_with_ambient(
+    program: &adapter::Program,
+    ambient: &std::collections::BTreeSet<String>,
+) -> Result<LashProgram, Diagnostic> {
+    let mut lowerer = Lowerer {
+        root_scope_depth: 2,
+        ..Lowerer::default()
+    };
+    let mut ambient_scope = Scope::default();
+    for name in ambient {
+        // The generated namespace is reserved and never durable, so a name
+        // carrying it is not a session global this cell may read.
+        if name.starts_with(GENERATED_BINDING_PREFIX) {
+            continue;
+        }
+        ambient_scope.bindings.insert(
+            name.clone(),
+            Binding {
+                internal: name.clone(),
+                kind: BindingKind::Const,
+                initialized: true,
+                owner_function: 0,
+            },
+        );
+    }
+    lowerer.scopes.push(ambient_scope);
     lowerer.scopes.push(Scope::default());
     let expressions = lowerer.lower_statements(&program.statements, true)?;
     Ok(LashProgram {
@@ -97,6 +145,11 @@ struct PendingBinding {
 
 #[derive(Default)]
 struct Lowerer {
+    /// How deep the program's own root scope is. One when the lowerer stands
+    /// alone; two when an ambient scope of live session globals sits beneath
+    /// it. Depth is what "top level" means to `defineProcess`, so it has to
+    /// count from the program's root rather than from zero.
+    root_scope_depth: usize,
     scopes: Vec<Scope>,
     functions: Vec<FunctionContext>,
     next_binding: usize,
@@ -412,7 +465,10 @@ impl Lowerer {
                                 None,
                             ));
                         }
-                        if self.scopes.len() != 1 || !self.functions.is_empty() {
+                        // The program's own root scope, which sits directly
+                        // above the ambient session scope.
+                        if self.scopes.len() != self.root_scope_depth || !self.functions.is_empty()
+                        {
                             return Err(Diagnostic::new(
                                 DiagnosticCode::ProcessDefinitionNotTopLevel,
                                 "defineProcess must initialize a top-level binding",

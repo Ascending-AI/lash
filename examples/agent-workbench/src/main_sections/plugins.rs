@@ -101,16 +101,17 @@ impl SessionPlugin for WorkbenchSessionPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let mail_world = self.mail_world.clone();
         let deferred_preview = self.deferred_tools.clone();
-        reg.prompt().contribute(Arc::new(move |_ctx| {
+        reg.prompt().contribute(Arc::new(move |ctx| {
             let mail_world = mail_world.clone();
             let deferred_preview = deferred_preview.clone();
+            // ADR 0063: the host's worked examples are written in the dialect
+            // the executor is actually serving this turn, read from its own
+            // execution section rather than from this process's configuration.
+            let prompt = workbench_prompt(tutorial_dialect(&ctx.protocol_turn_options));
             Box::pin(async move {
                 let mut contributions = vec![PromptContribution::environment(
                     "Agent Workbench",
-                    format!(
-                        "{WORKBENCH_PROMPT}\n\n{}",
-                        connected_accounts_prompt(&mail_world)
-                    ),
+                    format!("{prompt}\n\n{}", connected_accounts_prompt(&mail_world)),
                 )];
                 contributions.push(deferred_preview.preview_contribution());
                 Ok(contributions)

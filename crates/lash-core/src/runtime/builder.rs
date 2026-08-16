@@ -303,6 +303,7 @@ impl EmbeddedRuntimeBuilder {
                     None,
                     crate::plugin::SessionAuthorityContext {
                         plugin_options: self.plugin_options.clone(),
+                        protocol_turn_options: state.protocol_turn_options.clone(),
                         ..crate::plugin::SessionAuthorityContext::default()
                     },
                 )

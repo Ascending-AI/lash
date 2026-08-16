@@ -376,6 +376,26 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             lint.index("python3 scripts/check-transcript-diff.py --enforce"),
         )
 
+    def test_every_script_self_test_is_run_by_ci(self) -> None:
+        # The self-test list is enumerated by hand, so a new gate's own test can
+        # be written, pass locally, and never run again — which is exactly what
+        # happened to the judged-runbook matrix test: the parity claim rested on
+        # a gate CI did not execute. Discovering the files makes forgetting one
+        # a red test rather than a silent hole.
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        discovered = sorted(
+            path.name for path in (ROOT / "scripts").glob("test_*.py")
+        )
+        self.assertGreater(len(discovered), 5, "the self-test discovery found nothing")
+        missing = [
+            name for name in discovered if f"python3 scripts/{name}" not in workflow
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            f"these script self-tests exist but CI never runs them: {missing}",
+        )
+
     def test_lint_job_checks_and_previews_pr_release_notes(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")

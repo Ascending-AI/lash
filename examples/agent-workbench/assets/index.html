@@ -594,6 +594,46 @@
       overflow-wrap: anywhere;
     }
 
+    .session-roster {
+      display: grid;
+      gap: var(--space-2xs);
+      padding-top: var(--space-xs);
+      border-top: 1px solid var(--line);
+    }
+
+    .session-roster-head {
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      color: var(--ash-text);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .session-create {
+      display: grid;
+      gap: var(--space-2xs);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: var(--space-xs);
+      background: var(--form-raised);
+    }
+
+    .session-dialect-badge {
+      font-family: var(--font-ui);
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--sodium-soft);
+    }
+
+    .session-error {
+      margin: 0;
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      color: var(--error);
+    }
+    .session-error[hidden] { display: none; }
+
     .execution-scorecard {
       margin: 0;
       padding: 8px 10px;
@@ -2077,6 +2117,28 @@
       <div class="status-stack">
         <div class="status-row"><span>web</span><span id="webState">checking</span></div>
         <div class="status-row"><span>session</span><span id="sessionId">connecting…</span></div>
+        <div class="status-row"><span>dialect</span><span id="sessionDialect" class="session-dialect-badge">connecting…</span></div>
+        <section class="session-roster" aria-label="Sessions">
+          <div class="session-roster-head">sessions</div>
+          <label class="field">
+            <span>current</span>
+            <select id="sessionSelect" title="Switch the workbench to another session"></select>
+          </label>
+          <form class="session-create" id="newSessionForm">
+            <label class="field">
+              <span>name</span>
+              <input id="newSessionName" autocomplete="off" spellcheck="false"
+                     placeholder="optional name" maxlength="80" />
+            </label>
+            <label class="field">
+              <span>dialect</span>
+              <select id="newSessionDialect"
+                      title="The RLM dialect the new session is pinned to for its whole life"></select>
+            </label>
+            <button id="newSessionCreate" class="ghost-btn" type="submit">add session</button>
+          </form>
+          <p class="session-error" id="sessionError" hidden></p>
+        </section>
         <div class="status-row"><span>usage</span><span id="usageTotal">0 total</span></div>
         <div class="status-row"><span>tokens</span><span id="usageBreakdown">0 in · 0 out</span></div>
         <div class="status-row"><span>execution evidence</span></div>
@@ -2310,6 +2372,128 @@
       const url = new URL(window.location.href);
       url.searchParams.set("session_id", "workbench-tab-" + crypto.randomUUID());
       window.open(url, "_blank", "noopener");
+    });
+
+    const sessionDialect = document.getElementById("sessionDialect");
+    const sessionSelect = document.getElementById("sessionSelect");
+    const newSessionForm = document.getElementById("newSessionForm");
+    const newSessionName = document.getElementById("newSessionName");
+    const newSessionDialect = document.getElementById("newSessionDialect");
+    const sessionError = document.getElementById("sessionError");
+
+    /* The dialect menu is whatever the backend says is registered; this page
+       never writes the list down, so a dialect the substrate gains shows up
+       here without an edit. */
+    let knownDialects = [];
+
+    function showSessionError(message) {
+      sessionError.textContent = message;
+      sessionError.hidden = !message;
+    }
+
+    function sessionOptionLabel(session) {
+      const name = session.name && session.name !== session.session_id
+        ? session.name
+        : shortId(session.session_id);
+      return name + " · " + session.dialect;
+    }
+
+    function renderSessions(listing) {
+      const sessions = listing?.sessions || [];
+      sessionSelect.innerHTML = "";
+      for (const session of sessions) {
+        const option = document.createElement("option");
+        option.value = session.session_id;
+        option.textContent = sessionOptionLabel(session);
+        option.title = session.session_id;
+        if (session.session_id === (scopedSessionId || listing.current_session_id)) {
+          option.selected = true;
+        }
+        sessionSelect.appendChild(option);
+      }
+      /* A tab scoped to a session the roster does not carry still has to name
+         the session it is showing, or the selector would claim a different one. */
+      if (scopedSessionId && !sessions.some(session => session.session_id === scopedSessionId)) {
+        const option = document.createElement("option");
+        option.value = scopedSessionId;
+        option.textContent = shortId(scopedSessionId) + " · this tab";
+        option.selected = true;
+        sessionSelect.appendChild(option);
+      }
+      const dialects = listing?.dialects || [];
+      if (dialects.join(" ") !== knownDialects.join(" ")) {
+        knownDialects = dialects;
+        newSessionDialect.innerHTML = "";
+        for (const dialect of dialects) {
+          const option = document.createElement("option");
+          option.value = dialect;
+          option.textContent = dialect;
+          if (dialect === listing.default_dialect) option.selected = true;
+          newSessionDialect.appendChild(option);
+        }
+      }
+    }
+
+    async function loadSessions() {
+      try {
+        const response = await nativeFetch("/api/sessions");
+        if (!response.ok) return;
+        const listing = await response.json();
+        // Never rebuild the selector under the operator's cursor.
+        if (document.activeElement === sessionSelect) return;
+        renderSessions(listing);
+      } catch (_) { /* polling retries */ }
+    }
+
+    /* Switching is a durable selection, not a client-side filter: the backend
+       records which session a query-less call resolves to, so a reload — and
+       every driver that reads the workbench's current session — follows. */
+    async function switchToSession(sessionId) {
+      showSessionError("");
+      const response = await nativeFetch("/api/sessions/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        showSessionError(typeof body?.error === "string" ? body.error : "could not switch session");
+        loadSessions();
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.delete("session_id");
+      window.location.assign(url.pathname + url.search);
+    }
+
+    sessionSelect.addEventListener("change", () => {
+      const sessionId = sessionSelect.value;
+      if (!sessionId || sessionId === scopedSessionId) return;
+      switchToSession(sessionId).catch(() => showSessionError("could not switch session"));
+    });
+
+    newSessionForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      showSessionError("");
+      const request = { dialect: newSessionDialect.value };
+      const name = newSessionName.value.trim();
+      if (name) request.name = name;
+      try {
+        const response = await nativeFetch("/api/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request)
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          showSessionError(typeof body?.error === "string" ? body.error : "could not add session");
+          return;
+        }
+        newSessionName.value = "";
+        await switchToSession(body.session_id);
+      } catch (_) {
+        showSessionError("could not add session");
+      }
     });
 
     // BEGIN WORKBENCH_PROJECTION_STATE
@@ -4620,6 +4804,9 @@
       }
       knownWebState = state.settings.web_configured ? "ready" : "not configured";
       knownSessionLabel = state.settings.session_id;
+      /* The badge says what this session recorded, which the snapshot carries;
+         the page never labels a session from a deployment-wide setting. */
+      sessionDialect.textContent = state.settings.rlm_dialect || "—";
       markShellHydrated(shellAvailability);
       renderShellStatus();
       renderUsage(state.usage);
@@ -6026,12 +6213,16 @@
       refreshWork();
       refreshQueuedWork();
       loadTriggers();
+      loadSessions();
       restartEventStreams();
     });
     setInterval(refreshWork, 1400);
     setInterval(refreshQueuedWork, 1400);
     setInterval(loadTriggers, 1400);
     setInterval(loadAccounts, 1500);
+    /* Slower than the other rails: the roster reads each session's recorded
+       dialect from the session itself, so a poll costs one open per session. */
+    setInterval(loadSessions, 5000);
   </script>
 </body>
 </html>

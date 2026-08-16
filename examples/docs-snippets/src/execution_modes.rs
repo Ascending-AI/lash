@@ -29,7 +29,9 @@ async fn standard_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
 
 async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<()> {
     // docs:start:rlm-core
-    // Build an RLM core for Lashlang-driven turns.
+    // Build one RLM core; each session chooses its durable source dialect.
+    use lash::rlm::{RlmDialect, RlmSessionBuilderExt as _};
+
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::new(
             lash::rlm::ExecutionBound::instructions(1_000_000),
@@ -51,7 +53,43 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(crate::example_process_owner())?;
 
-    let session = core.session("task-1").open().await?;
+    // Absence is the durable Lashlang default.
+    assert_eq!(RlmDialect::Lashlang.language_id(), "lashlang");
+    let lashlang = core.session("task-lashlang").open().await?;
+    assert_eq!(
+        lashlang.read_view().protocol_turn_options().payload["dialect"],
+        serde_json::json!("lashlang")
+    );
+
+    // TypeScript is selected at creation and remains pinned on rehydrate.
+    assert_eq!(RlmDialect::Typescript.language_id(), "typescript");
+    let typescript = core
+        .session("task-typescript")
+        .rlm_dialect(RlmDialect::Typescript)?
+        .open()
+        .await?;
+    assert_eq!(
+        typescript.read_view().protocol_turn_options().payload["dialect"],
+        serde_json::json!("typescript")
+    );
+
+    // A host that offers the choice — a create form, a flag, an environment
+    // variable — reads the menu from the registered dialects rather than
+    // writing its own list, and refuses an unregistered id instead of quietly
+    // defaulting it: the dialect is pinned for the session's whole life.
+    assert_eq!(
+        RlmDialect::ALL.map(RlmDialect::language_id),
+        ["lashlang", "typescript"]
+    );
+    assert_eq!(
+        RlmDialect::from_language_id("typescript"),
+        Some(RlmDialect::Typescript)
+    );
+    assert_eq!(RlmDialect::from_language_id("lashscript"), None);
+    assert_eq!(
+        RlmDialect::registered_language_ids(),
+        "`lashlang`, `typescript`"
+    );
     // docs:end:rlm-core
     Ok(())
 }

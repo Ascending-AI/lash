@@ -26,8 +26,19 @@ It emits `graceful-drain e2e passed: scenarios=1` only after the contract test, 
 live scenario, and artifact assertions pass.
 
 **No real tokens.** The in-flight turn uses a deterministic provider that parks inside one
-real LLM effect until the host releases it, then returns a fixed Lashlang terminal. Do not
-configure a live provider.
+real LLM effect until the host releases it, then returns a fixed terminal cell in the row's
+own dialect (`LASH_RUNBOOK_DIALECT`, as RULES.md requires). Do not configure a live
+provider.
+
+**Two layers, and the dialect belongs to both.** The scripted layer is the companion's
+terminal cell: it is not judged for language quality, but it must be a cell the session can
+*execute*, because a foreign cell never commits and the turn then never reaches a terminal
+state — the row hangs rather than failing. The judged layer is everything above it: the
+drain procedure, the persisted dispositions, and the docs comparison, none of which differ
+by dialect. So the two dialect rows of this scenario differ in exactly one observable, the
+language of the committed cell, and agree on every drain claim. Confirm the served dialect
+from the row's own evidence (the committed cell's tag), never from the environment
+variable you set.
 
 **Fixture honesty.** The controller-owned journal in this scenario is an in-process ledger
 of active replay keys, not a claim that `InlineEffectHost` has a durable workflow journal.

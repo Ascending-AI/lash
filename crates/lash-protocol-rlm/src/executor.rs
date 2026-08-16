@@ -136,6 +136,23 @@ enum SourceDialect {
     Typescript,
 }
 
+impl SourceDialect {
+    /// The language id an execution trace record carries.
+    ///
+    /// Every record said `lashlang` regardless, so a TypeScript session's
+    /// `lashlang-execution.jsonl` described its own executions as Lashlang —
+    /// the same "evidence that disagrees with its own label" defect the
+    /// transcript badge had. The substrate under both dialects is the Lashlang
+    /// VM, which is why the file name and the graph API keep their names; what
+    /// was wrong is the claim about the *source* that ran.
+    fn language_id(self) -> &'static str {
+        match self {
+            Self::Lashlang => crate::dialect::lashlang::LANGUAGE_ID,
+            Self::Typescript => crate::dialect::typescript::LANGUAGE_ID,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_code_with_dialect_and_bounds(
     mut state: RlmExecutionState,
@@ -384,7 +401,12 @@ async fn execute_code_inner(
                 lashlang::CompilationDialect::Typescript,
             ) {
                 Some(program) => Ok(program),
-                None => lash_typescript::parse(code)
+                // Parsed with the session's live globals, so a cell can read
+                // what an earlier cell bound. Lashlang gets this for free by
+                // resolving at link; TypeScript resolves names at parse, so the
+                // names have to arrive here. `host_environment` already carries
+                // them — it is the same set the linker will check against.
+                None => lash_typescript::parse_with_globals(code, &host_environment.globals)
                     .map_err(|error| error.to_string())
                     .and_then(|program| {
                         state
@@ -543,6 +565,7 @@ async fn execute_code_inner(
         &ctx,
         &linked_module.artifact,
         &lashlang_execution_trace_config,
+        source_dialect.language_id(),
     );
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
@@ -714,6 +737,7 @@ fn foreground_lashlang_execution_trace(
     ctx: &RuntimeExecutionContext<'_>,
     artifact: &lashlang::ModuleArtifact,
     config: &RlmLashlangExecutionTraceConfig,
+    language: &'static str,
 ) -> Option<LashlangExecutionTrace> {
     let sink = config.sink.as_ref()?.clone();
     let invocation = ctx.parent_invocation()?;
@@ -724,6 +748,7 @@ fn foreground_lashlang_execution_trace(
     let kind = invocation.effect_kind()?;
     Some(LashlangExecutionTrace::new(
         sink,
+        language,
         config.trace_context.clone(),
         TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope {
@@ -940,7 +965,9 @@ mod tests {
         );
         let context =
             lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-                Arc::new(crate::control_tools::RlmControlToolsProvider),
+                Arc::new(crate::control_tools::RlmControlToolsProvider {
+                    vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                }),
                 catalog,
                 invocation,
             );
@@ -4058,7 +4085,11 @@ mod tests {
 
             let globals = state.bound_variable_values(&BTreeSet::new());
             let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-            let rendered = crate::rlm_support::render_bound_variables(&mut cache, &globals);
+            let rendered = crate::rlm_support::render_bound_variables(
+                &mut cache,
+                &globals,
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            );
 
             assert!(
                 rendered.contains("- `scratch_note` = after execution"),
@@ -4122,11 +4153,20 @@ mod tests {
             let globals = state.bound_variable_values(&exclude);
 
             let mut warm = crate::rlm_support::BoundVariableRenderCache::default();
-            let _ = crate::rlm_support::render_bound_variables(&mut warm, &globals);
+            let _ = crate::rlm_support::render_bound_variables(
+                &mut warm,
+                &globals,
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            );
             let t2 = std::time::Instant::now();
             let mut s2 = 0usize;
             for _ in 0..n {
-                s2 += crate::rlm_support::render_bound_variables(&mut warm, &globals).len();
+                s2 += crate::rlm_support::render_bound_variables(
+                    &mut warm,
+                    &globals,
+                    crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                )
+                .len();
             }
             let warm_us = t2.elapsed().as_nanos() as f64 / n as f64 / 1000.0;
 
@@ -4134,7 +4174,12 @@ mod tests {
             let mut s3 = 0usize;
             for _ in 0..n {
                 let mut cold = crate::rlm_support::BoundVariableRenderCache::default();
-                s3 += crate::rlm_support::render_bound_variables(&mut cold, &globals).len();
+                s3 += crate::rlm_support::render_bound_variables(
+                    &mut cold,
+                    &globals,
+                    crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                )
+                .len();
             }
             let cold_us = t3.elapsed().as_nanos() as f64 / n as f64 / 1000.0;
 
@@ -4195,7 +4240,12 @@ mod tests {
 
             let globals = state.bound_variable_values(&BTreeSet::new());
             let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-            let s = crate::rlm_support::render_bound_variables(&mut cache, &globals).to_string();
+            let s = crate::rlm_support::render_bound_variables(
+                &mut cache,
+                &globals,
+                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            )
+            .to_string();
 
             // Large record -> type + keys=N + projector preview.
             assert!(s.contains("`big_map`:"), "{s}");

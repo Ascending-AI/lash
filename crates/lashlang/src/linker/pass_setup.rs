@@ -20,6 +20,12 @@ struct Linker<'module> {
     type_defs: BTreeMap<String, TypeExpr>,
     expression_spans: BTreeMap<usize, Span>,
     expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
+    /// The surface dialect the linked source was written in.
+    ///
+    /// Linking is dialect-independent — TypeScript is lowered to the same AST —
+    /// but link *errors* are model-facing text, and a diagnostic that names a
+    /// primitive has to name it in the vocabulary the author actually wrote.
+    dialect: crate::CompilationDialect,
 }
 
 impl<'module> Linker<'module> {
@@ -27,12 +33,26 @@ impl<'module> Linker<'module> {
         Self {
             program,
             surface,
+            dialect: crate::CompilationDialect::Lashlang,
             process_names: BTreeSet::new(),
             process_types: BTreeMap::new(),
             type_names: BTreeSet::new(),
             type_defs: BTreeMap::new(),
             expression_spans: expression_spans_by_pointer(program),
             expected_type_facts: None,
+        }
+    }
+
+    fn with_dialect(mut self, dialect: crate::CompilationDialect) -> Self {
+        self.dialect = dialect;
+        self
+    }
+
+    /// The active dialect's spelling of the process-only signal receiver.
+    fn wait_signal_keyword(&self) -> &'static str {
+        match self.dialect {
+            crate::CompilationDialect::Lashlang => "wait_signal",
+            crate::CompilationDialect::Typescript => "waitSignal",
         }
     }
 

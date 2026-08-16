@@ -60,13 +60,81 @@ pub fn rlm_execution_section_for_host_environment(
     sections.join("\n\n")
 }
 
-fn render_host_environment_section(surface: &lashlang::LashlangHostEnvironment) -> Option<String> {
+/// Modules the substrate binds for its own lowering, never for a reader.
+///
+/// The leading double underscore is the repository's reserved-namespace marker
+/// (the TypeScript lowerer's generated bindings share it), so this is a rule
+/// about a namespace rather than a list of names to keep in sync. It exists
+/// because `lashlang_host_environment_from_tool_catalog` binds
+/// `__typescript_runtime` — how the TypeScript lowerer reaches journaled
+/// `Date.now()`/`Math.random()` — into *every* Lashlang host, and this section
+/// advertised it: a Lashlang reader was handed
+/// `await __typescript_runtime.now(any)? -> float`, an internal name in another
+/// dialect's vocabulary.
+///
+/// Hiding rather than renaming is deliberate. The module path is a durable
+/// link-time identifier: it is embedded in every lowered TypeScript program,
+/// including the persisted bodies of durable processes that must still resolve
+/// when a worker wakes them after a restart. ADR 0063 records the rule and the
+/// carve-out list.
+fn module_is_runtime_internal(path: &[String]) -> bool {
+    path.first()
+        .is_some_and(|segment| segment.starts_with("__"))
+}
+
+/// The host surface a dialect has to describe, walked once.
+///
+/// Both dialects advertise the same inventory and spell it differently, so the
+/// walk lives here and each dialect formats the rows. A TypeScript session used
+/// to receive no inventory at all: its execution section rendered tool
+/// signatures and nothing else, so the trigger sources, their event types and
+/// the `triggers.*` operations were invisible — while the host prompt told the
+/// model to use them. A judged row watched a model search for `cron.Schedule`,
+/// find nothing, and conclude the trigger APIs did not exist.
+pub(crate) struct HostSurfaceInventory<'a> {
+    pub(crate) operations: Vec<HostSurfaceOperation<'a>>,
+    pub(crate) data_types: Vec<(String, &'a lashlang::TypeExpr)>,
+    pub(crate) constructors: Vec<HostSurfaceConstructor<'a>>,
+    /// `(trigger source type, event type name)`.
+    pub(crate) trigger_sources: Vec<(String, String)>,
+}
+
+pub(crate) struct HostSurfaceOperation<'a> {
+    pub(crate) alias: String,
+    pub(crate) operation: String,
+    pub(crate) input: &'a lashlang::TypeExpr,
+    pub(crate) output: &'a lashlang::TypeExpr,
+}
+
+pub(crate) struct HostSurfaceConstructor<'a> {
+    pub(crate) path: String,
+    pub(crate) input: &'a lashlang::TypeExpr,
+    /// Already resolved to a nominal name (`TriggerSource<cron.Tick>`), which
+    /// is spelled the same in both dialects.
+    pub(crate) output: String,
+}
+
+impl HostSurfaceInventory<'_> {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+            && self.data_types.is_empty()
+            && self.constructors.is_empty()
+            && self.trigger_sources.is_empty()
+    }
+}
+
+pub(crate) fn host_surface_inventory(
+    surface: &lashlang::LashlangHostEnvironment,
+) -> HostSurfaceInventory<'_> {
     // Operations with real Lashlang types (trigger and other host primitives)
     // are listed here. Tool-catalog operations are bridged with placeholder
     // `any` types and documented in full under **Tools**, so they are skipped to
     // avoid an uninformative `any -> any` duplicate of that section.
-    let mut operation_lines = Vec::new();
+    let mut operations = Vec::new();
     for (_, module) in surface.resources.module_instances() {
+        if module_is_runtime_internal(&module.path) {
+            continue;
+        }
         if let Some(resource_type) =
             surface
                 .resources
@@ -86,58 +154,95 @@ fn render_host_environment_section(surface: &lashlang::LashlangHostEnvironment) 
                 {
                     continue;
                 }
-                operation_lines.push(format!(
-                    "- `await {}.{}({})? -> {}`",
-                    module.alias,
-                    operation,
-                    lashlang::format_type_expr(&binding.input_ty),
-                    lashlang::format_type_expr(&binding.output_ty)
-                ));
+                operations.push(HostSurfaceOperation {
+                    alias: module.alias.clone(),
+                    operation: operation.clone(),
+                    input: &binding.input_ty,
+                    output: &binding.output_ty,
+                });
             }
         }
     }
-    let mut data_type_lines = Vec::new();
-    for (_, data_type) in surface.resources.named_data_types() {
-        data_type_lines.push(format!(
-            "- `type {} = {}`",
-            data_type.name(),
-            lashlang::format_type_expr(data_type.ty())
-        ));
+    let data_types = surface
+        .resources
+        .named_data_types()
+        .map(|(_, data_type)| (data_type.name().to_string(), data_type.ty()))
+        .collect();
+    let constructors = surface
+        .resources
+        .value_constructors()
+        .map(|(_, constructor)| {
+            let output = match &constructor.output_ty {
+                lashlang::TypeExpr::Ref(name) => surface
+                    .resources
+                    .resolve_trigger_source(name.as_str())
+                    .map(|binding| format!("TriggerSource<{}>", binding.event_type_name()))
+                    .unwrap_or_else(|| lashlang::format_type_expr(&constructor.output_ty)),
+                other => lashlang::format_type_expr(other),
+            };
+            HostSurfaceConstructor {
+                path: constructor.path.join("."),
+                input: &constructor.input_ty,
+                output,
+            }
+        })
+        .collect();
+    let trigger_sources = surface
+        .resources
+        .trigger_sources()
+        .map(|(source_ty, binding)| (source_ty.to_string(), binding.event_type_name().to_string()))
+        .collect();
+    HostSurfaceInventory {
+        operations,
+        data_types,
+        constructors,
+        trigger_sources,
     }
-    let mut constructor_lines = Vec::new();
-    for (_, constructor) in surface.resources.value_constructors() {
-        let output_ty = match &constructor.output_ty {
-            lashlang::TypeExpr::Ref(name) => surface
-                .resources
-                .resolve_trigger_source(name.as_str())
-                .map(|binding| format!("TriggerSource<{}>", binding.event_type_name()))
-                .unwrap_or_else(|| lashlang::format_type_expr(&constructor.output_ty)),
-            _ => lashlang::format_type_expr(&constructor.output_ty),
-        };
-        constructor_lines.push(format!(
-            "- `{}({}) -> {}`",
-            constructor.path.join("."),
-            lashlang::format_type_expr(&constructor.input_ty),
-            output_ty
-        ));
-    }
-    let mut protocol_lines = Vec::new();
-    let trigger_register = lashlang::TriggerHostOperation::Register.host_operation();
-    for (source_ty, binding) in surface.resources.trigger_sources() {
-        protocol_lines.push(format!(
-            "- `{}` can be passed to `{}` and emits `{}`",
-            source_ty,
-            trigger_register,
-            binding.event_type_name()
-        ));
-    }
-    if operation_lines.is_empty()
-        && data_type_lines.is_empty()
-        && constructor_lines.is_empty()
-        && protocol_lines.is_empty()
-    {
+}
+
+fn render_host_environment_section(surface: &lashlang::LashlangHostEnvironment) -> Option<String> {
+    let inventory = host_surface_inventory(surface);
+    if inventory.is_empty() {
         return None;
     }
+    let operation_lines = inventory
+        .operations
+        .iter()
+        .map(|operation| {
+            format!(
+                "- `await {}.{}({})? -> {}`",
+                operation.alias,
+                operation.operation,
+                lashlang::format_type_expr(operation.input),
+                lashlang::format_type_expr(operation.output)
+            )
+        })
+        .collect::<Vec<_>>();
+    let data_type_lines = inventory
+        .data_types
+        .iter()
+        .map(|(name, ty)| format!("- `type {} = {}`", name, lashlang::format_type_expr(ty)))
+        .collect::<Vec<_>>();
+    let constructor_lines = inventory
+        .constructors
+        .iter()
+        .map(|constructor| {
+            format!(
+                "- `{}({}) -> {}`",
+                constructor.path,
+                lashlang::format_type_expr(constructor.input),
+                constructor.output
+            )
+        })
+        .collect::<Vec<_>>();
+    let trigger_register = lashlang::TriggerHostOperation::Register.host_operation();
+    let protocol_lines = inventory
+        .trigger_sources
+        .iter()
+        .map(|(source_ty, event)| {
+            format!("- `{source_ty}` can be passed to `{trigger_register}` and emits `{event}`")
+        })
+        .collect::<Vec<_>>();
     let mut section = String::from("### Host Surface");
     if !operation_lines.is_empty() {
         section.push_str("\n\nAwaited runtime operations:\n\n");

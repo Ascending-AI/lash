@@ -86,6 +86,96 @@ pub enum DiagnosticCode {
 }
 
 impl DiagnosticCode {
+    /// Every diagnostic code the dialect can emit.
+    ///
+    /// The prompt the model reads names codes in prose, and prose cannot be
+    /// type-checked: FIG-1306 shipped `TS_FOR_OF_ITERATOR_UNSUPPORTED`, a code
+    /// that never existed, into the production prompt, a test that pinned it,
+    /// and a runbook gate that could therefore never fire. This list is what
+    /// lets a test walk the rendered prompt and reject a name the dialect
+    /// cannot produce. `all_codes_are_listed` keeps it complete.
+    pub const ALL: &'static [Self] = &[
+        Self::SyntaxError,
+        Self::ClassUnsupported,
+        Self::GeneratorUnsupported,
+        Self::AsyncUnsupported,
+        Self::WithUnsupported,
+        Self::EvalUnsupported,
+        Self::FunctionConstructorUnsupported,
+        Self::LabelUnsupported,
+        Self::RegExpUnsupported,
+        Self::AccessorUnsupported,
+        Self::PrototypeMutationUnsupported,
+        Self::ThisUnsupported,
+        Self::EnumUnsupported,
+        Self::NamespaceUnsupported,
+        Self::DecoratorUnsupported,
+        Self::DynamicImportUnsupported,
+        Self::JsxUnsupported,
+        Self::ImportExportUnsupported,
+        Self::VarUnsupported,
+        Self::UsingUnsupported,
+        Self::DestructuringUnsupported,
+        Self::SpreadUnsupported,
+        Self::OptionalChainingUnsupported,
+        Self::NewUnsupported,
+        Self::UpdateUnsupported,
+        Self::SwitchUnsupported,
+        Self::DoWhileUnsupported,
+        Self::ForUnsupported,
+        Self::ForInUnsupported,
+        Self::ForOfUnsupported,
+        Self::DeleteUnsupported,
+        Self::AwaitUnsupported,
+        Self::AwaitRequired,
+        Self::YieldUnsupported,
+        Self::TaggedTemplateUnsupported,
+        Self::ComputedPropertyUnsupported,
+        Self::ObjectMethodUnsupported,
+        Self::SuperUnsupported,
+        Self::MetaPropertyUnsupported,
+        Self::BigIntUnsupported,
+        Self::PrivateNameUnsupported,
+        Self::AssignmentOperatorUnsupported,
+        Self::SequenceUnsupported,
+        Self::BitwiseUnsupported,
+        Self::ExponentiationUnsupported,
+        Self::InOperatorUnsupported,
+        Self::InstanceOfUnsupported,
+        Self::DebuggerUnsupported,
+        Self::EmptyCatchBindingUnsupported,
+        Self::LoneSurrogateLiteralUnsupported,
+        Self::SourceNestingLimit,
+        Self::SourceTooLarge,
+        Self::ParseResourcesUnavailable,
+        Self::ParameterDefaultUnsupported,
+        Self::ParameterRestUnsupported,
+        Self::DeclareUnsupported,
+        Self::MissingInitializer,
+        Self::ReservedIdentifier,
+        Self::MutualRecursionUnsupported,
+        Self::DuplicateBinding,
+        Self::TemporalDeadZone,
+        Self::UnknownBinding,
+        Self::AssignConst,
+        Self::MutableCaptureUnsupported,
+        Self::ProcessDefinitionNotTopLevel,
+        Self::ProcessConfigLiteralRequired,
+        Self::ProcessConfigFieldUnsupported,
+        Self::ProcessNameLiteralRequired,
+        Self::ProcessSignalsLiteralRequired,
+        Self::ProcessRunLiteralRequired,
+        Self::ProcessCaptureUnsupported,
+        Self::ProcessTargetStaticRequired,
+        Self::MethodUnsupported,
+        Self::ReturnOutsideFunction,
+        Self::LoopControlOutsideLoop,
+        Self::UnsupportedStatement,
+        Self::UnsupportedExpression,
+        Self::InvalidAst,
+        Self::LinkError,
+    ];
+
     /// The stable machine-readable diagnostic name.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -208,3 +298,68 @@ impl fmt::Display for Diagnostic {
 }
 
 impl std::error::Error for Diagnostic {}
+
+#[cfg(test)]
+mod tests {
+    use super::DiagnosticCode;
+
+    /// `ALL` is only useful if it is complete, and a hand-maintained list beside
+    /// the enum is exactly the drift shape that put a nonexistent code in the
+    /// production prompt. This reads the enum's own declaration and requires
+    /// every variant to appear.
+    #[test]
+    fn all_codes_are_listed() {
+        let source = include_str!("diagnostics.rs");
+        let declaration = source
+            .split("pub enum DiagnosticCode {")
+            .nth(1)
+            .and_then(|rest| rest.split('}').next())
+            .expect("the enum declares its variants");
+        let declared = declaration
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| line.strip_suffix(','))
+            .filter(|line| {
+                line.chars().next().is_some_and(char::is_uppercase)
+                    && line.chars().all(char::is_alphanumeric)
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            declared.len() > 50,
+            "the declaration parse found only {declared:?}"
+        );
+
+        let listed = DiagnosticCode::ALL
+            .iter()
+            .map(|code| format!("{code:?}"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let missing = declared
+            .iter()
+            .filter(|variant| !listed.contains(**variant))
+            .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "DiagnosticCode::ALL is missing {missing:?}"
+        );
+        assert_eq!(
+            listed.len(),
+            DiagnosticCode::ALL.len(),
+            "DiagnosticCode::ALL repeats a variant"
+        );
+    }
+
+    /// Every listed code must render a distinct `TS_`-prefixed token, since the
+    /// prompt walker matches on exactly that shape.
+    #[test]
+    fn every_code_renders_a_distinct_ts_token() {
+        let mut seen = std::collections::BTreeSet::new();
+        for code in DiagnosticCode::ALL {
+            let token = code.as_str();
+            assert!(
+                token.starts_with("TS_"),
+                "{code:?} renders `{token}`, which the prompt walker cannot recognise"
+            );
+            assert!(seen.insert(token), "`{token}` is rendered by two variants");
+        }
+    }
+}

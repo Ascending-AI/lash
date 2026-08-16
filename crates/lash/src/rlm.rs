@@ -39,11 +39,54 @@ impl RlmTurnBuilderExt for TurnBuilder {
 /// same key.
 #[cfg(feature = "rlm")]
 pub trait RlmSessionBuilderExt: Sized {
+    /// Pin the RLM source dialect for the durable lifetime of this session.
+    fn rlm_dialect(self, dialect: lash_rlm_types::RlmDialect) -> Result<Self>;
+
     fn final_answer_format(self, format: lash_rlm_types::RlmFinalAnswerFormat) -> Result<Self>;
+}
+
+/// Reads the dialect a session actually recorded.
+///
+/// The write side of this pair ([`RlmSessionBuilderExt::rlm_dialect`]) is a
+/// *request*: the recorded pin wins, so what a host asked for and what a
+/// session runs can differ whenever the store predates the request. Anything a
+/// host labels with a language — a rendered transcript, an API payload, an
+/// evidence bundle — has to read the recorded value rather than repeat its own
+/// configuration, or it will label the wrong dialect precisely in the case the
+/// label exists to disambiguate.
+#[cfg(feature = "rlm")]
+pub trait RlmSessionReadViewExt {
+    /// The dialect recorded on this session, defaulting to Lashlang for a
+    /// session that has recorded none (which is how every pre-dialect session
+    /// reads).
+    fn rlm_dialect(&self) -> lash_rlm_types::RlmDialect;
+}
+
+#[cfg(feature = "rlm")]
+impl RlmSessionReadViewExt for lash_core::SessionReadView {
+    fn rlm_dialect(&self) -> lash_rlm_types::RlmDialect {
+        self.protocol_turn_options()
+            .decode::<lash_rlm_types::RlmCreateExtras>()
+            .ok()
+            .and_then(|extras| extras.dialect)
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(feature = "rlm")]
 impl RlmSessionBuilderExt for SessionBuilder {
+    fn rlm_dialect(mut self, dialect: lash_rlm_types::RlmDialect) -> Result<Self> {
+        let mut extras = self
+            .plugin_options
+            .decode::<lash_rlm_types::RlmCreateExtras>(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        extras.dialect = Some(dialect);
+        self = self.plugin_option(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID, extras)?;
+        Ok(self)
+    }
+
     fn final_answer_format(mut self, format: lash_rlm_types::RlmFinalAnswerFormat) -> Result<Self> {
         let mut extras = self
             .plugin_options
@@ -75,7 +118,7 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     ProjectionRegistry, RlmProjectedBindings, RlmTurnInputExt, rlm_session_projection_extension,
 };
-pub use lash_rlm_types::RlmFinalAnswerFormat;
+pub use lash_rlm_types::{RlmDialect, RlmFinalAnswerFormat};
 
 /// The Lashlang compile APIs are operations over an
 /// [`RlmProtocolPluginFactory`] and a plugin host; they live in
@@ -92,6 +135,7 @@ fn rlm_termination(
     termination: lash_rlm_types::RlmTermination,
 ) -> Result<TurnBuilder> {
     let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+        dialect: None,
         termination,
         final_answer_format: None,
     })?;

@@ -14,10 +14,26 @@ pub(crate) fn default_board() -> BoardState {
     }
 }
 
-pub(crate) fn board_prompt(board: &BoardState) -> String {
+/// The board context, written in the dialect this turn resolved.
+///
+/// ADR 0063: host prompt copy follows the session's own dialect. The finish
+/// form and the noun for a unit of code are the two words in here that a
+/// TypeScript reader has never seen; `board.play(...)` is the same call path in
+/// both, because one tool binding serves both dialects.
+pub(crate) fn board_prompt(board: &BoardState, dialect: lash::rlm::RlmDialect) -> String {
     let status = board_status(board);
+    let (finish_form, cell_noun) = match dialect {
+        lash::rlm::RlmDialect::Typescript => (
+            "finish(\"<one short user-facing sentence>\")",
+            "typescript cell",
+        ),
+        _ => (
+            "finish \"<one short user-facing sentence>\"",
+            "lashlang block",
+        ),
+    };
     format!(
-        "You are O. The human is X.\nCurrent turn: {}.\nIndex map:\n0 top-left | 1 top-middle | 2 top-right\n3 middle-left | 4 center | 5 middle-right\n6 bottom-left | 7 bottom-middle | 8 bottom-right\nCurrent marks by index:\n{}\nVisual board:\n{}\nLegal moves: {:?}\nStatus: {}.\nIf it is O's turn and the game is not over, call `board.play(...)` exactly once before answering. Only choose one of the legal move indexes. Use `board.read(...)` only when needed. Finish with `finish \"<one short user-facing sentence>\"`; do not repeat that sentence as prose outside the lashlang block. If your move ended the game, clearly say that you won or that the game ended in a draw; otherwise say it is the human's turn. Do not explain your strategy, do not describe threats, do not print an ASCII board, do not narrate every cell, and do not return JSON to the user.",
+        "You are O. The human is X.\nCurrent turn: {}.\nIndex map:\n0 top-left | 1 top-middle | 2 top-right\n3 middle-left | 4 center | 5 middle-right\n6 bottom-left | 7 bottom-middle | 8 bottom-right\nCurrent marks by index:\n{}\nVisual board:\n{}\nLegal moves: {:?}\nStatus: {}.\nIf it is O's turn and the game is not over, call `board.play(...)` exactly once before answering. Only choose one of the legal move indexes. Use `board.read(...)` only when needed. Finish with `{finish_form}`; do not repeat that sentence as prose outside the {cell_noun}. If your move ended the game, clearly say that you won or that the game ended in a draw; otherwise say it is the human's turn. Do not explain your strategy, do not describe threats, do not print an ASCII board, do not narrate every cell, and do not return JSON to the user.",
         board.turn,
         indexed_marks(board),
         board_rows(board),
@@ -155,4 +171,45 @@ fn winner(cells: &[Option<String>]) -> Option<&'static str> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod dialect_tests {
+    use super::*;
+
+    /// ADR 0063, host side: the board context names a finish form and a unit of
+    /// code, and both are dialect words. The pair is asserted in both
+    /// directions so neither can silently become the other's.
+    #[test]
+    fn the_board_prompt_speaks_the_sessions_dialect() {
+        let lashlang = board_prompt(&default_board(), lash::rlm::RlmDialect::Lashlang);
+        assert!(lashlang.contains("finish \"<one short user-facing sentence>\""));
+        assert!(lashlang.contains("outside the lashlang block"));
+        assert!(!lashlang.contains("finish("));
+        assert!(!lashlang.contains("typescript"));
+
+        let typescript = board_prompt(&default_board(), lash::rlm::RlmDialect::Typescript);
+        assert!(typescript.contains("finish(\"<one short user-facing sentence>\")"));
+        assert!(typescript.contains("outside the typescript cell"));
+        assert!(!typescript.contains("lashlang"));
+    }
+
+    /// The turn's resolved options decide, so a session that recorded the other
+    /// dialect is described in the one it is running.
+    #[test]
+    fn the_dialect_comes_from_the_turns_resolved_options() {
+        let recorded = lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+            dialect: Some(lash::rlm::RlmDialect::Typescript),
+            ..Default::default()
+        })
+        .expect("typed options");
+        assert_eq!(
+            crate::state::rlm_dialect_from_turn_options(&recorded),
+            lash::rlm::RlmDialect::Typescript
+        );
+        assert_eq!(
+            crate::state::rlm_dialect_from_turn_options(&lash_core::ProtocolTurnOptions::default()),
+            lash::rlm::RlmDialect::Lashlang
+        );
+    }
 }

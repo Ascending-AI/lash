@@ -21,6 +21,40 @@ const LASHLANG_TAGS: CellTags = CellTags {
     close: "</lashlang>",
 };
 
+const TYPESCRIPT_TAGS: CellTags = CellTags {
+    open: "<typescript>",
+    close: "</typescript>",
+};
+
+/// Every registered dialect's tag set, so extraction can *recognize* a cell it
+/// must not execute.
+///
+/// A scanner that knows only the active dialect's tags reads a foreign cell as
+/// prose. That is not a cosmetic miss: with `FinishRequired` the driver asks
+/// the model to finish, the model answers with the cell it was told to write,
+/// and the turn re-prompts forever — the execution fence never fires because
+/// extraction never yields a cell to fence. The list is asserted against the
+/// dialect registry, so a third dialect cannot be forgotten here.
+const REGISTERED_CELL_TAGS: &[(&str, CellTags)] = &[
+    (crate::dialect::lashlang::LANGUAGE_ID, LASHLANG_TAGS),
+    ("typescript", TYPESCRIPT_TAGS),
+];
+
+/// The registered-but-inactive dialect this text writes a cell in, if any.
+pub(crate) fn foreign_dialect_cell(
+    text: &str,
+    active: CellTags,
+) -> Option<(&'static str, CellTags)> {
+    REGISTERED_CELL_TAGS
+        .iter()
+        .find(|(_, tags)| {
+            tags.open != active.open
+                && (first_cell_span(text, *tags).is_some()
+                    || complete_start_tag_span(text, *tags).is_some())
+        })
+        .map(|(language, tags)| (*language, *tags))
+}
+
 pub fn contains_lashlang_cell(text: &str) -> bool {
     first_cell_span(text, LASHLANG_TAGS).is_some()
 }
@@ -51,4 +85,87 @@ pub(super) fn extract_cell(
         code,
         lashlang_cell_count: 1,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The recognition list must cover every dialect the registry can activate,
+    /// or a session running the missing one silently reads foreign cells as
+    /// prose again. Checked against the dialect implementations themselves —
+    /// both the id and the tags — rather than against a second list of names.
+    #[test]
+    fn every_registered_dialect_is_recognizable() {
+        let dialects: Vec<std::sync::Arc<dyn crate::dialect::RlmDialect>> = vec![
+            std::sync::Arc::new(crate::dialect::lashlang_test_dialect()),
+            std::sync::Arc::new(crate::dialect::typescript_test_dialect()),
+        ];
+        for dialect in dialects {
+            let tags = dialect.cell_tags();
+            assert!(
+                REGISTERED_CELL_TAGS.iter().any(|(language, known)| {
+                    *language == dialect.language_id()
+                        && known.open == tags.open
+                        && known.close == tags.close
+                }),
+                "`{}` is a registered dialect whose cell tags extraction cannot recognize",
+                dialect.language_id()
+            );
+        }
+    }
+
+    #[test]
+    fn a_foreign_cell_is_named_and_the_active_one_is_not() {
+        let typescript = CellTags {
+            open: "<typescript>",
+            close: "</typescript>",
+        };
+        assert_eq!(
+            foreign_dialect_cell("<typescript>\nfinish(1);\n</typescript>", LASHLANG_TAGS)
+                .map(|(language, _)| language),
+            Some("typescript")
+        );
+        assert_eq!(
+            foreign_dialect_cell("<lashlang>\nfinish 1\n</lashlang>", typescript)
+                .map(|(language, _)| language),
+            Some("lashlang")
+        );
+        assert_eq!(
+            foreign_dialect_cell("<lashlang>\nfinish 1\n</lashlang>", LASHLANG_TAGS),
+            None
+        );
+        // An unclosed foreign cell is still a foreign cell: the model wrote the
+        // wrong tag, and saying so beats an unclosed-cell diagnostic about a
+        // dialect this session does not run.
+        assert_eq!(
+            foreign_dialect_cell("<typescript>\nfinish(1);", LASHLANG_TAGS)
+                .map(|(language, _)| language),
+            Some("typescript")
+        );
+    }
+
+    /// A whitespace-dirtied open tag is not a cell, in any dialect.
+    ///
+    /// `<typescript >` is not recognized, so a reply carrying one falls back to
+    /// the prose path this diagnostic exists to replace. That is deliberate and
+    /// symmetric rather than an oversight: the *active* dialect's grammar
+    /// refuses the same shape, so recognizing it here would name a foreign cell
+    /// in a case where the model's own dialect would have refused an identical
+    /// tag. The residue is named here so the next reader does not have to
+    /// rediscover which half of the behaviour is designed.
+    #[test]
+    fn a_malformed_open_tag_is_not_a_cell_in_either_dialect() {
+        let malformed = "<typescript >\nfinish(1);\n</typescript>";
+        assert_eq!(foreign_dialect_cell(malformed, LASHLANG_TAGS), None);
+        // And the active dialect's own grammar agrees, which is what makes the
+        // asymmetry a non-issue: neither reading executes anything.
+        assert!(
+            matches!(
+                extract_cell("<lashlang >\nfinish 1\n</lashlang>", LASHLANG_TAGS),
+                Ok(None)
+            ),
+            "a malformed active open tag is not a cell either"
+        );
+    }
 }

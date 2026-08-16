@@ -1,483 +1,736 @@
-# FIG-1305 implementation and verification report
-
-Branch: `samuel-fig-1305`
-
-Base: `1532794d93606940121c3dcff88ac9ad088ddd3e` (the FIG-1304 head this layer stacks on, after the stack was rebased onto main)
-
-Implementation commits:
-
-- `cff0b745cc5ad9924625d9d5fc65e83f155818c5` — `feat(typescript): add the durable agent surface`
-- `f0bd18d9f0acb41260550c9b5851a892af8c2bb9` — `fix(typescript): close durable agent review gaps`
-- `6b7dc23c2062aa23729a9c4fd3dfb8e45255a686` — `fix(rlm): pass the lease owner the process worker config now requires`
-- `061321389405ebd050a0a01558493c72bd747c77` — `feat(lashlang): carry per-leaf settlement order on the batch result`
-- `48b6a05b11ec19282443db8422cd0281fcc8057c` / `bb797239253135c63dd0bf2357c1f17d99a0cc17` — the first-settled rejection, red then green
-- `c3a8b3a7e8d318ccc44722ac596f6c88ebaa677f` — determinism, fail-closed journal and format pins
-- `1cd32308a3f3019232bcde5874a1dd139c19073f` — refuse a malformed settlement order instead of repairing it
-- `0d56d88f6b1064a21d490b35856f3b66ccf3c332` — for-of bodies do work; artifacts must name their dialect
-- `b75f390459e14d1d9040826720e99b41c7707ba6` — restore the instance methods; classify misses by name
-- `22695d10b` / `525a47e7e` — the round-2 dialect defects, red then green
-- `cdb15d32f` — map runs in the VM; iterable aliasing rejects; cache hits stop allocating
-- `78f7e9cef` — latency-ordered settlement pinned for deferred batch leaves
-- `fa2ab715c` — the fixed map and padding cases fed to the oracle
-- `010663589` / `92bed819b` — the round-3 findings, red then green
-- `9016fdd3d` / `1dfa3686d` — the astral empty-search divergence, red then green
-
-Every SHA above is an ancestor of the head. An earlier revision of this ledger
-named pre-rebase commits that no longer describe this history.
+# FIG-1306 implementation report
 
 ## Verdict
 
-**READY TO STACK.**
+**COMPLETE.** The TypeScript RLM dialect has a typed, durable, create-time
+selection path; a production host-API prompt whose claims are checked against
+the dialect's own behaviour; full judged-runbook parity with Lashlang;
+registered dual-dialect examples; and an executed first-shot fluency corpus that
+now reaches every behaviour the prompt advertises. The default remains Lashlang,
+unknown dialects fail closed at creation, and a resumed session uses its
+persisted dialect rather than re-deriving one. Subagent sessions inherit their
+parent's dialect, so a session tree is one dialect in v1.
 
-The TypeScript agent surface, durability paths, standard-library inventory,
-resource bounds, and repository gates are implemented and green, and the ECMA
-`Promise.all` blocker is closed: the aggregate now rejects with the reason of
-the leaf that settled first.
+A fourth round followed the three below: the judged battery's **cheap end** was
+run — one scripted TypeScript row per host, no model spend — and it found a
+defect class none of the earlier rounds could see, because every fixture in the
+tree built a Lashlang host. A TypeScript session was correct in its execution
+section and wrong in most of what surrounded it.
 
-The repair was to the shared aggregate contract, not to the TypeScript lowerer,
-because the lowerer had nothing truthful to work with — the batch result carried
-only input-ordered results. It now carries the order the leaves settled in, and
-the VM selects the reported rejection from that order. See
-[Settlement order](#settlement-order).
+The largest single finding is not prompt copy at all. **A TypeScript cell could
+not read a binding an earlier cell made** (F11): the lowerer resolved names at
+parse against source-local scopes, so cell B rejected `findings` with
+`TS_UNKNOWN_BINDING` while the same turn's prompt listed `findings` with its
+value. Lashlang never had it, because it resolves names at link where the live
+session globals are known. Every crate-level test missed it by pre-supplying its
+bindings in the same source it compiled. That is the difference between a
+dialect that can hold state across a turn and one that can only run
+self-contained one-shot cells, and it is now covered by deterministic
+dual-dialect fixtures driven through the production turn path.
 
-Round 2's BLOCK is closed: eleven rulings and the performance addendum, with
-each fixed dialect case fed to the node oracle so the corpus — not a
-hand-written test — is what holds the fix down. Two of those rulings changed
-what this report claims rather than what the code does, and one (M4) was
-refuted on evidence: the guarantee it asked for already held, and what was
-missing was a test, which now exists and has been shown to fail when the
-property is broken. See [Round 2 verification closure](#round-2-verification-closure). Round 3
-closed the five findings that closure round raised — two of them, N1 and N2,
-regressions this layer introduced rather than inherited, which is the useful
-kind of finding for a layer this size. See
-[Round 3 verification closure](#round-3-verification-closure).
+This round is written up first in the review ledger and ratified as ADR 0063. A
+context-clean fresh-eyes verification returned FIT-WITH-FIXES; its findings —
+one live prompt leak the walker could not see, one false attribution in this
+ledger, and six narrow gaps — are closed in the closure round below.
 
-## Delivered surface
+Three review rounds landed on this branch: two independent adversarial reviews
+(APPROVE-WITH-FIXES) and one fresh-eyes final verification that returned
+**BLOCK**. The blocker was not in the durability machinery — that survived every
+attack both rounds threw at it — but in the harness twenty-one of the
+thirty-two scenarios run on: **the Agent Workbench never actually served
+TypeScript.** That is closed, together with the four smaller findings from the
+same review. The mechanism the fix converged on is described below, because it
+changed what the operator rules have to say.
 
-### Durable TypeScript agents
+The live model-calling rows are **PREPARED / NOT RUN**. The runbook rules require
+provider credentials and an explicit go before incurring model/judge cost; none
+was supplied. No credential was read, no live provider was called, and no
+substitution was made.
 
-- Top-level, statically extractable
-  `defineProcess({ name, signals, run: async (...) => { ... } })` declarations.
-  Dynamic definitions, process targets, and signal names fail with stable
-  `TS_PROCESS_*` diagnostics.
-- `start`, `registerTrigger`, one-argument progress `wake`, three-argument named
-  signal `wake`, `waitSignal`, `sleep`, and cell-only `finish` lower through the
-  existing process and effect opcodes.
-- A process `return` is a real function return. Enclosing `finally` blocks run
-  before the generated process wrapper finishes the returned value. `finish`
-  inside `run` is rejected, so authored process code cannot bypass `finally`.
-  An uncaught `throw` fails the process.
-- Stored process artifacts retain `CompilationDialect::Typescript`. The linked
-  program and compiled-process caches include the dialect and module identity,
-  preventing a TypeScript artifact from compiling or resuming as Lashlang.
-- TypeScript deferred tool resolution is enabled. Rendered tool signatures use
-  `Promise<T>`, and the first-party catalog emits explicit `typescript.tool`
-  bindings alongside the Lashlang bindings.
+- Branch: `samuel-fig-1306`
+- Base: `dc191172e` (the FIG-1305 head this layer stacks on)
+- Final head: the report commit at the branch tip (the twelve commits of this
+  round run `ffb4cdaba` … `c706ff7bc`)
+- Push: not performed
 
-### Await, effects, and iteration
+## The dialect mechanism, as it now stands
 
-- Top-level `await` accepts tool calls, process handles, `sleep`, `waitSignal`,
-  `Promise.all`, and `Promise.allSettled`. The only accepted authored async
-  function is the literal `run` field of a static process definition.
-- `Promise.all` and `Promise.allSettled` reuse the shared
-  `ResourceOperationBatch` machinery. Plain values receive Promise-resolve
-  behavior, and `allSettled` produces fulfilled or Error-shaped rejected
-  records. Unsupported aggregate shapes reject by name.
-- `Date.now()` and `Math.random()` use the journaled
-  `LanguageRuntimeValue` effect. Replay consumes the recorded value rather than
-  sampling the VM clock or RNG. `new Date()` rejects as `TS_NEW_UNSUPPORTED`.
-- Canonical counter loops and `for...of` over arrays and strings are supported.
-  String iteration is by Unicode code point. The snapshot-based v1 iterator
-  rejects source mutation and user-authored calls in the body; a `continue`
-  that crosses `finally` is also rejected instead of changing ordering.
+Three facts, and the third is the one every earlier revision of this report got
+wrong.
 
-### Standard library and safety
+1. **The choice is asked for at open; it becomes durable at the session's first
+   commit.** Opening a session does not persist protocol turn options. A session
+   opened and dropped before any turn commits has recorded nothing, and the next
+   open may choose again.
+2. **A recorded dialect always wins, silently.** `resolve_rlm_session_dialect`
+   refuses only when an open *requests* a dialect different from the one
+   recorded; both hosts catch that refusal and reopen with the recorded value.
+3. **Therefore an open that runs a turn must carry the ambient dialect.** An
+   open that asks for nothing, on a session that has recorded nothing, resolves
+   the default and commits `lashlang` permanently.
 
-- The advertised inventory contains 64 method names: 37 static methods and 27
-  instance method names across String, Array, Object, JSON, Number, and Math.
-  Every absent operation is a named static or typed runtime rejection. The
-  instance half is not a number this report maintains: the register and the
-  lowerer's allowlist are one list read from two places, and
-  `instance_method_inventory_matches_the_lowerer` asserts set equality in both
-  directions, so neither can move without the other.
-- Checked Node v25.2.1 differentials and focused regressions cover coercion,
-  UTF-16-sensitive behavior, key ordering, replacement tokens, JSON number
-  formatting, numeric edge cases, optional arguments, and the supported method
-  inventory. The generated expectation table is byte-stable at SHA-256
-  `f4484da0248849f1a9eb78e5e8c4851264a4b1322cc9ec25048c3b95ff241492`.
-- Multiplicative string growth, including `repeat` and `$&`, ``$` ``, and `$'`
-  replacement expansion, is sized before allocation. A result beyond 8 MiB
-  terminates with uncatchable `MemoryLimitExceeded`; it cannot become a host
-  allocation panic or OOM attempt.
-- The inherited 64 KiB source cap, nesting budget, parse-stack reservation,
-  AST classification, and no-abort contract remain in force for the expanded
-  grammar.
+### The converged-hosts ruling
 
-## Ticket done-when evidence
+Both example hosts now implement exactly one mechanism: **ask for the ambient
+dialect on every session open, and accept the recorded pin when there is one.**
 
-| Requirement | Evidence | Result |
-| --- | --- | --- |
-| Agent primitives in cells and durable processes | `agent_surface.rs` exercises all lowerings and execution shapes; protocol tests exercise start, trigger registration, and named signaling | PASS |
-| Trigger registration | `typescript_register_trigger_executes_end_to_end` crosses the TypeScript executor and trigger environment | PASS |
-| Signal round-trip | `typescript_signal_round_trip_crosses_protocol_and_process_engine` stores and starts a TS artifact, sends a named signal through the protocol controller, resumes `waitSignal`, and observes terminal output | PASS |
-| Production artifact execution | `typescript_artifact_runs_through_process_engine_to_terminal` loads a stored TypeScript artifact through the Restate process engine and reaches terminal state | PASS |
-| Suspend/resume in `waitSignal`, `sleep`, and pending `finally` | `durable_processes_resume_across_await_signal_sleep_and_pending_finally` | PASS |
-| Suspend/resume during aggregate await | `durable_process_resumes_after_shared_promise_batch` | PASS |
-| Journaled time and randomness | Core journal/replay tests plus TypeScript effect lowering and execution tests | PASS |
-| First-party `typescript.tool` bindings and Promise signatures | Tool-catalog and signature-renderer tests | PASS |
-| Common first-shot programs avoid missing stdlib | Four executable fluency-smoke programs lower successfully | PASS |
-| ECMA-exact accepted `Promise.all` | `promise_all_rejects_with_the_first_settled_rejection` drives the report's decisive case through the shared batch machine | PASS |
+The earlier "apply at creation only" refinement in the workbench looked tighter
+and was wrong: `creating_session_builder` was called from the boot path and from
+`reset_chat`, and *both* of those open and drop a handle without running a turn.
+The pin evaporated with the handle, and the first real turn — opening with no
+dialect, finding nothing recorded — committed Lashlang. `agent-service` was
+already correct for the opposite reason: it passed the dialect on every open and
+fell back only on a pin conflict, which is precisely the mechanism the workbench
+now uses too.
 
-## Adversarial review closure
+Observably the behaviour is still create-only: the ambient value can only take
+effect on a session that has recorded nothing. What changed is that "creation"
+now means the open that commits, not the open that constructs.
 
-Two independent review tracks ran after the first implementation cut. The
-following findings were reproduced, repaired, and covered by focused tests.
+### The hang discovery
 
-### Durability and process-boundary review
+The pre-fix defect did not look like a failing assertion. With a TypeScript
+`AppState` the workbench served a *Lashlang* prompt while the fixture's provider
+answered — as a TypeScript-configured deployment's model would — with a
+`<typescript>` cell. The session cannot execute a cell of a dialect it is not
+running, so the turn never reached a terminal state: **the turn hung.** Reverting
+the fix reproduces it; the fixture loops rather than failing.
 
-- Production artifact caching linked TypeScript source with Lashlang identity.
-  Linking now honors the requested dialect.
-- The compiled-process cache key omitted dialect and module identity. Both now
-  participate in cache isolation.
-- Named process signaling had no `SignalRun` lowering or protocol-to-process
-  round-trip proof. The three-argument `wake` path and production-shaped
-  integration test now cover it.
-- `finish` inside a process could skip authored `finally` blocks. It is now
-  statically rejected.
-- Resolved Promise aggregate leaves and accepted non-tool shapes could route to
-  a host await on the list itself. Plain values now resolve locally; unsupported
-  promise kinds reject explicitly.
-- `Promise.allSettled` exposed a raw tool error string. Rejections now use the
-  same Error-shaped value as an ordinary awaited tool failure.
+That matters beyond this bug. In production the same shape is worse than a hang:
+the model would follow the Lashlang prompt it was actually given, the turn would
+succeed, and the row's whole evidence bundle would be labelled `typescript` and
+produced by Lashlang. That is the defect class this layer exists to close —
+"evidence that disagrees with its own label" — which is why the two new fixtures
+assert *both* halves: the prompt the served turn actually received, and the
+dialect the session recorded.
 
-### ECMA and resource-safety review
+### What the operator rules had to change
 
-- String `for...of` lowered successfully but reached a list-only VM iterator.
-  The lowering now snapshots code-point strings into an iterable list.
-- A classic-loop `continue` crossing `finally` ran the update too early. That
-  unsafe shape now rejects by name.
-- Huge finite `String.repeat` counts and replacement-token expansion could
-  allocate before the heap meter. Both paths preflight the exact result bound.
-- `JSON.stringify` number rendering, `Math.pow` infinity cases, String and Array
-  `lastIndexOf` optional arguments, object integer-key ordering, and other
-  advertised edge cases were aligned with the Node oracle or removed from the
-  advertised surface.
-- The review's surviving finding is the shared aggregate settlement-order
-  blocker below.
+`runbooks/RULES.md` told the operator that reopening under a different
+`LASH_RUNBOOK_DIALECT` is refused, and that a carried-over store fails every
+route. After the convergence neither host refuses: a carried-over store stays
+green and quietly serves the *recorded* dialect. Read literally, the old text
+made green routes read as evidence of a clean store — wrong in the dangerous
+direction. The paragraph now states the mechanism and keeps the
+fresh-data-directory mandate with its real reason: the pin wins silently, so a
+stale store yields a bundle labelled with one dialect and produced by the other,
+and the served dialect must be confirmed from the row's own evidence rather than
+from the environment.
 
-## Settlement order
+## Delivered contract
 
-`Promise.all` is specified to reject with the first *settled* rejection.
-`crates/lashlang/src/runtime/vm/effects.rs` scanned its leaves in input order,
-so a batch whose second leaf rejected first still reported the first leaf's
-reason — the decisive case in the original review: leaf 0 rejects after five
-seconds with `A`, leaf 1 rejects after ten milliseconds with `B`, Node reports
-`B`, and the aggregate reported `A`.
+### Typed and durable dialect selection
 
-Three things had to change, and only one of them was in the VM.
+- `RlmDialect::{Lashlang, Typescript}` is the public typed selection contract;
+  its serialized language ids are `lashlang` and `typescript`.
+- `RlmCreateExtras::dialect` is optional. Absence selects the ratified Lashlang
+  default; serde's deny-unknown contract remains intact.
+- `RlmSessionBuilderExt::rlm_dialect` is the public host-facing builder path.
+  Agent Workbench and `agent-service` accept `LASH_RUNBOOK_DIALECT`, use the
+  typed builder, default to Lashlang, and reject unknown values.
+- The selected language id is written into durable protocol state. Rehydration
+  treats that state as authoritative and rejects a create-time mismatch.
+- Tampered durable state fails closed in every shape: an unknown id, a
+  case-drifted id, a junk extra key, and an explicit `null`. Absence remains
+  Lashlang, because that is how every pre-layer session decodes.
+- Removing the key entirely is the one residual window, and it is bounded: it is
+  indistinguishable from a pre-layer session, so it must read as Lashlang, and
+  once the session has execution state the RLM snapshot's `engine` id is a
+  second source of truth that refuses disagreement
+  (`RlmSnapshotError::EngineMismatch`).
+- A per-turn `protocol_turn_options` override — public host surface over a
+  shallow key merge — cannot re-point a pinned session. The commit persists
+  session-level options, not the turn-scoped merge. This is now pinned by a test
+  that first proves the override really is carried by the turn.
+- Agent Workbench opens every production RLM session through the typed path with
+  the ambient dialect, and has fixtures on the TypeScript branch.
 
-**The order existed in exactly one place and was being thrown away.**
-`schedule_tool_batch` drives a batch's leaves through `FuturesUnordered`,
-collects them in completion order, then sorts by input index. That sort was the
-only record of which leaf settled first. It now reports both halves: outcomes in
-input order, and the input indices in the order they completed.
+### Production TypeScript prompt
 
-**The order is journaled, and fails closed.** It crosses the effect boundary as a
-required field on `RuntimeEffectOutcome::ToolBatch`, which is what the replay
-journal stores. It deliberately has no serde default: an aggregate that selects
-by settlement order cannot distinguish a defaulted input order from a recorded
-one, so an entry written before this field existed is refused rather than
-replayed as input order. There is no migration decoder. Continuation and
-snapshot formats are untouched — a batch result is consumed inside a single
-`perform` and never persisted — and a test pins that.
+The execution section is host documentation, not a TypeScript tutorial: cell
+tags, persistent top-level bindings, `console`/`print`/`finish`, every active
+tool as a generated `Promise<T>` signature, the typed `defineProcess` / `start`
+/ `sleep` / `waitSignal` / `wake` / `registerTrigger` primitives, durable
+suspension and `Promise.all` / `Promise.allSettled` first-settled semantics, and
+the named v1 guardrails a model actually hits.
 
-**The selection rule is recorded per batch at lowering.** The compiler already
-knows the dialect there, so a TypeScript aggregate marks its compiled batch and
-a Lashlang one leaves it clear. The alternative was to read the VM's
-`reference_semantics` flag at run time, which was rejected: that flag answers a
-heap-ownership question, and one predicate answering two questions is the exact
-defect shape that cost FIG-1304 three rounds. The cost is
-`LASHLANG_VM_ABI_VERSION` v4 to v5; the semantic hash and Lashlang's battery are
-unchanged.
+`waitSignal` now carries its scope: it is the one primitive in that block that is
+process-body-only, and the declaration says so rather than leaving the model to
+infer a rule from prose that treated it exactly like `sleep`.
 
-Both production hosts translate the order from invocation positions into leaf
-positions, with leaves that settled before the batch ran — journaled runtime
-values, and anything that failed during preparation — leading. A host that
-reports an order that is not an ordering of its own results fails closed with a
-typed `ResourceBatchSettlementOrder` rather than being guessed at.
+The rendered prompt is pinned at
+`crates/lash-protocol-rlm/src/dialect/snapshots/lash_protocol_rlm__dialect__typescript__tests__typescript_execution_section.snap`.
+The Lashlang execution-section snapshot remains unchanged.
 
-`Promise.allSettled` keeps its results in input order however the leaves
-settled, and a test pins that. It is not merely unaffected by construction: a
-batch only selects by settlement order when it can propagate a leaf's rejection,
-so an allSettled batch does not validate — and cannot die on — order metadata it
-never reads.
+## Prompt honesty: two checks, two directions
 
-The order translates from invocation positions to leaf positions at both hosts,
-with anything that settled before the batch ran leading. Today the only
-reachable case is a leaf that failed during preparation; a journaled runtime
-value cannot be a batch leaf, because an aggregate containing one is rejected
-before it reaches the host. An earlier revision of this section claimed
-otherwise.
+The prompt is prose, and prose is not type-checked. Two tests cover it, in
+opposite directions:
 
-## Dual-review fix round
+- **Codes named in the prompt must exist.** A walker collects every `TS_` token
+  in the rendered prompt and rejects any that is not in `DiagnosticCode::ALL`.
+  This is what closed the phantom `TS_FOR_OF_ITERATOR_UNSUPPORTED`.
+- **Diagnostics the prompt's primitives emit must be spelled in this dialect.**
+  The walker matches codes, not identifiers, so it could not see that misusing
+  `waitSignal` rejected with "`wait_signal` can only be used inside a process
+  body" — a Lashlang identifier the TypeScript reader has never seen. The second
+  check misuses every primitive the Host API block declares and fails if the
+  resulting model-facing message names a Lashlang-only spelling. It found exactly
+  one leak, fixed at its source: linking already knows which surface dialect it
+  was handed, so the process-only refusal now names the keyword the author
+  actually wrote.
 
-Two independent adversarial reviews returned APPROVE-WITH-FIXES with disjoint
-findings. Every one is closed below.
+## Judged-runbook parity
+
+`runbooks/parity-matrix.toml` is the machine-readable authority. It expands to
+**62 independent rows**: 30 RLM scenarios in each of the two dialects, one
+standard-mode row, and one TypeScript-only composite acceptance row.
+`scripts/judged_runbook_matrix.py` validates the files and emits stable `I/N`
+shards as JSON. The matrix properties — complete twin coverage, lossless
+sharding, one row per standard-mode host, tier/model agreement, and the row total
+itself — are mutation-earned: a duplicated scenario, a lossy shard, and a row
+funded at a model its tier does not name were green before this work and are red
+now, and CI runs the gate.
+
+`slack-clone-bot` is the standard-mode row. It runs `LashCore::standard_builder`
+— a native tool loop with no RLM session — so it has no dialect to pin and no
+honest twin; a second row would have bought an identical judged run and labelled
+it with a language the session never had.
+
+The former `slack-clone-mcp-client-depth` row was retired into `slack-clone-bot`
+Phase 3M. The subset proof, in three parts: (1)
+`slack-clone-deterministic`'s own coverage table maps its whole scorecard —
+sampling, form elicitation, URL elicitation/completion, roots, four committed
+results and four exact trace attempts — with no uncovered cell, and the retired
+runbook conceded it in its own second paragraph ("The same four client-depth
+tools run with exact scripted answers inside the token-free full-host CI
+companion"); (2) the judged battery ran the row and every host-owned feature
+passed, with the single failing gate being "exactly four *top-level* tool
+records", which fired only because a real model legitimately batched three of
+the four calls — a gate the paid row makes *worse*, not better (battery
+Finding H); (3) the one claim the scripted harness genuinely cannot make — that
+sampling is served by the bot's own configured provider, since a scripted
+provider has no model id to name — is now a step and two scorecard rows on
+`slack-clone-bot`, an already-paid judged row on the same host and the same
+boot. Phase 3M also carries the Finding H repair: the tool-name count unwraps a
+`batch` envelope instead of demanding four top-level records.
+
+Each scenario also carries an execution **tier** (`deterministic` / `economy` /
+`frontier`) and the concrete model slug the tier funds. The tier is a claim about
+what the row tests: a row whose every gate is a count, an id, or a byte
+comparison does not need a frontier driver to produce that evidence, while the
+organic `continue_as` lever, first-shot codemode fluency, and the
+pinned-program-shape rows do. `judge_model_floor` is unchanged at `gpt-5.6-sol`.
+
+Every RLM and judge step has a `gpt-5.6-sol` floor. Independent rows may execute
+concurrently; judging is sharded; evidence must be fresh; provider-equivalent
+substitutions must be recorded per row. No substitutions were used here.
+
+Twenty of the thirty ordinary scenarios are `workbench-*`, and the
+TypeScript-only composite row boots the Workbench too — twenty-one rows in all
+whose TypeScript evidence depended on the blocker above. None of them was run, so
+no mislabeled evidence was produced; the fix precedes the battery.
+
+| Scenario | Lashlang | TypeScript |
+|---|---|---|
+| `agent-service-branching` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `docs-quickstart` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `graceful-drain` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `process-operations` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `request-abandon` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `rlm-cell-boundary` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `session-lease-triage` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `slack-clone-bot` | standard mode — one dialect-neutral row, PREPARED / NOT RUN ||
+| `tictactoe-full-game` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `version-bump-recreation` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-attachments` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-break-glass` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-chat-projection` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-continue-as` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-cron-schedule` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-deferred-tools` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-durable-stop` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-engine-restart` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-execution-state-rehydration` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-failure-paths` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-inbox-world` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-process-lifecycle` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-reconnect-resilience` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-session-id-retirement` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-session-isolation` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-session-resume` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-shared-session-multi-tab` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-trigger-lifecycle` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-turn-ingress` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workbench-usage-ledger` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `workflow-editor-authoring` | PREPARED / NOT RUN | PREPARED / NOT RUN |
+| `typescript-codemode-parity` | N/A | PREPARED / NOT RUN |
+
+The TypeScript-only row is not a reduced smoke test. It requires a judged full
+codemode turn demonstrating `Promise.all` first-settled behaviour, a pure
+`for...of` loop over tool-returned data, a `defineProcess` signal/sleep
+lifecycle, an actual worker restart while suspended, and continuation of the same
+durable process after restart.
+
+## Examples, documentation, and API coverage
+
+- `examples/codemode-parity/` contains paired Lashlang and TypeScript codemode
+  turns and paired durable-process signal/sleep examples.
+- `examples/docs-snippets` executes explicit TypeScript selection through the
+  public builder and inspects the persisted session payload.
+- `docs/rlm.html`, `docs/embedding-turns.html`, and `docs/execution-modes.html`
+  document host selection and the durable default.
+- `docs/api-example-coverage.toml` registers the new enum, variants,
+  `language_id`, and builder method against executable examples; low-level
+  factory plumbing is explicitly justified rather than presented as host API.
+  The registry gate covers 8,114 entries and passes.
+
+## Executed fluency result
+
+`crates/lash-typescript/tests/fluency_smoke.rs` compiles, links and executes
+eight first-shot programs: awaited `Promise` tools, `Object.entries` data
+shaping, string/array iteration, `for...of` over tool-returned data with a
+helper call in the body, `map` with one- and two-parameter callbacks, the
+journaled `Date.now()` / `Math.random()` reads, and a `registerTrigger`
+registration.
+
+The last two rows are new this round, and between them they cover three
+behaviours the corpus could not reach at all. The corpus previously built a **bare** host
+catalog, so it could not reach them at all: they are host operations, not
+language builtins — the real RLM host adds the `__typescript_runtime`
+`now`/`random` bindings and, when triggers are enabled, the trigger resource
+operations. Three behaviours the production prompt advertises were therefore
+unmeasured by the corpus whose job is to prove the prompt honest. The environment
+now mirrors the real host's, and dropping either binding back out puts both new
+rows on the hit list.
+
+The process row remains narrower than the others by construction: `start` and
+`await` cross the effect boundary, so it shows the primitives lower, link and
+round-trip, not that `waitSignal`/`sleep`/`wake` execute. Those execute under
+suspension in `dialect.rs::a_process_suspended_inside_for_of_resumes` and
+`agent_surface.rs`.
+
+The corpus also carries one row that must be rejected, asserted to produce
+exactly one hit naming `TS_DESTRUCTURING_UNSUPPORTED` — an empty hit list is
+evidence only if the list can fill.
+
+Missing-method/rejection hit list:
+
+```json
+[]
+```
+
+## The multi-session workbench (follow-on round)
+
+The Workbench that came out of the rounds above serves one session on one
+process-wide dialect. Choosing TypeScript meant restarting the process with a
+different `LASH_RUNBOOK_DIALECT`, so the two dialects could never be compared
+side by side in the reference host that exists to demonstrate them. This round
+makes the Workbench multi-session, with the dialect chosen at creation.
+
+**The choice has to live where the open path can read it.** A session's dialect
+becomes durable at its *first commit*, not at the open that created it — the
+same fact the F1 fix above turned on. A create route that opened once with the
+chosen dialect and dropped the handle would lose the choice exactly as the first
+version of that fix did: the first real turn would open on the ambient default
+and pin it permanently. So the roster is not a display list. `AppState::
+session_builder`, which every route and every turn goes through, asks the roster
+for the dialect of the session it is opening and falls back to the ambient
+`LASH_RUNBOOK_DIALECT` for a session the roster does not know. That fallback is
+the compatibility contract: the boot session, an ad-hoc `?session_id=` tab, and
+every data directory that predates the roster read exactly as before.
+
+The mutation proof is recorded: replacing the roster lookup with the ambient
+field again fails three fixtures — the created session records `lashlang` where
+`typescript` was chosen, in both directions, and after a restart.
+
+**Durability is two files, not one.** `<data-dir>/session-id` keeps its plain
+text format and its meaning, because the judged runbooks read and write it
+directly; the roster is a sibling `sessions.json`, one row per session with its
+name, its create-time dialect, and its timestamps. A restart reopens both.
+
+**Labels still read what a session recorded.** The badge and the transcript both
+read the dialect out of the session's own read view (`RlmSessionReadViewExt::
+rlm_dialect`), never out of the roster row or the process configuration — the
+roster says what was *asked for*, and those differ exactly in the case a label
+exists to disambiguate. A session that has committed nothing has recorded
+nothing, and is badged with the dialect its next open will ask for rather than
+with the absent-value default it is about to stop reading as.
+
+**The dialect menu is the substrate's.** `RlmDialect::ALL` is the registered
+list, checked in `lash-protocol-rlm` against the dialects the registry can
+actually activate; `/api/sessions` serves it and the page renders it. Neither
+the host nor the browser writes a list of language ids down, and the UI contract
+test fails the page for shipping static dialect options.
+
+Routes: `GET /api/sessions` (roster, recorded dialects, current selection,
+registered ids, ambient default), `POST /api/sessions` (create with a dialect;
+an unregistered id is a typed 400 naming the registered ones), and
+`POST /api/sessions/select` (durable selection; an unrostered id is a 404).
+
+Fixtures, all through the production handlers: create-with-dialect in both
+directions, the ambient session unmoved beside it, unknown-dialect refusal with
+no roster row left behind, switching moving the query-less default and the
+selection file, the roster surviving a rebuilt web process *and still serving
+its dialect on the next turn*, and a reset carrying the slot's dialect to the
+rotated session.
+
+## Commits
+
+Every hash below is reachable from the branch head.
+
+| Commit | Purpose | Release note |
+|---|---|---|
+| `605891d42` | Persist typed per-session dialect selection | Added |
+| `84e99d34a` | Add the production TS prompt, examples, docs, and executed fluency | Added |
+| `30eacb895` | Require complete judged-runbook parity and stable shards | Internal |
+| `6d8500781` | Report the implementation | Internal |
+| `4343666c4` | Red: walk the prompt's diagnostic codes against the real ones | — |
+| `dd8181723` | Fix the phantom code, the `start` convention, and the guardrail list | Fixed |
+| `db6eff1c9` | Run the parity-matrix gate in CI and make its own checks bite | — |
+| `191570864` | Subagents inherit the parent session's dialect | Fixed |
+| `c60c62866` | Pin the ambient dialect at creation; refuse a null dialect | Fixed |
+| `11ce41bff` | Split the remote-trigger assertions out of a file at its budget | — |
+| `a045b3c0e` | Regenerate the report after the dual-review round | Internal |
+| `2f1cb3fc0` | Ask for the ambient dialect on every workbench open (**F1**) | Fixed |
+| `7fe7c6130` | Name the process-only primitive in the reader's own dialect (**F3**) | Fixed |
+| `880caac06` | Describe the reopen rule the hosts actually implement (**F2**) | Internal |
+| `a553ff101` | Give the fluency corpus the host bindings it was missing (**F4**) | Internal |
+| `0292ac006` | Pin that a per-turn override cannot re-point the dialect (**F5**) | Internal |
+| `77c67d938` | Clear the CI-only gates the F1 fix left red | Internal |
+| `ffb4cdaba` | Red: walk the driver's own copy and the substrate's leaked names | — |
+| `9291cea01` | Keep the substrate's own names out of the prompt, both directions (ADR 0063) | Fixed |
+| `c8162dedc` | Teach the reader's own dialect in the Workbench, and label what ran | Fixed |
+| `ba596ed53` | Describe the board in the session's own dialect | Fixed |
+| `a35971cb5` | Script every deterministic reply in the row's own dialect | Fixed |
+| `0424bdfed` | Stop billing standard-mode hosts twice for a dialect they lack | Internal |
+| `2bae0152a` | Gate two judged claims on what the host can actually show | Internal |
+| `3034ed91e` | Declare the host surface to TypeScript, and spell its examples | Fixed |
+| `a5feeb96c` | Satisfy the strict lints and the vocabulary-owned retry copy | — |
+| `304f2bfcd` | Name a cell of the inactive dialect instead of reading it as prose | Fixed |
+| `6b60a5524` | Check the extraction recognition list against the dialects themselves | — |
+| `c706ff7bc` | Let a cell read what an earlier cell bound (F11), and label the trace | Fixed |
+| `0602c5f4a` | Report the battery-defect round | Internal |
+| `504b92a20` | Assemble the read-only-variables block once, in the session's dialect (**RV-1**) | Fixed |
+| `c5d709bbd` | Close the verification round's low findings (RV-3…RV-8, M4) | Internal |
+| `4ccf012ba` | Publish the registered dialects as a typed menu | Added |
+| `9e7cf4641` | Serve many sessions, each in the dialect it was created with | Added |
+| `8f03be29a` | Choose a dialect when adding a session | Added |
+| `b3abd16f6` | Re-anchor the API coverage evidence after the route split | — |
+| `9361d53ee` | Poll the session roster at a gentler interval | — |
+| `e918b9a80` | Gate session creation and selection on the observe check | Fixed |
+| `eaf8ed9bc` | Parse `LASH_RUNBOOK_DIALECT` through the registered dialect menu | Internal |
+| final report commit | Regenerate this report against the branch as it stands | Internal |
+
+## Review ledger
+
+### Battery-defect round — dialect purity across every model-facing surface
+
+The judged battery was prepared but not paid for; running its cheap end — one
+scripted TypeScript row per host — produced a defect class the earlier rounds
+had no way to see, because every earlier fixture built a Lashlang host. A
+TypeScript session was correct in its execution section and wrong nearly
+everywhere else: in the copy assembled around it, in the host's own prompt, in
+the scripted replies of the harnesses that run twenty-one of the rows, and in
+what the substrate declined to tell it at all. This round closes that class and
+writes down the rule (ADR 0063: **one RLM turn is prompted in one dialect, in
+both directions, and one walker enforces it**).
+
+The walker is the deliverable, not the individual fixes. Every item below was
+found by sharpening it, and two of them were found *while* sharpening it — the
+tool-doc arrow syntax and the bound-variable shape language — which is the
+argument for the walker existing at all.
+
+| Item | What it was | Red side | Fix |
+|---|---|---|---|
+| A (driver copy) | The truncation notice (`re-print history[0].content`) and the output-limit retry ("do less per cell") were assembled by the driver in one dialect's words. Ordinary-turn copy, not edge cases | walker, 3 violations | `ffb4cdaba` → `9291cea01` |
+| O1 (reverse leak) | Every **Lashlang** prompt advertised `await __typescript_runtime.now(any)? -> float`. The module is how the TypeScript lowerer reaches journaled `Date.now()`/`Math.random()`, and one function builds the host environment for both dialects | walker, same run | `9291cea01` |
+| A (host prompt) | The Workbench injected three complete Lashlang programs into every system prompt, unconditionally. Highest-impact site on the branch: a TypeScript session was told to write `<typescript>` and then handed `<lashlang>` to copy | host-side walker + link check | `c8162dedc` |
+| B (red side) | The transcript-label fix had no test observing a TypeScript session's rendered label end to end | `/api/state` projection asserted in both dialects | `c8162dedc` |
+| A (agent-service) | The tic-tac-toe board context named `finish "<sentence>"` and "the lashlang block" to every dialect | both directions asserted | `ba596ed53` |
+| C (harnesses) | Four deterministic harnesses scripted Lashlang cells whatever the row claimed. A foreign cell cannot execute, so the row **hangs** rather than failing | cell-tag walk + link of every scripted cell | `a35971cb5` |
+| C (`code-failure`) | Broken in *both* dialects: `fail "..."` at cell top level is process-only, so the cell never committed and the unbounded turn budget re-asked the provider forever. No test existed | executed fixture, 60s timeout. **Two reverts** reproduce the hang: the shipped cell *and* the `call == 0` retry branch — the retry alone makes it terminate. With only the cell reverted, the link-verify fixture goes red instead | `a35971cb5` |
+| E (matrix) | Two standard-mode hosts were billed for a TypeScript row describing a session they never open | two new self-tests, total derived | `0424bdfed` |
+| D (generalized) | Two judged gates asked for readings a correct run cannot produce: a marker's absence from an omitted request body, and `lane_held = false` from a race the harness deliberately does not fix | — (documentation) | `2bae0152a` |
+| O3 (discoverability) | A TypeScript session was never told its trigger sources, host data types or `triggers.*` operations exist, while the host prompt told it to use `cron.Schedule`. A judged row watched a model search, find nothing, and produce a VOID | new dialect test, both directions | `3034ed91e` |
+| O3 (examples) | Authored tool examples are Lashlang source; the try-operator six of seven resident examples carry is a **syntax error** in TypeScript | walker marker, non-vacuity asserted from the authored corpus | `3034ed91e` |
+| **F11 — cross-cell bindings (the round's largest defect)** | A TypeScript cell reading a name an earlier cell bound rejected with `TS_UNKNOWN_BINDING` at parse, while the same turn's prompt listed that name under `=== BOUND VARIABLES ===` **with its value**. The lowerer resolved names against source-local scopes; the live globals reach the host environment at link, which runs after. Lashlang never had it because it resolves at link. This is every stateful multi-cell TypeScript session | dual-dialect executor-path fixtures: bind / read / rebind, the same across a restart, and a negative control per dialect | `c706ff7bc` |
+| B (fourth site) | A TypeScript session's execution trace records said `language: "lashlang"`, so its own `lashlang-execution.jsonl` described its executions as Lashlang | the graph projection's own test, inverted | `c706ff7bc` |
+| Extraction (the loop's mechanism) | A cell tagged with a registered-but-inactive dialect matched nothing and counted as **prose**, so a `FinishRequired` turn asked the model to finish, the model answered with the same cell, and the turn re-prompted without bound — 36 iterations of `request_finish` with `lashlang_cell_count: 0` in the row that found it. The execution fence never fires because extraction never yields a cell to fence | driver fixture: a `<typescript>` cell in a Lashlang session must be named on iteration 1 | `304f2bfcd` |
+
+### The A-inventory, and what happened to each site
+
+Every model-facing string the round inventoried, including the ones deliberately
+left alone. "Carve-out" means the identifier is durable and the model receives
+it in its data; "residual" means the leak is real and open.
+
+| Site | Disposition |
+|---|---|
+| `dialect/lashlang.rs`, `dialect/typescript.rs` execution sections | Dialect-owned already; TypeScript gained the host-surface inventory this round |
+| `rlm_support.rs` bound variables (prose) | Vocabulary-routed (A-core) |
+| `rlm_support.rs` read-only variables (prose) | Vocabulary-routed (A-core) on the protocol's hook, and **assembled a second time** by `lash-core` from the turn-extension handle in Lashlang — closed in the closure round (RV-1). Both routes are now walked |
+| `tool_catalog.rs` call paths | Vocabulary-routed (A-core) |
+| `tool_catalog.rs` authored examples | **Fixed this round** — rendered through `RlmDialect::render_tool_example` |
+| `control_tools.rs` `continue_as` doc + example | Vocabulary-routed (A-core); the battery's saved prompt predates that commit |
+| `rlm_support.rs` budget-escalation tails, final-answer instruction | Vocabulary-routed (A-core) |
+| `driver/history.rs` truncation notice (message + step output) | **Fixed this round** |
+| `protocol/finish.rs` output-limit retry copy | **Fixed this round** |
+| `dialect/lashlang.rs` `output_limit_cell_copy` | **Fixed this round** — said "per cell" to a reader who has only seen blocks |
+| `driver/history.rs` runtime notes (`history` entry count) | Dialect-neutral; no change. The line names a bound variable, not syntax |
+| `protocol/prompt.rs` host-environment section | **Fixed this round** — one inventory, two formatters, `__` namespace hidden |
+| `protocol/driver.rs:890` `lashlang_step_<turn>_<iteration>` event ids | **Carve-out.** Durable session-graph identifiers, and the model receives `kind: "lashlang_step"` in `history`. ADR 0063 |
+| `driver.rs:566/592` test-fixture `lashlang_step_*` ids | Same carve-out; they mirror the durable ids on purpose |
+| `lash_typescript::parse` name resolution | **Fixed this round (F11)** — the executor passes the live session globals as an ambient root scope; a name nobody has still rejects at parse |
+| Execution trace `language` field | **Fixed this round** — records the dialect of the source that ran. The event name, JSONL file name and graph API keep their Lashlang names, because those describe the substrate |
+| Effect ids `lashlang:effect:…` | **Carve-out.** Durable journal key identity naming the engine |
+| Process-body execution records (`language: "lashlang"`) | No change: what runs in a process body is the lowered program, whatever the authoring dialect |
+| `deferred_tools.rs` generated example (`await m.op({ … })?`) | Covered by the examples fix at render time; the grant registry itself was already dialect-aware (`definition.bindings` carries `typescript.tool`) |
+| Durable process ids `process:lashlang:sha256:…` (visible through a host's work API) | **Carve-out.** Every dialect's processes are compiled against the Lashlang VM substrate and the id is journal identity. The label half of the same question — what a rendered transcript calls the code — is what got fixed |
+| Deferred-tool grant registry | No change needed: `definition.bindings` already carries `typescript.tool`, so the grant surface is dialect-aware. Its only leak was the rendered examples string, which the examples fix covers |
+| `lash-lashlang-runtime` `__typescript_runtime` module path | **Carve-out, hidden not renamed.** Embedded in every lowered TypeScript program including persisted process bodies; its host operation ids reach the effect journal |
+| `lash_core` contract renderer type syntax (`-> str`) | **Residual.** Recorded in `KNOWN_TYPE_SYNTAX_RESIDUALS`, asserted exactly |
+| `rlm_support.rs` bound-variable shape language (`list[HistoryItem]`) | **Residual.** Same list. Both are typed-rendering changes in other crates, not copy edits |
+| Workbench system prompt (three tutorials) | **Fixed this round**, with every TypeScript program link-verified |
+| Workbench `failure_provider` scripted replies (10) | **Fixed this round**, all linked in both dialects |
+| `agent-service` board context | **Fixed this round** |
+| Runbook harnesses (`version_bump`, `session_lease_triage`, `process_operator_flow`) | **Fixed this round** |
+| `mock_provider.rs` scripted cells | Left alone: it serves `restate-postgres-workers`, which is not a judged parity scenario and has no dialect row |
+
+### Closure round — the fresh-eyes verification's findings
+
+The round was verified context-clean (FIT-WITH-FIXES) with every headline claim
+re-run or mutation-attacked. Two findings were substantive; six were narrow.
+
+| Finding | What it was | Red side | Fix |
+|---|---|---|---|
+| **RV-1 (product)** | `TurnInput::rlm_project` stores the bindings **twice** — as the protocol's plugin input and as a `ProtocolTurnExtension` handle whose `prompt_contributions()` `lash-core` rendered itself, from a hardcoded Lashlang vocabulary. The duplication was invisible while one dialect existed, because `merge_prompt_contributions` drops byte-identical contributions; the second dialect made the copies differ, so a TypeScript session received its own block *and* "Access them directly in `<lashlang>` blocks" underneath it | walker renders both routes; served-prompt count measured 1 (Lashlang) vs **2** (TypeScript) | `504b92a20` |
+| **RV-2 (ledger)** | This report claimed the three agent-scenario size labels were pre-existing drift and that an earlier round's PASS row was stale. False, and withdrawn — see the honest ledger | `cell_noun: "lashlang block"` restores all three labels | `c5d709bbd` |
+| RV-3 | Rendered tool examples were never parsed, only marker-checked | found a real rewriter limitation on its first run | `c5d709bbd` |
+| RV-4 | `type cron_Tick` declared, `cron.Tick` referenced | assertion over non-comment lines | `c5d709bbd` |
+| RV-5 | The residual register pinned `list[` when the whole type line leaks | four rows, punctuation-anchored markers | `c5d709bbd` |
+| RV-6 | The foreign-cell driver fixture was one-directional | `RlmDriver::for_language` + the reverse test | `c5d709bbd` |
+| RV-7 | `<typescript >` degrades to prose | both halves stated in a test | `c5d709bbd` |
+| RV-8 | `ToolValue`'s exclusion from the terminates-test was unexplained | the reason is now asserted | `c5d709bbd` |
+| M4 | The `code-failure` red-side recipe was incomplete | two reverts, not one | `c5d709bbd` |
+
+RV-1 is the one the round's own instrument should have caught and did not: the
+walker owned every fragment the crate *renders*, and this one is rendered by
+`lash-core` from a handle the crate hands it. The walker now renders both
+routes, which is the class closure — a third copy assembled through the generic
+seam fails it.
+
+### The walker's carve-out list, in full
+
+`SUBSTRATE_CARVE_OUTS` (`dialect/prompt_walker_tests.rs`) and ADR 0063 hold the
+same three entries. A carve-out is an identifier a prompt may spell in the other
+dialect's vocabulary **because the model genuinely receives it in its data**;
+everything else is either hidden or fixed.
+
+| Identifier | Why it may cross | What would have to change to remove it |
+|---|---|---|
+| `lashlang_step` | The model-visible `history` variable contains `kind: "lashlang_step"` in both dialects — `RlmHistoryItem` is one serialized type, and the session-graph event ids are `lashlang_step_<turn>_<iteration>`. A prompt saying `typescript_step` would disagree with the data the model is handed | Renaming the payload discriminant and the durable event ids together |
+| `process:lashlang:` | Durable process ids, visible to a host through its work API. Every dialect's processes are compiled against the Lashlang VM substrate | A durable process-id migration; the *label* half (what a transcript calls the code) is fixed instead |
+| `lashlang:effect:` | The durable effect-id prefix and part of journal key identity. It names the engine, which is the same VM under both dialects | A journal key migration |
+
+Two identifiers were considered and **not** carved out: `__typescript_runtime`
+is hidden from the prompt instead (nothing about it has to reach a model), and
+the trace record's `language` field is now the source's dialect rather than the
+engine's.
+
+And the **residuals** are real, open, and asserted by equality in
+`KNOWN_TYPE_SYNTAX_RESIDUALS` so a third cannot join them quietly: tool-doc
+signatures render `-> str`, and the bound-variable block renders a whole type
+line in Lashlang's syntax (`list[`, `: str,`, `: int,`, `?: any |`) — five rows,
+one per token that actually leaks, after the verification round pointed out that
+pinning `list[` alone described the leak as narrower than it is.
+
+### Fresh-eyes final verification (BLOCK) — prior round
 
 | Finding | What it was | Red | Fix |
-| --- | --- | --- | --- |
-| sol F1 (High) | `call_tool_batch` dropped out-of-range settlement positions and back-filled the gaps, so any malformed order became a clean input-order permutation that no validator could tell from a real one — the original rejection selection, restored silently | `1cd32308a` | `1cd32308a` |
-| opus F1 | The fail-closed journal pin keyed the tag `kind` instead of `type`, so it failed on the tag and proved nothing about the field it guards | `1cd32308a` | `1cd32308a` |
-| opus F6 | An `allSettled` batch validated — and could die on — settlement metadata it never reads | — | `1cd32308a` |
-| opus F10a | The settlement diagnostic reported lengths only, so a duplicate rendered as self-consistent and undiagnosable | — | `1cd32308a` |
-| sol F4 | `ModuleArtifact.compilation_dialect` carried a serde default, so a dialect-less TypeScript artifact decoded as Lashlang and verified | `0d56d88f6` | `0d56d88f6` |
-| opus F2 | `for…of` bodies rejected every call and member assignment, so the canonical agent loop was a link-time rejection — justified by a durability claim the reviewer refuted | `0d56d88f6` | `0d56d88f6` |
-| opus F5 | Nine instance methods were withdrawn behind a representability argument that covers only astral-splitting shapes, which the existing runtime rejection already handles | `b75f39045` | `b75f39045` |
-| opus F3 + sol F3 | An unadvertised method on a non-module receiver fell through to the tool-call branch and, under `await`, failed at the host untyped | `b75f39045` | `b75f39045` |
-| opus F8 | `pad_string` allocated without a size preflight | — | `b75f39045` |
-| opus F7 + sol F2 | `JSON.parse` rejected out-of-range numbers where ECMA clamps to an infinity | `b75f39045` | `b75f39045` |
-| sol F5 | An `allSettled` rejection carried the unwrap error's code, which cannot describe a leaf that is never unwrapped | — | `14e5feb74` |
-| opus F9 | A multi-segment call path rendered `declare namespace a { declare namespace b`, which is not valid TypeScript | — | `14e5feb74` |
-| opus F4 + sol F6 | The ledger named pre-rebase commits, the lashlang count was stale, and the settlement narrative described an unreachable path | — | `14e5feb74` |
+|---|---|---|---|
+| F1 (Blocker) | The Agent Workbench never served TypeScript. Only the two opens that never run a turn applied `LASH_RUNBOOK_DIALECT`; every turn-running open asked for nothing, so the first turn committed Lashlang. Twenty-one scenarios would have produced Lashlang evidence under a TypeScript label — and the pre-fix symptom is a **hung turn**, not a failing one | fixture hangs pre-fix | `2f1cb3fc0` |
+| F2 (Fix) | `runbooks/RULES.md` claimed reopen under the other dialect is refused and fails every route. Neither host refuses after the convergence, so green routes read as a clean store | — | `880caac06` |
+| F3 (Fix) | `waitSignal` was declared with no scope annotation beside `sleep`, which is not process-only; and its refusal named the Lashlang identifier `wait_signal`, which the `TS_`-token walker cannot see | `7fe7c6130` (test written first: one leak) | `7fe7c6130` |
+| F4 (Note) | The fluency corpus's bare catalog could not reach `Date.now`, `Math.random` or `registerTrigger`, all three named in the production prompt | binding-removal mutation | `a553ff101` |
+| F5 (Note) | A per-turn `protocol_turn_options` override is a write to protocol state that bypasses create-time resolution. It does not land, but nothing pinned that | turn-merge-persist mutation | `0292ac006` |
 
-Three of these deserve a note beyond the table.
+Findings the review verified as **correct and left alone**: the durable selection
+attack surface (eleven shapes, including pre-layer `{}`, explicit `null`,
+unregistered `python`, reopen precedence and resume), subagent inheritance in
+both directions, the unconstructibility of a mixed tree through that seam, every
+advertised static and instance method linking and executing (39 + 34 probes, zero
+advertised-but-broken), all eleven named guardrail codes rejecting with exactly
+their named code, the `start` calling convention, the reachability of the
+runbook's `TS_FOR_OF_UNSUPPORTED` gate, and the `+17`-byte-per-golden MessagePack
+cost of the new always-written key.
 
-**The repair-instead-of-refuse defect was the important one.** The contract, the
-journal decoder and the VM validator were all correct; between them a
-normalisation step quietly made every malformed order well-formed. The guarantee
-read as delivered in three places while being false in one. The fix validates at
-the boundary and deletes the back-fill, because a repair that produces a valid
-permutation is indistinguishable from a real one downstream — by construction, no
-later check could have caught it.
+### Dual adversarial review (APPROVE-WITH-FIXES) — prior round
 
-**The `for…of` restriction was justified by a false claim.** The register said the
-filter waited on a resumable iterator protocol; the reviewer suspended a process
-inside a `for…of` and resumed it through a continuation round-trip. The filter
-was conservatism, not durability, and it cost the most common loop in the
-language. It now rejects only shapes that can reach the iterable, and says which
-shape did.
+| Finding | What it was | Fix |
+|---|---|---|
+| A-F1 / B-F1 (High) | The prompt, its pinning assertion, the snapshot, the runbook's Phase 2 gate and the README all named `TS_FOR_OF_ITERATOR_UNSUPPORTED`, a code that never existed | `dd8181723` (red: `4343666c4`) |
+| A-F3 / B-F2 (High) | `start`'s declared second argument was an options bag with an `input` field; the lowerer passes the object's keys through as the process's parameter names | `dd8181723` |
+| B-F3 (Medium) | The same sentence over-stated the `for...of` guard, suppressing legal code | `dd8181723` |
+| A-F4 (Medium) | The guardrail list omitted the five shapes a model reaches for first | `dd8181723` |
+| B-F6 (Medium) | The fluency corpus had no `for...of`, no `map`, and no negative control | `dd8181723` |
+| A-F10 (Low) | The corpus claimed to execute durable process primitives it cannot drive from a cell | `dd8181723` |
+| A-F2 (High) | The twin-coverage gate the parity claim rests on was run by nothing | `db6eff1c9` |
+| A-F8 / B-F4 (Medium) | A duplicated scenario passed while the script emitted 67 rows; the shard test re-implemented the split | `db6eff1c9` |
+| A-F11 (Nit) | The shard test never drove the script's own selection or argument parsing | `db6eff1c9` |
+| B-F5 (Medium) | The cross-dialect fence had no test: deleting it kept the package green | `db6eff1c9` |
+| A-F6 / B-F7 (Medium) | A TypeScript parent spawned Lashlang subagents | `191570864` |
+| A-F5 / B-F8 (Medium) | Both hosts re-asserted the ambient dialect on every open, one direction failing every route | `c60c62866`, superseded by `2f1cb3fc0` |
+| B-F10 (Low) | The workbench's dialect was a `cfg(test)` fork no test could reach | `c60c62866`; the branch was actually reached for the first time in `2f1cb3fc0` |
+| B-F9 / A-F9 (Low) | An explicit `null` dialect did not fail closed | `c60c62866` |
+| A-F7 (Low-Medium) | Docs said the choice is made "at creation"; it becomes durable at the first commit | `c60c62866` |
+| A-F12 / B-F11 (Nit) | The report's base and commit table described a pre-rebase history | `a045b3c0e` |
 
-**`sol F5` is closed only as far as the contract allows.** `ExecutionHostError`
-carries a message and nothing else, so the finest identity available to an
-`allSettled` record is the host's own text. The record no longer claims the
-unwrap error's code, which was simply wrong for a leaf that is never unwrapped.
-Giving rejections a discriminable code needs a code channel on the effect-host
-contract that every host would have to populate — named here rather than faked.
+Note on `c60c62866`: its fix for A-F5/B-F8 is the refinement that introduced F1.
+It is listed as closed because the finding is closed — by `2f1cb3fc0`, on the
+mechanism both hosts now share.
 
-## Round 2 verification closure
+### Honest ledger
 
-A decisive fresh-eyes verification returned BLOCK with eleven rulings and a
-performance addendum. Every one is closed below. Per the standing rule, every
-fixed case the oracle can express also landed in the checked-in corpus, which
-is the permanent gate: the hand-written test is the diagnosis, the corpus row
-is the guard. The corpus is expression-level, so H1, H3, M1, M3 and H2 are
-node-checked there (`map` and padding had no rows at all before this round and
-now have eight); M2 is a statement-form rejection, which the
-expression oracle cannot carry, so it is pinned in `agent_surface.rs`
-(`for_of_bodies_reject_aliasing_the_iterable`) instead.
+Things a reader should not have to dig for:
 
-| Ruling | What it was | Red | Fix |
-| --- | --- | --- | --- |
-| H1 | `slice` and `substring` treated an omitted or `undefined` end bound as position 0, so every such call returned the empty string | `22695d10b` | `525a47e7e` |
-| H2 | `map` was advertised and accepted, then failed at run time with a host-boundary error, because the stdlib builtin exports every argument across a boundary a closure cannot cross | — | `cdb15d32f` |
-| H3 | JSON overflow rewriting copied bytes through `as char`, mojibaking every non-ASCII string in a document that contained an overflowing number; the sentinel was also guessable and collided with guest data | `22695d10b` | `525a47e7e` |
-| M1 | The overflow sentinel is now derived from the document and its substitutions are counted, so a mismatch fails closed instead of silently restoring the wrong node | `22695d10b` | `525a47e7e` |
-| M2 | A `for…of` body that bound the iterable to a second name defeated root tracking, so writes through the alias diverged from ECMA in silence | — | `cdb15d32f` |
-| M3 | `replaceAll` expanded `$&`, `` $` `` and `$'` against a truncated slice rather than the whole string | `22695d10b` | `525a47e7e` |
-| M4 | Ruled DELIVER: carry true settlement through the pending-await phase. **The premise was refuted on evidence — see below.** | — | `78f7e9cef` |
-| M5 | The register's instance inventory was hand-maintained and had fallen nine methods behind the allowlist, telling guests that `slice` rejects when it does not | — | `cdb15d32f` |
-| L1 | Two `just perf-guard` rows in this report contradicted each other | — | the final report commit |
-| L2 | The quoted oracle SHA-256 was stale | — | the final report commit |
-| L3 | The batch-error path claimed input order for a batch that never ran | — | `cdb15d32f` |
-| L4 | No test resumed a process suspended inside `for…of` | — | `cdb15d32f` |
-| perf addendum | Ruled fix, not recalibrate: the compiled-process cache built its owned key — three cloned strings — before the lookup, so every hit paid an allocation for a value it dropped | — | `cdb15d32f` |
-
-### M4: the premise does not hold, and the guarantee already did
-
-M4 read the batch reply loop awaiting parked launches in input order and
-concluded that a deferred leaf which rejects first would not lead the
-settlement order. The reading of that loop is correct; the conclusion is not,
-because a batch leaf never reaches the loop parked.
-
-`execute_prepared_tool_batch_child` awaits its own pending completion and
-always hands back a finished call, and it does so *inside* the unordered
-scheduler — so a deferred leaf takes its place in the order at the moment it
-actually completes. `ToolBatchEffectOutcome` is crate-private with that single
-producer, so no host can supply parked launches either. The loop's `Pending`
-arm is unreachable for every possible caller.
-
-This was established by evidence, not by reading: an implementation of the
-ruled change was written, and an assertion placed on its parked-leaf path
-proved the path never executes. The ruled integration test was then written
-against the real seam — two deferred tools with raced completions at the
-`call_tool_batch` production entry both hosts use — and passed **before** any
-M4 change, which is the demonstration that the guarantee already held. The
-speculative restructuring was reverted rather than shipped as untested
-complexity on an unreachable path; the finding is recorded as a comment at the
-loop so the next reviewer does not re-raise it.
-
-What was genuinely missing was the test. The guarantee lived only in how the
-two phases happen to be arranged, which a refactor can undo without noticing,
-and nothing held it down. It is now pinned from the outside in both launch
-orders, and serializing the children turns the discriminating case red — so
-the pin has teeth rather than merely being green.
-
-The narrowed-claim fallback the ruling asked for is therefore not needed: the
-layer's ECMA claim covers deferred tools as stated.
-
-## Round 3 verification closure
-
-Round-2 closure verification confirmed every ruling closed or refuted with
-evidence, and raised five new findings. All five are closed.
-
-| Finding | What it was | Red | Fix |
-| --- | --- | --- | --- |
-| N1 (Medium) | `replaceAll` with an empty search delegated to the single-match path, returning `-abc` where ECMA gives `-a-b-c-` — and the comment above it asserted the delegation *was* ECMA's behaviour. The M3 fix had traded one divergence for another: before it, Rust's `str::replace` happened to agree with node | `010663589` | `92bed819b` |
-| N2 (Medium) | The aliasing half of the `for…of` filter compared exact identifiers while the mutation half tracked an expression's root binding, so the two disagreed about what "the iterable" is and a member-rooted iterable (`data.items`) could be aliased through the gap | `92bed819b` | `92bed819b` |
-| N3 (Low) | The `map` branch preceded the literal-receiver check, so `"ab".map(f)` skipped its named rejection and failed at run time with a shaping error instead | `92bed819b` | `92bed819b` |
-| N4 (Low) | The register pin asserted documented ⊆ accepted and sampled the reverse, leaving the direction that actually caused M5 — the allowlist growing while the register stands still — checked only by spot samples | — | `92bed819b` |
-| N5 (Low) | The effect restriction on `map` callbacks was undocumented | — | `92bed819b` |
-
-N1's fix carries five node rows including the end-of-string match, the empty
-receiver, the `replace` contrast that must *not* change, a non-ASCII case, and
-the replacement tokens around each empty match. N3 carries a rejection row.
-
-A polish pass after round 3 reconciled two stale doc counts and closed one
-more silent divergence. The register claimed the differential table held 310
-rows and 237 distinct expressions when it held 345 and 272, and this report
-claimed 55 method names when the inventory is 64 — both are counts restated in
-prose beside the thing they count, which is the shape that produced M5. The
-numbers are corrected and now pinned: `committed_row_counts_match_the_register`
-asserts both corpus counts against the table (mutating the register to 344
-fails it), and the method count defers to the set-equality pin rather than
-restating a number. `replaceAll('')` on an astral receiver was expanding per
-Unicode scalar where ECMA expands per UTF-16 code unit, silently returning a
-string that was neither node's answer nor a refusal; it now rejects with
-`TS_LONE_SURROGATE_UNSUPPORTED`, alongside `split('')`, which refuses the same
-shape for the same reason. BMP receivers are unchanged and stay covered by
-oracle rows.
-
-N4 is now structural rather than assertional: the allowlist is a single named
-list that both the predicate and the register pin read, and the pin asserts set
-equality in both directions. Adding a name to the allowlist alone fails it with
-`the lowerer accepts ["flatMap"], which the register does not document` —
-verified by mutation, since a pin that has never been seen red is not yet a
-pin. N5's register line is likewise pinned rather than asserted in prose: a
-test drives the documented failure and the `await` rejection that makes the
-"no suspension inside `map`" half true.
-
-Two production files crossed the 1 600-line budget during this round. Rather
-than compress comments to fit, the two concerns that had outgrown their hosts
-moved out: JSON encoding and decoding (whose rewrite-and-restore pair is only
-correct as a unit) left the method-dispatch table for
-`vm/javascript_json.rs`, and the `map` lowering (the one instance method that
-cannot cross the host boundary, and so owns its own arity reasoning) left the
-general lowerer for `lower/array_map.rs`.
-
-## Accepted v1 restrictions and deviations
-
-The full executable register is in `crates/lash-typescript/README.md`. The
-agent-surface-specific limits are:
-
-- General async functions reject; v1 accepts top-level await and a static
-  process definition's async `run` literal.
-- `map` accepts a callback written as a literal at the call site with one or
-  two parameters, matching ECMA's `(value, index)`. A callback passed by name,
-  built dynamically, or declaring a third `array` parameter rejects as
-  `TS_METHOD_UNSUPPORTED` rather than lowering to something that only
-  resembles it — the VM checks arity exactly, so nothing lowers that cannot
-  run. A literal receiver that cannot carry `map` is rejected by
-  name before lowering. The callback runs in the VM and cannot perform
-  effects; one inside terminates with the typed `EffectInBuiltinCallback`,
-  and `await` inside it is a parse-level rejection, so there is no suspension
-  point inside `map` to make durable.
-- Promise aggregates accept array literals containing top-level tool promises
-  and resolved values. Nested aggregates, non-array iterables, and process or
-  timer promises inside an aggregate reject.
-- Classic `for` accepts the canonical counter form. `for...of` snapshots arrays
-  and strings; source mutation and user-authored calls in its body reject until
-  a resumable iterator protocol exists.
-- Arrays are dense. Hole-creating writes and named or negative index writes
-  reject without mutation.
-- Lone UTF-16 surrogates are not representable in the v1 UTF-8 value model.
-  Literals reject statically; astral indexing and string-backed
-  `Object.values`/`Object.entries` reject when they would manufacture a lone
-  surrogate. Methods with that unavoidable result are not advertised.
-- A single string result is capped at 8 MiB with uncatchable typed exhaustion.
-- Classes, modules, generators, destructuring, `for...in`, and the other
-  inherited exclusions remain named rejections.
-
-A rejected `Promise.all` still waits for every leaf to settle before reporting.
-ECMA specifies which reason surfaces, not when, so this is a runtime-system
-constraint rather than an alternate semantics, and it is registered as one: v1
-has no fail-fast cancellation of an in-flight batch leaf.
-
-## Fluency smoke
-
-FIG-1304 rejected recurring first-shot agent shapes: awaited tools, aggregate
-promises, ordinary `for` loops, and common data shaping. The post-implementation
-smoke keeps four representative programs as executable source in
-`tests/fluency_smoke.rs`. All four lower, covering `JSON.stringify`, `join`,
-`Object.entries`, `toUpperCase`, `Math.max`, awaited tool batches, and durable
-process effects.
-
-No fresh live-model sampling was performed in this worktree. The evidence is a
-repurposed, executable first-shot corpus, not a claim about a newly measured
-model success rate.
-
-## Compatibility and persistence
-
-- There are no SQL changes, so change-triggered schema congruence is not
-  applicable. The existing workspace schema-congruence tests still pass.
-- There is no durable format-version bump. Persisted process artifacts now
-  carry the compilation dialect needed to select the correct compiler.
-- The expanded TypeScript tool metadata changes one stored logical-size label
-  from `2.0KB` to `2.1KB`; checkpoint and revision semantics are unchanged.
-  This is the only durable transcript snapshot change.
-- The checked-in Node differential generator was regenerated and then rerun;
-  the second run produced the same bytes and hash.
+- **`c60c62866` made the workbench worse.** It closed a real finding with a
+  refinement that silenced the dialect entirely on every turn-running open. One
+  review round passed over it; the fresh-eyes round caught it. The fixtures that
+  would have caught it at the time are now in the tree.
+- **No workbench test had ever constructed a TypeScript `AppState`.** All
+  seventeen fixtures set `RlmDialect::Lashlang`, and the field's own doc comment
+  justified itself as existing so that a test *could* reach the TypeScript
+  branch. It was never reached until this round.
+- **Two CI-only gates were red at the previous head** and are fixed in
+  `77c67d938`: clippy under `-D warnings` (three needless borrows introduced by
+  routing opens through `open_session(&str)`) and the API example-coverage
+  registry (124 anchors pointing at pre-shift line numbers). Neither is visible
+  to the pre-commit hooks, and the round that introduced them reported green.
+- **Three prompt-advertised behaviours were unmeasured by the corpus that exists
+  to measure the prompt** (F4). The prompt was honest about them — the reviewer
+  verified all three link and execute with bindings present — but the corpus
+  could not have told us.
+- **One model-facing internal alias remains.** Against a catalog without the
+  runtime bindings the message is "unknown module `__typescript_runtime`" — an
+  internal name in a string a model can see. It is unreachable in production (the
+  real host always installs those bindings) and is out of this round's scope, but
+  it is the same class as F3 and is recorded rather than dropped.
+- **Every crate-level TypeScript test pre-supplies its own bindings.** That is
+  why the dialect shipped through four rounds unable to read a session global
+  (F11): the corpus, the conformance suites and the differential oracle all
+  compile self-contained programs, which is exactly the one shape the defect
+  does not touch. The fixtures added here drive the production turn path
+  instead, in both dialects, because that is the only place the gap is visible.
+- **The cheap end of the battery found a class every fixture was blind to.**
+  Twenty-one rows boot the Workbench and nine of them boot its scripted
+  provider; every one of those replies was a Lashlang cell, so a TypeScript row
+  would not have failed — it would have hung. The same is true of three runbook
+  harnesses. None of this was visible to a test suite in which every host was
+  Lashlang.
+- **Two dialect leaks are open and named.** Tool-doc signatures render `-> str`
+  and the bound-variable block renders `list[HistoryItem]` to a TypeScript
+  reader. Both come from renderers outside this crate's dialect seam, both are
+  typed-rendering changes rather than copy edits, and both are asserted by
+  equality in `KNOWN_TYPE_SYNTAX_RESIDUALS` so they cannot be forgotten or
+  silently joined by a third.
+- **Three agent-scenario size labels changed because of this round, and the
+  first version of this report said otherwise.** The claim was "pre-existing
+  drift, the previous round's PASS row was stale". It is false. This round
+  routed the `continue_as` tool description through the vocabulary, so
+  `"…the last meaningful statement in the lashlang block…"` became
+  `"…in the block…"` — nine bytes shorter, in a description that is serialized
+  into `tool_state`, whose logical size those transcripts assert. Restoring
+  `cell_noun: "lashlang block"` restores all three labels exactly. The bisect
+  that produced the wrong conclusion reverted only `crates/lash-protocol-rlm`,
+  which is where `dialect/lashlang.rs` lives — and it *did* still reproduce,
+  because the revert also restored the old vocabulary; the inference "therefore
+  pre-existing" did not follow. The committed labels are right; the sentence
+  about a previous round was not, and it is withdrawn.
+- **The `code-failure` scenario shipped with no test at all**, which is how it
+  came to script a program that is invalid in both dialects. Its unbounded
+  retry is a second defect (FIG-1407, main-side) that this round deliberately
+  did **not** fix; the fixture now terminates and the timeout in its test is the
+  guard.
+- **`mock_provider.rs` still scripts Lashlang cells.** It serves
+  `restate-postgres-workers`, which is not a judged parity scenario and has no
+  dialect row, so it was left alone rather than changed for symmetry.
+- **The live 63-row judged battery has not been run.** Every parity claim in this
+  report is a claim about the harness, not about a judged result.
 
 ## Verification
 
-All commands used `CARGO_TARGET_DIR=/workspace/.cargo-target-lash-fig-1305`
-where Cargo was involved. The canonical workspace run was taken with
-nothing else touching that target directory: an earlier attempt overlapped with
-the rustdoc and coverage gates and produced a phantom `can't find crate for
-lash` failure in the `docs-snippets` doctest, which passed on its own and
-passed again in the serialized run. Shared-target contamination is a known
-hazard here and a concurrent battery is not evidence either way.
+All Cargo commands used `CARGO_TARGET_DIR=/workspace/.cargo-target-lash-fig-1306`,
+with no other heavy build job running concurrently.
 
 | Gate | Result |
-| --- | --- |
-| `cargo check --workspace --all-targets --locked` | PASS |
-| `cargo test --workspace --locked` | PASS; 252 suites, 0 failures — full unit, integration, property, UI, trybuild, simulation, conformance, and doctest suite, run serialized |
-| `cargo nextest run` (lashlang, typescript, core, protocol-rlm, lashlang-runtime) | PASS; 2 241 tests |
-| `just perf-guard` | Runtime leg PASS. Lashlang leg: **155 budget failures at the recipe's 500 iterations, against 162 on the base `1532794d9` — no metric fails here that does not already fail on the base**, so this work regresses nothing and repairs seven. At 2 500 iterations the same head is **fully green, 0 failures, with no budget-table edit**: the 45 overages reported in round 1 were the eager compiled-process cache key, and fixing it removed them. The 500-iteration remainder is warmup-dominated (overages fall from 1 459 vs 336 at 500 to nothing at 2 500) and is pre-existing; recalibrating that recipe is owned separately. |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS |
+|---|---|
 | `cargo fmt --all --check` | PASS |
-| `python3 scripts/check_included_file_formatting.py` | PASS; 37 included Rust files |
-| `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry files |
-| `bash scripts/check-rustdoc.sh` | PASS; 602 public items documented, 0 missing |
-| `python3 scripts/check_test_quarantines.py` | PASS |
-| `python3 scripts/check_api_example_coverage.py` | PASS; 8,106 entries (run unpiped, exit code checked) |
-| `bash scripts/check-production-file-size.sh` | PASS; main executor reduced to 1,588 lines |
-| `cargo test -p lash-typescript --test differential_oracle` | PASS; 346 node-checked rows, corpus regenerated byte-identically |
-| `python3 scripts/release_notes.py check-pr --range 1532794d9..HEAD` | PASS; every user-facing commit categorized |
-| `git diff --check 1532794d93606940121c3dcff88ac9ad088ddd3e..HEAD` | PASS |
-| `cargo test -p lashlang --locked` | PASS; 464 unit tests and all package integrations |
-| `cargo test -p lash-typescript --locked` | PASS; all 15 agent-surface tests plus dialect, differential, ECMA, fluency, rejection, safety, and conformance suites |
-| Focused protocol named-signal integration | PASS |
-| Focused Restate TypeScript artifact-to-terminal integration | PASS |
-| SQL change-triggered congruence gate | N/A; no SQL changed |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0). Red twice before it: a `&format!` at the `continue_as` doc and `step_output_text` crossing the argument bound once the vocabulary joined it |
+| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-trace -p lash-restate-postgres-workers-e2e --locked` | PASS; **724 run, 724 passed**, 13 skipped after the closure round (722 before it). Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
+| `cargo test -p lash-runtime --features rlm --lib` | PASS; 248 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
+| `cargo test --workspace --locked` | PASS; **4,502 passed, zero failures**, exit 0 (4,501 at `0602c5f4a`; the closure round adds the served-prompt assertion). Executed alone with nothing else building and scored on the **passed count** rather than the exit code. Its first execution was red on three agent-scenario size labels; those are this round's own doing (the shortened `continue_as` description) and are re-recorded, not drift |
+| `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,488 entries, after re-anchoring 33 references. `RlmSessionReadViewExt` and its `rlm_dialect` moved from `unused-add` to `used-asserted` on the new end-to-end label assertion |
+| `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
+| `python3 scripts/test_judged_runbook_matrix.py` | PASS; 6 tests (4 before this round) |
+| `python3 scripts/judged_runbook_matrix.py --shard 1/1` | PASS; 63 validated rows |
+| `python3 scripts/release_notes.py check-pr --range dc191172e..HEAD` | PASS (exit 0) |
+| Live 63-row judged battery | PREPARED / NOT RUN; no provider-cost authorization |
 
-The first full workspace run exposed only gate-driven mechanical corrections:
-the TypeScript metadata size label and a deliberately regenerated differential
-classification. The final full run passed with zero failures.
+### Gates — multi-session round
+
+Same target directory, run after the round's last code commit (`eaf8ed9bc`).
+The workspace suite was executed alone.
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all --check` | PASS |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0) |
+| `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-restate-postgres-workers-e2e --locked` | PASS; 527 run, 527 passed, 13 skipped |
+| `cargo test --workspace --locked` | PASS; **4,508 passed, zero failures**, exit 0 |
+| `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,491 entries. Three new rows — `RlmDialect::ALL`, `from_language_id`, `registered_language_ids` — and a re-anchor after the session routes moved out of `routes.rs` |
+| `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
+| `python3 scripts/check_included_file_formatting.py` | PASS |
+| `bash scripts/check-production-file-size.sh` | PASS. Red once: `routes.rs` crossed the 1,600-line production budget, which is why the session routes have their own file |
+| `python3 scripts/release_notes.py check-pr --range dc191172e..HEAD` | PASS (exit 0) |
+| Live browser round | NOT RUN. The UI is covered by the markup contract test and by the projection harness that executes the page's own snapshot block; no workbench was started against a live provider |
+
+**Red-side proof.** Replacing the roster lookup in `session_builder` with the
+process-wide field again turns three fixtures red — the created TypeScript
+session records `lashlang`, the Lashlang session created on a TypeScript
+deployment records `typescript`, and the restarted process serves the rostered
+session in the wrong dialect. The fixtures fail on the durable read, not on the
+roster, which is the property that matters.
+
+### Red-side evidence — battery-defect round
+
+| Item | Red-side demonstration |
+|---|---|
+| A (driver copy) + O1 | The walker was extended first and reported five violations across both directions: `execution section` contains `__typescript_runtime`; `output limit` and `output limit retry` contain `per cell` (Lashlang); `history preview notice` and `history output reference` contain `re-print` (TypeScript). Committed red at `ffb4cdaba` |
+| A (host prompt) | The host-side walker asserts each prompt against the *other* dialect's marker list and requires both lists to fire, so the check cannot go vacuous. The link check found a real constraint while being written — a definition's `const` must be named exactly its `name` literal — which failed two of the three TypeScript tutorials until the copy was corrected |
+| C (`code-failure`) | Restoring the shipped cell **and** removing the `call == 0` retry branch — the true shipped shape — makes `the_code_failure_scenario_renders_a_failed_cell_and_terminates` fail at its 60s timeout with "the lashlang code-failure scenario never reached a terminal state"; green again in 0.18s. Reverting the cell alone is not sufficient: the retry branch makes the scenario terminate on its own, and what goes red then is the link-verify fixture, in both dialects |
+| C (harnesses) | With the example routing unwired, the walker reports `typescript prompt fragment `tool docs` contains `)?``; the fixture's Lashlang rendering is separately asserted to contain `)?` so the marker has something real to catch |
+| E (matrix) | The row total is derived from the four category lists and pinned, so a reclassification that leaves RULES.md or this report stale turns the self-test red |
+| F11 | Reverting the executor's one-line wiring (`parse_with_globals` → `parse`) turns both TypeScript legs of `a_cell_reads_what_an_earlier_cell_bound_in_both_dialects` and `a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects` red, with both Lashlang legs still green — the dialect asymmetry named directly. The crate-level rule has its own five-case suite (`crates/lash-typescript/tests/session_globals.rs`) |
+| Extraction | `a_cell_of_the_inactive_dialect_is_named_on_the_first_iteration` fails on the shipped scanner: nothing executes (correct) but nothing tells the model why, so the reply is prose and the turn re-prompts |
+| Residuals | `KNOWN_TYPE_SYNTAX_RESIDUALS` is asserted by equality: a third leak fails the walker, and closing one of the two fails it until its row is deleted |
+
+### Red-side evidence — prior rounds
+
+| Item | Red-side demonstration |
+|---|---|
+| F1 | Re-verified this round. With the pre-fix shape restored (turn-running opens asking for no dialect), `a_typescript_workbench_serves_typescript_turns_and_records_the_dialect` never completes — killed at a 420s timeout — because the served prompt is Lashlang, the provider answers with a `<typescript>` cell, and the turn cannot reach a terminal state. On the fixed tree the same test passes in 0.08s |
+| F3 | The structural check was written first and reported exactly one leak: "waitSignal at top level: names `wait_signal`" |
+| F4 | Removing the `__typescript_runtime` bindings puts row 7 on the hit list ("does not expose operation `random`"); removing `add_trigger_resource_operations` puts row 8 on it ("unknown module `triggers`") |
+| F5 | Persisting the turn-scoped merge as session state turns the test red immediately, with the session rejecting its own snapshot engine ("RLM snapshot engine `typescript` is unsupported") |
+
+The prior round's mutations still hold: reverting subagent inheritance, deleting
+the cross-dialect fence, unwiring a CI self-test entry, dropping a code from
+`DiagnosticCode::ALL`, duplicating a matrix scenario and skewing `select_shard`
+each turn the relevant test red.
 
 ## Repository state
 
-- Conventional commits include categorized `Release-Notes:` entries and no AI
+- Conventional commits with categorized `Release-Notes:` footers and no AI
   attribution.
+- No live provider credentials were consumed.
 - No push was performed.
-- This report is the only change in the final documentation commit and is
-  committed last, so `REPORT.md` is the branch-tip deliverable.

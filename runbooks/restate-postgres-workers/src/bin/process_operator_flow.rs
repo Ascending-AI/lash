@@ -147,8 +147,23 @@ fn process_json(record: &ProcessRecord) -> Value {
     })
 }
 
+/// Read once: a bad `LASH_RUNBOOK_DIALECT` must fail the phase, not one turn.
+fn runbook_dialect() -> lash::rlm::RlmDialect {
+    static DIALECT: std::sync::OnceLock<lash::rlm::RlmDialect> = std::sync::OnceLock::new();
+    *DIALECT.get_or_init(|| {
+        lash_restate_postgres_workers_e2e::runbook_rlm_dialect()
+            .expect("LASH_RUNBOOK_DIALECT names a registered dialect")
+    })
+}
+
+/// The scripted cell, in the dialect the row is running. A foreign cell cannot
+/// execute, so the turn never reaches a terminal state and the row hangs
+/// instead of failing.
 fn scripted_response(value: &str) -> LlmResponse {
-    let text = format!("<lashlang>\nfinish \"{value}\"\n</lashlang>");
+    let text = lash_restate_postgres_workers_e2e::scripted_finish_cell(
+        runbook_dialect(),
+        &format!("\"{value}\""),
+    );
     LlmResponse {
         full_text: text.clone(),
         parts: vec![lash_core::LlmOutputPart::Text {
@@ -550,7 +565,14 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     let provider_handle = provider.handle.clone();
     let attachments = tempfile::tempdir().context("drain attachment directory")?;
     let core = core(storage, provider.handle.clone(), &attachments)?;
-    let session = core.session(TURN_SESSION_ID).open().await?;
+    let session = {
+        use lash::rlm::RlmSessionBuilderExt as _;
+        core.session(TURN_SESSION_ID)
+            .rlm_dialect(runbook_dialect())
+            .context("pin the row's dialect")?
+            .open()
+            .await?
+    };
     let journal = Arc::new(JournalController::default());
     let task_journal = Arc::clone(&journal);
     let turn = tokio::spawn(async move {

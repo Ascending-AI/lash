@@ -49,7 +49,25 @@ use tracing_subscriber::layer::{Context as LayerContext, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
 
 const TURN_PROMPT: &str = "commit one turn";
-const SCRIPTED_PROGRAM: &str = "<lashlang>\nfinish \"ok\"\n</lashlang>";
+/// The scripted cell, in the dialect the row is running.
+///
+/// This harness commits real turns, so its reply has to be a cell the session
+/// can execute. Hard-coded Lashlang meant the TypeScript row of
+/// `session-lease-triage` never committed a turn in the dialect it claimed:
+/// the session refuses a foreign cell, so the phase's "a turn commits" evidence
+/// was produced by a Lashlang session under a TypeScript label.
+fn scripted_program() -> String {
+    lash_restate_postgres_workers_e2e::scripted_finish_cell(runbook_dialect(), "\"ok\"")
+}
+
+/// Read once, so a bad value fails the phase rather than one backend.
+fn runbook_dialect() -> lash::rlm::RlmDialect {
+    static DIALECT: std::sync::OnceLock<lash::rlm::RlmDialect> = std::sync::OnceLock::new();
+    *DIALECT.get_or_init(|| {
+        lash_restate_postgres_workers_e2e::runbook_rlm_dialect()
+            .expect("LASH_RUNBOOK_DIALECT names a registered dialect")
+    })
+}
 /// Renewals land often enough that a healthy holder is provably renewing within
 /// a phase, and the TTL is long enough that it never lapses on its own: every
 /// lease loss in this harness is injected, never a timing accident.
@@ -330,8 +348,11 @@ struct TurnCore {
 
 impl TurnCore {
     async fn open(&self, session_id: &str) -> Result<lash::LashSession> {
+        use lash::rlm::RlmSessionBuilderExt as _;
         self.core
             .session(session_id)
+            .rlm_dialect(runbook_dialect())
+            .context("pin the row's dialect")?
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))
@@ -364,10 +385,11 @@ fn scripted_provider() -> lash::provider::ProviderHandle {
 }
 
 fn scripted_response() -> lash::provider::LlmResponse {
+    let program = scripted_program();
     lash::provider::LlmResponse {
-        full_text: SCRIPTED_PROGRAM.to_string(),
+        full_text: program.clone(),
         parts: vec![lash_core::LlmOutputPart::Text {
-            text: SCRIPTED_PROGRAM.to_string(),
+            text: program,
             response_meta: None,
         }],
         response_metadata: Default::default(),

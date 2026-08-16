@@ -1,0 +1,9 @@
+process approval(request: any) signals { approved: any } {
+  decision = wait_signal("approved")
+  sleep for 25
+  wake { stage: "approved", decision: decision }
+  finish { request: request, decision: decision }
+}
+
+handle = start approval(request: { id: "req-1" })
+finish handle

@@ -12,7 +12,7 @@
         ));
         std::fs::create_dir_all(&data_dir).expect("create session resume data dir");
         let session_id_path = data_dir.join("session-id");
-        let first_session_ids = WorkbenchSessionIds::persistent(session_id_path.clone())
+        let first_session_ids = WorkbenchSessions::persistent(session_id_path.clone())
             .expect("create persistent session id");
         let session_id = first_session_ids.current();
         let first_registry = Arc::new(
@@ -216,7 +216,7 @@
             .disable_queued_work_driver()
             .build(crate::test_core_owner())
             .expect("build reconstructed workbench core");
-        let resumed_session_ids = WorkbenchSessionIds::persistent(session_id_path)
+        let resumed_session_ids = WorkbenchSessions::persistent(session_id_path)
             .expect("reopen persistent session id");
         assert_eq!(resumed_session_ids.current(), session_id);
         let process_observer = resumed_core
@@ -225,11 +225,12 @@
             .expect("process observer configured");
         let state = AppState {
             core: resumed_core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&resumed_registry)),
-            session_ids: resumed_session_ids,
+            sessions: resumed_session_ids,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),

@@ -296,10 +296,13 @@ fn terminal_value_match(result: TurnResult) -> anyhow::Result<()> {
 
 async fn finish_schema(core: &lash::LashCore) -> anyhow::Result<()> {
     // docs:start:finish-schema
-    use lash::rlm::{RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _};
+    use lash::rlm::{
+        RlmDialect, RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _,
+    };
 
     let session = core
         .session("analysis")
+        .rlm_dialect(RlmDialect::Typescript)?
         .final_answer_format(RlmFinalAnswerFormat::RawFinalValue)?
         .open()
         .await?;

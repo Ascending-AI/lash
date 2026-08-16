@@ -43,7 +43,9 @@ pub(super) fn register_rlm_protocol_plugin(
         bound_variables_prompt: runtime_state.shared_bound_variables_prompt(),
     }))?;
     reg.tools()
-        .provider(Arc::new(crate::control_tools::RlmControlToolsProvider))?;
+        .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
+            vocabulary: dialect.prompt_vocabulary(),
+        }))?;
     reg.tool_catalog()
         .contribute(Arc::new(crate::tool_catalog::rlm_tool_catalog));
     reg.tool_calls().before(Arc::new(|ctx| {
@@ -86,6 +88,10 @@ fn register_projected_bindings_prompt_contributor(
             {
                 contributions.extend(RlmProjectionExtension::prompt_contributions_for(
                     &extension.bindings,
+                    // The session owns the dialect; a turn-scoped extension
+                    // built by a host before the dialect resolved must not
+                    // fall back to Lashlang copy here.
+                    session.dialect_prompt_vocabulary(),
                 ));
             }
             Ok(contributions)

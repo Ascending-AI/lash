@@ -66,7 +66,7 @@ finish (await handle)?
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessionIds::fresh(),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -146,7 +146,7 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessionIds::fresh(),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -287,7 +287,7 @@ finish (await handle)?
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessionIds::fresh(),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -815,8 +815,8 @@ async fn live_failure_path_harness(
     let harness = live_workbench_restate_state_with_provider(
         &data_dir,
         ingress_url,
-        scenario.provider(),
-        WorkbenchSessionIds::fresh(),
+        scenario.provider(lash::rlm::RlmDialect::Lashlang),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -873,7 +873,7 @@ finish (await handle)?
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessionIds::fresh(),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -1055,7 +1055,7 @@ finish "started lifecycle gates"
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessionIds::fresh(),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -1339,7 +1339,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessionIds::fresh(),
+        WorkbenchSessions::fresh(),
         ActiveTurns::default(),
     )
     .await;
@@ -1814,14 +1814,14 @@ async fn live_restate_recovery_child() {
         .into_handle();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))
         .expect("open child active-turn routing");
-    let session_ids = WorkbenchSessionIds::persistent(data_dir.join("session-id"))
+    let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))
         .expect("open child session id");
     let lease_timings = recovery_e2e_lease_timings();
     let harness = live_workbench_restate_state_with_provider_and_database(
         &data_dir,
         ingress_url,
         provider,
-        session_ids,
+        sessions,
         active_turns,
         database_url.as_deref(),
         lease_timings,

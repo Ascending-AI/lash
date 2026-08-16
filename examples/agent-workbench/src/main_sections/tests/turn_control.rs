@@ -52,11 +52,12 @@ mod turn_control_timeout_tests {
             .expect("process observer configured");
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -288,11 +289,12 @@ mod turn_control_timeout_tests {
             .expect("process observer configured");
         AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
@@ -466,11 +468,12 @@ finish (await handle)?
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let state = AppState {
             core,
+            rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
-            session_ids: WorkbenchSessionIds::fresh(),
+            sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
                 model: "test-model".to_string(),
