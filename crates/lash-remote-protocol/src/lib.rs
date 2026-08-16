@@ -32,6 +32,10 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 38: `RemoteRuntimeEffectKind` gains `LanguageRuntimeValue`, the
+// journaled sample a language runtime draws for a nondeterministic builtin. A
+// version 37 peer has no name for that kind and would reject or misread the
+// effect rather than replay it.
 // Bumped to 32: session process originators retain their optional agent-frame
 // elevation. Exact version negotiation prevents an older peer from silently
 // dropping that authority before a process wake is enqueued.
@@ -76,7 +80,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 37;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 38;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {
