@@ -77,8 +77,8 @@ impl<'a> QueuedDrainRequest<'a> {
 
     /// Rows eligible to drain together on this wake, in strict queue order.
     ///
-    /// Never empty: Lash consults a policy only when at least the head row is
-    /// claimable.
+    /// Always holds at least two rows: a lone eligible row leaves nothing to
+    /// select, so Lash drains it without consulting a policy.
     pub fn candidates(&self) -> &'a [QueuedDrainCandidate] {
         self.candidates
     }
@@ -152,6 +152,10 @@ pub trait QueuedDrainPolicy: std::fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
 
     /// Chooses how many leading candidates drain on this wake.
+    ///
+    /// Called only when more than one row is eligible, and the returned count
+    /// is clamped into `1..=candidates.len()`: a policy can neither starve its
+    /// own queue nor reach past the rows Lash offered.
     fn select_drain(&self, request: &QueuedDrainRequest<'_>) -> QueuedDrainSelection;
 }
 
@@ -216,7 +220,11 @@ impl QueuedDrainPolicy for DrainModePolicy {
 }
 
 /// The policy Lash uses when a host configures none: [`DrainMode::OneAtATime`].
-pub fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
+///
+/// Hosts reach this through
+/// [`QueuedWorkBatchingConfig::drain_policy`](crate::QueuedWorkBatchingConfig::drain_policy)
+/// rather than directly, so it stays crate-internal.
+pub(crate) fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
     static DEFAULT: std::sync::OnceLock<Arc<dyn QueuedDrainPolicy>> = std::sync::OnceLock::new();
     Arc::clone(DEFAULT.get_or_init(|| Arc::new(DrainModePolicy::new(DrainMode::OneAtATime))))
 }

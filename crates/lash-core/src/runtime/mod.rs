@@ -375,9 +375,10 @@ pub use process_worker::{
     ProcessDrainDeferred, ProcessDrainReport, ProcessExecutionConcurrencyError,
     ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
 };
+pub(crate) use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, default_queued_drain_policy,
+    QueuedDrainSelection,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use queued_work_driver::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;

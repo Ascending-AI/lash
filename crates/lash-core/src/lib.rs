@@ -843,7 +843,7 @@ pub(crate) use provider::{
 pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
-pub use runtime::default_queued_drain_policy;
+pub(crate) use runtime::default_queued_drain_policy;
 #[doc(hidden)]
 pub use runtime::drive_with_event_pump;
 

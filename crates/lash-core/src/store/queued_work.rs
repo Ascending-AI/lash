@@ -212,8 +212,9 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
 ///   [`DeliveryPolicy::EarliestSafeBoundary`].
 /// * An absent merge key, or a control/cancel kind, claims exactly one batch.
 /// * A batchable head extends through immediately following rows with the same
-///   delivery policy, merge key, and authority/elevation, within the host's
-///   row, age, and rendered-token bounds.
+///   delivery policy, merge key, and authority/elevation, within the host's row
+///   and age bounds. How much of that eligible prefix actually drains is the
+///   host's [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) decision.
 pub fn select_turn_work_claim_indices(
     candidates: &[ClaimCandidate],
     boundary: QueuedWorkClaimBoundary,
@@ -368,8 +369,23 @@ pub fn select_turn_work_claim_indices(
 
     // Lash has now applied every claim law: what remains is a legal, strictly
     // FIFO prefix that *may* share this turn. How much of it actually drains is
-    // the host's [`QueuedDrainPolicy`] decision (FIG-1313), not kernel token
+    // the host's `QueuedDrainPolicy` decision (FIG-1313), not kernel token
     // arithmetic. The shipped default drains the head alone.
+    if compatible_prefix_len == 1 {
+        // A lone eligible row always drains: no selection is expressible, so
+        // the policy is not consulted and its per-row projections are not
+        // rendered.
+        let selected = record_turn_claim_decision(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            1,
+            first_tokens,
+            "single_eligible_row",
+        );
+        return Ok((0..selected).collect());
+    }
     let drain_candidates = candidates[..compatible_prefix_len]
         .iter()
         .map(|candidate| crate::QueuedDrainCandidate {

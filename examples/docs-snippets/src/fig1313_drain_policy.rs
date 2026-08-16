@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
+use lash::persistence::QueuedWorkClaimBoundary::Idle;
 use lash::persistence::SessionStoreFactory as _;
+use lash::persistence::{QueuedWorkAuthority, QueuedWorkKind};
 use lash::provider::LlmResponse;
 use lash::{DrainMode, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, TurnEvent};
 
@@ -230,4 +232,65 @@ async fn a_row_larger_than_the_window_is_refused_by_name() -> anyhow::Result<()>
         vec![batch_id]
     );
     Ok(())
+}
+
+/// A host can unit-test its own policy without booting a runtime: build the
+/// request Lash would hand it and read the selection back.
+#[test]
+fn a_host_can_exercise_its_drain_policy_directly() {
+    let candidates = [
+        lash::QueuedDrainCandidate {
+            enqueue_seq: 1,
+            kind: QueuedWorkKind::Turn,
+            merge_key: Some("docs-drain-policy".to_string()),
+            authority: QueuedWorkAuthority::new("docs-principal"),
+            projected_tokens: 512,
+            pending_age_ms: 0,
+        },
+        lash::QueuedDrainCandidate {
+            enqueue_seq: 2,
+            kind: QueuedWorkKind::Turn,
+            merge_key: Some("docs-drain-policy".to_string()),
+            authority: QueuedWorkAuthority::new("docs-principal"),
+            projected_tokens: 4_096,
+            pending_age_ms: 250,
+        },
+    ];
+    let request = QueuedDrainRequest::new(&candidates, 31_744, 32_768, 64, Idle);
+    let head = &request.candidates()[0];
+    let next = &request.candidates()[1];
+    assert_eq!(request.candidates().len(), 2);
+    assert_eq!(head.enqueue_seq, 1);
+    assert_eq!(head.kind, QueuedWorkKind::Turn);
+    assert_eq!(next.merge_key.as_deref(), Some("docs-drain-policy"));
+    assert_eq!(next.authority, QueuedWorkAuthority::new("docs-principal"));
+    assert_eq!(next.projected_tokens, 4_096);
+    assert_eq!(next.pending_age_ms, 250);
+    assert_eq!(request.available_tokens(), 31_744);
+    assert_eq!(request.max_context_tokens(), 32_768);
+    assert_eq!(request.max_rows(), 64);
+    assert_eq!(request.boundary(), Idle);
+
+    let one_at_a_time = lash::DrainModePolicy::new(DrainMode::OneAtATime);
+    assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);
+    assert_eq!(DrainMode::OneAtATime.as_str(), "one_at_a_time");
+    assert_eq!(one_at_a_time.name(), "one_at_a_time");
+    let selection = one_at_a_time.select_drain(&request);
+    assert_eq!(selection, QueuedDrainSelection::head_only());
+    assert_eq!(
+        selection.drain_count(),
+        QueuedDrainSelection::leading(1).drain_count()
+    );
+
+    let all = lash::DrainModePolicy::new(DrainMode::All);
+    assert_eq!(all.name(), DrainMode::All.as_str());
+    let everything = all.select_drain(&request);
+    assert_eq!(everything, QueuedDrainSelection::everything(&request));
+    assert_eq!(everything.drain_count(), 2);
+
+    // An unconfigured host runs the documented default.
+    let default_config = lash::QueuedWorkBatchingConfig::new(1024);
+    assert_eq!(default_config.drain_policy().name(), "one_at_a_time");
+    let all_config = lash::QueuedWorkBatchingConfig::new(1024).with_drain_mode(DrainMode::All);
+    assert_eq!(all_config.drain_policy().name(), "all");
 }

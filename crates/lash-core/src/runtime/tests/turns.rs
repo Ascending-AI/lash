@@ -7604,7 +7604,7 @@ async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
                 CancellationToken::new(),
                 named_turn_scope("root", "oversized-row"),
             ),
-            &[batch_id.clone()],
+            std::slice::from_ref(&batch_id),
         )
         .await
         .expect_err("a row larger than the window must be refused");
