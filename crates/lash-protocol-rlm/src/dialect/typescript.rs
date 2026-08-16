@@ -997,12 +997,13 @@ mod tests {
         // immediately without relying on an insta snapshot.
         let refusal = lash_typescript::link("await waitSignal(\"go\");", &host)
             .expect_err("waitSignal outside a process body must reject");
-        let prompt = TypescriptDialect::prompt_only(lash_lashlang_runtime::LashlangSurface::default())
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &lash_core::ToolCatalog::default(),
-            )
-            .expect("typescript execution section");
+        let prompt =
+            TypescriptDialect::prompt_only(lash_lashlang_runtime::LashlangSurface::default())
+                .render_execution_section(
+                    crate::protocol::RlmPromptFeatures::default(),
+                    &lash_core::ToolCatalog::default(),
+                )
+                .expect("typescript execution section");
         let expected_quote = format!("\"{}\"", refusal.message);
         assert!(
             prompt.contains(&expected_quote),

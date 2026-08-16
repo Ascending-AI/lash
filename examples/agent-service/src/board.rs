@@ -218,7 +218,8 @@ mod dialect_tests {
     #[test]
     fn dialect_pin_conflict_matches_the_protocol_plugins_exact_message() {
         let error = lash::EmbedError::Session(lash_core::SessionError::Protocol(
-            "RLM dialect is durably pinned to `typescript` and cannot be reopened as `lashlang`".to_string(),
+            "RLM dialect is durably pinned to `typescript` and cannot be reopened as `lashlang`"
+                .to_string(),
         ));
         assert!(crate::state::is_dialect_pin_conflict(&error));
 
