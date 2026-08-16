@@ -101,14 +101,46 @@ fn exporting_a_deeply_nested_runtime_global_at_terminal_exit_is_a_typed_refusal(
 }
 
 /// The ceiling is the durable one, and it is a ceiling rather than a cliff:
-/// nesting the boundary allows still works, through both walks.
+/// the export walk accepts a value nested at exactly the depth a snapshot
+/// accepts, and refuses only past it.
+///
+/// Pinned at the boundary itself rather than a comfortable distance below it.
+/// The slack a lower number leaves is what hid an export-cache off-by-one that
+/// made a chain of exactly 64 export on a cold cache and refuse on a warm one.
 #[test]
-fn nesting_within_the_durable_ceiling_still_coerces_and_exports() {
-    on_stack_budget("value-depth-accepted", || {
-        // 60 nested arrays plus the leaf leaves room for the wrappers the
-        // coercion of a finish value adds on top.
-        let outcome = execute(&nested_array_source(60, "finish(String(deep).length > 0);"))
-            .expect("nesting within the ceiling must execute");
+fn nesting_at_the_durable_ceiling_still_exports() {
+    on_stack_budget("value-depth-accepted-export", || {
+        // 63 wraps around the leaf array is exactly `MAX_SNAPSHOT_VALUE_DEPTH`
+        // reference levels, the deepest graph the durable boundary accepts.
+        let outcome = execute(&nested_array_source(63, "finish(1);"))
+            .expect("a global at exactly the ceiling must export at terminal exit");
+        assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(1.0)));
+        let error = execute(&nested_array_source(64, "finish(1);"))
+            .expect_err("one level past the ceiling must refuse");
+        assert!(
+            matches!(error, RuntimeError::ValueDepthLimitExceeded { .. }),
+            "{error}"
+        );
+    });
+}
+
+/// The coercion walk has its own ceiling, one reference level below the export
+/// walk's: it charges a level for the scalar leaf it recurses onto, where the
+/// export walk and the durable measure both count reference levels only. That
+/// costs nothing in determinism — the walk has no cache, so it refuses the same
+/// value live and resumed — so it is pinned here as it stands rather than moved
+/// under this ticket.
+#[test]
+fn nesting_at_the_coercion_ceiling_still_coerces() {
+    on_stack_budget("value-depth-accepted-coercion", || {
+        let outcome = execute(&nested_array_source(62, "finish(String(deep).length > 0);"))
+            .expect("coercion at its ceiling must execute");
         assert_eq!(outcome, ExecutionOutcome::Finished(Value::Bool(true)));
+        let error = execute(&nested_array_source(63, "finish(String(deep));"))
+            .expect_err("one level past the coercion ceiling must refuse");
+        assert!(
+            matches!(error, RuntimeError::ValueDepthLimitExceeded { .. }),
+            "{error}"
+        );
     });
 }

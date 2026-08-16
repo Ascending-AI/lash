@@ -26,7 +26,7 @@ pub(crate) use javascript_exotics::{
 pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
 };
-pub(crate) use validation::{PersistedRoots, ensure_value_depth};
+pub(crate) use validation::{MAX_RUNTIME_VALUE_DEPTH, PersistedRoots, ensure_value_depth};
 
 use super::{
     CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,
@@ -556,6 +556,12 @@ impl Heap {
 
     /// Exports one value with the depth of the tree it produced, so a cache hit
     /// charges the nesting the walk it replaced would have charged.
+    ///
+    /// The returned depth counts reference levels — the same unit `depth`
+    /// counts — so a scalar leaf is 0 and a subtree of `n` chained references
+    /// is `n`. That is what makes the cache-hit charge below,
+    /// `depth + cached - 1`, land on exactly the depth the deepest reference in
+    /// the cached subtree would have been walked at.
     fn export_instruction_inner(
         &mut self,
         value: &Value,
@@ -563,7 +569,7 @@ impl Heap {
         depth: usize,
     ) -> Result<(Value, usize), RuntimeError> {
         let Value::Ref(id) = value else {
-            return Ok((value.clone(), 1));
+            return Ok((value.clone(), 0));
         };
         ensure_value_depth(depth)?;
         if let Some((exported, exported_depth)) = self.cached_materialized(*id) {
@@ -658,6 +664,12 @@ impl Heap {
         }
     }
 
+    /// `depth` is the number of reference levels in `value`'s subtree, counted
+    /// the way `export_instruction_inner`'s `depth` argument counts: the object
+    /// itself is one, a scalar leaf is none. Cached in that unit rather than as
+    /// a tree depth so a warm cache refuses at exactly the ceiling a cold walk
+    /// refuses at — the two are live-vs-resumed, because `materialized` is
+    /// rebuilt empty on restore.
     fn cache_materialized(&mut self, id: HeapId, value: Value, depth: usize) {
         self.materialized.insert(id, (value, depth));
     }

@@ -338,3 +338,41 @@ fn the_list_pre_charge_matches_what_the_committed_list_is_charged() {
         );
     }
 }
+
+/// A chain of `refs` heap objects, innermost holding a scalar leaf.
+fn ref_chain(heap: &mut Heap, refs: usize) -> Value {
+    let mut value = heap
+        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .expect("allocate the innermost link");
+    for _ in 1..refs {
+        value = heap
+            .allocate(HeapObject::List(vec![value]))
+            .expect("allocate a chain link");
+    }
+    value
+}
+
+/// The export cache must charge a cached subtree exactly what walking it would
+/// have charged. `materialized` is rebuilt empty on restore, so a warm cache is
+/// a live cell and a cold one is a resumed cell: a divergence at the ceiling is
+/// the same value exporting on one side of a park and refusing on the other.
+#[test]
+fn a_warm_export_cache_charges_the_same_depth_as_a_cold_walk() {
+    let mut heap = Heap::default();
+    let at_ceiling = ref_chain(&mut heap, MAX_RUNTIME_VALUE_DEPTH);
+    heap.export_for_instruction(&at_ceiling)
+        .expect("a chain at the ceiling must export on a cold cache");
+    heap.export_for_instruction(&at_ceiling)
+        .expect("a chain at the ceiling must export on a warm cache");
+
+    let mut heap = Heap::default();
+    let over_ceiling = ref_chain(&mut heap, MAX_RUNTIME_VALUE_DEPTH + 1);
+    assert!(matches!(
+        heap.export_for_instruction(&over_ceiling),
+        Err(RuntimeError::ValueDepthLimitExceeded { .. })
+    ));
+    assert!(matches!(
+        heap.export_for_instruction(&over_ceiling),
+        Err(RuntimeError::ValueDepthLimitExceeded { .. })
+    ));
+}
