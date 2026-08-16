@@ -37,14 +37,14 @@ impl Heap {
                 if key.as_ref() == "length" {
                     return Ok(false);
                 }
-                if let Some(index) = javascript_array_index(&Value::String(key.as_ref().into())) {
-                    if index < values.len() {
-                        return Err(RuntimeError::ValidationFailed {
-                            reason: format!(
-                                "TS_DELETE_ARRAY_INDEX_UNSUPPORTED: delete on dense array index {index} would create a hole; use splice({index}, 1)"
-                            ),
-                        });
-                    }
+                if let Some(index) = javascript_array_index(&Value::String(key.as_ref().into()))
+                    && index < values.len()
+                {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: format!(
+                            "TS_DELETE_ARRAY_INDEX_UNSUPPORTED: delete on dense array index {index} would create a hole; use splice({index}, 1)"
+                        ),
+                    });
                 }
                 false
             }
