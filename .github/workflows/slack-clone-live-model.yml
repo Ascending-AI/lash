@@ -6,6 +6,13 @@ on:
 permissions:
   contents: read
 
+# Manual dispatches spend real OpenRouter credit under a per-run cap, so two
+# runs of the same ref never overlap. Queue rather than cancel: an in-flight run
+# has already spent, and cancelling it wastes that spend without a verdict.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   live-model-swap:
     name: OpenRouter two-agent nonce swap
