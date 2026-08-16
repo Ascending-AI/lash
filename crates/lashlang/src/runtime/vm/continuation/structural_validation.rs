@@ -162,6 +162,11 @@ pub(super) fn validate_continuation(
                     validate_heap_reference(&continuation.heap.heap, errors)?;
                 }
             }
+            HeapObject::Url(url) => {
+                validate_value(&url.search_params, &format!("heap URL {} params", id.get()))?;
+                validate_heap_reference(&continuation.heap.heap, &url.search_params)?;
+            }
+            HeapObject::UrlSearchParams(_) => {}
         }
     }
     for (depth, frame) in continuation.frame_stack.iter().enumerate() {
@@ -197,19 +202,29 @@ pub(super) fn validate_continuation(
             results,
             completion,
             allow_effects: _,
+            live_url_search_params,
         } = &frame.return_target
         {
             let result_cursor_is_valid = match completion {
                 VmCallbackCompletion::Collect => results.len().saturating_add(1) == *next_index,
                 VmCallbackCompletion::Discard => *next_index >= 1 && results.is_empty(),
             };
-            if *next_index > calls.len() || !result_cursor_is_valid {
+            let live_cursor_is_valid = if *live_url_search_params {
+                calls.len() == 1
+                    && matches!(calls.first(), Some(Value::Ref(id)) if matches!(continuation.heap.heap.get(*id), Ok(HeapObject::UrlSearchParams(_))))
+                    && matches!(completion, VmCallbackCompletion::Discard)
+            } else {
+                *next_index <= calls.len()
+                    && calls.iter().all(|call| matches!(call, Value::Tuple(_)))
+            };
+            if !live_cursor_is_valid || !result_cursor_is_valid {
                 return Err(ContinuationError::UnserializableValue {
                     location: format!("frame {depth} callback"),
                     variant: "invalid callback cursor",
                 });
             }
-            if calls.iter().any(|call| !matches!(call, Value::Tuple(_))) {
+            if !*live_url_search_params && calls.iter().any(|call| !matches!(call, Value::Tuple(_)))
+            {
                 return Err(ContinuationError::UnserializableValue {
                     location: format!("frame {depth} callback"),
                     variant: "invalid callback arguments",

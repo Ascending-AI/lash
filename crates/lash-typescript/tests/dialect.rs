@@ -142,6 +142,43 @@ fn return_runs_and_can_be_replaced_by_finally() {
 }
 
 #[test]
+fn type_level_typescript_syntax_is_erased_but_runtime_declarations_stay_rejected() {
+    assert_eq!(
+        finished(
+            r#"
+            interface Box<T> { value: T }
+            type Numeric = number;
+            function identity<T>(value: T): T { return value; }
+            const value: Numeric = (identity<number>(2) as number)!;
+            finish(value satisfies Numeric);
+            "#,
+        ),
+        Value::Number(2.0)
+    );
+    for (source, code) in [
+        (
+            "enum E { A }",
+            lash_typescript::DiagnosticCode::EnumUnsupported,
+        ),
+        (
+            "namespace N {}",
+            lash_typescript::DiagnosticCode::NamespaceUnsupported,
+        ),
+        (
+            "@sealed class C {}",
+            lash_typescript::DiagnosticCode::DecoratorUnsupported,
+        ),
+    ] {
+        assert_eq!(
+            lash_typescript::compile(source)
+                .expect_err("runtime-emitting TypeScript syntax must reject")
+                .code,
+            code
+        );
+    }
+}
+
+#[test]
 fn undefined_erases_at_the_json_boundary() {
     let value = finished("finish([undefined, { absent: undefined, present: null }]);");
     assert_eq!(

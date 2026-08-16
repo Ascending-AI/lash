@@ -80,6 +80,24 @@ impl CanonicalHeapObject {
                     })
                     .transpose()?,
             },
+            HeapObject::Url(url) => Self::Url {
+                href: url.href.clone(),
+                search_params: CanonicalValue::from_runtime(
+                    &url.search_params,
+                    &format!("{location}.search_params"),
+                    0,
+                )?,
+            },
+            HeapObject::UrlSearchParams(params) => Self::UrlSearchParams {
+                entries: params
+                    .entries
+                    .iter()
+                    .map(|(key, value)| CanonicalUrlSearchParamsEntry {
+                        key: key.clone(),
+                        value: value.clone(),
+                    })
+                    .collect(),
+            },
         })
     }
 
@@ -153,6 +171,21 @@ impl CanonicalHeapObject {
                 cause: cause.map(CanonicalValue::into_runtime).transpose()?,
                 errors: errors.map(CanonicalValue::into_runtime).transpose()?,
             }),
+            Self::Url {
+                href,
+                search_params,
+            } => HeapObject::Url(UrlObject {
+                href,
+                search_params: search_params.into_runtime()?,
+            }),
+            Self::UrlSearchParams { entries } => {
+                HeapObject::UrlSearchParams(UrlSearchParamsObject {
+                    entries: entries
+                        .into_iter()
+                        .map(|entry| (entry.key, entry.value))
+                        .collect(),
+                })
+            }
         })
     }
 }

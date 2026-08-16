@@ -94,6 +94,102 @@ async fn regexp_last_index_mutation_survives_park_and_restore() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn url_search_params_live_link_and_order_survive_park_and_restore() {
+    let program = Program::block(vec![
+        ts_assign(
+            "url",
+            heap_new(
+                "URL",
+                vec![Expr::String("https://example.test/?b=2&a=1&a=2".into())],
+            ),
+        ),
+        ts_assign("params", field("url", "searchParams")),
+        heap_method(
+            "append",
+            "params",
+            vec![Expr::String("a".into()), Expr::String("3".into())],
+        ),
+        Expr::Print(Box::new(Expr::String("park linked URL state".into()))),
+        Expr::Finish(Box::new(Expr::List(vec![
+            field("url", "href"),
+            heap_method("toString", "params", Vec::new()),
+            Expr::JavaScriptBinary {
+                left: Box::new(Expr::Variable("params".into())),
+                op: crate::JavaScriptBinaryOp::StrictEqual,
+                right: Box::new(field("url", "searchParams")),
+            },
+        ]))),
+    ]);
+    assert_eq!(
+        run_typescript_ast_across_every_effect(program).await,
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::String("https://example.test/?b=2&a=1&a=2&a=3".into()),
+                Value::String("b=2&a=1&a=2&a=3".into()),
+                Value::Bool(true),
+            ]
+            .into(),
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn url_search_params_live_link_survives_state_snapshot_round_trip() {
+    let setup = Program::block(vec![
+        ts_assign(
+            "url",
+            heap_new(
+                "URL",
+                vec![Expr::String("https://example.test/?a=1&a=2".into())],
+            ),
+        ),
+        ts_assign("params", field("url", "searchParams")),
+        heap_method(
+            "append",
+            "params",
+            vec![Expr::String("b".into()), Expr::String("3".into())],
+        ),
+        Expr::Finish(Box::new(Expr::Null)),
+    ]);
+    let setup = compile_ast_with_dialect(&setup, CompilationDialect::Typescript)
+        .expect("compile URL snapshot setup");
+    let mut state = State::new();
+    execute(&setup, &mut state, &Host)
+        .await
+        .expect("persist URL globals");
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("encode URL snapshot");
+    let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("decode URL snapshot");
+    let mut state = State::from_snapshot(snapshot);
+    let query = Program::block(vec![Expr::Finish(Box::new(Expr::List(vec![
+        field("url", "href"),
+        heap_method("toString", "params", Vec::new()),
+        Expr::JavaScriptBinary {
+            left: Box::new(Expr::Variable("params".into())),
+            op: crate::JavaScriptBinaryOp::StrictEqual,
+            right: Box::new(field("url", "searchParams")),
+        },
+    ])))]);
+    let query = compile_ast_with_dialect(&query, CompilationDialect::Typescript)
+        .expect("compile URL snapshot query");
+    assert_eq!(
+        execute(&query, &mut state, &Host)
+            .await
+            .expect("query restored URL globals"),
+        ExecutionOutcome::Finished(Value::List(
+            vec![
+                Value::String("https://example.test/?a=1&a=2&b=3".into()),
+                Value::String("a=1&a=2&b=3".into()),
+                Value::Bool(true),
+            ]
+            .into(),
+        ))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn regexp_last_index_uses_heap_aware_to_number_and_to_length() {
     let mut expressions = Vec::new();
     for (suffix, value) in [

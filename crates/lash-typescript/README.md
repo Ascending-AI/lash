@@ -20,8 +20,12 @@ operators. `in` is an own-property query because dialect objects have no prototy
 accepts any arity and prints its arguments after ECMA `ToString` conversion,
 joined by one space; lexical bindings named `console` take precedence.
 Accepted operations follow ECMA-262 coercion, truthiness, operand-return, and
-reference rules. TypeScript type annotations, aliases, and interfaces are
-erased after parsing or used for signature/type work.
+reference rules. Type-level TypeScript syntax is erased: annotations,
+interfaces, type aliases, generics and type arguments, `as`/angle-bracket
+assertions, `satisfies`, and postfix non-null `!` do not exist at runtime.
+Enums, decorators, and namespaces/modules emit or alter runtime behavior, so
+they remain named rejections: `TS_ENUM_UNSUPPORTED`,
+`TS_DECORATOR_UNSUPPORTED`, and `TS_NAMESPACE_UNSUPPORTED`.
 
 Cells are scripts and may use top-level `await` for tools, process handles,
 `sleep`, `Promise.all`, and `Promise.allSettled`; `waitSignal` is
@@ -62,6 +66,46 @@ This is a runtime-system constraint, not an alternate semantics.
 at the same journal boundary as other effects and replay never samples the VM's
 clock or RNG. The Error family plus Map, Set, Date, and RegExp are the explicit
 exceptions to the general `new` rejection.
+
+`URL` and `URLSearchParams` are durable mutable heap objects with reference
+identity. `new URL(input, base?)` accepts an absolute URL or resolves against a
+base. Its `href`, `protocol`, `username`, `password`, `host`, `hostname`,
+`port`, `pathname`, `search`, and `hash` setters reparse and normalize with
+WHATWG semantics. `origin` and `searchParams` are WHATWG getter-only
+attributes; assignment is Node's non-strict no-op. `searchParams` is one stable,
+live object: params mutations immediately update `href`, and URL `href` or
+`search` assignment refreshes that same params object.
+
+The accepted URL signatures are:
+
+```typescript
+new URL(input: unknown, base?: unknown)
+URL.canParse(input: unknown, base?: unknown): boolean
+url.toString(): string
+url.toJSON(): string
+
+new URLSearchParams(init?: string | Array<[unknown, unknown]> | Record<string, unknown> | URLSearchParams)
+params.get(name: unknown): string | null
+params.getAll(name: unknown): string[]
+params.set(name: unknown, value: unknown): void
+params.append(name: unknown, value: unknown): void
+params.delete(name: unknown, value?: unknown): void
+params.has(name: unknown, value?: unknown): boolean
+params.sort(): void
+params.size: number
+params.toString(): string
+params.forEach(callback: (value: string, name: string, params: URLSearchParams) => void, thisArg?: unknown): void
+params.keys(): Iterable<string>
+params.values(): Iterable<string>
+params.entries(): Iterable<[string, string]>
+```
+
+The params constructor preserves duplicate keys and insertion order. Object
+keys follow the dialect-wide ECMA order (integer-like keys first, then
+insertion). Serialization is UTF-8 `application/x-www-form-urlencoded`, so a
+space becomes `+` while a literal plus becomes `%2B`. Params are directly
+iterable as entries; `keys()`, `values()`, `entries()`, and the params object
+itself may be consumed directly by `for...of`.
 
 Everything outside the accepted surface is rejected with a stable `TS_*`
 diagnostic. Most rejection is static; the deviation register names every
@@ -183,6 +227,20 @@ language semantics:
   turn boundary and the dialect filters the reserved prefix out of the
   bound-variables prompt, so it is never shown; a block binding that shadows
   nothing keeps the name its author wrote.
+- URL parsing is backed by exactly `url` 2.5.8. Unicode IDNA hosts are accepted
+  only where that parser matches the pinned Node/WPT oracle, including ordinary
+  Unicode-to-punycode conversion. Four known backing-version gaps fail closed
+  instead of returning an approximate URL: `file:` and non-special schemes
+  (`TS_URL_SCHEME_UNSUPPORTED`, rewrite with `http(s)`); raw malformed `xn--`
+  A-label cases (`TS_URL_IDNA_BACKING_DIVERGENCE`, use Unicode or a complete
+  valid A-label); current caret encoding
+  (`TS_URL_PERCENT_ENCODING_BACKING_DIVERGENCE`, pre-encode `^` as `%5E`); and
+  the newest special relative triple-slash rows
+  (`TS_URL_RELATIVE_SLASH_BACKING_DIVERGENCE`, provide an absolute URL). One
+  port-setter edge containing only ASCII tabs/newlines rejects as
+  `TS_URL_SETTER_BACKING_DIVERGENCE`; provide decimal digits or the empty
+  string. Invalid relative/absolute input rejects as `TS_URL_PARSE_ERROR` and
+  directs the author to add an absolute URL or a valid base.
 
 No other semantic deviation is intentionally accepted for an operation in the
 surface below.
@@ -211,8 +269,8 @@ string `.length` counts UTF-16 units while `for...of` walks code points.
 
 ## Standard-library inventory
 
-The v1 inventory contains 65 method names: 37 static methods and
-28 instance method names (with `toString`, `concat`, `includes`,
+The v1 inventory contains 78 method names: 38 static methods and
+40 instance method names (with `toString`, `concat`, `includes`,
 `indexOf`, and `lastIndexOf` shared by more than one receiver kind).
 
 `instance_method_inventory_matches_the_lowerer` pins the list below against
@@ -225,9 +283,9 @@ The shipped static methods are `Object.keys`, `values`, `entries`,
 `isNaN`, `isSafeInteger`, `parseFloat`, and `parseInt`; `JSON.parse` and
 `stringify`; and `Math.abs`, `acos`, `asin`, `cbrt`, `ceil`, `cos`, `exp`,
 `floor`, `log`, `log10`, `log2`, `round`, `sin`, `tan`, `trunc`, `max`, `min`,
-`pow`, `sqrt`, and `sign`.
+`pow`, `sqrt`, and `sign`; and `URL.canParse`.
 
-The shipped instance methods are `at`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `endsWith`, `filter`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `slice`, `split`, `startsWith`, `substring`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, and `valueOf`. Missing methods reject with
+The shipped instance methods are `at`, `append`, `charAt`, `charCodeAt`, `codePointAt`, `concat`, `delete`, `endsWith`, `entries`, `filter`, `forEach`, `get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `keys`, `lastIndexOf`, `map`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `set`, `slice`, `sort`, `split`, `startsWith`, `substring`, `toJSON`, `toLowerCase`, `toString`, `toUpperCase`, `trim`, `trimEnd`, `trimStart`, `valueOf`, and `values`. Missing methods reject with
 `TS_METHOD_UNSUPPORTED` when the receiver is statically known and with the same
 named typed runtime failure when only its runtime type is known. Mutating array
 methods are deliberately absent; index assignment remains the supported

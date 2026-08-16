@@ -314,10 +314,14 @@ impl Lowerer {
             {
                 let exotic = match object.as_ref() {
                     Expr::New { constructor, .. }
-                        if matches!(constructor.as_str(), "Map" | "Set") =>
+                        if matches!(constructor.as_str(), "Map" | "Set" | "URLSearchParams") =>
                     {
                         true
                     }
+                    Expr::Member {
+                        property: MemberProperty::Field(field),
+                        ..
+                    } if field == "searchParams" => true,
                     Expr::Ident(name) => self
                         .binding(name)
                         .ok()

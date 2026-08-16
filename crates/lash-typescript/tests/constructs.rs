@@ -102,18 +102,13 @@ fn error_constructors_and_instanceof_use_heap_kinds() {
         ),
         Value::String("SyntaxError,ReferenceError,URIError,EvalError,AggregateError".into())
     );
-    for source in [
-        "finish({} instanceof Promise);",
-        "finish({} instanceof URL);",
-        "finish({} instanceof URLSearchParams);",
-    ] {
-        let error = lash_typescript::compile(source).expect_err("unavailable kind must reject");
-        assert_eq!(
-            error.code,
-            lash_typescript::DiagnosticCode::InstanceOfUnsupported
-        );
-        assert!(error.message.contains("Unsupported:"));
-    }
+    let error = lash_typescript::compile("finish({} instanceof Promise);")
+        .expect_err("Promise remains unavailable as an instanceof RHS");
+    assert_eq!(
+        error.code,
+        lash_typescript::DiagnosticCode::InstanceOfUnsupported
+    );
+    assert!(error.message.contains("Unsupported:"));
     let stack = lash_typescript::compile("finish(new Error('x').stack);")
         .expect_err("nondeterministic stack must reject");
     assert!(stack.message.contains("stack"));

@@ -20,6 +20,7 @@ mod javascript;
 mod javascript_codec;
 mod javascript_json;
 mod javascript_substrate;
+mod javascript_url;
 mod reference_assignment;
 
 #[cfg(test)]
@@ -1567,31 +1568,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             .slots
             .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values);
         Ok((globals, self.heap))
-    }
-
-    fn record_instruction_profile(&mut self, tag: InstructionProfileTag, elapsed_ns: u128) {
-        let Some(profile) = &mut self.profile else {
-            return;
-        };
-        let index = tag as usize;
-        profile.instruction_counts[index] += 1;
-        profile.instruction_times[index] += elapsed_ns;
-    }
-
-    fn record_builtin_profile(&mut self, builtin: IntrinsicOp, elapsed_ns: u128) {
-        let Some(profile) = &mut self.profile else {
-            return;
-        };
-        let index = builtin.profile_tag() as usize;
-        profile.builtin_counts[index] += 1;
-        profile.builtin_times[index] += elapsed_ns;
-    }
-
-    pub(crate) fn take_profile(&mut self) -> ProfileReport {
-        let Some(profile) = self.profile.take() else {
-            return ProfileReport::default();
-        };
-        profile.finish()
     }
 }
 include!("functions.rs");

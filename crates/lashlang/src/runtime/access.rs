@@ -229,6 +229,12 @@ pub(crate) fn read_javascript_heap_field(
             }
             _ => Value::Undefined,
         },
+        HeapObject::Url(_) => heap
+            .url_property(id, field.text.as_ref())?
+            .unwrap_or(Value::Undefined),
+        HeapObject::UrlSearchParams(params) if field.text.as_ref() == "size" => {
+            Value::Number(params.entries.len() as f64)
+        }
         _ => Value::Undefined,
     })
 }
@@ -266,6 +272,10 @@ pub(crate) fn read_javascript_heap_index(
             }
             _ => Value::Undefined,
         },
+        HeapObject::Url(_) => heap.url_property(id, &key)?.unwrap_or(Value::Undefined),
+        HeapObject::UrlSearchParams(params) if key == "size" => {
+            Value::Number(params.entries.len() as f64)
+        }
         _ => Value::Undefined,
     })
 }

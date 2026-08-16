@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
-use super::super::{ErrorKind, canonical_regexp_flags, javascript_to_string};
+use super::super::{
+    ErrorKind, canonical_regexp_flags, ensure_javascript_string_size, javascript_to_string,
+};
 use super::javascript::{ecma_record_entries, js_stdlib_error};
 use super::javascript_json::javascript_json_stringify;
 use super::*;
@@ -118,6 +120,29 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Ok(());
         }
         let value = match (kind.as_str(), args) {
+            ("URL", [input]) => {
+                let input = self.heap.javascript_to_string(input)?;
+                ensure_javascript_string_size(input.len())?;
+                self.heap.allocate_url(&input, None)?
+            }
+            ("URL", [input, base]) => {
+                let input = self.heap.javascript_to_string(input)?;
+                ensure_javascript_string_size(input.len())?;
+                if matches!(base, Value::Undefined) {
+                    self.heap.allocate_url(&input, None)?
+                } else {
+                    let base = self.heap.javascript_to_string(base)?;
+                    ensure_javascript_string_size(base.len())?;
+                    self.heap.allocate_url(&input, Some(&base))?
+                }
+            }
+            ("URLSearchParams", []) | ("URLSearchParams", [Value::Undefined | Value::Null]) => {
+                self.heap.allocate_url_search_params(Vec::new())?
+            }
+            ("URLSearchParams", [initial]) => {
+                let entries = url_search_params_initial(&self.heap, initial)?;
+                self.heap.allocate_url_search_params(entries)?
+            }
             ("RegExp", [pattern, flags]) => {
                 let pattern = scalar_javascript_string(pattern)?;
                 let flags = canonical_regexp_flags(&scalar_javascript_string(flags)?)
@@ -303,6 +328,61 @@ fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError>
     })
 }
 
+fn url_search_params_initial(
+    heap: &Heap,
+    initial: &Value,
+) -> Result<Vec<(String, String)>, RuntimeError> {
+    match initial {
+        Value::String(value) => Ok(crate::runtime::heap::parse_params_string(value)),
+        Value::Record(record) => ecma_record_entries(record)
+            .into_iter()
+            .map(|(name, value)| Ok((name.to_string(), heap.javascript_to_string(value)?)))
+            .collect(),
+        Value::Ref(id) => match heap.get(*id)? {
+            HeapObject::UrlSearchParams(params) => Ok(params.entries.clone()),
+            HeapObject::Record(record) => ecma_record_entries(record)
+                .into_iter()
+                .map(|(name, value)| Ok((name.to_string(), heap.javascript_to_string(value)?)))
+                .collect(),
+            HeapObject::List(_) | HeapObject::Tuple(_) => {
+                url_search_params_pairs(heap, heap_sequence(heap, initial)?)
+            }
+            _ => {
+                let string = heap.javascript_to_string(initial)?;
+                Ok(crate::runtime::heap::parse_params_string(&string))
+            }
+        },
+        Value::List(_) | Value::Tuple(_) => {
+            url_search_params_pairs(heap, heap_sequence(heap, initial)?)
+        }
+        value => {
+            let string = heap.javascript_to_string(value)?;
+            Ok(crate::runtime::heap::parse_params_string(&string))
+        }
+    }
+}
+
+fn url_search_params_pairs(
+    heap: &Heap,
+    values: Vec<Value>,
+) -> Result<Vec<(String, String)>, RuntimeError> {
+    values
+        .into_iter()
+        .map(|entry| {
+            let pair = heap_sequence(heap, &entry)?;
+            if pair.len() != 2 {
+                return Err(js_stdlib_error(
+                    "URLSearchParams constructor pair must contain exactly two values",
+                ));
+            }
+            Ok((
+                heap.javascript_to_string(&pair[0])?,
+                heap.javascript_to_string(&pair[1])?,
+            ))
+        })
+        .collect()
+}
+
 fn javascript_error_cause(heap: &Heap, options: &Value) -> Option<Value> {
     match options {
         Value::Record(record) => record.get("cause").cloned(),
@@ -323,23 +403,25 @@ fn reject_reserved_global_name(name: &str) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-pub(super) fn stringify_if_contains_error(
+pub(super) fn stringify_if_contains_heap_hook(
     heap: &Heap,
     value: &Value,
 ) -> Result<Option<String>, RuntimeError> {
-    if !value_contains_error(heap, value)? {
+    if !value_contains_json_hook(heap, value)? {
         return Ok(None);
     }
     javascript_json_stringify_with_errors(heap, value, &mut BTreeSet::new()).map(Some)
 }
 
-fn value_contains_error(heap: &Heap, value: &Value) -> Result<bool, RuntimeError> {
+fn value_contains_json_hook(heap: &Heap, value: &Value) -> Result<bool, RuntimeError> {
     let mut pending = vec![value];
     let mut visited = BTreeSet::new();
     while let Some(value) = pending.pop() {
         match value {
             Value::Ref(id) if visited.insert(*id) => match heap.get(*id)? {
-                HeapObject::Error(_) => return Ok(true),
+                HeapObject::Error(_) | HeapObject::Url(_) | HeapObject::UrlSearchParams(_) => {
+                    return Ok(true);
+                }
                 HeapObject::Tuple(values) | HeapObject::List(values) => {
                     pending.extend(values.iter())
                 }
@@ -370,7 +452,9 @@ fn javascript_json_stringify_with_errors(
                 return Err(js_stdlib_error("JSON.stringify received a cyclic value"));
             }
             let result = match heap.get(*id)? {
-                HeapObject::Error(_) => Ok("{}".to_string()),
+                HeapObject::Error(_) | HeapObject::UrlSearchParams(_) => Ok("{}".to_string()),
+                HeapObject::Url(url) => serde_json::to_string(&url.href)
+                    .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
                 HeapObject::List(values) | HeapObject::Tuple(values) => {
                     let values = values
                         .iter()

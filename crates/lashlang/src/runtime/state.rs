@@ -3,7 +3,8 @@ use std::sync::Arc;
 use super::{
     CompiledProgram, ContinuationError, DateObject, ErrorKind, ErrorObject, Heap, HeapId,
     HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots, ProjectedValue, Record,
-    RegExpObject, ResourceHandle, RuntimeError, SetObject, Value, record_with_capacity,
+    RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject, UrlSearchParamsObject, Value,
+    record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -418,12 +419,25 @@ enum CanonicalHeapObject {
         cause: Option<CanonicalValue>,
         errors: Option<CanonicalValue>,
     },
+    Url {
+        href: String,
+        search_params: CanonicalValue,
+    },
+    UrlSearchParams {
+        entries: Vec<CanonicalUrlSearchParamsEntry>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CanonicalMapEntry {
     key: CanonicalValue,
     value: CanonicalValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CanonicalUrlSearchParamsEntry {
+    key: String,
+    value: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -764,6 +778,8 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
     "message",
     "cause",
     "errors",
+    "href",
+    "search_params",
 ];
 const MAP_ENTRY_FIELDS: &[&str] = &["key", "value"];
 

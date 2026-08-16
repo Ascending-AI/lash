@@ -52,7 +52,8 @@ pub use heap::{
 };
 pub(crate) use heap::{
     DateObject, ErrorKind, ErrorObject, Heap, HeapObject, HeapRestoreWire, MapObject,
-    PersistedRoots, RegExpObject, SetObject, canonical_regexp_flags, regexp_string,
+    PersistedRoots, RegExpObject, SetObject, UrlObject, UrlSearchParamsObject,
+    canonical_regexp_flags, regexp_string,
 };
 pub use host::{
     AbilityOp, AbilityResult, DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds,

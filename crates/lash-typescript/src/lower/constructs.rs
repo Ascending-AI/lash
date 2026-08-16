@@ -272,6 +272,7 @@ impl Lowerer {
         let direct_exotic = match source {
             Expr::New { constructor, .. } if constructor == "Map" => Some("entries"),
             Expr::New { constructor, .. } if constructor == "Set" => Some("values"),
+            Expr::New { constructor, .. } if constructor == "URLSearchParams" => Some("entries"),
             _ => None,
         };
         let source = if keys {
@@ -1160,20 +1161,17 @@ impl Lowerer {
                 ]))
             }
             "Error" | "TypeError" | "RangeError" | "SyntaxError" | "ReferenceError"
-            | "URIError" | "EvalError" | "AggregateError" | "Map" | "Set" | "Date" | "RegExp" => {
-                Ok(LashExpr::BuiltinCall {
-                    name: "__typescript_heap_instanceof".into(),
-                    args: vec![
-                        self.lower_expr(left)?,
-                        LashExpr::String(constructor.as_str().into()),
-                    ],
-                })
-            }
-            "Promise" | "URL" | "URLSearchParams" => Err(Diagnostic::new(
+            | "URIError" | "EvalError" | "AggregateError" | "Map" | "Set" | "Date" | "RegExp"
+            | "URL" | "URLSearchParams" => Ok(LashExpr::BuiltinCall {
+                name: "__typescript_heap_instanceof".into(),
+                args: vec![
+                    self.lower_expr(left)?,
+                    LashExpr::String(constructor.as_str().into()),
+                ],
+            }),
+            "Promise" => Err(Diagnostic::new(
                 DiagnosticCode::InstanceOfUnsupported,
-                format!(
-                    "Unsupported: instanceof {constructor}. Await agent promises directly; use err.name checks or Array.isArray(value)."
-                ),
+                "Unsupported: instanceof Promise. Await agent promises directly.",
                 None,
             )),
             _ => Err(Diagnostic::new(
@@ -1219,12 +1217,29 @@ impl Lowerer {
                 | "Set"
                 | "Date"
                 | "RegExp"
+                | "URL"
+                | "URLSearchParams"
         );
         if !allowed || self.has_binding(constructor) {
             return Err(Diagnostic::new(
                 DiagnosticCode::NewUnsupported,
                 format!(
-                    "Unsupported: new {constructor}. Use Error-family, Map, Set, Date, or RegExp constructors."
+                    "Unsupported: new {constructor}. Use Error-family, Map, Set, Date, RegExp, URL, or URLSearchParams constructors."
+                ),
+                None,
+            ));
+        }
+        let valid_arity = match constructor {
+            "URL" => matches!(args.len(), 1 | 2),
+            "URLSearchParams" => args.len() <= 1,
+            _ => true,
+        };
+        if !valid_arity {
+            return Err(Diagnostic::new(
+                DiagnosticCode::NewUnsupported,
+                format!(
+                    "new `{constructor}` does not accept {} argument(s) in the TypeScript runtime surface",
+                    args.len()
                 ),
                 None,
             ));

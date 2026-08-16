@@ -218,6 +218,8 @@ impl Heap {
                     | super::HeapObject::Set(_)
                     | super::HeapObject::Date(_)
                     | super::HeapObject::Error(_)
+                    | super::HeapObject::Url(_)
+                    | super::HeapObject::UrlSearchParams(_)
             )
         }) {
             return Err(format!(
@@ -302,6 +304,57 @@ fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> R
             {
                 return Err(format!(
                     "AggregateError object {} errors must reference a JavaScript list",
+                    id.get()
+                ));
+            }
+        }
+        HeapObject::Url(url) => {
+            let parsed = super::url_objects::parse_url(&url.href, None)
+                .map_err(|_| format!("URL object {} has an invalid href", id.get()))?;
+            if parsed.as_str() != url.href {
+                return Err(format!("URL object {} href is not canonical", id.get()));
+            }
+            let Value::Ref(params_id) = url.search_params else {
+                return Err(format!(
+                    "URL object {} searchParams must be a heap reference",
+                    id.get()
+                ));
+            };
+            let HeapObject::UrlSearchParams(params) = heap
+                .get(params_id)
+                .map_err(|_| format!("URL object {} has dangling searchParams", id.get()))?
+            else {
+                return Err(format!(
+                    "URL object {} searchParams must reference URLSearchParams",
+                    id.get()
+                ));
+            };
+            let parsed_entries = parsed
+                .query()
+                .map_or_else(Vec::new, super::url_objects::parse_params_string);
+            if parsed_entries != params.entries {
+                return Err(format!(
+                    "URL object {} and its URLSearchParams entries disagree",
+                    id.get()
+                ));
+            }
+        }
+        HeapObject::UrlSearchParams(_) => {
+            let owners = heap
+                .objects_in_id_order()
+                .filter(|(_, object)| {
+                    matches!(
+                        object,
+                        HeapObject::Url(super::UrlObject {
+                            search_params: Value::Ref(candidate),
+                            ..
+                        }) if *candidate == id
+                    )
+                })
+                .count();
+            if owners > 1 {
+                return Err(format!(
+                    "URLSearchParams object {} is linked to more than one URL",
                     id.get()
                 ));
             }

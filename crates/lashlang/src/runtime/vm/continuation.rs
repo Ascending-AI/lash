@@ -139,6 +139,8 @@ pub(crate) enum VmFrameReturnContinuation {
         results: Vec<Value>,
         completion: VmCallbackCompletion,
         allow_effects: bool,
+        #[serde(default)]
+        live_url_search_params: bool,
     },
 }
 
@@ -211,6 +213,7 @@ impl Default for VmHeapContinuation {
 mod continuation_serde {
     use super::*;
     use crate::HeapId;
+    use crate::runtime::heap::{UrlObject, UrlSearchParamsObject};
 
     const NUMBER_WIRE_VERSION: u32 = 1;
     const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
@@ -317,6 +320,13 @@ mod continuation_serde {
             message: String,
             cause: Option<ValueWire>,
             errors: Option<ValueWire>,
+        },
+        Url {
+            href: String,
+            search_params: ValueWire,
+        },
+        UrlSearchParams {
+            entries: Vec<(String, String)>,
         },
     }
 
@@ -434,6 +444,13 @@ mod continuation_serde {
                 cause: error.cause.as_ref().map(value_to_wire).transpose()?,
                 errors: error.errors.as_ref().map(value_to_wire).transpose()?,
             },
+            HeapObject::Url(url) => HeapObjectWire::Url {
+                href: url.href.clone(),
+                search_params: value_to_wire(&url.search_params)?,
+            },
+            HeapObject::UrlSearchParams(params) => HeapObjectWire::UrlSearchParams {
+                entries: params.entries.clone(),
+            },
         })
     }
 
@@ -502,6 +519,16 @@ mod continuation_serde {
                 cause: cause.map(value_from_wire).transpose()?,
                 errors: errors.map(value_from_wire).transpose()?,
             }),
+            HeapObjectWire::Url {
+                href,
+                search_params,
+            } => HeapObject::Url(UrlObject {
+                href,
+                search_params: value_from_wire(search_params)?,
+            }),
+            HeapObjectWire::UrlSearchParams { entries } => {
+                HeapObject::UrlSearchParams(UrlSearchParamsObject { entries })
+            }
         })
     }
 
@@ -924,6 +951,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         CallbackCompletion::Discard => VmCallbackCompletion::Discard,
                     },
                     allow_effects: callback.allow_effects,
+                    live_url_search_params: callback.live_url_search_params,
                 },
             };
             frame_stack.push(VmFrameContinuation {
@@ -1203,6 +1231,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         results,
                         completion,
                         allow_effects,
+                        live_url_search_params,
                     } => ReturnTarget::Callback(CallbackDriver {
                         function,
                         calls,
@@ -1213,6 +1242,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                             VmCallbackCompletion::Discard => CallbackCompletion::Discard,
                         },
                         allow_effects,
+                        live_url_search_params,
                     }),
                 },
             })

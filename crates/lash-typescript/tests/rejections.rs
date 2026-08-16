@@ -231,7 +231,7 @@ fn instance_method_inventory_matches_the_lowerer() {
         "the register documents {unaccepted:?}, which the lowerer does not accept"
     );
     let claimed = register
-        .split("37 static methods and\n")
+        .split("38 static methods and\n")
         .nth(1)
         .and_then(|rest| rest.split(' ').next())
         .and_then(|count| count.parse::<usize>().ok())
@@ -242,7 +242,7 @@ fn instance_method_inventory_matches_the_lowerer() {
         "the stated instance-method count must match the documented list"
     );
     for candidate in [
-        "sort", "pop", "push", "shift", "unshift", "reduce", "flat", "substr",
+        "pop", "push", "shift", "unshift", "reduce", "flat", "substr",
     ] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),

@@ -67,7 +67,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .collect::<Vec<_>>()
                     .into()),
                 HeapObject::Set(set) => Ok(set.values.clone().into()),
-                HeapObject::RegExp(_) | HeapObject::Date(_) => {
+                HeapObject::UrlSearchParams(params) => Ok(params
+                    .entries
+                    .iter()
+                    .map(|(name, value)| {
+                        Value::List(
+                            vec![Value::String(name.into()), Value::String(value.into())].into(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .into()),
+                HeapObject::RegExp(_) | HeapObject::Date(_) | HeapObject::Url(_) => {
                     Err(RuntimeError::ValidationFailed {
                         reason: format!(
                             "TS_FOR_OF_EXOTIC_UNSUPPORTED: {} is not iterable",
@@ -202,7 +212,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), value] = values.as_slice()
             && method.as_str() == "JSON.stringify"
             && let Some(json) =
-                javascript_substrate::stringify_if_contains_error(&self.heap, value)?
+                javascript_substrate::stringify_if_contains_heap_hook(&self.heap, value)?
         {
             self.stack.push(Value::String(json.into()));
             return Ok(());
@@ -229,6 +239,30 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             return self.execute_javascript_heap_method(method, *receiver, args);
         }
+        if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
+            && method.as_str() == "Lash.ArrayFromIterable"
+            && let HeapObject::UrlSearchParams(params) = self.heap.get(*receiver)?
+        {
+            self.stack.push(Value::List(
+                params
+                    .entries
+                    .iter()
+                    .map(|(name, value)| {
+                        Value::List(
+                            vec![Value::String(name.into()), Value::String(value.into())].into(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+            ));
+            return Ok(());
+        }
+        if let [Value::String(method), args @ ..] = values.as_slice()
+            && method.as_str() == "URL.canParse"
+        {
+            self.stack.push(self.execute_url_can_parse(args)?);
+            return Ok(());
+        }
         for value in &mut values {
             if matches!(value, Value::Ref(_)) {
                 *value = self.heap.export_for_instruction(value)?;
@@ -249,6 +283,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         args: &[Value],
     ) -> Result<(), RuntimeError> {
         let kind = self.heap.get(receiver)?.kind_name();
+        if matches!(kind, "URL" | "URLSearchParams") {
+            if let Some(result) = self.execute_url_heap_method(kind, method, receiver, args)? {
+                self.stack.push(result);
+            }
+            return Ok(());
+        }
         let result = match (kind, method, args) {
             ("RegExp", "valueOf", []) | ("Map", "valueOf", []) | ("Set", "valueOf", []) => {
                 Some(Value::Ref(receiver))

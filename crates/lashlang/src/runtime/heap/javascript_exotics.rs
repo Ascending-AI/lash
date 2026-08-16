@@ -222,6 +222,8 @@ impl Heap {
                 | HeapObject::Set(_)
                 | HeapObject::Date(_)
                 | HeapObject::Error(_)
+                | HeapObject::Url(_)
+                | HeapObject::UrlSearchParams(_)
         ))
     }
 
@@ -243,6 +245,8 @@ impl Heap {
             HeapObject::Set(_) => constructor == "Set",
             HeapObject::Date(_) => constructor == "Date",
             HeapObject::Error(error) => constructor == "Error" || constructor == error.kind.name(),
+            HeapObject::Url(_) => constructor == "URL",
+            HeapObject::UrlSearchParams(_) => constructor == "URLSearchParams",
             _ => false,
         })
     }
@@ -439,7 +443,11 @@ impl Heap {
         self.commit_object_update(id, object)
     }
 
-    fn commit_object_update(&mut self, id: HeapId, object: HeapObject) -> Result<(), RuntimeError> {
+    pub(super) fn commit_object_update(
+        &mut self,
+        id: HeapId,
+        object: HeapObject,
+    ) -> Result<(), RuntimeError> {
         let slot = self
             .id_to_slot
             .get(&id)
@@ -544,6 +552,10 @@ impl Heap {
                 }
                 .into(),
             ),
+            Some(HeapObject::Url(url)) => Value::String(url.href.as_str().into()),
+            Some(HeapObject::UrlSearchParams(params)) => {
+                Value::String(super::url_objects::serialize_params(&params.entries).into())
+            }
             Some(HeapObject::Closure { .. }) => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }

@@ -12,6 +12,8 @@ impl HeapObject {
             Self::Set(_) => "Set",
             Self::Date(_) => "Date",
             Self::Error(error) => error.kind.name(),
+            Self::Url(_) => "URL",
+            Self::UrlSearchParams(_) => "URLSearchParams",
         }
     }
 
@@ -53,6 +55,15 @@ impl HeapObject {
                 .saturating_add(VALUE_SLOT_BYTES)
                 .saturating_add(error.cause.as_ref().map_or(0, value_logical_bytes))
                 .saturating_add(error.errors.as_ref().map_or(0, value_logical_bytes)),
+            Self::Url(url) => (url.href.len() as u64).saturating_add(VALUE_SLOT_BYTES),
+            Self::UrlSearchParams(params) => {
+                params.entries.iter().fold(0_u64, |total, (name, value)| {
+                    total
+                        .saturating_add(COLLECTION_ENTRY_BYTES)
+                        .saturating_add(name.len() as u64)
+                        .saturating_add(value.len() as u64)
+                })
+            }
         };
         OBJECT_HEADER_BYTES.saturating_add(payload)
     }
@@ -80,10 +91,13 @@ impl HeapObject {
             Self::Tuple(values) | Self::List(values) => Box::new(values.iter()),
             Self::Record(record) => Box::new(record.values()),
             Self::Closure { captures, .. } => Box::new(captures.iter()),
-            Self::RegExp(_) | Self::Date(_) => Box::new(std::iter::empty()),
+            Self::RegExp(_) | Self::Date(_) | Self::UrlSearchParams(_) => {
+                Box::new(std::iter::empty())
+            }
             Self::Map(map) => Box::new(map.entries.iter().flat_map(|(key, value)| [key, value])),
             Self::Set(set) => Box::new(set.values.iter()),
             Self::Error(error) => Box::new(error.cause.iter().chain(error.errors.iter())),
+            Self::Url(url) => Box::new(std::iter::once(&url.search_params)),
         }
     }
 }

@@ -24,6 +24,10 @@ struct CallbackDriver {
     results: Vec<Value>,
     completion: CallbackCompletion,
     allow_effects: bool,
+    /// `calls[0]` is the rooted URLSearchParams receiver and `next_index` is
+    /// the next live list index. The list is re-read after every callback so
+    /// appends and deletions follow WHATWG iteration semantics.
+    live_url_search_params: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -163,7 +167,29 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 if matches!(callback.completion, CallbackCompletion::Collect) {
                     callback.results.push(self.heap.isolate_value(&result)?);
                 }
-                if let Some(call) = callback.calls.get(callback.next_index).cloned() {
+                let call = if callback.live_url_search_params {
+                    let Value::Ref(receiver) = callback.calls[0] else {
+                        return Err(RuntimeError::ValidationFailed {
+                            reason: "invalid live URLSearchParams callback receiver".to_string(),
+                        });
+                    };
+                    self.heap
+                        .url_search_params_entries(receiver)?
+                        .and_then(|entries| entries.get(callback.next_index).cloned())
+                        .map(|(name, value)| {
+                            Value::Tuple(
+                                vec![
+                                    Value::String(value.into()),
+                                    Value::String(name.into()),
+                                    Value::Ref(receiver),
+                                ]
+                                .into(),
+                            )
+                        })
+                } else {
+                    callback.calls.get(callback.next_index).cloned()
+                };
+                if let Some(call) = call {
                     callback.next_index += 1;
                     let function = callback.function.clone();
                     // Each builtin-initiated frame push has the same unit cost
@@ -216,6 +242,37 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 CallbackCompletion::Discard
             },
             allow_effects,
+            live_url_search_params: false,
+        };
+        self.begin_function_call(function, first, ReturnTarget::Callback(callback))
+    }
+
+    pub(super) fn begin_url_search_params_for_each(
+        &mut self,
+        function: Value,
+        receiver: HeapId,
+    ) -> Result<(), RuntimeError> {
+        let entries = self
+            .heap
+            .url_search_params_entries(receiver)?
+            .expect("URLSearchParams receiver was checked");
+        let Some((name, value)) = entries.first() else {
+            self.stack.push(Value::Undefined);
+            return Ok(());
+        };
+        let first = vec![
+            Value::String(value.into()),
+            Value::String(name.into()),
+            Value::Ref(receiver),
+        ];
+        let callback = CallbackDriver {
+            function: function.clone(),
+            calls: vec![Value::Ref(receiver)],
+            next_index: 1,
+            results: Vec::new(),
+            completion: CallbackCompletion::Discard,
+            allow_effects: true,
+            live_url_search_params: true,
         };
         self.begin_function_call(function, first, ReturnTarget::Callback(callback))
     }

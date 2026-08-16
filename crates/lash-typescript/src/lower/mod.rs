@@ -525,7 +525,7 @@ impl Lowerer {
                     }
                     if let (Some(name), Some(Expr::New { constructor, .. })) =
                         (process_name, declaration.init.as_ref())
-                        && matches!(constructor.as_str(), "Map" | "Set")
+                        && matches!(constructor.as_str(), "Map" | "Set" | "URLSearchParams")
                     {
                         self.iterable_kinds
                             .insert(self.binding(name)?.internal.clone(), constructor.clone());

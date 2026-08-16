@@ -37,7 +37,7 @@ impl Heap {
                 if key.as_ref() == "length" {
                     return Ok(false);
                 }
-                if let Some(index) = javascript_array_index(&Value::String(key.as_ref().into()))
+                if let Some(index) = javascript_array_index_key(key.as_ref())
                     && index < values.len()
                 {
                     return Err(RuntimeError::ValidationFailed {
@@ -165,6 +165,32 @@ impl Heap {
             let imported = self.import_values(vec![value], 1)?.remove(0);
             let last_index = regexp_last_index(self.javascript_to_number(&imported)?);
             return self.set_regexp_last_index(target_id, last_index);
+        }
+
+        if matches!(self.get(target_id)?, HeapObject::Url(_)) {
+            let property = match *leaf {
+                CompiledAssignPathStep::Field(field) => names[field].text.to_string(),
+                CompiledAssignPathStep::Index => {
+                    let index = indexes
+                        .get(index_cursor)
+                        .ok_or(RuntimeError::MissingAssignmentIndex)?;
+                    self.javascript_to_string(index)?
+                }
+            };
+            // WHATWG exposes these as getter-only attributes. Assignment in
+            // the non-strict script dialect is Node's silent no-op and does
+            // not coerce the right-hand side.
+            if matches!(property.as_str(), "origin" | "searchParams") {
+                return Ok(());
+            }
+            let value = self.javascript_to_string(&value)?;
+            if self.set_url_property(target_id, &property, &value)? {
+                return Ok(());
+            }
+            return Err(RuntimeError::CannotAssignField {
+                field: property,
+                actual: "URL".to_string(),
+            });
         }
 
         let imported = self.import_values(vec![value], 1)?.remove(0);

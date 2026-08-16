@@ -6,6 +6,7 @@ mod id;
 mod javascript_exotics;
 mod object;
 mod reference_assignment;
+mod url_objects;
 mod validation;
 
 pub use id::HeapId;
@@ -14,6 +15,9 @@ pub(crate) use javascript_exotics::RegExpProgramCache;
 pub(crate) use javascript_exotics::{
     DateObject, ErrorKind, ErrorObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpObject, SetObject,
     canonical_regexp_flags, regexp_string, same_value_zero,
+};
+pub(crate) use url_objects::{
+    UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
 };
 pub(crate) use validation::PersistedRoots;
 
@@ -42,6 +46,8 @@ pub(crate) enum HeapObject {
     Set(SetObject),
     Date(DateObject),
     Error(ErrorObject),
+    Url(UrlObject),
+    UrlSearchParams(UrlSearchParamsObject),
 }
 
 fn value_logical_bytes(value: &Value) -> u64 {
@@ -598,7 +604,9 @@ impl Heap {
             | HeapObject::Map(_)
             | HeapObject::Set(_)
             | HeapObject::Date(_)
-            | HeapObject::Error(_)) => {
+            | HeapObject::Error(_)
+            | HeapObject::Url(_)
+            | HeapObject::UrlSearchParams(_)) => {
                 // Exotic values intentionally have no detached `Value` shape:
                 // detaching would destroy identity or expose internal slots.
                 return Err(javascript_exotics::host_boundary_error(&object));
@@ -787,7 +795,9 @@ impl Heap {
             | HeapObject::Map(_)
             | HeapObject::Set(_)
             | HeapObject::Date(_)
-            | HeapObject::Error(_) => {
+            | HeapObject::Error(_)
+            | HeapObject::Url(_)
+            | HeapObject::UrlSearchParams(_) => {
                 return Err(javascript_exotics::host_boundary_error(self.get(*id)?));
             }
         };
@@ -943,6 +953,11 @@ impl Heap {
                     .map(|value| self.stage_isolation(value, staging))
                     .transpose()?,
             }),
+            HeapObject::Url(url) => HeapObject::Url(UrlObject {
+                href: url.href.clone(),
+                search_params: self.stage_isolation(&url.search_params, staging)?,
+            }),
+            HeapObject::UrlSearchParams(params) => HeapObject::UrlSearchParams(params.clone()),
         })
     }
 
@@ -1207,7 +1222,9 @@ impl Heap {
             | HeapObject::Map(_)
             | HeapObject::Set(_)
             | HeapObject::Date(_)
-            | HeapObject::Error(_)) => {
+            | HeapObject::Error(_)
+            | HeapObject::Url(_)
+            | HeapObject::UrlSearchParams(_)) => {
                 return Err(RuntimeError::CannotAssignIndex {
                     actual: object.kind_name().to_string(),
                 });
@@ -1382,6 +1399,11 @@ impl Heap {
                     (None, None) => Ok(true),
                     _ => Ok(false),
                 }
+            }
+            (HeapObject::Url(left), HeapObject::Url(right)) => Ok(left.href == right.href
+                && self.structural_eq_inner(&left.search_params, &right.search_params, visited)?),
+            (HeapObject::UrlSearchParams(left), HeapObject::UrlSearchParams(right)) => {
+                Ok(left == right)
             }
             _ => Ok(false),
         }

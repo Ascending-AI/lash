@@ -1,4 +1,29 @@
 impl<'a, H: ExecutionHost> Vm<'a, H> {
+    fn record_instruction_profile(&mut self, tag: InstructionProfileTag, elapsed_ns: u128) {
+        let Some(profile) = &mut self.profile else {
+            return;
+        };
+        let index = tag as usize;
+        profile.instruction_counts[index] += 1;
+        profile.instruction_times[index] += elapsed_ns;
+    }
+
+    fn record_builtin_profile(&mut self, builtin: IntrinsicOp, elapsed_ns: u128) {
+        let Some(profile) = &mut self.profile else {
+            return;
+        };
+        let index = builtin.profile_tag() as usize;
+        profile.builtin_counts[index] += 1;
+        profile.builtin_times[index] += elapsed_ns;
+    }
+
+    pub(crate) fn take_profile(&mut self) -> ProfileReport {
+        let Some(profile) = self.profile.take() else {
+            return ProfileReport::default();
+        };
+        profile.finish()
+    }
+
     fn lashlang_execution_site_at(&self, instruction_ip: usize) -> Option<&LashlangExecutionSite> {
         self.chunk
             .lashlang_execution_sites

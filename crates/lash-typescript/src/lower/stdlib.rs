@@ -21,7 +21,7 @@ pub(super) fn static_stdlib_owner(expr: &Expr) -> Option<&str> {
     };
     matches!(
         name.as_str(),
-        "Object" | "Array" | "String" | "Number" | "JSON" | "Math"
+        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "URL"
     )
     .then_some(name)
 }
@@ -29,7 +29,16 @@ pub(super) fn static_stdlib_owner(expr: &Expr) -> Option<&str> {
 pub(super) fn is_known_runtime_global(name: &str) -> bool {
     matches!(
         name,
-        "Object" | "Array" | "String" | "Number" | "JSON" | "Math" | "Date" | "Promise"
+        "Object"
+            | "Array"
+            | "String"
+            | "Number"
+            | "JSON"
+            | "Math"
+            | "Date"
+            | "Promise"
+            | "URL"
+            | "URLSearchParams"
     )
 }
 
@@ -69,6 +78,7 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
                 | "sqrt"
                 | "sign"
         ),
+        "URL" => method == "canParse",
         _ => false,
     }
 }
@@ -85,8 +95,15 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "charCodeAt",
     "codePointAt",
     "concat",
+    "append",
+    "delete",
+    "entries",
     "endsWith",
     "filter",
+    "forEach",
+    "get",
+    "getAll",
+    "has",
     "includes",
     "indexOf",
     "join",
@@ -98,9 +115,12 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "replace",
     "replaceAll",
     "slice",
+    "sort",
     "split",
     "startsWith",
     "substring",
+    "set",
+    "keys",
     "toLowerCase",
     "toUpperCase",
     "toString",
@@ -108,6 +128,8 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "trimEnd",
     "trimStart",
     "valueOf",
+    "values",
+    "toJSON",
 ];
 
 pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
