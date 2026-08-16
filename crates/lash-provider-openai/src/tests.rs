@@ -1936,7 +1936,9 @@ fn openrouter_buffered_wire_preserves_concrete_model_and_explicit_zero_reasoning
         }
     });
     let mut state = ChatStreamState::default();
-    state.capture_response_value(&value);
+    state
+        .capture_response_value(&value)
+        .expect("buffered identity is stable");
 
     assert_eq!(
         state.execution_evidence(),
@@ -2058,12 +2060,12 @@ fn openrouter_stream_wire_retains_partial_identity_when_stream_ends_early() {
 }
 
 #[test]
-fn openrouter_stream_wire_captures_first_stable_identity_and_terminal_facts() {
+fn openrouter_stream_wire_captures_stable_identity_and_terminal_facts() {
     let mut state = ChatStreamState::default();
     for raw in [
         r#"{"id":"","model":"","choices":[{"delta":{"content":"ok"}}]}"#,
         r#"{"id":"gen-first","model":"provider/model-a","choices":[{"delta":{}}]}"#,
-        r#"{"id":"gen-later","model":"provider/model-b","choices":[{"delta":{},"finish_reason":"length"}],"usage":{"completion_tokens_details":{"reasoning_tokens":7}}}"#,
+        r#"{"id":"gen-first","model":"provider/model-a","choices":[{"delta":{},"finish_reason":"length"}],"usage":{"completion_tokens_details":{"reasoning_tokens":7}}}"#,
     ] {
         OpenAiCompatibleProvider::process_chat_sse_event(raw, &mut state)
             .expect("SSE chunk parses");
@@ -2074,6 +2076,28 @@ fn openrouter_stream_wire_captures_first_stable_identity_and_terminal_facts() {
     assert_eq!(evidence.served_model.as_deref(), Some("provider/model-a"));
     assert_eq!(evidence.reasoning_output_tokens, Some(7));
     assert_eq!(evidence.provider_finish_reason.as_deref(), Some("length"));
+}
+
+#[test]
+fn openrouter_stream_wire_rejects_mid_stream_identity_conflict() {
+    let mut state = ChatStreamState::default();
+    OpenAiCompatibleProvider::process_chat_sse_event(
+        r#"{"id":"gen-first","model":"provider/model-a","choices":[{"delta":{}}]}"#,
+        &mut state,
+    )
+    .expect("initial SSE identity parses");
+
+    let error = OpenAiCompatibleProvider::process_chat_sse_event(
+        r#"{"id":"gen-first","model":"provider/model-b","choices":[{"delta":{}}]}"#,
+        &mut state,
+    )
+    .expect_err("served-model variance must fail");
+
+    assert_eq!(error.kind, ProviderFailureKind::Stream);
+    assert_eq!(
+        error.code.as_deref(),
+        Some("stream_evidence_identity_conflict")
+    );
 }
 
 fn streamed_request(events: Arc<std::sync::Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {

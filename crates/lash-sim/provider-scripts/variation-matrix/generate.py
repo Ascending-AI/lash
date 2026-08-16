@@ -385,8 +385,19 @@ BUILDERS = {
 }
 
 
-def cell(streams: list[dict[str, object]]) -> dict[str, object]:
-    return {"kind": "recorded_streams", "recordings": streams}
+def declaration(kind: str, reason: str) -> dict[str, str]:
+    return {"kind": kind, "reason": reason}
+
+
+def cell(
+    streams: list[dict[str, object]],
+    *,
+    declarations: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {"kind": "recorded_streams", "recordings": streams}
+    if declarations:
+        result["declarations"] = declarations
+    return result
 
 
 def stream_for(
@@ -432,16 +443,19 @@ def matrix() -> dict[str, object]:
                 "openai.responses": {
                     "kind": "not_applicable",
                     "reason": "Responses has no provider wire stop-sequence field",
+                    "assertion": "omitted_unsupported_stop",
                     "recordings": [stream_for("openai.responses", "unsupported_stop", text='<lashlang>\nfinish "settled"\n</lashlang>\n')],
                 },
                 "codex.responses-sse": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses has no provider wire stop-sequence field",
+                    "assertion": "omitted_unsupported_stop",
                     "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='<lashlang>\nfinish "settled"\n</lashlang>\n')],
                 },
                 "codex.responses-websocket": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses WebSocket has no provider wire stop-sequence field",
+                    "assertion": "omitted_unsupported_stop",
                     "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='<lashlang>\nfinish "settled"\n</lashlang>\n')],
                 },
             },
@@ -511,13 +525,22 @@ def matrix() -> dict[str, object]:
                 "content_filter": {"incomplete_reason": "content_filter"},
             },
         }[dialect]
+        declarations = []
+        if dialect == "anthropic.messages":
+            declarations.append(
+                declaration(
+                    "no_tool_replay",
+                    "this dialect's function-call fixture carries no provider-owned replay payload",
+                )
+            )
         outcome_cells[dialect] = cell(
             [
                 stream_for(dialect, "stop", text="matrix stop", **terminal_args["stop"]),
                 stream_for(dialect, "tool", tool=True, **terminal_args["tool"]),
                 stream_for(dialect, "length", text="matrix partial", **terminal_args["length"]),
                 stream_for(dialect, "content_filter", text="matrix filtered", **terminal_args["content_filter"]),
-            ]
+            ],
+            declarations=declarations,
         )
     rows.append(
         {
@@ -531,7 +554,18 @@ def matrix() -> dict[str, object]:
     for dialect in DIALECTS:
         builder_args: dict[str, object] = {"text": "matrix partial", "terminal": False}
         close = dialect == "codex.responses-websocket"
-        missing_cells[dialect] = cell([recording("missing_terminal", BUILDERS[dialect](**builder_args), close=close)])
+        declarations = []
+        if dialect in {"anthropic.messages", "google.generate-content", "openai.chat-completions"}:
+            declarations.append(
+                declaration(
+                    "no_response_text_replay",
+                    "this dialect's partial text event carries no provider replay payload",
+                )
+            )
+        missing_cells[dialect] = cell(
+            [recording("missing_terminal", BUILDERS[dialect](**builder_args), close=close)],
+            declarations=declarations,
+        )
     rows.append(
         {
             "variation": "missing_terminal_evidence",
@@ -547,6 +581,21 @@ def matrix() -> dict[str, object]:
             "google.generate-content": {"finish_reason": "STOP"},
             "openai.chat-completions": {"finish_reason": "tool_calls"},
         }.get(dialect, {})
+        declarations = []
+        if dialect == "anthropic.messages":
+            declarations.append(
+                declaration(
+                    "no_tool_replay",
+                    "Anthropic tool-use events carry no provider-owned replay payload",
+                )
+            )
+        if dialect == "openai.chat-completions":
+            declarations.append(
+                declaration(
+                    "no_reasoning_replay",
+                    "Chat Completions exposes reasoning text but no provider replay payload",
+                )
+            )
         shape_cells[dialect] = cell(
             [
                 stream_for(dialect, "empty_deltas", text="matrix shape", empty_deltas=True),
@@ -557,7 +606,8 @@ def matrix() -> dict[str, object]:
                     empty_terminal_chunks=True,
                 ),
                 stream_for(dialect, "split_reasoning_tool", reasoning="matrix reasoning", tool=True, split=True, **tool_terminal),
-            ]
+            ],
+            declarations=declarations,
         )
     rows.append(
         {
@@ -571,6 +621,12 @@ def matrix() -> dict[str, object]:
         dialect: cell([stream_for(dialect, "reasoning_rendered", reasoning="matrix reasoning", text="matrix answer", split=True)])
         for dialect in DIALECTS
     }
+    reasoning_cells["openai.chat-completions"]["declarations"] = [
+        declaration(
+            "no_reasoning_replay",
+            "Chat Completions exposes reasoning text but no provider replay payload",
+        )
+    ]
     rows.append(
         {
             "variation": "reasoning_rendered_path",
@@ -607,12 +663,82 @@ def matrix() -> dict[str, object]:
         recordings = [success, failure]
         if dialect in {"openai.responses", "codex.responses-sse"}:
             recordings.append(buffered_response_identity())
-        identity_cells[dialect] = cell(recordings)
+        declarations = []
+        if dialect in {
+            "anthropic.messages",
+            "google.generate-content",
+            "openai.chat-completions",
+        }:
+            declarations.append(
+                declaration(
+                    "no_response_text_replay",
+                    "this dialect's plain text event carries no provider replay payload",
+                )
+            )
+        if dialect == "codex.responses-websocket":
+            declarations.extend(
+                [
+                    declaration(
+                        "no_provider_request_id",
+                        "the WebSocket handshake exposes response identity but no provider request-id header",
+                    ),
+                    declaration(
+                        "failed_response_in_band",
+                        "Codex WebSocket reports response.failed as an in-band protocol event",
+                    ),
+                ]
+            )
+        if dialect in {"openai.responses", "codex.responses-sse"}:
+            declarations.append(
+                declaration(
+                    "buffered_response_identity",
+                    "this HTTP Responses adapter supports buffered JSON as well as SSE",
+                )
+            )
+        identity_cells[dialect] = cell(recordings, declarations=declarations)
     rows.append(
         {
             "variation": "response_identity_execution_evidence",
             "expectation": {"kind": "response_identity_execution_evidence"},
             "cells": identity_cells,
+        }
+    )
+
+    identity_conflict_cells = {}
+    for dialect in DIALECTS:
+        if dialect == "anthropic.messages":
+            events = [
+                payload({"type": "message_start", "message": {"id": "matrix-response-1", "model": "matrix-model-a", "usage": {}}}),
+                payload({"type": "message_start", "message": {"id": "matrix-response-1", "model": "matrix-model-b", "usage": {}}}),
+            ]
+        elif dialect == "google.generate-content":
+            events = [
+                payload({"response": {"responseId": "matrix-response-1", "modelVersion": "matrix-model-a"}}),
+                payload({"response": {"responseId": "matrix-response-1", "modelVersion": "matrix-model-b"}}),
+            ]
+        elif dialect == "openai.chat-completions":
+            events = [
+                payload({"id": "matrix-response-1", "model": "matrix-model-a", "choices": [{"delta": {}}]}),
+                payload({
+                    "id": "matrix-response-1",
+                    "model": "matrix-model-b",
+                    "choices": [{"delta": {}}],
+                    "usage": {"completion_tokens_details": {"reasoning_tokens": 99}},
+                }),
+            ]
+        else:
+            events = [
+                payload({"type": "response.created", "response": {"id": "matrix-response-1", "model": "matrix-model-a", "status": "in_progress"}}),
+                payload({"type": "response.in_progress", "response": {"id": "matrix-response-1", "model": "matrix-model-b", "status": "in_progress"}}),
+            ]
+        identity_conflict_cells[dialect] = cell(
+            [recording("served_model_conflict", events, close=dialect == "codex.responses-websocket")]
+        )
+    rows.append(
+        {
+            "variation": "mid_stream_identity_conflict",
+            "expectation": {"kind": "mid_stream_identity_conflict"},
+            "cells": identity_conflict_cells,
         }
     )
 
@@ -640,7 +766,15 @@ def matrix() -> dict[str, object]:
                         request_id=f"matrix-request-attempt-{attempt}",
                     )
                 )
-        retry_cells[dialect] = cell([*early_attempts, success])
+        declarations = []
+        if dialect == "codex.responses-websocket":
+            declarations.append(
+                declaration(
+                    "retry_identity_from_response",
+                    "WebSocket attempts expose response ids instead of HTTP request ids",
+                )
+            )
+        retry_cells[dialect] = cell([*early_attempts, success], declarations=declarations)
     rows.append(
         {
             "variation": "multi_reset_retry_sequence",

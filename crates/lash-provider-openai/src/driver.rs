@@ -455,7 +455,7 @@ fn complete_buffered_chat(
             LlmTransportError::new(format!("Invalid Chat Completions JSON: {e}"))
                 .with_raw(text.clone())
         })?;
-        state.capture_response_value(&value);
+        state.capture_response_value(&value)?;
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
         let parts = OpenAiCompatibleProvider::chat_response_parts_from_value(&value);
@@ -764,12 +764,6 @@ async fn drive_streaming_chat(
         return Err(error.with_partial_response(chat_response_from_state(state.clone(), &url)));
     }
 
-    let parts = state.parts();
-    if !has_response_content(&parts) {
-        return Err(empty_response_error(
-            state.final_response_raw.clone().unwrap_or_default(),
-        ));
-    }
     if stream_termination == StreamTermination::RequireTerminalEvidence
         && state.provider_finish_reason.is_none()
     {
@@ -778,6 +772,12 @@ async fn drive_streaming_chat(
             .with_code("stream_ended_before_finish_reason")
             .retryable(true)
             .with_partial_response(chat_response_from_state(state, &url)));
+    }
+    let parts = state.parts();
+    if !has_response_content(&parts) {
+        return Err(empty_response_error(
+            state.final_response_raw.clone().unwrap_or_default(),
+        ));
     }
     if let Some(tx) = &stream_events {
         for part in state.take_remaining_tool_call_parts() {

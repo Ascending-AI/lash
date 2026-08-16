@@ -18,7 +18,9 @@ fn buffered_wire_prefers_native_finish_reason() {
         }]
     });
     let mut state = ChatStreamState::default();
-    state.capture_response_value(&value);
+    state
+        .capture_response_value(&value)
+        .expect("buffered identity is stable");
     assert_native_finish_reason(&state);
 }
 

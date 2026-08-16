@@ -37,6 +37,7 @@
         "openai.responses": {
           "kind": "not_applicable",
           "reason": "Responses has no provider wire stop-sequence field",
+          "assertion": "omitted_unsupported_stop",
           "recordings": [
             {
               "case": "unsupported_stop",
@@ -164,6 +165,7 @@
         "codex.responses-sse": {
           "kind": "not_applicable",
           "reason": "Codex Responses has no provider wire stop-sequence field",
+          "assertion": "omitted_unsupported_stop",
           "recordings": [
             {
               "case": "unsupported_stop",
@@ -291,6 +293,7 @@
         "codex.responses-websocket": {
           "kind": "not_applicable",
           "reason": "Codex Responses WebSocket has no provider wire stop-sequence field",
+          "assertion": "omitted_unsupported_stop",
           "recordings": [
             {
               "case": "unsupported_stop",
@@ -1145,6 +1148,12 @@
               "body": null,
               "close_after_events": false,
               "expected_finish_reason": "refusal"
+            }
+          ],
+          "declarations": [
+            {
+              "kind": "no_tool_replay",
+              "reason": "this dialect's function-call fixture carries no provider-owned replay payload"
             }
           ]
         },
@@ -3105,6 +3114,12 @@
               "close_after_events": false,
               "expected_finish_reason": null
             }
+          ],
+          "declarations": [
+            {
+              "kind": "no_response_text_replay",
+              "reason": "this dialect's partial text event carries no provider replay payload"
+            }
           ]
         },
         "google.generate-content": {
@@ -3157,6 +3172,12 @@
               "close_after_events": false,
               "expected_finish_reason": null
             }
+          ],
+          "declarations": [
+            {
+              "kind": "no_response_text_replay",
+              "reason": "this dialect's partial text event carries no provider replay payload"
+            }
           ]
         },
         "openai.chat-completions": {
@@ -3197,6 +3218,12 @@
               "body": null,
               "close_after_events": false,
               "expected_finish_reason": null
+            }
+          ],
+          "declarations": [
+            {
+              "kind": "no_response_text_replay",
+              "reason": "this dialect's partial text event carries no provider replay payload"
             }
           ]
         },
@@ -3789,6 +3816,12 @@
               "close_after_events": false,
               "expected_finish_reason": "tool_use"
             }
+          ],
+          "declarations": [
+            {
+              "kind": "no_tool_replay",
+              "reason": "Anthropic tool-use events carry no provider-owned replay payload"
+            }
           ]
         },
         "google.generate-content": {
@@ -4379,6 +4412,12 @@
               "body": null,
               "close_after_events": false,
               "expected_finish_reason": "tool_calls"
+            }
+          ],
+          "declarations": [
+            {
+              "kind": "no_reasoning_replay",
+              "reason": "Chat Completions exposes reasoning text but no provider replay payload"
             }
           ]
         },
@@ -6051,6 +6090,12 @@
               "close_after_events": false,
               "expected_finish_reason": "stop"
             }
+          ],
+          "declarations": [
+            {
+              "kind": "no_reasoning_replay",
+              "reason": "Chat Completions exposes reasoning text but no provider replay payload"
+            }
           ]
         },
         "openai.responses": {
@@ -6752,6 +6797,12 @@
               "close_after_events": false,
               "expected_finish_reason": null
             }
+          ],
+          "declarations": [
+            {
+              "kind": "no_response_text_replay",
+              "reason": "this dialect's plain text event carries no provider replay payload"
+            }
           ]
         },
         "google.generate-content": {
@@ -6844,6 +6895,12 @@
               "close_after_events": false,
               "expected_finish_reason": null
             }
+          ],
+          "declarations": [
+            {
+              "kind": "no_response_text_replay",
+              "reason": "this dialect's plain text event carries no provider replay payload"
+            }
           ]
         },
         "openai.chat-completions": {
@@ -6929,6 +6986,12 @@
               "body": "{\"error\":{\"type\":\"invalid_request_error\",\"code\":\"matrix_failure\",\"message\":\"matrix failure\"}}",
               "close_after_events": false,
               "expected_finish_reason": null
+            }
+          ],
+          "declarations": [
+            {
+              "kind": "no_response_text_replay",
+              "reason": "this dialect's plain text event carries no provider replay payload"
             }
           ]
         },
@@ -7089,6 +7152,12 @@
               "close_after_events": false,
               "expected_finish_reason": "completed"
             }
+          ],
+          "declarations": [
+            {
+              "kind": "buffered_response_identity",
+              "reason": "this HTTP Responses adapter supports buffered JSON as well as SSE"
+            }
           ]
         },
         "codex.responses-sse": {
@@ -7248,6 +7317,12 @@
               "close_after_events": false,
               "expected_finish_reason": "completed"
             }
+          ],
+          "declarations": [
+            {
+              "kind": "buffered_response_identity",
+              "reason": "this HTTP Responses adapter supports buffered JSON as well as SSE"
+            }
           ]
         },
         "codex.responses-websocket": {
@@ -7403,6 +7478,315 @@
               ],
               "body": null,
               "close_after_events": false,
+              "expected_finish_reason": null
+            }
+          ],
+          "declarations": [
+            {
+              "kind": "no_provider_request_id",
+              "reason": "the WebSocket handshake exposes response identity but no provider request-id header"
+            },
+            {
+              "kind": "failed_response_in_band",
+              "reason": "Codex WebSocket reports response.failed as an in-band protocol event"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "variation": "mid_stream_identity_conflict",
+      "expectation": {
+        "kind": "mid_stream_identity_conflict"
+      },
+      "cells": {
+        "anthropic.messages": {
+          "kind": "recorded_streams",
+          "recordings": [
+            {
+              "case": "served_model_conflict",
+              "status": 200,
+              "headers": [
+                {
+                  "name": "content-type",
+                  "value": "text/event-stream; charset=utf-8"
+                },
+                {
+                  "name": "x-request-id",
+                  "value": "matrix-request-1"
+                },
+                {
+                  "name": "request-id",
+                  "value": "matrix-request-1"
+                }
+              ],
+              "events": [
+                {
+                  "json": {
+                    "type": "message_start",
+                    "message": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-a",
+                      "usage": {}
+                    }
+                  }
+                },
+                {
+                  "json": {
+                    "type": "message_start",
+                    "message": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-b",
+                      "usage": {}
+                    }
+                  }
+                }
+              ],
+              "body": null,
+              "close_after_events": false,
+              "expected_finish_reason": null
+            }
+          ]
+        },
+        "google.generate-content": {
+          "kind": "recorded_streams",
+          "recordings": [
+            {
+              "case": "served_model_conflict",
+              "status": 200,
+              "headers": [
+                {
+                  "name": "content-type",
+                  "value": "text/event-stream; charset=utf-8"
+                },
+                {
+                  "name": "x-request-id",
+                  "value": "matrix-request-1"
+                },
+                {
+                  "name": "request-id",
+                  "value": "matrix-request-1"
+                }
+              ],
+              "events": [
+                {
+                  "json": {
+                    "response": {
+                      "responseId": "matrix-response-1",
+                      "modelVersion": "matrix-model-a"
+                    }
+                  }
+                },
+                {
+                  "json": {
+                    "response": {
+                      "responseId": "matrix-response-1",
+                      "modelVersion": "matrix-model-b"
+                    }
+                  }
+                }
+              ],
+              "body": null,
+              "close_after_events": false,
+              "expected_finish_reason": null
+            }
+          ]
+        },
+        "openai.chat-completions": {
+          "kind": "recorded_streams",
+          "recordings": [
+            {
+              "case": "served_model_conflict",
+              "status": 200,
+              "headers": [
+                {
+                  "name": "content-type",
+                  "value": "text/event-stream; charset=utf-8"
+                },
+                {
+                  "name": "x-request-id",
+                  "value": "matrix-request-1"
+                },
+                {
+                  "name": "request-id",
+                  "value": "matrix-request-1"
+                }
+              ],
+              "events": [
+                {
+                  "json": {
+                    "id": "matrix-response-1",
+                    "model": "matrix-model-a",
+                    "choices": [
+                      {
+                        "delta": {}
+                      }
+                    ]
+                  }
+                },
+                {
+                  "json": {
+                    "id": "matrix-response-1",
+                    "model": "matrix-model-b",
+                    "choices": [
+                      {
+                        "delta": {}
+                      }
+                    ],
+                    "usage": {
+                      "completion_tokens_details": {
+                        "reasoning_tokens": 99
+                      }
+                    }
+                  }
+                }
+              ],
+              "body": null,
+              "close_after_events": false,
+              "expected_finish_reason": null
+            }
+          ]
+        },
+        "openai.responses": {
+          "kind": "recorded_streams",
+          "recordings": [
+            {
+              "case": "served_model_conflict",
+              "status": 200,
+              "headers": [
+                {
+                  "name": "content-type",
+                  "value": "text/event-stream; charset=utf-8"
+                },
+                {
+                  "name": "x-request-id",
+                  "value": "matrix-request-1"
+                },
+                {
+                  "name": "request-id",
+                  "value": "matrix-request-1"
+                }
+              ],
+              "events": [
+                {
+                  "json": {
+                    "type": "response.created",
+                    "response": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-a",
+                      "status": "in_progress"
+                    }
+                  }
+                },
+                {
+                  "json": {
+                    "type": "response.in_progress",
+                    "response": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-b",
+                      "status": "in_progress"
+                    }
+                  }
+                }
+              ],
+              "body": null,
+              "close_after_events": false,
+              "expected_finish_reason": null
+            }
+          ]
+        },
+        "codex.responses-sse": {
+          "kind": "recorded_streams",
+          "recordings": [
+            {
+              "case": "served_model_conflict",
+              "status": 200,
+              "headers": [
+                {
+                  "name": "content-type",
+                  "value": "text/event-stream; charset=utf-8"
+                },
+                {
+                  "name": "x-request-id",
+                  "value": "matrix-request-1"
+                },
+                {
+                  "name": "request-id",
+                  "value": "matrix-request-1"
+                }
+              ],
+              "events": [
+                {
+                  "json": {
+                    "type": "response.created",
+                    "response": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-a",
+                      "status": "in_progress"
+                    }
+                  }
+                },
+                {
+                  "json": {
+                    "type": "response.in_progress",
+                    "response": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-b",
+                      "status": "in_progress"
+                    }
+                  }
+                }
+              ],
+              "body": null,
+              "close_after_events": false,
+              "expected_finish_reason": null
+            }
+          ]
+        },
+        "codex.responses-websocket": {
+          "kind": "recorded_streams",
+          "recordings": [
+            {
+              "case": "served_model_conflict",
+              "status": 200,
+              "headers": [
+                {
+                  "name": "content-type",
+                  "value": "text/event-stream; charset=utf-8"
+                },
+                {
+                  "name": "x-request-id",
+                  "value": "matrix-request-1"
+                },
+                {
+                  "name": "request-id",
+                  "value": "matrix-request-1"
+                }
+              ],
+              "events": [
+                {
+                  "json": {
+                    "type": "response.created",
+                    "response": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-a",
+                      "status": "in_progress"
+                    }
+                  }
+                },
+                {
+                  "json": {
+                    "type": "response.in_progress",
+                    "response": {
+                      "id": "matrix-response-1",
+                      "model": "matrix-model-b",
+                      "status": "in_progress"
+                    }
+                  }
+                }
+              ],
+              "body": null,
+              "close_after_events": true,
               "expected_finish_reason": null
             }
           ]
@@ -8267,6 +8651,12 @@
               "body": null,
               "close_after_events": false,
               "expected_finish_reason": "completed"
+            }
+          ],
+          "declarations": [
+            {
+              "kind": "retry_identity_from_response",
+              "reason": "WebSocket attempts expose response ids instead of HTTP request ids"
             }
           ]
         }

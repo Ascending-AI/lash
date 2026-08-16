@@ -1,6 +1,6 @@
 //! Versioned provider-variation fixture matrix at the transport seam.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -20,14 +20,16 @@ use lash_sansio::llm::types::{
 };
 use lash_sansio::session_model::{Message, MessageRole, render_prompt, shared_parts};
 use lash_sansio::sync::MutexExt;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::provider::{
-    ProviderWireEndpoint, ProviderWireEvent, ProviderWireHeader, ProviderWireRequestMatch,
-    ProviderWireScript, ScriptedLlmHttpTransport,
+    ProviderWireEndpoint, ProviderWireEvent, ProviderWireScript, ScriptedLlmHttpTransport,
 };
 use crate::provider_variations::LASHLANG_CLOSE_DELIMITER;
+
+#[path = "provider_variation_matrix/schema.rs"]
+mod schema;
+use schema::*;
 
 const MATRIX_SCHEMA: &str = "lash.provider-variation-matrix.v1";
 const MATRIX_JSON: &str = include_str!("../provider-scripts/variation-matrix/v1/matrix.json");
@@ -39,7 +41,7 @@ const EXPECTED_DIALECTS: [&str; 6] = [
     "codex.responses-sse",
     "codex.responses-websocket",
 ];
-const EXPECTED_VARIATIONS: [&str; 8] = [
+const EXPECTED_VARIATIONS: [&str; 9] = [
     "stop_consumed",
     "literal_present",
     "equivalent_outcome_mapping",
@@ -47,104 +49,9 @@ const EXPECTED_VARIATIONS: [&str; 8] = [
     "event_shape_variation",
     "reasoning_rendered_path",
     "response_identity_execution_evidence",
+    "mid_stream_identity_conflict",
     "multi_reset_retry_sequence",
 ];
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Matrix {
-    schema: String,
-    dialects: Vec<String>,
-    rows: Vec<MatrixRow>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MatrixRow {
-    variation: String,
-    expectation: MatrixExpectation,
-    cells: BTreeMap<String, MatrixCell>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum MatrixExpectation {
-    StopBoundary { literal_present: bool },
-    EquivalentOutcomeMapping,
-    MissingTerminalEvidence,
-    EventShapeVariation,
-    ReasoningRenderedPath,
-    ResponseIdentityExecutionEvidence,
-    MultiResetRetrySequence,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum MatrixCell {
-    ProviderWireScripts {
-        paths: Vec<String>,
-    },
-    RecordedStreams {
-        recordings: Vec<Recording>,
-    },
-    NotApplicable {
-        reason: String,
-        recordings: Vec<Recording>,
-    },
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Recording {
-    case: String,
-    #[serde(default = "default_http_status")]
-    status: u16,
-    #[serde(default)]
-    request_match: ProviderWireRequestMatch,
-    #[serde(default)]
-    expected_finish_reason: Option<String>,
-    #[serde(default)]
-    headers: Vec<ProviderWireHeader>,
-    #[serde(default)]
-    events: Vec<RecordedPayload>,
-    #[serde(default)]
-    body: Option<String>,
-    #[serde(default)]
-    close_after_events: bool,
-    #[serde(default)]
-    transport_error: Option<String>,
-    #[serde(default)]
-    retryable: bool,
-}
-
-const fn default_http_status() -> u16 {
-    200
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RecordedPayload {
-    #[serde(default)]
-    json: Option<Value>,
-    #[serde(default)]
-    raw: Option<String>,
-}
-
-impl RecordedPayload {
-    fn wire(&self) -> String {
-        match (&self.json, &self.raw) {
-            (Some(value), None) => value.to_string(),
-            (None, Some(raw)) => raw.clone(),
-            _ => panic!("recorded payload must contain exactly one of json or raw"),
-        }
-    }
-}
-
-impl Matrix {
-    fn load() -> Self {
-        serde_json::from_str(MATRIX_JSON).expect("provider variation matrix parses")
-    }
-}
 
 #[test]
 fn matrix_is_a_complete_versioned_row_by_column_product() {
@@ -173,7 +80,7 @@ fn matrix_is_a_complete_versioned_row_by_column_product() {
         );
         for (dialect, cell) in &row.cells {
             match cell {
-                MatrixCell::ProviderWireScripts { paths } => {
+                MatrixCell::ProviderWireScripts { paths, .. } => {
                     assert!(
                         !paths.is_empty(),
                         "{} {dialect} has no fixture",
@@ -187,18 +94,42 @@ fn matrix_is_a_complete_versioned_row_by_column_product() {
                         );
                     }
                 }
-                MatrixCell::RecordedStreams { recordings } => assert!(
+                MatrixCell::RecordedStreams { recordings, .. } => assert!(
                     !recordings.is_empty(),
                     "{} {dialect} has no recordings",
                     row.variation
                 ),
-                MatrixCell::NotApplicable { reason, recordings } => {
+                MatrixCell::NotApplicable {
+                    reason,
+                    assertion,
+                    recordings,
+                } => {
                     assert!(
-                        row.variation == "stop_consumed" && !reason.trim().is_empty(),
-                        "only the provider-owned wire-stop row may be inapplicable"
+                        !reason.trim().is_empty(),
+                        "{} {dialect} inapplicable cell requires a reason",
+                        row.variation
                     );
-                    assert_eq!(recordings.len(), 1);
+                    match assertion {
+                        NotApplicableAssertion::OmittedUnsupportedStop => {
+                            assert_eq!(recordings.len(), 1)
+                        }
+                    }
                 }
+            }
+            let mut declarations = BTreeSet::new();
+            for declaration in cell.declarations() {
+                assert!(
+                    !declaration.reason().trim().is_empty(),
+                    "{} {dialect} {:?} declaration requires a reason",
+                    row.variation,
+                    declaration.kind()
+                );
+                assert!(
+                    declarations.insert(declaration.kind()),
+                    "{} {dialect} repeats {:?}",
+                    row.variation,
+                    declaration.kind()
+                );
             }
         }
     }
@@ -221,9 +152,51 @@ fn checked_in_matrix_matches_its_deterministic_generator() {
         "matrix generator failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let generated =
-        std::fs::read(temp.path().join("matrix.json")).expect("read regenerated provider matrix");
-    assert_eq!(generated, MATRIX_JSON.as_bytes());
+    let generated = std::fs::read_to_string(temp.path().join("matrix.json"))
+        .expect("read regenerated provider matrix");
+    if generated != MATRIX_JSON {
+        let offset = generated
+            .bytes()
+            .zip(MATRIX_JSON.bytes())
+            .position(|(generated, checked_in)| generated != checked_in)
+            .unwrap_or_else(|| generated.len().min(MATRIX_JSON.len()));
+        let generated_value: Value =
+            serde_json::from_str(&generated).expect("regenerated provider matrix parses as JSON");
+        let checked_in_value: Value =
+            serde_json::from_str(MATRIX_JSON).expect("checked-in provider matrix parses as JSON");
+        let cell = first_divergent_cell(&generated_value, &checked_in_value)
+            .unwrap_or_else(|| "matrix metadata".to_string());
+        panic!(
+            "provider matrix generator mismatch at {cell}, byte offset {offset}; run {}",
+            matrix_generator().display()
+        );
+    }
+}
+
+fn first_divergent_cell(generated: &Value, checked_in: &Value) -> Option<String> {
+    let generated_rows = generated.get("rows")?.as_array()?;
+    let checked_in_rows = checked_in.get("rows")?.as_array()?;
+    for (row_index, (generated_row, checked_in_row)) in
+        generated_rows.iter().zip(checked_in_rows).enumerate()
+    {
+        let variation = generated_row
+            .get("variation")
+            .or_else(|| checked_in_row.get("variation"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown-variation");
+        for dialect in EXPECTED_DIALECTS {
+            let generated_cell = generated_row
+                .get("cells")
+                .and_then(|cells| cells.get(dialect));
+            let checked_in_cell = checked_in_row
+                .get("cells")
+                .and_then(|cells| cells.get(dialect));
+            if generated_cell != checked_in_cell {
+                return Some(format!("row {row_index} ({variation}), cell {dialect}"));
+            }
+        }
+    }
+    None
 }
 
 #[tokio::test]
@@ -235,15 +208,7 @@ async fn http_adapter_columns_match_every_shared_row_expectation() {
     {
         for row in &matrix.rows {
             let cell = row.cells.get(dialect).expect("complete matrix column");
-            if let MatrixCell::NotApplicable { recordings, .. } = cell {
-                run_unsupported_stop_http(dialect, row, recordings).await;
-                continue;
-            }
-            let recordings = match materialize_recordings(dialect, cell) {
-                Some(recordings) => recordings,
-                None => continue,
-            };
-            run_http_row(dialect, row, recordings).await;
+            run_matrix_cell(MatrixTransport::Http, dialect, row, cell).await;
         }
     }
 }
@@ -254,33 +219,65 @@ async fn codex_websocket_column_matches_every_shared_row_expectation() {
     let dialect = "codex.responses-websocket";
     for row in &matrix.rows {
         let cell = row.cells.get(dialect).expect("complete WebSocket column");
-        if let MatrixCell::NotApplicable { recordings, .. } = cell {
-            run_unsupported_stop_websocket(row, recordings).await;
-            continue;
-        }
-        let Some(recordings) = materialize_recordings(dialect, cell) else {
-            continue;
-        };
-        run_websocket_row(row, recordings).await;
+        run_matrix_cell(MatrixTransport::WebSocket, dialect, row, cell).await;
     }
 }
 
-async fn run_websocket_row(row: &MatrixRow, recordings: Vec<Recording>) {
-    let dialect = "codex.responses-websocket";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MatrixTransport {
+    Http,
+    WebSocket,
+}
+
+async fn run_matrix_cell(
+    transport: MatrixTransport,
+    dialect: &str,
+    row: &MatrixRow,
+    cell: &MatrixCell,
+) {
+    if let MatrixCell::NotApplicable {
+        reason,
+        assertion,
+        recordings,
+    } = cell
+    {
+        run_not_applicable(transport, dialect, row, reason, *assertion, recordings).await;
+        return;
+    }
+    let recordings = materialize_recordings(dialect, cell).expect("applicable cell recordings");
+    run_matrix_row(transport, dialect, row, cell, recordings).await;
+}
+
+async fn run_matrix_row(
+    transport: MatrixTransport,
+    dialect: &str,
+    row: &MatrixRow,
+    cell: &MatrixCell,
+    recordings: Vec<Recording>,
+) {
     match row.expectation {
         MatrixExpectation::StopBoundary { literal_present } => {
             let recording = only_recording(&recordings, dialect, &row.variation);
-            let (route, completion) =
-                complete_websocket(row, std::slice::from_ref(recording)).await;
-            let completion =
-                completion.unwrap_or_else(|error| panic!("{} failed: {error:?}", row.variation));
+            let completion = complete_matrix(
+                transport,
+                dialect,
+                row,
+                std::slice::from_ref(recording),
+                &Arc::new(Mutex::new(Vec::new())),
+                CompletionMode::Streaming,
+            )
+            .await;
+            let completion = completion
+                .result
+                .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
             assert_eq!(completion.terminal_reason, LlmTerminalReason::Stop);
             assert_eq!(
                 completion.full_text.contains(LASHLANG_CLOSE_DELIMITER),
-                literal_present
+                literal_present,
+                "{} {dialect} violated the shared delimiter expectation",
+                row.variation
             );
             assert_current_success_contract(dialect, &completion, recording);
-            assert_replay_origins(&completion.parts, &route);
         }
         MatrixExpectation::EquivalentOutcomeMapping => {
             for (case, expected) in [
@@ -290,58 +287,121 @@ async fn run_websocket_row(row: &MatrixRow, recordings: Vec<Recording>) {
                 ("content_filter", LlmTerminalReason::ContentFilter),
             ] {
                 let recording = named_recording(&recordings, case);
-                let (_, completion) =
-                    complete_websocket(row, std::slice::from_ref(recording)).await;
-                let completion = completion
-                    .unwrap_or_else(|error| panic!("{} {case} failed: {error:?}", row.variation));
-                assert_eq!(completion.terminal_reason, expected, "{case}");
+                let completion = complete_matrix(
+                    transport,
+                    dialect,
+                    row,
+                    std::slice::from_ref(recording),
+                    &Arc::new(Mutex::new(Vec::new())),
+                    CompletionMode::Streaming,
+                )
+                .await;
+                let route = completion.route;
+                let completion = completion.result.unwrap_or_else(|error| {
+                    panic!("{} {dialect} {case} failed: {error:?}", row.variation)
+                });
+                assert_eq!(
+                    completion.terminal_reason, expected,
+                    "{} {dialect} {case} must normalize identically",
+                    row.variation
+                );
                 if case == "tool" {
                     assert_lookup_tool(&completion.parts, dialect, &row.variation);
+                    assert_declared_replay(
+                        &completion.parts,
+                        &route,
+                        cell,
+                        CellDeclarationKind::NoToolReplay,
+                        ReplayExpectation::Tool,
+                        dialect,
+                        &row.variation,
+                    );
                 }
                 assert_current_success_contract(dialect, &completion, recording);
             }
         }
         MatrixExpectation::MissingTerminalEvidence => {
             let recording = only_recording(&recordings, dialect, &row.variation);
-            let (route, completion) =
-                complete_websocket(row, std::slice::from_ref(recording)).await;
-            let error = completion.expect_err("WebSocket EOF before response.completed must fail");
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let completion = complete_matrix(
+                transport,
+                dialect,
+                row,
+                std::slice::from_ref(recording),
+                &events,
+                CompletionMode::Streaming,
+            )
+            .await;
+            let route = completion.route;
+            let error = completion
+                .result
+                .expect_err("missing terminal evidence must fail end-to-end");
             assert_eq!(error.error.kind, ProviderFailureKind::Stream);
-            assert!(error.error.code.is_some());
+            assert!(
+                error.error.code.is_some(),
+                "{dialect} must classify the missing terminal"
+            );
             let partial = error
                 .error
                 .partial_response
                 .as_deref()
-                .expect("WebSocket missing-terminal failure carries partial state");
+                .expect("missing-terminal failure carries parsed partial state");
             assert_eq!(partial.terminal_reason, LlmTerminalReason::Unknown);
             assert_eq!(partial.full_text, "matrix partial");
+            assert_declared_replay(
+                &partial.parts,
+                &route,
+                cell,
+                CellDeclarationKind::NoResponseTextReplay,
+                ReplayExpectation::ResponseText,
+                dialect,
+                &row.variation,
+            );
             assert_eq!(error.call_record.attempts.len(), 1);
             assert_eq!(
                 error.call_record.attempts[0].protocol_position,
                 ProtocolPosition::OutputStarted
             );
-            assert!(partial.http_summary.is_some());
-            assert!(partial.execution_evidence.is_some());
-            assert_replay_origins(&partial.parts, &route);
+            assert_current_partial_contract(dialect, partial);
         }
         MatrixExpectation::EventShapeVariation => {
             for case in ["empty_deltas", "empty_terminal_chunks"] {
                 let recording = named_recording(&recordings, case);
                 let events = Arc::new(Mutex::new(Vec::new()));
-                let (_, completion) =
-                    complete_websocket_with_events(row, std::slice::from_ref(recording), &events)
-                        .await;
-                let completion = completion
-                    .unwrap_or_else(|error| panic!("{} {case} failed: {error:?}", row.variation));
+                let completion = complete_matrix(
+                    transport,
+                    dialect,
+                    row,
+                    std::slice::from_ref(recording),
+                    &events,
+                    CompletionMode::Streaming,
+                )
+                .await
+                .result
+                .unwrap_or_else(|error| {
+                    panic!("{} {dialect} {case} failed: {error:?}", row.variation)
+                });
                 assert_eq!(completion.full_text, "matrix shape");
                 assert_eq!(completion.terminal_reason, LlmTerminalReason::Stop);
                 assert_current_success_contract(dialect, &completion, recording);
                 assert_no_empty_stream_output(dialect, case, &events.lock_recover());
             }
             let recording = named_recording(&recordings, "split_reasoning_tool");
-            let (_, completion) = complete_websocket(row, std::slice::from_ref(recording)).await;
-            let completion = completion.unwrap_or_else(|error| {
-                panic!("{} split reasoning/tool failed: {error:?}", row.variation)
+            let completion = complete_matrix(
+                transport,
+                dialect,
+                row,
+                std::slice::from_ref(recording),
+                &Arc::new(Mutex::new(Vec::new())),
+                CompletionMode::Streaming,
+            )
+            .await;
+            let route = completion.route;
+            let completion = completion.result.unwrap_or_else(|error| {
+                panic!(
+                    "{} {dialect} split reasoning/tool failed: {error:?}",
+                    row.variation
+                )
             });
             assert_eq!(completion.terminal_reason, LlmTerminalReason::ToolUse);
             assert_reasoning(
@@ -351,44 +411,181 @@ async fn run_websocket_row(row: &MatrixRow, recordings: Vec<Recording>) {
                 &row.variation,
             );
             assert_lookup_tool(&completion.parts, dialect, &row.variation);
+            assert_declared_replay(
+                &completion.parts,
+                &route,
+                cell,
+                CellDeclarationKind::NoToolReplay,
+                ReplayExpectation::Tool,
+                dialect,
+                &row.variation,
+            );
+            assert_declared_replay(
+                &completion.parts,
+                &route,
+                cell,
+                CellDeclarationKind::NoReasoningReplay,
+                ReplayExpectation::Reasoning,
+                dialect,
+                &row.variation,
+            );
             assert_current_success_contract(dialect, &completion, recording);
         }
         MatrixExpectation::ReasoningRenderedPath => {
             let recording = only_recording(&recordings, dialect, &row.variation);
-            let (route, completion) =
-                complete_websocket(row, std::slice::from_ref(recording)).await;
-            let completion =
-                completion.unwrap_or_else(|error| panic!("{} failed: {error:?}", row.variation));
+            let completion = complete_matrix(
+                transport,
+                dialect,
+                row,
+                std::slice::from_ref(recording),
+                &Arc::new(Mutex::new(Vec::new())),
+                CompletionMode::Streaming,
+            )
+            .await;
+            let route = completion.route;
+            let completion = completion
+                .result
+                .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
             assert_reasoning(
                 &completion.parts,
                 "matrix reasoning",
                 dialect,
                 &row.variation,
             );
-            assert_reasoning_rendered(&completion.parts, dialect);
-            assert_replay_origins(&completion.parts, &route);
+            let expects_replay = !cell.declares(CellDeclarationKind::NoReasoningReplay);
+            assert_reasoning_rendered(&completion.parts, dialect, expects_replay);
+            if expects_replay {
+                assert_replay_origins(
+                    &completion.parts,
+                    &route,
+                    ReplayExpectation::Reasoning,
+                    dialect,
+                    &row.variation,
+                );
+            }
             assert_current_success_contract(dialect, &completion, recording);
         }
         MatrixExpectation::ResponseIdentityExecutionEvidence => {
             let recording = named_recording(&recordings, "response_identity");
-            let (route, completion) =
-                complete_websocket(row, std::slice::from_ref(recording)).await;
-            let completion =
-                completion.unwrap_or_else(|error| panic!("{} failed: {error:?}", row.variation));
-            assert_identity_evidence(&completion, dialect, recording);
-            assert_replay_origins(&completion.parts, &route);
-            let failure = named_recording(&recordings, "failed_response");
-            let (_, error) = complete_websocket(row, std::slice::from_ref(failure)).await;
-            assert_failed_identity(
+            let completion = complete_matrix(
+                transport,
                 dialect,
-                &error.expect_err("recorded WebSocket failure must fail"),
+                row,
+                std::slice::from_ref(recording),
+                &Arc::new(Mutex::new(Vec::new())),
+                CompletionMode::Streaming,
+            )
+            .await;
+            let route = completion.route;
+            let completion = completion
+                .result
+                .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
+            assert_identity_evidence(&completion, dialect, recording, cell);
+            if cell.declares(CellDeclarationKind::NoResponseTextReplay) {
+                assert_no_replay_state(
+                    &completion.parts,
+                    ReplayExpectation::ResponseText,
+                    dialect,
+                    &row.variation,
+                );
+            } else {
+                assert_replay_origins(
+                    &completion.parts,
+                    &route,
+                    ReplayExpectation::ResponseText,
+                    dialect,
+                    &row.variation,
+                );
+            }
+            let failure = named_recording(&recordings, "failed_response");
+            let error = complete_matrix(
+                transport,
+                dialect,
+                row,
+                std::slice::from_ref(failure),
+                &Arc::new(Mutex::new(Vec::new())),
+                CompletionMode::Streaming,
+            )
+            .await
+            .result
+            .expect_err("recorded provider failure must fail");
+            assert_failed_identity(dialect, &error, cell);
+            if cell.declares(CellDeclarationKind::BufferedResponseIdentity) {
+                let buffered = named_recording(&recordings, "buffered_response_identity");
+                let completion = complete_matrix(
+                    transport,
+                    dialect,
+                    row,
+                    std::slice::from_ref(buffered),
+                    &Arc::new(Mutex::new(Vec::new())),
+                    CompletionMode::Buffered,
+                )
+                .await;
+                let route = completion.route;
+                let completion = completion.result.unwrap_or_else(|error| {
+                    panic!("{dialect} buffered identity fixture failed: {error:?}")
+                });
+                assert_identity_evidence(&completion, dialect, buffered, cell);
+                assert_replay_origins(
+                    &completion.parts,
+                    &route,
+                    ReplayExpectation::ResponseText,
+                    dialect,
+                    &row.variation,
+                );
+            }
+        }
+        MatrixExpectation::MidStreamIdentityConflict => {
+            let recording = only_recording(&recordings, dialect, &row.variation);
+            let error = complete_matrix(
+                transport,
+                dialect,
+                row,
+                std::slice::from_ref(recording),
+                &Arc::new(Mutex::new(Vec::new())),
+                CompletionMode::Streaming,
+            )
+            .await
+            .result
+            .expect_err("mid-stream served-model variance must fail");
+            assert_eq!(error.error.kind, ProviderFailureKind::Stream, "{dialect}");
+            assert_eq!(
+                error.error.code.as_deref(),
+                Some("stream_evidence_identity_conflict"),
+                "{dialect}"
+            );
+            assert_eq!(error.call_record.attempts.len(), 1, "{dialect}");
+            assert_eq!(
+                error.call_record.attempts[0].outcome,
+                AttemptOutcome::Interrupted,
+                "{dialect}"
+            );
+            let evidence = error
+                .error
+                .partial_response
+                .as_deref()
+                .and_then(|partial| partial.execution_evidence.as_ref())
+                .unwrap_or_else(|| {
+                    panic!("{dialect} identity conflict must retain partial evidence")
+                });
+            assert_eq!(
+                evidence.reasoning_output_tokens, None,
+                "{dialect} must not merge evidence from the conflicting identity"
             );
         }
         MatrixExpectation::MultiResetRetrySequence => {
             let events = Arc::new(Mutex::new(Vec::new()));
-            let (_, completion) = complete_websocket_with_events(row, &recordings, &events).await;
-            let completion =
-                completion.unwrap_or_else(|error| panic!("{} failed: {error:?}", row.variation));
+            let completion = complete_matrix(
+                transport,
+                dialect,
+                row,
+                &recordings,
+                &events,
+                CompletionMode::Streaming,
+            )
+            .await
+            .result
+            .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
             assert_eq!(completion.full_text, "matrix retry settled");
             assert_eq!(completion.call_record.attempts.len(), 3);
             assert_eq!(
@@ -404,33 +601,33 @@ async fn run_websocket_row(row: &MatrixRow, recordings: Vec<Recording>) {
                     AttemptOutcome::Completed
                 ]
             );
-            assert_retry_stream_reduction(dialect, &events.lock_recover(), &completion);
+            assert_eq!(
+                completion
+                    .call_record
+                    .attempts
+                    .iter()
+                    .map(|attempt| attempt.protocol_position)
+                    .collect::<Vec<_>>(),
+                [
+                    ProtocolPosition::ResponseObserved,
+                    ProtocolPosition::ResponseObserved,
+                    ProtocolPosition::TerminalObserved,
+                ],
+                "{dialect} retry protocol positions changed"
+            );
+            for attempt in &completion.call_record.attempts[..2] {
+                assert_eq!(
+                    attempt
+                        .retry_decision
+                        .as_ref()
+                        .and_then(|decision| decision.reason.as_deref()),
+                    Some("empty_stream_partial_before_output"),
+                    "{dialect} response observation alone must not authorize retry"
+                );
+            }
+            assert_retry_stream_reduction(dialect, cell, &events.lock_recover(), &completion);
         }
     }
-}
-
-async fn complete_websocket(
-    row: &MatrixRow,
-    recordings: &[Recording],
-) -> (
-    lash_core::ProviderRouteIdentity,
-    Result<ProviderCompletion, ProviderCompletionError>,
-) {
-    let events = Arc::new(Mutex::new(Vec::new()));
-    complete_websocket_with_events(row, recordings, &events).await
-}
-
-async fn complete_websocket_with_events(
-    row: &MatrixRow,
-    recordings: &[Recording],
-    events: &Arc<Mutex<Vec<LlmStreamEvent>>>,
-) -> (
-    lash_core::ProviderRouteIdentity,
-    Result<ProviderCompletion, ProviderCompletionError>,
-) {
-    let (route, result, _) =
-        complete_websocket_with_events_and_capture(row, recordings, events).await;
-    (route, result)
 }
 
 async fn complete_websocket_with_events_and_capture(
@@ -472,6 +669,15 @@ async fn complete_websocket_with_events_and_capture(
             .into_components(),
     );
     let route = provider.route_identity(dialect_model("codex.responses-websocket"));
+    assert_eq!(
+        route,
+        lash_core::ProviderRouteIdentity::for_endpoint(
+            "codex",
+            &server.url,
+            dialect_model("codex.responses-websocket"),
+        ),
+        "Codex WebSocket route identity must name the WebSocket endpoint"
+    );
     let result = provider
         .complete(matrix_request(
             "codex.responses-websocket",
@@ -482,22 +688,101 @@ async fn complete_websocket_with_events_and_capture(
     (route, result, server.captured())
 }
 
-async fn run_unsupported_stop_websocket(row: &MatrixRow, recordings: &[Recording]) {
-    let recording = only_recording(recordings, "codex.responses-websocket", &row.variation);
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let (_, completion, captured) =
-        complete_websocket_with_events_and_capture(row, std::slice::from_ref(recording), &events)
-            .await;
-    let completion = completion.expect("unsupported WebSocket stop fixture completes literally");
-    assert_eq!(captured.len(), 1, "Codex must send one response.create");
-    assert_eq!(captured[0]["type"], "response.create");
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompletionMode {
+    Streaming,
+    Buffered,
+}
+
+struct MatrixCompletion {
+    route: lash_core::ProviderRouteIdentity,
+    result: Result<ProviderCompletion, ProviderCompletionError>,
+    captured_websocket_requests: Vec<Value>,
+}
+
+async fn complete_matrix(
+    transport: MatrixTransport,
+    dialect: &str,
+    row: &MatrixRow,
+    recordings: &[Recording],
+    events: &Arc<Mutex<Vec<LlmStreamEvent>>>,
+    mode: CompletionMode,
+) -> MatrixCompletion {
+    match transport {
+        MatrixTransport::Http => {
+            let result = match mode {
+                CompletionMode::Streaming => {
+                    complete_http_with_events(dialect, row, recordings, events).await
+                }
+                CompletionMode::Buffered => {
+                    let recording = only_recording(recordings, dialect, &row.variation);
+                    complete_http_buffered(dialect, row, recording).await
+                }
+            };
+            MatrixCompletion {
+                route: completion_route(dialect),
+                result,
+                captured_websocket_requests: Vec::new(),
+            }
+        }
+        MatrixTransport::WebSocket => {
+            assert_eq!(
+                mode,
+                CompletionMode::Streaming,
+                "{dialect} does not expose a buffered transport"
+            );
+            let (route, result, captured_websocket_requests) =
+                complete_websocket_with_events_and_capture(row, recordings, events).await;
+            MatrixCompletion {
+                route,
+                result,
+                captured_websocket_requests,
+            }
+        }
+    }
+}
+
+async fn run_not_applicable(
+    transport: MatrixTransport,
+    dialect: &str,
+    row: &MatrixRow,
+    reason: &str,
+    assertion: NotApplicableAssertion,
+    recordings: &[Recording],
+) {
     assert!(
-        !json_contains_key(&captured[0], "stop")
-            && !json_contains_key(&captured[0], "stop_sequences"),
-        "Codex WebSocket serialized an unsupported wire stop field: {}",
-        captured[0]
+        !reason.trim().is_empty(),
+        "{} {dialect} inapplicable cell requires a reason",
+        row.variation
     );
-    assert_unsupported_stop_disposition("codex.responses-websocket", &completion, recording);
+    assert_eq!(assertion, NotApplicableAssertion::OmittedUnsupportedStop);
+    let recording = only_recording(recordings, dialect, &row.variation);
+    let completion = complete_matrix(
+        transport,
+        dialect,
+        row,
+        std::slice::from_ref(recording),
+        &Arc::new(Mutex::new(Vec::new())),
+        CompletionMode::Streaming,
+    )
+    .await;
+    if transport == MatrixTransport::WebSocket {
+        assert_eq!(
+            completion.captured_websocket_requests.len(),
+            1,
+            "{dialect} must send one response.create"
+        );
+        let request = &completion.captured_websocket_requests[0];
+        assert_eq!(request["type"], "response.create", "{dialect}");
+        assert!(
+            !json_contains_key(request, "stop") && !json_contains_key(request, "stop_sequences"),
+            "{dialect} serialized an unsupported wire stop field: {request}"
+        );
+    }
+    let completion = completion
+        .result
+        .unwrap_or_else(|error| panic!("{dialect} inapplicable proof failed: {error:?}"));
+    assert_unsupported_stop_disposition(dialect, &completion, recording);
 }
 
 fn json_contains_key(value: &Value, key: &str) -> bool {
@@ -508,14 +793,6 @@ fn json_contains_key(value: &Value, key: &str) -> bool {
         Value::Array(values) => values.iter().any(|value| json_contains_key(value, key)),
         _ => false,
     }
-}
-
-async fn run_unsupported_stop_http(dialect: &str, row: &MatrixRow, recordings: &[Recording]) {
-    let recording = only_recording(recordings, dialect, &row.variation);
-    let completion = complete_http(dialect, row, std::slice::from_ref(recording))
-        .await
-        .unwrap_or_else(|error| panic!("{dialect} unsupported stop fixture failed: {error:?}"));
-    assert_unsupported_stop_disposition(dialect, &completion, recording);
 }
 
 fn assert_unsupported_stop_disposition(
@@ -540,186 +817,6 @@ fn assert_unsupported_stop_disposition(
         Some(disposition)
     );
     assert_current_success_contract(dialect, completion, recording);
-}
-
-async fn run_http_row(dialect: &str, row: &MatrixRow, recordings: Vec<Recording>) {
-    match row.expectation {
-        MatrixExpectation::StopBoundary { literal_present } => {
-            let recording = only_recording(&recordings, dialect, &row.variation);
-            let completion = complete_http(dialect, row, std::slice::from_ref(recording))
-                .await
-                .unwrap_or_else(|error| panic!("{} {} failed: {error:?}", row.variation, dialect));
-            assert_eq!(completion.terminal_reason, LlmTerminalReason::Stop);
-            assert_eq!(
-                completion.full_text.contains(LASHLANG_CLOSE_DELIMITER),
-                literal_present,
-                "{} {dialect} violated the shared delimiter expectation",
-                row.variation
-            );
-            assert_current_success_contract(dialect, &completion, recording);
-        }
-        MatrixExpectation::EquivalentOutcomeMapping => {
-            let expectations = [
-                ("stop", LlmTerminalReason::Stop),
-                ("tool", LlmTerminalReason::ToolUse),
-                ("length", LlmTerminalReason::OutputLimit),
-                ("content_filter", LlmTerminalReason::ContentFilter),
-            ];
-            for (case, expected) in expectations {
-                let recording = named_recording(&recordings, case);
-                let completion = complete_http(dialect, row, std::slice::from_ref(recording))
-                    .await
-                    .unwrap_or_else(|error| {
-                        panic!("{} {dialect} {case} failed: {error:?}", row.variation)
-                    });
-                assert_eq!(
-                    completion.terminal_reason, expected,
-                    "{} {dialect} {case} must normalize identically",
-                    row.variation
-                );
-                if case == "tool" {
-                    assert_lookup_tool(&completion.parts, dialect, &row.variation);
-                }
-                assert_current_success_contract(dialect, &completion, recording);
-            }
-        }
-        MatrixExpectation::MissingTerminalEvidence => {
-            let recording = only_recording(&recordings, dialect, &row.variation);
-            let events = Arc::new(Mutex::new(Vec::new()));
-            let error =
-                complete_http_with_events(dialect, row, std::slice::from_ref(recording), &events)
-                    .await
-                    .expect_err("missing terminal evidence must fail end-to-end");
-            assert_eq!(error.error.kind, ProviderFailureKind::Stream);
-            assert!(
-                error.error.code.is_some(),
-                "{dialect} must classify the missing terminal"
-            );
-            let partial = error
-                .error
-                .partial_response
-                .as_deref()
-                .expect("missing-terminal failure carries parsed partial state");
-            assert_eq!(partial.terminal_reason, LlmTerminalReason::Unknown);
-            assert_eq!(partial.full_text, "matrix partial");
-            assert_eq!(error.call_record.attempts.len(), 1);
-            assert_eq!(
-                error.call_record.attempts[0].protocol_position,
-                ProtocolPosition::OutputStarted
-            );
-            assert_current_partial_contract(dialect, partial);
-        }
-        MatrixExpectation::EventShapeVariation => {
-            for case in ["empty_deltas", "empty_terminal_chunks"] {
-                let recording = named_recording(&recordings, case);
-                let events = Arc::new(Mutex::new(Vec::new()));
-                let completion = complete_http_with_events(
-                    dialect,
-                    row,
-                    std::slice::from_ref(recording),
-                    &events,
-                )
-                .await
-                .unwrap_or_else(|error| {
-                    panic!("{} {dialect} {case} failed: {error:?}", row.variation)
-                });
-                assert_eq!(completion.full_text, "matrix shape");
-                assert_eq!(completion.terminal_reason, LlmTerminalReason::Stop);
-                assert_current_success_contract(dialect, &completion, recording);
-                assert_no_empty_stream_output(dialect, case, &events.lock_recover());
-            }
-            let recording = named_recording(&recordings, "split_reasoning_tool");
-            let completion = complete_http(dialect, row, std::slice::from_ref(recording))
-                .await
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "{} {dialect} split reasoning/tool failed: {error:?}",
-                        row.variation
-                    )
-                });
-            assert_eq!(completion.terminal_reason, LlmTerminalReason::ToolUse);
-            assert_reasoning(
-                &completion.parts,
-                "matrix reasoning",
-                dialect,
-                &row.variation,
-            );
-            assert_lookup_tool(&completion.parts, dialect, &row.variation);
-            assert_current_success_contract(dialect, &completion, recording);
-        }
-        MatrixExpectation::ReasoningRenderedPath => {
-            let recording = only_recording(&recordings, dialect, &row.variation);
-            let completion = complete_http(dialect, row, std::slice::from_ref(recording))
-                .await
-                .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
-            assert_reasoning(
-                &completion.parts,
-                "matrix reasoning",
-                dialect,
-                &row.variation,
-            );
-            assert_reasoning_rendered(&completion.parts, dialect);
-            assert_replay_origins(&completion.parts, &completion_route(dialect));
-            assert_current_success_contract(dialect, &completion, recording);
-        }
-        MatrixExpectation::ResponseIdentityExecutionEvidence => {
-            let recording = named_recording(&recordings, "response_identity");
-            let completion = complete_http(dialect, row, std::slice::from_ref(recording))
-                .await
-                .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
-            assert_identity_evidence(&completion, dialect, recording);
-            assert_replay_origins(&completion.parts, &completion_route(dialect));
-            let failure = named_recording(&recordings, "failed_response");
-            let error = complete_http(dialect, row, std::slice::from_ref(failure))
-                .await
-                .expect_err("recorded HTTP failure must fail");
-            assert_failed_identity(dialect, &error);
-            if matches!(dialect, "openai.responses" | "codex.responses-sse") {
-                let buffered = named_recording(&recordings, "buffered_response_identity");
-                let completion = complete_http_buffered(dialect, row, buffered)
-                    .await
-                    .unwrap_or_else(|error| {
-                        panic!("{dialect} buffered identity fixture failed: {error:?}")
-                    });
-                assert_identity_evidence(&completion, dialect, buffered);
-                assert_replay_origins(&completion.parts, &completion_route(dialect));
-            }
-        }
-        MatrixExpectation::MultiResetRetrySequence => {
-            let events = Arc::new(Mutex::new(Vec::new()));
-            let completion = complete_http_with_events(dialect, row, &recordings, &events)
-                .await
-                .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
-            assert_eq!(completion.full_text, "matrix retry settled");
-            assert_eq!(completion.call_record.attempts.len(), 3);
-            let interrupted = if dialect == "openai.chat-completions" {
-                AttemptOutcome::Failed
-            } else {
-                AttemptOutcome::Interrupted
-            };
-            assert_eq!(
-                completion
-                    .call_record
-                    .attempts
-                    .iter()
-                    .map(|attempt| attempt.outcome)
-                    .collect::<Vec<_>>(),
-                [interrupted, interrupted, AttemptOutcome::Completed,],
-                "{dialect} retry outcomes changed"
-            );
-            let events = events.lock_recover();
-            assert_retry_stream_reduction(dialect, &events, &completion);
-        }
-    }
-}
-
-async fn complete_http(
-    dialect: &str,
-    row: &MatrixRow,
-    recordings: &[Recording],
-) -> Result<ProviderCompletion, ProviderCompletionError> {
-    let events = Arc::new(Mutex::new(Vec::new()));
-    complete_http_with_events(dialect, row, recordings, &events).await
 }
 
 async fn complete_http_buffered(
@@ -881,8 +978,8 @@ fn recorded_script(dialect: &str, variation: &str, recording: &Recording) -> Pro
 
 fn materialize_recordings(dialect: &str, cell: &MatrixCell) -> Option<Vec<Recording>> {
     match cell {
-        MatrixCell::RecordedStreams { recordings } => Some(recordings.clone()),
-        MatrixCell::ProviderWireScripts { paths } => Some(
+        MatrixCell::RecordedStreams { recordings, .. } => Some(recordings.clone()),
+        MatrixCell::ProviderWireScripts { paths, .. } => Some(
             paths
                 .iter()
                 .map(|path| recording_from_provider_wire_script(dialect, path))
@@ -1012,77 +1109,100 @@ fn assert_current_partial_contract(dialect: &str, partial: &lash_core::LlmRespon
         partial.execution_evidence.is_some(),
         "{dialect} partial must retain execution evidence observed before EOF"
     );
-    assert_replay_origins(&partial.parts, &completion_route(dialect));
 }
 
-fn assert_identity_evidence(completion: &ProviderCompletion, dialect: &str, recording: &Recording) {
+fn assert_identity_evidence(
+    completion: &ProviderCompletion,
+    dialect: &str,
+    recording: &Recording,
+    cell: &MatrixCell,
+) {
     let evidence = completion
         .execution_evidence
         .as_ref()
         .unwrap_or_else(|| panic!("{dialect} dropped execution evidence"));
     assert_eq!(
         evidence.provider_response_id.as_deref(),
-        Some("matrix-response-1")
+        Some("matrix-response-1"),
+        "{dialect} provider response id"
     );
     assert_eq!(
         evidence.served_model.as_deref(),
-        Some("matrix-served-model")
+        Some("matrix-served-model"),
+        "{dialect} served model"
     );
-    if dialect == "codex.responses-websocket" {
-        assert_eq!(evidence.provider_request_id, None);
+    if cell.declares(CellDeclarationKind::NoProviderRequestId) {
+        assert_eq!(evidence.provider_request_id, None, "{dialect} request id");
     } else {
         assert_eq!(
             evidence.provider_request_id.as_deref(),
-            Some("matrix-request-1")
+            Some("matrix-request-1"),
+            "{dialect} provider request id"
         );
     }
-    assert_eq!(evidence.reasoning_output_tokens, Some(0));
+    assert_eq!(
+        evidence.reasoning_output_tokens,
+        Some(0),
+        "{dialect} reasoning output tokens"
+    );
     assert_eq!(
         evidence.provider_finish_reason, recording.expected_finish_reason,
         "{dialect} changed its provider-native finish reason"
     );
     assert_eq!(
         completion.call_record.attempts[0].evidence.as_ref(),
-        Some(evidence)
+        Some(evidence),
+        "{dialect} attempt evidence"
     );
 }
 
-fn assert_failed_identity(dialect: &str, error: &ProviderCompletionError) {
-    assert_eq!(error.call_record.attempts.len(), 1);
+fn assert_failed_identity(dialect: &str, error: &ProviderCompletionError, cell: &MatrixCell) {
+    assert_eq!(error.call_record.attempts.len(), 1, "{dialect}");
     let attempt = &error.call_record.attempts[0];
     let evidence = attempt
         .evidence
         .as_ref()
         .unwrap_or_else(|| panic!("{dialect} failed attempt dropped execution evidence"));
-    if dialect == "codex.responses-websocket" {
-        let partial = error
-            .error
-            .partial_response
-            .as_deref()
-            .expect("failed WebSocket response retains parsed partial state");
-        assert_eq!(partial.execution_evidence.as_ref(), Some(evidence));
+    if cell.declares(CellDeclarationKind::FailedResponseInBand) {
+        let partial =
+            error.error.partial_response.as_deref().unwrap_or_else(|| {
+                panic!("{dialect} in-band failure retains parsed partial state")
+            });
+        assert_eq!(
+            partial.execution_evidence.as_ref(),
+            Some(evidence),
+            "{dialect} partial evidence"
+        );
         assert_eq!(
             evidence.provider_response_id.as_deref(),
-            Some("matrix-failed-response")
+            Some("matrix-failed-response"),
+            "{dialect} failed response id"
         );
         assert_eq!(
             evidence.served_model.as_deref(),
-            Some("matrix-served-model")
+            Some("matrix-served-model"),
+            "{dialect} failed served model"
         );
-        assert_eq!(evidence.reasoning_output_tokens, Some(0));
-        assert_eq!(evidence.provider_finish_reason.as_deref(), Some("failed"));
+        assert_eq!(evidence.reasoning_output_tokens, Some(0), "{dialect}");
+        assert_eq!(
+            evidence.provider_finish_reason.as_deref(),
+            Some("failed"),
+            "{dialect}"
+        );
     } else {
-        assert_eq!(error.error.status, Some(400));
+        assert_eq!(error.error.status, Some(400), "{dialect}");
         assert_eq!(
             evidence.provider_request_id.as_deref(),
-            Some("matrix-failed-request")
+            Some("matrix-failed-request"),
+            "{dialect} failed request evidence"
         );
         assert_eq!(
             attempt
                 .error
                 .as_ref()
                 .and_then(|error| error.provider_request_id.as_deref()),
-            Some("matrix-failed-request")
+            Some("matrix-failed-request"),
+            "{dialect} normalized failed request id"
         );
     }
 }
@@ -1101,6 +1221,7 @@ fn assert_no_empty_stream_output(dialect: &str, case: &str, events: &[LlmStreamE
 
 fn assert_retry_stream_reduction(
     dialect: &str,
+    cell: &MatrixCell,
     events: &[LlmStreamEvent],
     completion: &ProviderCompletion,
 ) {
@@ -1133,7 +1254,8 @@ fn assert_retry_stream_reduction(
             "{dialect} attempt {} unexpectedly emitted billable output",
             index + 1
         );
-        let identity_kind = if dialect == "codex.responses-websocket" {
+        let response_identity = cell.declares(CellDeclarationKind::RetryIdentityFromResponse);
+        let identity_kind = if response_identity {
             "response"
         } else {
             "request"
@@ -1143,7 +1265,7 @@ fn assert_retry_stream_reduction(
             segment.iter().any(|event| match event {
                 LlmStreamEvent::Evidence(evidence) =>
                     evidence.execution_evidence.as_ref().and_then(|evidence| {
-                        if dialect == "codex.responses-websocket" {
+                        if response_identity {
                             evidence.provider_response_id.as_deref()
                         } else {
                             evidence.provider_request_id.as_deref()
@@ -1221,11 +1343,10 @@ fn assert_reasoning(parts: &[LlmOutputPart], expected: &str, dialect: &str, vari
     );
 }
 
-fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str) {
+fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str, expected_replayable: bool) {
     let replayable = parts.iter().any(|part| {
         matches!(part, LlmOutputPart::Reasoning { replay: Some(replay), .. } if !replay.is_empty())
     });
-    let expected_replayable = dialect != "openai.chat-completions";
     assert_eq!(
         replayable, expected_replayable,
         "{dialect} did not preserve the fixture's expected reasoning replay state"
@@ -1285,29 +1406,97 @@ fn assert_reasoning_rendered(parts: &[LlmOutputPart], dialect: &str) {
     );
 }
 
-fn assert_replay_origins(parts: &[LlmOutputPart], route: &lash_core::ProviderRouteIdentity) {
+#[derive(Clone, Copy, Debug)]
+enum ReplayExpectation {
+    ResponseText,
+    Reasoning,
+    Tool,
+}
+
+fn assert_declared_replay(
+    parts: &[LlmOutputPart],
+    route: &lash_core::ProviderRouteIdentity,
+    cell: &MatrixCell,
+    absent_declaration: CellDeclarationKind,
+    expectation: ReplayExpectation,
+    dialect: &str,
+    variation: &str,
+) {
+    if cell.declares(absent_declaration) {
+        assert_no_replay_state(parts, expectation, dialect, variation);
+    } else {
+        assert_replay_origins(parts, route, expectation, dialect, variation);
+    }
+}
+
+fn assert_replay_origins(
+    parts: &[LlmOutputPart],
+    route: &lash_core::ProviderRouteIdentity,
+    expectation: ReplayExpectation,
+    dialect: &str,
+    variation: &str,
+) {
+    let mut replay_parts = 0;
     for part in parts {
         let origin = match part {
             LlmOutputPart::Text {
                 response_meta: Some(meta),
                 ..
-            } if !meta.is_empty() => meta.origin.as_ref(),
+            } if !meta.is_empty() && matches!(expectation, ReplayExpectation::ResponseText) => {
+                meta.origin.as_ref()
+            }
             LlmOutputPart::Reasoning {
                 replay: Some(replay),
                 ..
-            } if !replay.is_empty() => replay.origin.as_ref(),
+            } if !replay.is_empty() && matches!(expectation, ReplayExpectation::Reasoning) => {
+                replay.origin.as_ref()
+            }
             LlmOutputPart::ToolCall {
                 replay: Some(replay),
                 ..
-            } if !replay.is_empty() => replay.origin.as_ref(),
+            } if !replay.is_empty() && matches!(expectation, ReplayExpectation::Tool) => {
+                replay.origin.as_ref()
+            }
             _ => continue,
         };
+        replay_parts += 1;
         assert_eq!(
             origin,
             Some(route),
-            "provider-owned replay state was not stamped"
+            "{variation} {dialect} provider-owned replay state was not stamped"
         );
     }
+    assert!(
+        replay_parts > 0,
+        "{variation} {dialect} expected {expectation:?} replay state but none was captured"
+    );
+}
+
+fn assert_no_replay_state(
+    parts: &[LlmOutputPart],
+    expectation: ReplayExpectation,
+    dialect: &str,
+    variation: &str,
+) {
+    let has_replay = parts.iter().any(|part| match part {
+        LlmOutputPart::Text {
+            response_meta: Some(meta),
+            ..
+        } => matches!(expectation, ReplayExpectation::ResponseText) && !meta.is_empty(),
+        LlmOutputPart::Reasoning {
+            replay: Some(replay),
+            ..
+        } => matches!(expectation, ReplayExpectation::Reasoning) && !replay.is_empty(),
+        LlmOutputPart::ToolCall {
+            replay: Some(replay),
+            ..
+        } => matches!(expectation, ReplayExpectation::Tool) && !replay.is_empty(),
+        _ => false,
+    });
+    assert!(
+        !has_replay,
+        "{variation} {dialect} declared no {expectation:?} replay state but captured some"
+    );
 }
 
 fn completion_route(dialect: &str) -> lash_core::ProviderRouteIdentity {

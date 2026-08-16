@@ -565,7 +565,15 @@ impl Provider for CodexProvider {
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
-        ProviderRouteIdentity::for_endpoint(self.kind(), &self.responses_url, model)
+        let endpoint = match self.transport {
+            CodexTransport::Websocket | CodexTransport::WebsocketCached => &self.websocket_url,
+            // Auto may fall back from WebSocket to SSE within one logical call,
+            // so its stable serving route remains the fallback-capable Responses
+            // endpoint. A transport-pinned WebSocket provider has no such
+            // ambiguity and reports the endpoint it actually serves from.
+            CodexTransport::Auto | CodexTransport::Sse => &self.responses_url,
+        };
+        ProviderRouteIdentity::for_endpoint(self.kind(), endpoint, model)
     }
 
     fn options(&self) -> ProviderOptions {
