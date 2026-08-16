@@ -140,7 +140,7 @@ pub(super) fn scenario_backend_regression_reference(
         "standard.empty_provider_response_error" | "standard.provider_error_without_checkpoint" => {
             (
                 "provider-protocol-terminalization",
-                "scripted provider mutation matrices classify retryable 429 and fail open on unknown dropped-terminal parser failures through every migrated provider parser",
+                "scripted provider mutation matrices classify retryable 429 and dropped-terminal parser failures through every migrated provider parser",
             )
         }
         "standard.streamed_text_finalizes_once"

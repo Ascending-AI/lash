@@ -88,44 +88,53 @@ pub struct DefaultProviderFailureClassifier;
 
 impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
     fn classify(&self, mut failure: ProviderFailure) -> ProviderFailure {
-        // A driver-owned kind, typed code, or terminal verdict is conclusive.
-        // Numeric HTTP codes are generic envelopes until the status mapping
-        // below classifies them.
-        let mut structurally_classified = failure.kind != ProviderFailureKind::Unknown
-            || failure.terminal_reason != LlmTerminalReason::ProviderError
+        // Driver-owned semantic evidence is conclusive. `Http`, a bare status,
+        // and its mirrored numeric code are the generic wire envelope, not a
+        // provider classification, so text fallbacks remain available there.
+        let retryability_classified = failure.retryability_is_classified();
+        let structurally_classified = !matches!(
+            failure.kind,
+            ProviderFailureKind::Unknown | ProviderFailureKind::Http
+        ) || failure.terminal_reason
+            != LlmTerminalReason::ProviderError
             || failure
                 .code
                 .as_deref()
-                .is_some_and(|code| code.parse::<u16>().is_err());
+                .is_some_and(|code| code.parse::<u16>().is_err())
+            || retryability_classified;
         if let Some(status) = failure.status.or_else(|| {
             failure
                 .code
                 .as_deref()
                 .and_then(|code| code.parse::<u16>().ok())
         }) {
-            structurally_classified = true;
             failure.status = Some(status);
+            let generic_kind = matches!(
+                failure.kind,
+                ProviderFailureKind::Unknown | ProviderFailureKind::Http
+            );
             if failure.kind == ProviderFailureKind::Unknown {
                 failure.kind = ProviderFailureKind::Http;
             }
-            failure.retryable =
-                matches!(status, 408 | 409 | 413 | 425 | 429 | 500 | 502 | 503 | 504);
-            if status == 429 {
+            if !retryability_classified {
+                failure.retryable = matches!(status, 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504);
+            }
+            if status == 429 && generic_kind {
                 // Provider-side throttling. `Quota` + `retryable: true` is the
                 // combination `ProviderHandle`'s retry ladder defers to as a
                 // throttle; hard quota exhaustion (the text markers below)
                 // downgrades to `retryable: false`.
                 failure.kind = ProviderFailureKind::Quota;
-            } else if matches!(status, 401 | 403) {
+            } else if matches!(status, 401 | 403) && generic_kind {
                 failure.kind = ProviderFailureKind::Auth;
-            } else if matches!(status, 400 | 413 | 422) {
+            } else if matches!(status, 400 | 413 | 422) && generic_kind {
                 failure.kind = ProviderFailureKind::Validation;
             }
         } else if matches!(
             failure.kind,
             ProviderFailureKind::Transport | ProviderFailureKind::Timeout
-        ) {
-            structurally_classified = true;
+        ) && !retryability_classified
+        {
             failure.retryable = true;
         }
 
@@ -160,28 +169,30 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
             && !haystack.contains("quota exceeded for metric")
             && !haystack.contains("retrydelay")
             && !haystack.contains("please retry");
-        if haystack.contains("insufficient_quota")
-            || haystack.contains("usage_limit_reached")
-            || haystack.contains("usage_not_included")
-            || haystack.contains("credit balance is too low")
-            || google_hard_quota
-        {
-            failure.kind = ProviderFailureKind::Quota;
-            failure.retryable = false;
-        }
-        if haystack.contains("content_filter")
-            || haystack.contains("prohibited_content")
-            || haystack.contains("safety")
-            || haystack.contains("sensitive")
-        {
-            failure.terminal_reason = LlmTerminalReason::ContentFilter;
-        }
-        if haystack.contains("model_not_found")
-            || haystack.contains("unsupported model")
-            || haystack.contains("does not exist")
-        {
-            failure.kind = ProviderFailureKind::Unsupported;
-            failure.retryable = false;
+        if !structurally_classified {
+            if haystack.contains("insufficient_quota")
+                || haystack.contains("usage_limit_reached")
+                || haystack.contains("usage_not_included")
+                || haystack.contains("credit balance is too low")
+                || google_hard_quota
+            {
+                failure.kind = ProviderFailureKind::Quota;
+                failure.retryable = false;
+            }
+            if haystack.contains("content_filter")
+                || haystack.contains("prohibited_content")
+                || haystack.contains("safety")
+                || haystack.contains("sensitive")
+            {
+                failure.terminal_reason = LlmTerminalReason::ContentFilter;
+            }
+            if haystack.contains("model_not_found")
+                || haystack.contains("unsupported model")
+                || haystack.contains("does not exist")
+            {
+                failure.kind = ProviderFailureKind::Unsupported;
+                failure.retryable = false;
+            }
         }
         if !structurally_classified
             && failure.kind == ProviderFailureKind::Unknown

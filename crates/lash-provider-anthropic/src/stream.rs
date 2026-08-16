@@ -184,7 +184,9 @@ impl AnthropicProvider {
             return Ok(());
         }
         let event = parse_event(raw).ok_or_else(|| {
-            LlmTransportError::new("Invalid Anthropic SSE payload").with_raw(raw.to_string())
+            LlmTransportError::new("Invalid Anthropic SSE payload")
+                .with_raw(raw.to_string())
+                .retryable(false)
         })?;
         let kind = event
             .get("type")

@@ -2658,7 +2658,7 @@ pub fn scenario_contract_generated_facts_for_semantic(
                 events,
                 "dropped_terminal_event",
                 "standard_empty_response_terminal_error",
-                "empty/unterminated provider output remains an unknown retryable provider error for every migrated parser",
+                "empty/unterminated provider output is classified as a terminal provider error by every migrated parser",
             )?,
         ]),
         "standard.provider_error_without_checkpoint" => Ok(vec![
@@ -3172,10 +3172,10 @@ fn provider_mutation_semantic_fact(
         );
     }
     if mutation == "dropped_terminal_event"
-        && !provider_dropped_terminal_event_fails_open(std::slice::from_ref(event))
+        && !provider_dropped_terminal_event_classified(std::slice::from_ref(event))
     {
         return Err(
-            "dropped-terminal provider mutation lacked unknown retryable parser classification proofs"
+            "dropped-terminal provider mutation lacked non-retryable parser classification proofs"
                 .to_string(),
         );
     }
@@ -6221,7 +6221,7 @@ fn protocol_terminal_state_semantics(
 ) -> bool {
     duplicate_free_stream_finalization(events, summary)
         && provider_rate_limit_terminalized_by_scripted_parsers(events)
-        && provider_dropped_terminal_event_fails_open(events)
+        && provider_dropped_terminal_event_classified(events)
 }
 
 fn queued_ingress_has_source_keys(events: &[DeliveredBoundary]) -> bool {
@@ -6449,7 +6449,7 @@ fn provider_rate_limit_terminalized_by_scripted_parsers(events: &[DeliveredBound
         })
 }
 
-fn provider_dropped_terminal_event_fails_open(events: &[DeliveredBoundary]) -> bool {
+fn provider_dropped_terminal_event_classified(events: &[DeliveredBoundary]) -> bool {
     events
         .iter()
         .filter(|event| event.kind == BoundaryKind::ProviderMutation)
@@ -6477,17 +6477,7 @@ fn provider_dropped_terminal_event_fails_open(events: &[DeliveredBoundary]) -> b
                             .get("classification")
                             .and_then(|classification| classification.get("retryable"))
                             .and_then(Value::as_bool)
-                            == Some(true)
-                        && proof
-                            .get("classification")
-                            .and_then(|classification| classification.get("kind"))
-                            .and_then(Value::as_str)
-                            == Some("Unknown")
-                        && proof
-                            .get("classification")
-                            .and_then(|classification| classification.get("terminal_reason"))
-                            .and_then(Value::as_str)
-                            == Some("provider_error")
+                            == Some(false)
                 })
                 .filter_map(|proof| proof.get("provider_kind").and_then(Value::as_str))
                 .collect::<BTreeSet<_>>();
@@ -9193,10 +9183,10 @@ mod tests {
                                 "openai-compatible"
                             ],
                             "proofs": [
-                                {"provider_kind": "openai-compatible", "terminal_reason": "provider_error", "classification": {"kind": "Unknown", "retryable": true, "terminal_reason": "provider_error"}},
-                                {"provider_kind": "openai", "terminal_reason": "provider_error", "classification": {"kind": "Unknown", "retryable": true, "terminal_reason": "provider_error"}},
-                                {"provider_kind": "anthropic", "terminal_reason": "provider_error", "classification": {"kind": "Unknown", "retryable": true, "terminal_reason": "provider_error"}},
-                                {"provider_kind": "google_oauth", "terminal_reason": "provider_error", "classification": {"kind": "Unknown", "retryable": true, "terminal_reason": "provider_error"}}
+                                {"provider_kind": "openai-compatible", "terminal_reason": "provider_error", "classification": {"retryable": false}},
+                                {"provider_kind": "openai", "terminal_reason": "provider_error", "classification": {"retryable": false}},
+                                {"provider_kind": "anthropic", "terminal_reason": "provider_error", "classification": {"retryable": false}},
+                                {"provider_kind": "google_oauth", "terminal_reason": "provider_error", "classification": {"retryable": false}}
                             ]
                         }
                     }

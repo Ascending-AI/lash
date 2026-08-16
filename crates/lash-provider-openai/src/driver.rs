@@ -254,7 +254,7 @@ pub(crate) async fn complete(
         Err(mut failure) => {
             let response_metadata = capture.into_metadata();
             if failure.request_body.is_none() {
-                failure.request_body = Some(request_body_for_error.clone());
+                failure.request_body = Some(Box::new(request_body_for_error.clone()));
             }
             if let Some(partial) = failure.partial_response.as_deref_mut()
                 && partial.request_body.is_none()

@@ -207,7 +207,7 @@ async fn extended_provider_trace_captures_exact_serialized_chat_body() {
         .expect("error-path provider request trace");
     assert_auth_material_absent(&error_event);
     assert_eq!(
-        error.request_body.as_deref(),
+        error.request_body.as_ref().map(|body| body.as_str()),
         Some(error_event.raw.as_str())
     );
     assert_auth_material_absent_from_error(&error);
@@ -240,7 +240,7 @@ async fn codex_sse_provider_trace_captures_exact_serialized_request_body() {
     };
     assert_eq!(request_event.raw.as_bytes(), observed_body.as_ref());
     assert_eq!(
-        error.request_body.as_deref(),
+        error.request_body.as_ref().map(|body| body.as_str()),
         Some(request_event.raw.as_str())
     );
 }
@@ -272,7 +272,7 @@ async fn codex_websocket_provider_trace_captures_exact_serialized_request_body()
     assert_eq!(observed_bodies.len(), 1);
     assert_eq!(request_event.raw.as_bytes(), observed_bodies[0]);
     assert_eq!(
-        error.request_body.as_deref(),
+        error.request_body.as_ref().map(|body| body.as_str()),
         Some(request_event.raw.as_str())
     );
 }

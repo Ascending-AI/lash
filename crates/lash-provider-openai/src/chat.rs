@@ -573,6 +573,7 @@ impl OpenAiCompatibleProvider {
         let event: ChatSseEvent<'_> = serde_json::from_str(raw).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions SSE payload: {e}"))
                 .with_raw(raw)
+                .retryable(false)
         })?;
         if let Some(error) = event.error.as_ref() {
             let retryable = responses_error_is_retryable(error);

@@ -14,7 +14,9 @@ pub fn process_sse_event(
         return Ok(());
     }
     let event: Value = serde_json::from_str(raw).map_err(|e| {
-        LlmTransportError::new(format!("Invalid {provider} SSE payload: {e}")).with_raw(raw)
+        LlmTransportError::new(format!("Invalid {provider} SSE payload: {e}"))
+            .with_raw(raw)
+            .retryable(false)
     })?;
     let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
     if event_type == "error" {

@@ -457,8 +457,8 @@ impl Provider for FailingProvider {
 }
 
 /// Fails `fail_until` calls with an HTTP-status failure (plus optional
-/// `Retry-After`), leaving kind/retryability to the classifier — the shape
-/// every wire provider produces for 429/5xx responses.
+/// `Retry-After`), leaving generic statuses to the classifier. Status 413
+/// models the Gemini upload driver's explicit validation verdict.
 #[derive(Clone, Debug)]
 struct StatusFailingProvider {
     options: ProviderOptions,
@@ -500,12 +500,17 @@ impl Provider for StatusFailingProvider {
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt <= self.fail_until {
-            let message = if self.status == 429 {
-                "throttled by provider"
-            } else {
-                "upstream unavailable"
+            let message = match self.status {
+                429 => "throttled by provider",
+                413 => "Request too large: attachment exceeds upload limit",
+                _ => "upstream unavailable",
             };
             let mut failure = LlmTransportError::new(message).with_status(self.status);
+            if self.status == 413 {
+                failure = failure
+                    .with_kind(ProviderFailureKind::Validation)
+                    .retryable(false);
+            }
             if let Some(retry_after) = self.retry_after {
                 failure = failure.with_retry_after(retry_after);
             }
@@ -853,7 +858,11 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
         &[("x-request-id".to_string(), "original-request".to_string())]
     );
     assert_eq!(
-        failure.error.request_body.as_deref(),
+        failure
+            .error
+            .request_body
+            .as_ref()
+            .map(|body| body.as_str()),
         Some("original request body")
     );
     let original = failure.call_record.attempts[0]
@@ -1890,6 +1899,38 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
     );
 }
 
+#[tokio::test]
+async fn provider_handle_attachment_413_remains_plain_non_retryable_validation() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let provider = StatusFailingProvider {
+        options: ProviderOptions {
+            reliability: ProviderReliability::default().max_attempts(3),
+            ..ProviderOptions::default()
+        },
+        attempts: Arc::clone(&attempts),
+        fail_until: 100,
+        status: 413,
+        retry_after: None,
+        retry_after_header: None,
+    };
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let error = handle
+        .complete(empty_request())
+        .await
+        .expect_err("attachment 413 is terminal validation");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(error.kind, ProviderFailureKind::Validation);
+    assert!(!error.retryable);
+    assert_eq!(error.code.as_deref(), Some("413"));
+    assert_eq!(error.terminal_reason, LlmTerminalReason::ProviderError);
+    assert_eq!(
+        error.message,
+        "Request too large: attachment exceeds upload limit"
+    );
+}
+
 #[test]
 fn default_failure_classifier_classifies_429_as_retryable_throttle() {
     let classifier = DefaultProviderFailureClassifier;
@@ -1969,13 +2010,41 @@ fn default_failure_classifier_uses_context_overflow_text_for_unclassified_failur
         "Mistral: Prompt contains too many tokens; too large for model with 128000 maximum context length",
         "z.ai: model_context_window_exceeded",
     ] {
-        let failure = classifier.classify(ProviderFailure::new(message));
+        let failure = classifier.classify(
+            ProviderFailure::new(message)
+                .with_kind(ProviderFailureKind::Http)
+                .with_status(400),
+        );
         assert_eq!(failure.kind, ProviderFailureKind::Validation);
         assert_eq!(
             failure.terminal_reason,
             crate::LlmTerminalReason::ContextOverflow
         );
         assert!(!failure.retryable);
+    }
+}
+
+#[test]
+fn generic_anthropic_and_google_http_overflow_envelopes_use_the_text_fallback() {
+    let classifier = DefaultProviderFailureClassifier;
+    for raw in [
+        r#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 250000 tokens > 200000 maximum"}}"#,
+        r#"{"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed"}}"#,
+    ] {
+        let failure = classifier.classify(
+            ProviderFailure::new("provider request failed with 400")
+                .with_kind(ProviderFailureKind::Http)
+                .with_status(400)
+                .with_raw(raw),
+        );
+
+        assert_eq!(failure.kind, ProviderFailureKind::Validation, "{raw}");
+        assert!(!failure.retryable, "{raw}");
+        assert_eq!(
+            failure.terminal_reason,
+            LlmTerminalReason::ContextOverflow,
+            "{raw}"
+        );
     }
 }
 
@@ -1992,6 +2061,16 @@ fn default_failure_classifier_fails_open_when_unclassified_text_is_uncertain() {
         failure.terminal_reason,
         crate::LlmTerminalReason::ProviderError
     );
+}
+
+#[test]
+fn default_failure_classifier_preserves_explicit_non_retryability() {
+    let failure = DefaultProviderFailureClassifier
+        .classify(ProviderFailure::new("Anthropic stream error: invalid request").retryable(false));
+
+    assert_eq!(failure.kind, ProviderFailureKind::Unknown);
+    assert!(!failure.retryable);
+    assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
 }
 
 #[test]
@@ -2013,6 +2092,46 @@ fn default_failure_classifier_does_not_override_structured_user_echo() {
         failure.terminal_reason,
         crate::LlmTerminalReason::ProviderError
     );
+}
+
+#[test]
+fn default_failure_classifier_does_not_override_structured_hard_quota_echo() {
+    let failure = DefaultProviderFailureClassifier.classify(
+        ProviderFailure::new("request rejected")
+            .with_kind(ProviderFailureKind::Validation)
+            .with_code("invalid_request_error")
+            .with_raw(r#"{"echo":"insufficient_quota"}"#),
+    );
+
+    assert_eq!(failure.kind, ProviderFailureKind::Validation);
+    assert!(!failure.retryable);
+    assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
+}
+
+#[test]
+fn default_failure_classifier_does_not_override_structured_content_filter_echo() {
+    let failure = DefaultProviderFailureClassifier.classify(
+        ProviderFailure::new("request rejected")
+            .with_kind(ProviderFailureKind::Validation)
+            .with_code("invalid_request_error")
+            .with_raw(r#"{"echo":"the user asked about safety"}"#),
+    );
+
+    assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
+}
+
+#[test]
+fn default_failure_classifier_does_not_override_structured_unsupported_model_echo() {
+    let failure = DefaultProviderFailureClassifier.classify(
+        ProviderFailure::new("request rejected")
+            .with_kind(ProviderFailureKind::Validation)
+            .with_code("invalid_request_error")
+            .with_raw(r#"{"echo":"the example model does not exist"}"#),
+    );
+
+    assert_eq!(failure.kind, ProviderFailureKind::Validation);
+    assert!(!failure.retryable);
+    assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
 }
 
 #[test]

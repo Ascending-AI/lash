@@ -10,6 +10,7 @@ pub struct HttpTransportError {
     pub kind: ProviderFailureKind,
     pub message: String,
     pub retryable: bool,
+    retryability_classified: bool,
     pub status: Option<u16>,
     /// Cold raw provider evidence stays off the inline `Result` error path.
     pub raw: Option<Box<String>>,
@@ -18,7 +19,8 @@ pub struct HttpTransportError {
     /// Cold diagnostic metadata stays off the inline `Result` error path.
     pub headers: Box<Vec<(String, String)>>,
     pub retry_after: Option<std::time::Duration>,
-    pub request_body: Option<String>,
+    /// Cold request evidence stays off the inline `Result` error path.
+    pub request_body: Option<Box<String>>,
     /// The adapter observed provider-generated output before this failure,
     /// including output that cannot yet be projected into an [`LlmResponse`]
     /// part (for example unfinished tool arguments or opaque reasoning).
@@ -34,6 +36,7 @@ impl HttpTransportError {
             kind: ProviderFailureKind::Unknown,
             message: message.into(),
             retryable: false,
+            retryability_classified: false,
             status: None,
             raw: None,
             code: None,
@@ -53,7 +56,14 @@ impl HttpTransportError {
 
     pub fn retryable(mut self, retryable: bool) -> Self {
         self.retryable = retryable;
+        self.retryability_classified = true;
         self
+    }
+
+    /// Whether the driver explicitly classified retryability at the transport
+    /// boundary, including an explicit non-retryable verdict.
+    pub fn retryability_is_classified(&self) -> bool {
+        self.retryability_classified
     }
 
     pub fn with_status(mut self, status: u16) -> Self {
@@ -101,7 +111,7 @@ impl HttpTransportError {
     }
 
     pub fn with_request_body(mut self, request_body: impl Into<String>) -> Self {
-        self.request_body = Some(request_body.into());
+        self.request_body = Some(Box::new(request_body.into()));
         self
     }
 

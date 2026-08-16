@@ -313,7 +313,7 @@ pub(super) fn write_generated_backend_regression_fixtures(
             fixture_id: "provider-protocol-terminalization",
             required_boundary_kinds: &["provider_mutation"],
             semantic_oracles: &["sim.oracle.state-machine-semantic-invariants.v1"],
-            regression_contract: "scripted provider mutation matrices classify retryable 429 and fail open on unknown dropped-terminal parser failures through every migrated provider parser",
+            regression_contract: "scripted provider mutation matrices classify retryable 429 and dropped-terminal parser failures through every migrated provider parser",
             predicate: trace_has_provider_protocol_terminalization,
         },
         BackendRegressionSpec {

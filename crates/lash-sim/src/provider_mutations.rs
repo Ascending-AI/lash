@@ -710,6 +710,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dropped_terminal_parser_failures_are_explicitly_non_retryable() {
+        let matrix = execute_provider_mutation_matrix("dropped_terminal_event")
+            .await
+            .expect("dropped-terminal provider mutation matrix");
+
+        for proof in matrix["matrix"]["proofs"]
+            .as_array()
+            .expect("provider parser proofs")
+        {
+            assert_eq!(
+                proof["classification"]["retryable"],
+                false,
+                "{} parser must declare a truncated terminal event non-retryable: {proof}",
+                proof["provider_kind"].as_str().unwrap_or("unknown")
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn transport_mutations_classify_on_distinct_named_paths() {
         let expectations = [
             ("mid_stream_disconnect", "Stream", true, None),

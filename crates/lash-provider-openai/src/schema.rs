@@ -8,7 +8,6 @@ fn error_object(value: &Value) -> Option<&Value> {
         .get("response")
         .and_then(|response| response.get("error"))
         .or_else(|| value.get("error"))
-        .or_else(|| value.is_object().then_some(value))
 }
 
 pub(crate) fn classify_openai_error(
@@ -27,10 +26,25 @@ pub(crate) fn classify_openai_error(
     };
 
     failure.code = Some(code.to_string());
-    if code == "context_length_exceeded" && matches!(failure.status, None | Some(400)) {
-        failure.kind = ProviderFailureKind::Validation;
-        failure.retryable = false;
-        failure.terminal_reason = LlmTerminalReason::ContextOverflow;
+    match code {
+        "context_length_exceeded" if matches!(failure.status, None | Some(400)) => {
+            failure.kind = ProviderFailureKind::Validation;
+            failure = failure.retryable(false);
+            failure.terminal_reason = LlmTerminalReason::ContextOverflow;
+        }
+        "insufficient_quota" | "usage_limit_reached" | "usage_not_included" => {
+            failure.kind = ProviderFailureKind::Quota;
+            failure = failure.retryable(false);
+        }
+        "content_filter" | "prohibited_content" => {
+            failure = failure.retryable(false);
+            failure.terminal_reason = LlmTerminalReason::ContentFilter;
+        }
+        "model_not_found" | "unsupported_model" => {
+            failure.kind = ProviderFailureKind::Unsupported;
+            failure = failure.retryable(false);
+        }
+        _ => {}
     }
     failure
 }
@@ -64,4 +78,32 @@ pub fn responses_error_is_retryable(value: &Value) -> bool {
                         | "rate_limit_exceeded"
                 )
             })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn top_level_error_event_type_is_not_a_typed_provider_code() {
+        let failure = classify_openai_error(
+            &serde_json::json!({"type": "error", "message": "stream failed"}),
+            LlmTransportError::new("stream failed"),
+        );
+
+        assert_eq!(failure.code, None);
+    }
+
+    #[test]
+    fn response_failed_event_type_is_not_a_typed_provider_code() {
+        let failure = classify_openai_error(
+            &serde_json::json!({
+                "type": "response.failed",
+                "response": {"status": "failed"}
+            }),
+            LlmTransportError::new("response failed"),
+        );
+
+        assert_eq!(failure.code, None);
+    }
 }

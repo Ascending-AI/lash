@@ -121,6 +121,7 @@ impl GoogleOAuthProvider {
             let value: Value = serde_json::from_str(&text).map_err(|e| {
                 LlmTransportError::new(format!("Invalid Cloud Code response JSON: {e}"))
                     .with_raw(text.clone())
+                    .retryable(false)
             })?;
             let origin_model = request.get("model").and_then(Value::as_str);
             let parts = Self::response_parts_from_value(&value, origin_model);
