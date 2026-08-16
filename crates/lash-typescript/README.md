@@ -398,7 +398,7 @@ strings implement `$$`, `$&`, ``$` ``, `$'`, `$1` through `$99`, and
 
 ## Standard-library inventory
 
-The v1 inventory contains 144 owner-qualified method names: 59 static methods
+The v1 inventory contains 145 owner-qualified method names: 60 static methods
 and 85 instance method names. The signature table is also the source of the
 model prompt; optional arguments are explicit rather than hidden behind an
 "ECMA optional arguments" qualifier.
@@ -424,8 +424,13 @@ The shipped static families are:
   `cbrt`, `ceil`, `clz32`, `cos`, `cosh`, `exp`, `expm1`, `floor`, `fround`,
   `hypot`, `imul`, `log`, `log1p`, `log10`, `log2`, `round`, `sin`, `sinh`,
   `tan`, `tanh`, `trunc`, `max`, `min`, `pow`, `sqrt`, and `sign`, with their
-  ordinary ECMA arities. `PI`, `E`, `LN2`, `LN10`, `LOG2E`, `LOG10E`,
-  `SQRT2`, and `SQRT1_2` are accepted constants.
+  ordinary ECMA arities, plus `random()`. `PI`, `E`, `LN2`, `LN10`, `LOG2E`,
+  `LOG10E`, `SQRT2`, and `SQRT1_2` are accepted constants.
+  `Math.random()` is not a computation: it is a journaled host effect on the
+  same seam as `Date.now()`, so the draw is recorded on the first execution and
+  replayed exactly on every later one. A replayed turn sees the same sequence
+  it saw the first time, which is what makes it admissible in a durable
+  program at all.
 - URL: `canParse(input[, base])`.
 
 The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,

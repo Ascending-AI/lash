@@ -254,7 +254,7 @@ fn instance_method_inventory_matches_the_lowerer() {
         "the register documents {unaccepted:?}, which the lowerer does not accept"
     );
     assert_eq!(documented.len(), 85);
-    assert_eq!(lash_typescript::stdlib_name_count(), 144);
+    assert_eq!(lash_typescript::stdlib_name_count(), 145);
     for candidate in ["pop", "push", "shift", "unshift", "substr"] {
         assert!(
             !lash_typescript::accepts_instance_method(candidate),

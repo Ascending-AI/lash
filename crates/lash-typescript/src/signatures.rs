@@ -79,6 +79,11 @@ pub(crate) const STATIC_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
     ("Math", "max", "...values"),
     ("Math", "min", "...values"),
     ("Math", "pow", "base, exponent"),
+    // A journaled host effect, not a computation: the draw is recorded on the
+    // first execution and replayed exactly on every later one, which is the
+    // same seam `Date.now()` uses. It is in the inventory because the call is
+    // accepted; the note on it is what keeps the surface honest.
+    ("Math", "random", ""),
     ("Math", "sqrt", "value"),
     ("Math", "sign", "value"),
     ("URL", "canParse", "input[, base]"),
