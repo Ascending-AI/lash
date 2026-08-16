@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::javascript_array_index_key;
+use std::borrow::Cow;
 
 impl Heap {
     pub(crate) fn delete_javascript_member(
@@ -180,14 +181,29 @@ impl Heap {
             target_id = child_id;
         }
 
-        let is_last_index = match *leaf {
-            CompiledAssignPathStep::Field(field) => names[field].text.as_ref() == "lastIndex",
+        let leaf_key: Option<Cow<'_, str>> = match *leaf {
+            CompiledAssignPathStep::Field(field) => {
+                Some(Cow::Borrowed(names[field].text.as_ref()))
+            }
             CompiledAssignPathStep::Index => indexes
                 .get(index_cursor)
                 .map(|index| self.javascript_to_string(index))
                 .transpose()?
-                .is_some_and(|key| key == "lastIndex"),
+                .map(Cow::Owned),
         };
+        // `o[key] = v` where `key` only turns out to be `__proto__` here. The
+        // value model is dense records with no prototype chain, so the write
+        // has nowhere to land except as an ordinary data key — which reads back
+        // as data where node's accessor would have changed what the object
+        // inherits. The compile-time guard covers every statically named form;
+        // this is the one that is only knowable at the write.
+        if let Some(error) = leaf_key
+            .as_deref()
+            .and_then(crate::runtime::access::prototype_chain_key_error)
+        {
+            return Err(error);
+        }
+        let is_last_index = leaf_key.as_deref() == Some("lastIndex");
         if is_last_index && matches!(self.get(target_id)?, HeapObject::RegExp(_)) {
             let imported = self.import_values(vec![value], 1)?.remove(0);
             let last_index = regexp_last_index(self.javascript_to_number(&imported)?);

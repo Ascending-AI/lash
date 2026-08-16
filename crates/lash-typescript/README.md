@@ -182,6 +182,16 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- The value model is dense records with no prototype chain, so `__proto__`,
+  `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`, and
+  `__lookupSetter__` all reject as `TS_PROTOTYPE_MUTATION_UNSUPPORTED` — as a
+  member name, as a quoted property, and as an object-literal key. A computed
+  key that only resolves to one of these names at the access rejects at runtime
+  under the same code, because the two alternatives are both silent: a read
+  would answer `undefined` where Node answers the prototype, and a write would
+  store a data key that nothing ever reads through. One over-rejection follows
+  from having only the runtime name: `{ [key]: v }` with a computed
+  `"__proto__"` is an ordinary data property in Node, and refuses here.
 - A `map` callback runs inside the VM and cannot perform effects. `console.log`,
   a tool call, or any other effect inside one terminates with the typed
   `EffectInBuiltinCallback` error. The callback is ordinary synchronous code:

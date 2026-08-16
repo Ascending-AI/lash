@@ -678,3 +678,36 @@ fn property_removal_preserves_the_surviving_order() {
         Value::String(r#"{"a":1,"c":3,"d":4}"#.into())
     );
 }
+
+/// A computed key that only turns out to be `__proto__` at the access refuses
+/// by name rather than diverging silently.
+///
+/// The static forms are rejected by the adapter (see `rejections.rs`). Here the
+/// name is not knowable until the access, and the value model has no prototype
+/// chain: node would answer the read with `Object.prototype` and let the write
+/// change what the object inherits, while a dense record can only answer
+/// `undefined` and store a data key nothing reads through. Both are silent
+/// divergences, so both refuse.
+#[test]
+fn a_computed_prototype_chain_key_refuses_by_name() {
+    for source in [
+        "const o: any = {}; const key = '__pro' + 'to__'; o[key] = { x: 1 }; finish(1);",
+        "const o: any = { a: 1 }; const key = '__pro' + 'to__'; finish(o[key]);",
+        "const key = '__pro' + 'to__'; const o: any = { [key]: 1 }; finish(1);",
+        "const o: any = {}; const key = '__define' + 'Getter__'; finish(o[key]);",
+    ] {
+        let error = execute(source).expect_err("a computed prototype-chain key must refuse");
+        assert!(
+            error
+                .to_string()
+                .contains("TS_PROTOTYPE_MUTATION_UNSUPPORTED"),
+            "{source}: {error}"
+        );
+    }
+
+    // A name that merely looks similar is an ordinary data key.
+    assert_eq!(
+        finished("const o: any = { prototypeish: 1 }; finish(o.prototypeish);"),
+        Value::Number(1.0)
+    );
+}

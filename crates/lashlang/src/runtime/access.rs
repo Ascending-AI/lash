@@ -157,10 +157,38 @@ pub(crate) fn read_javascript_index_direct(
     read_javascript_index_direct_with_key(target, &key)
 }
 
+/// Property names whose ECMA meaning is the prototype chain.
+///
+/// The value model is dense records with no prototypes, so none of these names
+/// has anything to read or mutate here. Every statically written form is
+/// rejected by the TypeScript adapter; a computed key is only knowable at the
+/// access, and the two honest answers there are `undefined` — silently
+/// divergent from node, where `o[k]` with `k === '__proto__'` yields the
+/// prototype and `o[k] = v` changes what the object inherits — or a named
+/// rejection. It rejects.
+pub(crate) fn prototype_chain_key_error(key: &str) -> Option<RuntimeError> {
+    matches!(
+        key,
+        "__proto__"
+            | "__defineGetter__"
+            | "__defineSetter__"
+            | "__lookupGetter__"
+            | "__lookupSetter__"
+    )
+    .then(|| RuntimeError::ValidationFailed {
+        reason: format!(
+            "TS_PROTOTYPE_MUTATION_UNSUPPORTED: `{key}` reaches the prototype chain, which this value model does not have"
+        ),
+    })
+}
+
 pub(crate) fn read_javascript_index_direct_with_key(
     target: Value,
     key: &str,
 ) -> Result<Value, RuntimeError> {
+    if let Some(error) = prototype_chain_key_error(key) {
+        return Err(error);
+    }
     match target {
         Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index_key(key)
             .and_then(|index| values.get(index).cloned())
@@ -252,6 +280,9 @@ pub(crate) fn read_javascript_heap_index(
     index: &Value,
 ) -> Result<Value, RuntimeError> {
     let key = heap.javascript_to_string(index)?;
+    if let Some(error) = prototype_chain_key_error(&key) {
+        return Err(error);
+    }
     Ok(match heap.get(id)? {
         HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
             .and_then(|index| values.get(index).cloned())

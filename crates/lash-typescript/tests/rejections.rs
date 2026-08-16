@@ -314,3 +314,51 @@ fn date_rejections_name_the_deterministic_repair() {
         assert!(error.to_string().contains(repair), "{source}: {error}");
     }
 }
+
+// The prototype chain. The census has claimed
+// `TS_PROTOTYPE_MUTATION_UNSUPPORTED` for `__proto__` and the accessor family
+// since it was written, while the guard matched only the literal name
+// `prototype` — so `o.__proto__ = base` compiled and ran, landing as an
+// ordinary data key that nothing ever reads through. These are the four static
+// shapes; the computed one is only knowable at the access and is covered in
+// `ecma_regressions.rs`.
+rejection_test!(
+    rejects_proto_member_write,
+    "const o: any = {}; o.__proto__ = { x: 1 };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_member_read,
+    "const o: any = { a: 1 }; finish(o.__proto__);",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_string_property,
+    "const o: any = {}; o['__proto__'] = { x: 1 };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_object_literal_key,
+    "const o: any = { __proto__: { x: 1 } };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_proto_quoted_object_literal_key,
+    "const o: any = { '__proto__': { x: 1 } };",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_define_getter,
+    "const o: any = {}; o.__defineGetter__('x', () => 1);",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_define_setter,
+    "const o: any = {}; o.__defineSetter__('x', (v: number) => v);",
+    Code::PrototypeMutationUnsupported
+);
+rejection_test!(
+    rejects_lookup_getter,
+    "const o: any = {}; finish(o.__lookupGetter__('x'));",
+    Code::PrototypeMutationUnsupported
+);
