@@ -101,6 +101,10 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "sort",
     "some",
     "splice",
+    "push",
+    "pop",
+    "shift",
+    "unshift",
     "split",
     "search",
     "startsWith",
@@ -207,6 +211,10 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
                 | "some"
                 | "sort"
                 | "splice"
+                | "push"
+                | "pop"
+                | "shift"
+                | "unshift"
                 | "toReversed"
                 | "toSorted"
                 | "toSpliced"

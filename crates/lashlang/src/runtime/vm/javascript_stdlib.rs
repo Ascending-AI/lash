@@ -66,7 +66,7 @@ pub(super) fn normalized_instance_arguments(method: &str, args: &[Value]) -> Vec
         "fill" => 3,
         "slice" | "substring" => 2,
         "reverse" | "toReversed" | "toLowerCase" | "toUpperCase" | "trim" | "trimStart"
-        | "trimEnd" | "toString" | "valueOf" => 0,
+        | "trimEnd" | "toString" | "valueOf" | "pop" | "shift" => 0,
         _ => return args.to_vec(),
     };
     normalized_arguments(args, arity)

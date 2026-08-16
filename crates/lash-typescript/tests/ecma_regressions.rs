@@ -711,3 +711,93 @@ fn a_computed_prototype_chain_key_refuses_by_name() {
         Value::Number(1.0)
     );
 }
+
+/// The four end-of-array mutators, with their ECMA return values and the
+/// composition that made their absence a wall.
+///
+/// Without `push`, the ordinary accumulate-in-a-callback shape —
+/// `const out = []; xs.forEach(v => { out.push(v); })` — was a compile-time
+/// rejection, which is the single most common thing a model writes. They mutate
+/// the live receiver through the same path `splice` uses, so aliases see the
+/// change and the heap budget is charged for the growth.
+#[test]
+fn array_end_mutators_are_node_exact_and_mutate_the_live_receiver() {
+    for (source, expected) in [
+        ("const xs = [1, 2]; finish(xs.push(3));", 3.0),
+        ("const xs: number[] = []; finish(xs.push());", 0.0),
+        ("const xs = [1, 2]; finish(xs.pop());", 2.0),
+        ("const xs = [1, 2]; finish(xs.shift());", 1.0),
+        ("const xs = [1, 2]; finish(xs.unshift(0));", 3.0),
+        ("const xs = [1, 2]; xs.pop(); finish(xs.length);", 1.0),
+        // An alias sees the mutation: the receiver is the live heap array.
+        (
+            "const xs = [1, 2]; const ys = xs; ys.push(3); finish(xs.length);",
+            3.0,
+        ),
+    ] {
+        assert_eq!(finished(source), Value::Number(expected), "{source}");
+    }
+
+    for source in [
+        "const xs: number[] = []; finish(xs.pop() === undefined);",
+        "const xs: number[] = []; finish(xs.shift() === undefined);",
+        "const xs: number[] = []; xs.pop(); finish(xs.length === 0);",
+    ] {
+        assert_eq!(finished(source), Value::Bool(true), "{source}");
+    }
+
+    for (source, expected) in [
+        (
+            "const xs = [1, 2]; xs.push(3, 4); finish(xs.join(','));",
+            "1,2,3,4",
+        ),
+        (
+            "const xs = [1, 2]; xs.unshift(-1, 0); finish(xs.join(','));",
+            "-1,0,1,2",
+        ),
+        // The rejection wall this closes.
+        (
+            "const out: number[] = []; [1, 2, 3].forEach((v: number) => { out.push(v * 2); }); finish(out.join(','));",
+            "2,4,6",
+        ),
+        (
+            "const xs = [1, 2, 3]; const out: number[] = []; while (xs.length > 0) { out.push(xs.shift()); } finish(out.join(','));",
+            "1,2,3",
+        ),
+    ] {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+
+    // The receiver must be an array; the methods are not a general surface.
+    lash_typescript::compile("finish('ab'.push('c'));")
+        .expect_err("a string receiver has no `push`");
+    execute("const m = new Map(); finish(m.push(1));").expect_err("a Map receiver has no `push`");
+}
+
+/// Growth through `push` is charged against the heap budget like any other
+/// allocation, so a loop that pushes without end refuses instead of consuming
+/// the process. The bound here is small so the refusal arrives early; on a
+/// default host the same loop meets `DEFAULT_HOST_MEMORY_LIMIT_BYTES`.
+#[test]
+fn pushing_past_the_memory_budget_is_a_clean_refusal() {
+    let program = lash_typescript::compile(
+        "const xs: string[] = []; const chunk = 'x'.repeat(65536); for (let i = 0; i < 10000; i++) { xs.push(chunk); } finish(xs.length);",
+    )
+    .expect("an unbounded push loop compiles");
+    let environment = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
+        ExecutionBound::Unbounded,
+        ExecutionBound::Unbounded,
+        ExecutionBound::logical_bytes(4 * 1024 * 1024),
+    ));
+    assert!(
+        matches!(
+            futures::executor::block_on(lashlang::execute(
+                &program,
+                &mut State::new(),
+                &environment
+            )),
+            Err(RuntimeError::MemoryLimitExceeded { .. })
+        ),
+        "an unbounded push loop must refuse against the budget"
+    );
+}

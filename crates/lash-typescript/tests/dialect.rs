@@ -682,3 +682,46 @@ fn a_process_suspended_inside_for_of_resumes() {
         );
     });
 }
+
+/// An array mutated with `push` survives a park in the middle of the loop that
+/// is filling it.
+///
+/// `push`/`pop`/`shift`/`unshift` mutate a live heap array, so the half-filled
+/// array is durable state at every suspension point inside the loop. This runs
+/// to the first effect, captures the continuation, encodes and decodes it as
+/// the durable path does, resumes from the decoded form, and asserts the
+/// finished array is the one an uninterrupted run produces.
+#[test]
+fn array_mutators_survive_a_park_in_the_middle_of_the_loop() {
+    let source = "const out: number[] = []; for (let i = 0; i < 4; i++) { out.push(i); print(out.length); } out.unshift(-1); out.pop(); finish(out.join(','));";
+    let program = lash_typescript::compile(source).expect("the mutating loop should compile");
+
+    let resumed = futures::executor::block_on(async {
+        let mut state = State::new();
+        let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install VM state");
+        assert_eq!(
+            vm.run_process_until_effect()
+                .await
+                .expect("run to the first print"),
+            VmRunOutcome::EffectCompleted
+        );
+        let continuation = vm.suspend().expect("capture the mid-loop continuation");
+        let encoded = serde_json::to_vec(&continuation).expect("encode the continuation");
+        let decoded = serde_json::from_slice(&encoded).expect("decode the continuation");
+        let mut vm = Vm::resume_from(decoded, &program, &Host).expect("resume mid-loop");
+        loop {
+            match vm.run_process_until_effect().await.expect("resume to finish") {
+                VmRunOutcome::EffectCompleted => continue,
+                other => break other,
+            }
+        }
+    });
+
+    let expected = ExecutionOutcome::Finished(Value::String("-1,0,1,2".into()));
+    assert_eq!(run(source), expected, "the uninterrupted run is the reference");
+    assert_eq!(
+        resumed,
+        VmRunOutcome::Complete(expected),
+        "the resumed run must reach the same finish"
+    );
+}

@@ -398,8 +398,8 @@ strings implement `$$`, `$&`, ``$` ``, `$'`, `$1` through `$99`, and
 
 ## Standard-library inventory
 
-The v1 inventory contains 145 owner-qualified method names: 60 static methods
-and 85 instance method names. The signature table is also the source of the
+The v1 inventory contains 149 owner-qualified method names: 60 static methods
+and 89 instance method names. The signature table is also the source of the
 model prompt; optional arguments are explicit rather than hidden behind an
 "ECMA optional arguments" qualifier.
 
@@ -438,7 +438,8 @@ The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
 `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `forEach`,
 `get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `match`, `matchAll`,
 `every`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `reduce`,
-`reduceRight`, `reverse`, `slice`, `sort`, `some`, `splice`, `split`, `search`,
+`reduceRight`, `reverse`, `slice`, `sort`, `some`, `splice`, `push`, `pop`,
+`shift`, `unshift`, `split`, `search`,
 `startsWith`, `substring`, `toExponential`, `toFixed`, `toPrecision`,
 `toReversed`, `toSorted`, `toSpliced`, `set`, `keys`, `toLowerCase`,
 `toUpperCase`, `toString`, `trim`, `trimEnd`, `trimStart`, `test`, `valueOf`, `values`,
@@ -455,7 +456,11 @@ the durable VM callback driver. `sort` is stable, mutates and returns its
 receiver; `toSorted`, `toReversed`, `toSpliced`, and `with` return fresh arrays.
 The array representation is dense: `arr.length = 0` is accepted, while writes
 that would create holes reject as `TS_SPARSE_ARRAY_UNSUPPORTED` instead of
-silently changing callback semantics.
+silently changing callback semantics. `push`, `pop`, `shift`, and `unshift`
+mutate the receiver in place with their ECMA return values — the new length for
+`push`/`unshift`, the removed element or `undefined` for `pop`/`shift` — and
+compose with the callback methods, so accumulating into an array inside
+`forEach` is the ordinary form it is everywhere else.
 
 `localeCompare`, `toLocaleString`, and `Intl` remain rejected because locale
 data is host-dependent. Rewrite comparisons as
@@ -569,7 +574,7 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 527 rows, of which 454 are distinct
+The Node differential table carries 541 rows, of which 468 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
 that of the 448 unique rows rather than of 521 distinct behaviours. Both counts

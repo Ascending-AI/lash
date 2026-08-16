@@ -42,6 +42,38 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.heap.replace_javascript_list(receiver, values)?;
                 self.heap.allocate_list(removed)?
             }
+            // The four ends-of-the-array mutators. They ride the same
+            // live-receiver path `splice` established: mutate the cloned
+            // vector, hand it back through `replace_javascript_list` so the
+            // byte accounting and the memory bound answer, and return what
+            // ECMA returns — the new length for the growing pair, the removed
+            // element (or `undefined`) for the shrinking one.
+            "push" => {
+                values.extend(args.iter().cloned());
+                let length = values.len();
+                self.heap.replace_javascript_list(receiver, values)?;
+                Value::Number(length as f64)
+            }
+            "unshift" => {
+                values.splice(0..0, args.iter().cloned());
+                let length = values.len();
+                self.heap.replace_javascript_list(receiver, values)?;
+                Value::Number(length as f64)
+            }
+            "pop" => {
+                let removed = values.pop().unwrap_or(Value::Undefined);
+                self.heap.replace_javascript_list(receiver, values)?;
+                removed
+            }
+            "shift" => {
+                let removed = if values.is_empty() {
+                    Value::Undefined
+                } else {
+                    values.remove(0)
+                };
+                self.heap.replace_javascript_list(receiver, values)?;
+                removed
+            }
             "sort" if args.is_empty() || matches!(args, [Value::Undefined]) => {
                 let mut keyed = values
                     .into_iter()
