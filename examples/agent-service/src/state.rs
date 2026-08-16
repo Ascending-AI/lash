@@ -299,7 +299,7 @@ pub(crate) mod anyhow_like {
 /// surfaces as a protocol error; a narrower match would need the plugin's error
 /// type in this example's dependency set. A wrong answer here can only make a
 /// genuinely broken open retry once without the dialect and fail again.
-fn is_dialect_pin_conflict(error: &lash::EmbedError) -> bool {
+pub(crate) fn is_dialect_pin_conflict(error: &lash::EmbedError) -> bool {
     error.to_string().contains("RLM dialect is durably pinned")
 }
 

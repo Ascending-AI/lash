@@ -370,7 +370,13 @@ mod tests {
         .expect("lashlang options");
         let error = resolve_rlm_session_options(&recorded, &mismatch, true)
             .expect_err("a durable dialect cannot change on reopen");
-        assert!(error.to_string().contains("durably pinned to `typescript`"));
+        assert!(
+            error.to_string().contains(
+                "RLM dialect is durably pinned to `typescript` and cannot be reopened as `lashlang`"
+            ),
+            "error message must contain the full pinned message: {error}"
+        );
+        assert!(error.to_string().contains("RLM dialect is durably pinned"));
     }
 
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
