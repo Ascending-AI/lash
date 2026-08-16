@@ -40,7 +40,8 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
     tracing::warn!(error = %error, declined_total, "{message}");
 }
 
-const LASHLANG_SEGMENT_STATE_VERSION: u32 = 2;
+// v3 embeds VM continuation v7, including durable RegExp match arrays.
+const LASHLANG_SEGMENT_STATE_VERSION: u32 = 3;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

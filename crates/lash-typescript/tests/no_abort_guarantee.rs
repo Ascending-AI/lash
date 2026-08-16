@@ -477,3 +477,30 @@ fn an_unavailable_reservation_is_a_resource_diagnostic() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// RegExp parsing has its own bounded preflight and must fail closed before a
+/// hostile literal can drive the backing parser or executor into an abort.
+#[test]
+fn regexp_size_depth_and_giant_quantifiers_fail_without_aborting() {
+    let too_long = format!("/{}/;", "a".repeat(4_097));
+    let error = lash_typescript::validate(&too_long).expect_err("long RegExp must reject");
+    assert_eq!(error.code.as_str(), "TS_REGEX_PATTERN_TOO_LONG");
+
+    let too_deep = format!("/{}a{}/;", "(".repeat(33), ")".repeat(33));
+    let error = lash_typescript::validate(&too_deep).expect_err("deep RegExp must reject");
+    assert_eq!(error.code.as_str(), "TS_REGEX_PATTERN_NESTING_LIMIT");
+
+    for pattern in [
+        "/a{1,999999999999999999999999999999}/;",
+        "/(?:a{999999999999999999999999999999})+b/;",
+        "/(?=(a+)+$)a{999999999999999999999999999999}/;",
+    ] {
+        match lash_typescript::validate(pattern) {
+            Ok(()) => {}
+            Err(error) => assert!(
+                error.code.as_str().starts_with("TS_REGEX_"),
+                "hostile RegExp has a named diagnostic: {error}"
+            ),
+        }
+    }
+}

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
-// v11 carries Lashlang snapshot v5, whose stricter heap reference wire shape
+// v12 carries Lashlang snapshot v6 and its durable RegExpMatch heap kind.
+// v11 carried Lashlang snapshot v5, whose stricter heap reference wire shape
 // changes embedded global bytes and therefore their component identities.
 // v10 added serializable lashlang call frames and closure heap objects. v9 was
 // one shape carrying two changes that each claimed v8 independently:
@@ -8,7 +9,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub(super) const RLM_SNAPSHOT_VERSION: u32 = 11;
+pub(super) const RLM_SNAPSHOT_VERSION: u32 = 12;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

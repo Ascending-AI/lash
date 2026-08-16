@@ -30,9 +30,43 @@ rejection_test!(
     Code::LabelUnsupported
 );
 rejection_test!(
-    rejects_regular_expressions,
-    "const r = /x/;",
-    Code::RegExpUnsupported
+    rejects_regexp_indices_flag,
+    "const r = /x/d;",
+    Code::RegexIndicesFlagUnsupported
+);
+rejection_test!(
+    rejects_regexp_unicode_sets_flag,
+    "const r = /x/v;",
+    Code::RegexUnicodeSetsFlagUnsupported
+);
+
+#[test]
+fn retained_match_all_iterator_has_a_sink_repair() {
+    let error = lash_typescript::validate("const matches = 'a'.matchAll(/a/g);")
+        .expect_err("matchAll must be consumed directly");
+    assert_eq!(error.code, Code::RegexIteratorPosition);
+    assert!(
+        error.message.contains("[...text.matchAll(regexp)]"),
+        "{error}"
+    );
+}
+
+#[test]
+fn match_all_rejects_non_contract_iterable_sinks() {
+    for source in [
+        "new Set('a'.matchAll(/a/g));",
+        "new Map('a'.matchAll(/a/g));",
+        "Object.fromEntries('a'.matchAll(/a/g));",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::RegexIteratorPosition, "{error}");
+    }
+}
+
+rejection_test!(
+    rejects_non_string_regexp_constructor_literal,
+    "new RegExp(/a/g);",
+    Code::NewUnsupported
 );
 rejection_test!(
     rejects_getters,

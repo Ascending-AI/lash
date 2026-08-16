@@ -61,7 +61,9 @@ pub(crate) struct ErrorObject {
 /// rule: this slot is absent from every persistence wire and empty after
 /// restore.
 #[derive(Clone, Debug)]
-pub(crate) struct RegExpProgramCache;
+pub(crate) struct RegExpProgramCache {
+    pub(crate) program: regress::Regex,
+}
 
 #[derive(Debug)]
 pub(crate) struct RegExpObject {
@@ -69,6 +71,38 @@ pub(crate) struct RegExpObject {
     pub(crate) flags: String,
     pub(crate) last_index: u64,
     pub(crate) compiled_program: Option<Box<RegExpProgramCache>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RegExpMatchObject {
+    pub(crate) items: Vec<Value>,
+    pub(crate) index: Value,
+    pub(crate) input: Value,
+    pub(crate) groups: Value,
+}
+
+impl RegExpMatchObject {
+    pub(crate) fn enumerable_keys(&self) -> Vec<String> {
+        (0..self.items.len())
+            .map(|index| index.to_string())
+            .chain(["index", "input", "groups"].map(str::to_string))
+            .collect()
+    }
+
+    pub(crate) fn enumerable_values(&self) -> Vec<Value> {
+        self.items
+            .iter()
+            .cloned()
+            .chain([self.index.clone(), self.input.clone(), self.groups.clone()])
+            .collect()
+    }
+
+    pub(crate) fn enumerable_entries(&self) -> Vec<(String, Value)> {
+        self.enumerable_keys()
+            .into_iter()
+            .zip(self.enumerable_values())
+            .collect()
+    }
 }
 
 impl Clone for RegExpObject {
@@ -117,6 +151,33 @@ impl PartialEq for DateObject {
 }
 
 impl Heap {
+    pub(crate) fn ensure_additional_logical_bytes(
+        &self,
+        additional: u64,
+    ) -> Result<(), RuntimeError> {
+        let attempted = self.live_logical_bytes.saturating_add(additional);
+        if attempted > self.logical_byte_limit {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: self.logical_byte_limit,
+                attempted,
+            });
+        }
+        Ok(())
+    }
+
+    /// Whether this value is a list, whether it is held in the heap or still a
+    /// tree. RegExp match arrays extend the JavaScript list identity here.
+    pub(crate) fn is_list(&self, value: &Value) -> bool {
+        match value {
+            Value::List(_) => true,
+            Value::Ref(id) => matches!(
+                self.get(*id),
+                Ok(HeapObject::List(_) | HeapObject::RegExpMatch(_))
+            ),
+            _ => false,
+        }
+    }
+
     pub(crate) fn allocate_regexp(
         &mut self,
         pattern: String,
@@ -127,6 +188,21 @@ impl Heap {
             flags,
             last_index: 0,
             compiled_program: None,
+        }))
+    }
+
+    pub(crate) fn allocate_regexp_match(
+        &mut self,
+        items: Vec<Value>,
+        index: Value,
+        input: Value,
+        groups: Value,
+    ) -> Result<Value, RuntimeError> {
+        self.allocate_object(HeapObject::RegExpMatch(RegExpMatchObject {
+            items,
+            index,
+            input,
+            groups,
         }))
     }
 
@@ -218,6 +294,7 @@ impl Heap {
         Ok(matches!(
             self.get(id)?,
             HeapObject::RegExp(_)
+                | HeapObject::RegExpMatch(_)
                 | HeapObject::Map(_)
                 | HeapObject::Set(_)
                 | HeapObject::Date(_)
@@ -241,6 +318,7 @@ impl Heap {
         };
         Ok(match self.get(*id)? {
             HeapObject::RegExp(_) => constructor == "RegExp",
+            HeapObject::RegExpMatch(_) => constructor == "Array",
             HeapObject::Map(_) => constructor == "Map",
             HeapObject::Set(_) => constructor == "Set",
             HeapObject::Date(_) => constructor == "Date",
@@ -270,6 +348,30 @@ impl Heap {
             regexp.last_index = last_index;
             true
         })
+    }
+
+    pub(crate) fn set_regexp_program(
+        &mut self,
+        id: HeapId,
+        program: regress::Regex,
+    ) -> Result<(), RuntimeError> {
+        let object = self
+            .slots
+            .get_mut(
+                *self
+                    .id_to_slot
+                    .get(&id)
+                    .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?,
+            )
+            .and_then(Option::as_mut)
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let HeapObject::RegExp(regexp) = &mut object.object else {
+            return Err(RuntimeError::ValidationFailed {
+                reason: "compiled RegExp cache target is not a RegExp".to_string(),
+            });
+        };
+        regexp.compiled_program = Some(Box::new(RegExpProgramCache { program }));
+        Ok(())
     }
 
     pub(crate) fn map_entries(
@@ -567,6 +669,10 @@ impl Heap {
             Some(HeapObject::Tuple(values) | HeapObject::List(values)) => {
                 Value::String(self.javascript_sequence_string(values, active)?.into())
             }
+            Some(HeapObject::RegExpMatch(result)) => Value::String(
+                self.javascript_sequence_string(&result.items, active)?
+                    .into(),
+            ),
             Some(HeapObject::Record(_)) => Value::String("[object Object]".into()),
             Some(HeapObject::Date(date)) => Value::Number(date.milliseconds),
             Some(HeapObject::Map(_)) => Value::String("[object Map]".into()),
@@ -628,12 +734,40 @@ impl Heap {
 }
 
 pub(crate) fn regexp_string(regexp: &RegExpObject) -> String {
-    let pattern = if regexp.pattern.is_empty() {
-        "(?:)"
-    } else {
-        regexp.pattern.as_str()
-    };
+    let pattern = regexp_source(regexp);
     format!("/{pattern}/{}", regexp.flags)
+}
+
+pub(crate) fn regexp_source(regexp: &RegExpObject) -> String {
+    if regexp.pattern.is_empty() {
+        return "(?:)".to_string();
+    }
+    let mut source = String::new();
+    let mut escaped = false;
+    let mut in_class = false;
+    for character in regexp.pattern.chars() {
+        match character {
+            '\n' => source.push_str("\\n"),
+            '\r' => source.push_str("\\r"),
+            '\u{2028}' => source.push_str("\\u2028"),
+            '\u{2029}' => source.push_str("\\u2029"),
+            '[' if !escaped => {
+                in_class = true;
+                source.push(character);
+            }
+            ']' if !escaped => {
+                in_class = false;
+                source.push(character);
+            }
+            '/' if !escaped && !in_class => source.push_str("\\/"),
+            _ => source.push(character),
+        }
+        escaped = character == '\\' && !escaped;
+        if character != '\\' {
+            escaped = false;
+        }
+    }
+    source
 }
 
 fn normalize_same_value_zero_storage(value: Value) -> Value {

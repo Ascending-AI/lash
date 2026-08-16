@@ -341,9 +341,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x51, 0xbf, 0x6b, 0xc6, 0x0c, 0x3d, 0x51, 0xff, 0x81, 0x81, 0x24, 0x1c, 0x01, 0xeb,
-            0xb6, 0x8c, 0x7f, 0xd1, 0xdb, 0xb5, 0x40, 0x24, 0x38, 0x45, 0x89, 0x5c, 0x06, 0x30,
-            0x8e, 0x18, 0x5a, 0x90,
+            0x49, 0x17, 0x7a, 0x18, 0xcb, 0x4a, 0x20, 0x1b, 0x2e, 0x90, 0x2d, 0x69, 0xba, 0x5c,
+            0x25, 0xa8, 0xb9, 0x25, 0x3c, 0x04, 0x84, 0x4e, 0x0a, 0x32, 0xf4, 0xf1, 0xd6, 0x31,
+            0x89, 0x71, 0x4f, 0x87,
         ]
     );
 }
@@ -357,7 +357,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e05a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e06a7676c6f62616c7390");
 }
 
 #[test]
@@ -813,7 +813,24 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     else {
         unreachable!()
     };
-    regexp_object.compiled_program = Some(Box::new(super::super::heap::RegExpProgramCache));
+    regexp_object.compiled_program = Some(Box::new(super::super::heap::RegExpProgramCache {
+        program: regress::Regex::new("a+").expect("compiled test regexp"),
+    }));
+    let match_groups = heap
+        .allocate_record(
+            [("word".to_string(), Value::String("aaa".into()))]
+                .into_iter()
+                .collect(),
+        )
+        .expect("match groups");
+    let regexp_match = heap
+        .allocate_regexp_match(
+            vec![Value::String("aaa".into())],
+            Value::Number(4.0),
+            Value::String("xxxxaaa".into()),
+            match_groups,
+        )
+        .expect("RegExp match");
 
     let map = heap
         .allocate_map(vec![
@@ -838,6 +855,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     roots.insert("map_alias".to_string(), map);
     roots.insert("set".to_string(), set);
     roots.insert("regexp".to_string(), regexp);
+    roots.insert("regexp_match".to_string(), regexp_match);
     roots.insert("date".to_string(), date);
     roots.insert("error".to_string(), error);
     let snapshot = Snapshot {
@@ -880,6 +898,20 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
         regexp.compiled_program.is_none(),
         "compiled matcher cache must never be serialized"
     );
+    let Value::Ref(restored_match) = restored.runtime_globals["regexp_match"] else {
+        unreachable!()
+    };
+    let match_slot = restored.heap.id_to_slot[&restored_match];
+    let HeapObject::RegExpMatch(regexp_match) = &restored.heap.slots[match_slot]
+        .as_ref()
+        .expect("restored RegExp match slot")
+        .object
+    else {
+        unreachable!()
+    };
+    assert_eq!(regexp_match.items, vec![Value::String("aaa".into())]);
+    assert_eq!(regexp_match.index, Value::Number(4.0));
+    assert_eq!(regexp_match.input, Value::String("xxxxaaa".into()));
     assert_eq!(restored.to_canonical_bytes().expect("re-encode"), bytes);
 }
 
@@ -923,6 +955,12 @@ fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
             flags: String::new(),
             last_index: 0,
             compiled_program: None,
+        }),
+        HeapObject::RegExpMatch(crate::runtime::RegExpMatchObject {
+            items: Vec::new(),
+            index: Value::Number(0.0),
+            input: Value::String(String::new().into()),
+            groups: Value::Null,
         }),
         HeapObject::Map(MapObject {
             entries: Vec::new(),

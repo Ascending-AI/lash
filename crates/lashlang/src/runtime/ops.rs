@@ -151,6 +151,7 @@ pub(crate) async fn execute_intrinsic(
         | IntrinsicOp::JavaScriptHeapNew(_)
         | IntrinsicOp::JavaScriptHeapInstanceOf
         | IntrinsicOp::JavaScriptHeapDeleteMember
+        | IntrinsicOp::JavaScriptRegExp(_)
         | IntrinsicOp::JavaScriptGlobalDelete
         | IntrinsicOp::JavaScriptGlobalHas
         | IntrinsicOp::JavaScriptGlobalSet

@@ -21,6 +21,7 @@ mod javascript_array;
 mod javascript_codec;
 mod javascript_date;
 mod javascript_json;
+pub(crate) mod javascript_regexp;
 mod javascript_stdlib;
 mod javascript_substrate;
 mod javascript_url;
@@ -39,6 +40,11 @@ pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 use control::{VmMode, VmStep};
 use effects::VmEffect;
 use exceptions::{ExceptionHandler, FinallyCompletion, FinallyState};
+pub use javascript_regexp::{
+    TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_MAX_NESTING,
+    TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS, TypeScriptRegExpValidationError,
+    validate_typescript_regexp, validate_typescript_regexp_shape,
+};
 
 use super::host::{ExecutionMode, ProcessEventKind, SleepKind};
 use super::record::{Record, record_with_capacity};
@@ -47,14 +53,15 @@ use super::schema::{
 };
 use super::value::ProjectedValue;
 use super::{
-    Chunk, ClosureParameterModel, CompiledProgram, ExecutionHost, ExecutionOutcome,
-    ExecutionScratch, Heap, HeapId, HeapObject, ImageValue, Instruction, InstructionProfileTag,
-    IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY,
-    ListValue, Name, PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings,
-    ResourceHandle, RuntimeError, State, Value, add_assign_index_number, add_values, as_number,
-    assign_path, eval_binary_values, eval_compare_values, eval_javascript_binary,
-    eval_javascript_unary, eval_number_binary_values, eval_number_compare_values,
-    eval_number_numeric_binary_value, execute_compiled_format, execute_compiled_format_direct,
+    Chunk, ClosureParameterModel, CompiledProgram, DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionHost,
+    ExecutionOutcome, ExecutionScratch, Heap, HeapId, HeapObject, ImageValue, Instruction,
+    InstructionProfileTag, IntrinsicOp, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_TYPE_KEY, ListValue, Name, PersistedRoots,
+    ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject, ResourceHandle,
+    RuntimeError, State, Value, add_assign_index_number, add_values, as_number, assign_path,
+    eval_binary_values, eval_compare_values, eval_javascript_binary, eval_javascript_unary,
+    eval_number_binary_values, eval_number_compare_values, eval_number_numeric_binary_value,
+    execute_compiled_format, execute_compiled_format_direct,
     execute_compiled_format_one_number_compact_direct, execute_intrinsic,
     execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
     javascript_split, materialize_projected_async, materialize_value, range_bounds,
@@ -468,21 +475,35 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::Map => {
                 let function = self.pop_stack()?;
                 let items = self.pop_stack()?;
-                let items = self.heap.export_for_instruction(&items)?;
-                let items = match items {
-                    Value::List(values) | Value::Tuple(values) => values
-                        .iter()
-                        // This is the one isolation boundary: each callback
-                        // borrows its already-independent item.
-                        .map(|value| self.heap.isolate_value(value))
-                        .collect::<Result<Vec<_>, _>>()?,
+                let items = match &items {
+                    Value::Ref(id) if self.reference_semantics => match self.heap.get(*id)? {
+                        HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                        HeapObject::RegExpMatch(result) => result.items.clone(),
+                        object => {
+                            return Err(RuntimeError::ShapingListRequired {
+                                builtin: "map".into(),
+                                actual: object.kind_name().to_string(),
+                            });
+                        }
+                    },
+                    Value::List(values) | Value::Tuple(values) => values.to_vec(),
                     value => {
-                        return Err(RuntimeError::ShapingListRequired {
-                            builtin: "map".into(),
-                            actual: super::value_type_name(&value).to_string(),
-                        });
+                        let exported = self.heap.export_for_instruction(value)?;
+                        let (Value::List(values) | Value::Tuple(values)) = exported else {
+                            return Err(RuntimeError::ShapingListRequired {
+                                builtin: "map".into(),
+                                actual: super::value_type_name(value).to_string(),
+                            });
+                        };
+                        values.to_vec()
                     }
                 };
+                let items = items
+                    .iter()
+                    // This is the one isolation boundary: each callback
+                    // borrows its already-independent item.
+                    .map(|value| self.heap.isolate_value(value))
+                    .collect::<Result<Vec<_>, _>>()?;
                 if items.is_empty() {
                     self.stack.push(Value::List(Vec::new().into()));
                 } else {
@@ -1316,6 +1337,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::JavaScriptHeapDeleteMember => {
                 self.execute_javascript_heap_delete_member()?
             }
+            IntrinsicOp::JavaScriptRegExp(argc) => self.execute_javascript_regexp(argc)?,
             IntrinsicOp::JavaScriptGlobalDelete => self.execute_javascript_global_delete()?,
             IntrinsicOp::JavaScriptGlobalHas => self.execute_javascript_global_has()?,
             IntrinsicOp::JavaScriptGlobalSet => self.execute_javascript_global_set()?,

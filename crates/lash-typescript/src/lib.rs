@@ -6,6 +6,7 @@
 mod adapter;
 mod diagnostics;
 mod lower;
+mod regex;
 mod signatures;
 
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH};

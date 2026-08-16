@@ -151,6 +151,18 @@ pub(super) fn validate_continuation(
                     });
                 }
             }
+            HeapObject::RegExpMatch(result) => {
+                validate_values(&result.items, &format!("heap RegExp match {}", id.get()))?;
+                validate_heap_references(&continuation.heap.heap, &result.items)?;
+                for (name, value) in [
+                    ("index", &result.index),
+                    ("input", &result.input),
+                    ("groups", &result.groups),
+                ] {
+                    validate_value(value, &format!("heap RegExp match {} {name}", id.get()))?;
+                    validate_heap_reference(&continuation.heap.heap, value)?;
+                }
+            }
             HeapObject::Date(_) => {}
             HeapObject::Error(error) => {
                 if let Some(cause) = &error.cause {

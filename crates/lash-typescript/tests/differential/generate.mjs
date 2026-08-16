@@ -14,7 +14,7 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 181],
+  ['findings', 'findings-expressions.txt', 232],
 ];
 
 const rejected = new Map([
@@ -22,6 +22,10 @@ const rejected = new Map([
   ['(1, 2)', 'TS_SEQUENCE_UNSUPPORTED'],
   ['null ?? 1 || 2', 'TS_SYNTAX_ERROR'],
   ["'\\uD800'", 'TS_LONE_SURROGATE_LITERAL_UNSUPPORTED'],
+  ["/a/d", 'TS_REGEX_INDICES_FLAG_UNSUPPORTED'],
+  ["/a/v", 'TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED'],
+  ['new RegExp(/a/g)', 'TS_NEW_UNSUPPORTED'],
+  ["new Set('a'.matchAll(/a/g)).size", 'TS_REGEX_ITERATOR_POSITION'],
 ]);
 
 const runtimeRejected = new Map([
@@ -38,6 +42,7 @@ const runtimeRejected = new Map([
     'TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED',
   ],
   ["'\\uD83D\\uDE00'[0]", 'TS_LONE_SURROGATE_UNSUPPORTED'],
+  ["(() => /./.exec('😀')[0])()", 'TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED'],
 ]);
 
 function expressions(file, expectedCount) {

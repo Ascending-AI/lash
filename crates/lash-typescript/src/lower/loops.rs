@@ -294,7 +294,8 @@ fn mentions_binding(expr: &Expr, binding: &str) -> bool {
         | Expr::Null
         | Expr::Bool(_)
         | Expr::Number(_)
-        | Expr::String(_) => false,
+        | Expr::String(_)
+        | Expr::RegExp { .. } => false,
         Expr::This => false,
         Expr::LoneSurrogateString => false,
         Expr::Update { target, .. } => assign_target_mentions_binding(target, binding),
@@ -680,6 +681,7 @@ fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         | Expr::Number(_)
         | Expr::String(_)
         | Expr::Ident(_)
+        | Expr::RegExp { .. }
         | Expr::This
         | Expr::LoneSurrogateString => {}
         Expr::Update { target, .. } => {

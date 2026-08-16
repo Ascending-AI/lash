@@ -8,6 +8,7 @@ impl HeapObject {
             Self::Record(_) => "record",
             Self::Closure { .. } => "function",
             Self::RegExp(_) => "RegExp",
+            Self::RegExpMatch(_) => "RegExp match array",
             Self::Map(_) => "Map",
             Self::Set(_) => "Set",
             Self::Date(_) => "Date",
@@ -39,6 +40,12 @@ impl HeapObject {
                 .saturating_add(regexp.flags.len() as u64)
                 .saturating_add(VALUE_SLOT_BYTES.saturating_mul(3))
                 .saturating_add(8),
+            Self::RegExpMatch(result) => result
+                .items
+                .iter()
+                .chain([&result.index, &result.input, &result.groups])
+                .map(value_logical_bytes)
+                .fold(RECORD_FIELD_BYTES.saturating_mul(3), u64::saturating_add),
             Self::Map(map) => map.entries.iter().fold(0_u64, |total, (key, value)| {
                 total
                     .saturating_add(COLLECTION_ENTRY_BYTES)
@@ -93,6 +100,14 @@ impl HeapObject {
             Self::Closure { captures, .. } => Box::new(captures.iter()),
             Self::RegExp(_) | Self::Date(_) | Self::UrlSearchParams(_) => {
                 Box::new(std::iter::empty())
+            }
+            Self::RegExpMatch(result) => {
+                Box::new(
+                    result
+                        .items
+                        .iter()
+                        .chain([&result.index, &result.input, &result.groups]),
+                )
             }
             Self::Map(map) => Box::new(map.entries.iter().flat_map(|(key, value)| [key, value])),
             Self::Set(set) => Box::new(set.values.iter()),

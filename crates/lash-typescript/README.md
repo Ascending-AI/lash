@@ -133,7 +133,7 @@ shape-dependent runtime rejection. The executable inventories in
 differential suite under `tests/differential/` are the source of truth. In
 particular, v1 excludes classes, generators, non-canonical classic `for` forms,
 modules/imports, JSX, namespaces, decorators, `eval`/`Function`, prototype
-access, accessors, regex literals, BigInt, sequence expressions, labels, `for await`,
+access, accessors, BigInt, sequence expressions, labels, `for await`,
 and arbitrary constructors or `instanceof` right-hand sides. Identifiers beginning
 with `__typescript_` are reserved for the
 lowerer's generated bindings and reject with `TS_RESERVED_IDENTIFIER`.
@@ -161,10 +161,39 @@ language semantics:
   `EffectInBuiltinCallback` error. The callback is ordinary synchronous code:
   an `await` inside it is a parse-level rejection, so there is no suspension
   point inside `map` to make durable.
+- A function-valued `replace`/`replaceAll` replacement uses that same durable,
+  synchronous callback driver. VM preemption and continuation restore are safe
+  between its instructions, but an effect inside the callback terminates with
+  `EffectInBuiltinCallback` just as it does for `map`.
+- A RegExp pattern is capped at **4,096 UTF-16 code units** and **32 nested
+  groups**, with `TS_REGEX_PATTERN_TOO_LONG` and
+  `TS_REGEX_PATTERN_NESTING_LIMIT` repairs. Matching is capped at **1,000,000
+  deterministic matcher steps** per operation; exhaustion is the uncatchable
+  `RegExpBudgetExceeded` execution-bound error. The pinned `regress` 0.11.1
+  engine is patched locally to charge bytecode dispatch and backtrack
+  transitions; [upstream issue placeholder](https://github.com/ridiculousfish/regress/issues/PLACEHOLDER).
+- RegExp flags `d` and `v` reject as `TS_REGEX_INDICES_FLAG_UNSUPPORTED` and
+  `TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED`: match indices and Unicode-set syntax
+  are not in the accepted surface. Use `match.index` plus capture lengths
+  instead of `d`, and `u` plus ordinary Unicode character classes instead of
+  `v`. The `g` and `y` state machines are Lash-owned because the backing engine
+  does not implement JavaScript `lastIndex` semantics.
+- The runtime value model cannot represent a lone UTF-16 surrogate. A non-`u`
+  RegExp match that would produce one therefore fails closed as
+  `TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED`; add `u` or avoid matching half
+  of an astral character.
+- `matchAll` is accepted only in a direct iterable sink (`for...of`, spread, or
+  `Array.from`) and otherwise rejects as `TS_REGEX_ITERATOR_POSITION` with a
+  spread repair. This keeps the iterator from becoming durable state. The
+  shared sink lowers the operation as one bounded materialization, so a later
+  `break` in `for...of` does not make matching lazy; matcher fuel is charged for
+  the complete direct-sink operation.
 - A single JavaScript string result is capped at **8 MiB**. Multiplicative
   growth paths such as `repeat` and replacement-token expansion preflight the
   result before allocation; exceeding the cap terminates as the uncatchable
-  `MemoryLimitExceeded` resource exhaustion error.
+  `MemoryLimitExceeded` resource exhaustion error. Regex inputs, match objects,
+  split plans, and replacement plans likewise check or pre-charge every
+  guest-sized native allocation before reserving host memory.
 - A TypeScript cell is capped at **64 KiB** of source and rejects with
   `TS_SOURCE_TOO_LARGE`. The bound is what makes the parse-stack reservation
   finite, and 64 KiB is roughly 1 600 lines — far more than a cell should be.
@@ -314,10 +343,27 @@ provides shortest-round-trip decimal text for template interpolation,
 remainder semantics for negative operands, `**` is right-associative and agrees
 with `Math.pow`, `Math.min()` is `Infinity`, and `Math.round(-0.5)` is `-0`.
 
+Regular-expression literals and `new RegExp(pattern?, flags?)` accept `g`, `i`,
+`m`, `s`, `u`, and `y`; constructor arguments must be strings or `undefined`,
+with an explicit-string repair for other values. RegExp objects are durable
+mutable heap values: pattern, flags, and `lastIndex` persist across suspension,
+while the compiled matcher is a rebuildable cache and is never serialized.
+Node-shaped exec/match results use an unforgeable durable `RegExpMatch` heap
+kind. This is a fail-closed wire cutover: bytecode format 9, snapshot format 6,
+VM continuation format 7, RLM snapshot envelope 12, and Lashlang segment
+handover 3. Deployments must drain or recreate parked processes created by
+older formats. The accepted surface is `source`, `flags`, `global`,
+`ignoreCase`, `multiline`, `sticky`, `unicode`, and writable `lastIndex`;
+`exec`, `test`, `toString`, and `valueOf`; plus string `match`, `search`,
+`matchAll`, `replace`, `replaceAll`, and `split`. Exec match values have Node's
+array shape, capture slots, `index`, `input`, and named `groups`. Replacement
+strings implement `$$`, `$&`, ``$` ``, `$'`, `$1` through `$99`, and
+`$<name>`.
+
 ## Standard-library inventory
 
-The v1 inventory contains 139 owner-qualified method names: 59 static methods
-and 80 instance method names. The signature table is also the source of the
+The v1 inventory contains 144 owner-qualified method names: 59 static methods
+and 85 instance method names. The signature table is also the source of the
 model prompt; optional arguments are explicit rather than hidden behind an
 "ECMA optional arguments" qualifier.
 
@@ -347,14 +393,14 @@ The shipped static families are:
 - URL: `canParse(input[, base])`.
 
 The shipped instance names are `at`, `concat`, `charAt`, `charCodeAt`,
-`codePointAt`, `append`, `add`, `clear`, `delete`, `entries`, `endsWith`, `filter`, `fill`,
+`codePointAt`, `append`, `add`, `clear`, `delete`, `entries`, `exec`, `endsWith`, `filter`, `fill`,
 `find`, `findIndex`, `findLast`, `findLastIndex`, `flat`, `flatMap`, `forEach`,
-`get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`,
+`get`, `getAll`, `has`, `includes`, `indexOf`, `join`, `lastIndexOf`, `map`, `match`, `matchAll`,
 `every`, `padEnd`, `padStart`, `repeat`, `replace`, `replaceAll`, `reduce`,
-`reduceRight`, `reverse`, `slice`, `sort`, `some`, `splice`, `split`,
+`reduceRight`, `reverse`, `slice`, `sort`, `some`, `splice`, `split`, `search`,
 `startsWith`, `substring`, `toExponential`, `toFixed`, `toPrecision`,
 `toReversed`, `toSorted`, `toSpliced`, `set`, `keys`, `toLowerCase`,
-`toUpperCase`, `toString`, `trim`, `trimEnd`, `trimStart`, `valueOf`, `values`,
+`toUpperCase`, `toString`, `trim`, `trimEnd`, `trimStart`, `test`, `valueOf`, `values`,
 `with`, `hasOwnProperty`, `union`, `intersection`, `difference`,
 `symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`,
 `toJSON`, `getTime`, `getUTCFullYear`, `getUTCMonth`, `getUTCDate`,
@@ -482,10 +528,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 468 rows, of which 395 are distinct
+The Node differential table carries 519 rows, of which 446 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of the 395 unique rows rather than of 468 distinct behaviours. Both counts
+that of the 446 unique rows rather than of 519 distinct behaviours. Both counts
 are pinned against the table by `committed_row_counts_match_the_register`, and
 the generator pins each lane's own row count, so neither this paragraph nor a
 lane can drift from the corpus in silence.

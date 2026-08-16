@@ -8,6 +8,7 @@ enum ScanMode {
     SingleQuoted,
     DoubleQuoted,
     Template,
+    RegExp,
     LineComment,
     BlockComment,
 }
@@ -338,6 +339,8 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
     let bytes = source.as_bytes();
     let mut mode = ScanMode::Code;
     let mut escaped = false;
+    let mut regexp_class = false;
+    let mut regexp_pattern_start = 0usize;
     let mut frames = Vec::new();
     let mut current_operators = 0usize;
     let mut previous = PreviousToken::None;
@@ -389,6 +392,16 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                         mode = ScanMode::BlockComment;
                         index += 1;
                         scanned = None;
+                    }
+                    (b'/', _) if !previous.can_end_expression() => {
+                        // SWC lexes a RegExp literal as one token. Its grouping
+                        // punctuation therefore does not recurse the TypeScript
+                        // parser and must not consume this source-nesting budget;
+                        // the RegExp validator applies its separate 32-group cap.
+                        mode = ScanMode::RegExp;
+                        escaped = false;
+                        regexp_class = false;
+                        regexp_pattern_start = index + 1;
                     }
                     (b'\'', _) => {
                         mode = ScanMode::SingleQuoted;
@@ -611,6 +624,27 @@ pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
                     mode = ScanMode::Code;
                     // A template hole is expression position, like `(`.
                     previous = PreviousToken::Byte(b'(');
+                }
+            }
+            ScanMode::RegExp => {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'[' {
+                    regexp_class = true;
+                } else if byte == b']' {
+                    regexp_class = false;
+                } else if byte == b'/' && !regexp_class {
+                    crate::regex::validate_literal_shape(
+                        &source[regexp_pattern_start..index],
+                        Some(SourceSpan {
+                            start: regexp_pattern_start,
+                            end: index,
+                        }),
+                    )?;
+                    mode = ScanMode::Code;
+                    previous = PreviousToken::Byte(b'0');
                 }
             }
             ScanMode::LineComment => {

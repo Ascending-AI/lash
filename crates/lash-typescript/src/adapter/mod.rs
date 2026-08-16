@@ -173,6 +173,10 @@ pub(crate) enum Expr {
     Bool(bool),
     Number(f64),
     String(String),
+    RegExp {
+        pattern: String,
+        flags: String,
+    },
     Ident(String),
     This,
     Array(Vec<ArrayElement>),
@@ -1017,12 +1021,11 @@ impl Adapter {
                     .map_or(Expr::LoneSurrogateString, |value| {
                         Expr::String(value.to_string())
                     }),
-                swc::Lit::Regex(_) => {
-                    return Err(reject(
-                        DiagnosticCode::RegExpUnsupported,
-                        "regular-expression literals",
-                        span,
-                    ));
+                swc::Lit::Regex(value) => {
+                    let pattern = value.exp.to_string();
+                    let flags = value.flags.to_string();
+                    crate::regex::validate_literal(&pattern, &flags, span)?;
+                    Expr::RegExp { pattern, flags }
                 }
                 swc::Lit::BigInt(_) => {
                     return Err(reject(

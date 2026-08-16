@@ -1045,16 +1045,15 @@ fn lashlang_aggregates_still_select_in_input_order() {
     );
 }
 
-/// Settlement order is consumed inside a single `perform` and never persisted,
-/// so the durable continuation and snapshot formats must be untouched by this
-/// change. If a later change does put batch state in a continuation, this pin
-/// is the reminder that the format versions have to move with it.
+/// Settlement order is consumed inside a single `perform` and never persisted.
+/// Snapshot v6 is independently required by the durable RegExp match-array
+/// kind; the aggregate rule still does not move the VM ABI.
 #[test]
 fn settlement_order_does_not_reach_the_continuation_format() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        5,
-        "the snapshot format now carries TypeScript exotic heap objects"
+        6,
+        "snapshot v6 carries the durable RegExp match-array kind"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,

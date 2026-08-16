@@ -467,3 +467,54 @@ findings	178	accept	"(() => { enum E { A, B=4, C } return `${E.A}|${E[0]}|${E.B}
 findings	179	accept	"(() => { enum E { A='x', B='y' } return `${E.A}|${E.B}|${Object.keys(E).join(',')}`; })()"	"x|y|A,B"	-
 findings	180	accept	"(() => { let n=0; enum E { A=(n+=2), B=(n+=3) } return `${E.A}|${E[2]}|${E.B}|${E[5]}|${n}`; })()"	"2|A|5|B|5"	-
 findings	181	accept	"(() => { const enum E { A, B=4, C='z' } return `${E.A}|${E.B}|${E.C}`; })()"	"0|4|z"	-
+findings	182	accept	"(() => { const r=/a(?<tail>b+)/gi; return `${r.source}|${r.flags}|${r.global}|${r.ignoreCase}|${r.multiline}|${r.sticky}|${r.unicode}`; })()"	"a(?<tail>b+)|gi|true|true|false|false|false"	-
+findings	183	accept	"(() => { const r=new RegExp('a+','my'); return `${r.source}|${r.flags}|${r.multiline}|${r.sticky}`; })()"	"a+|my|true|true"	-
+findings	184	accept	"(() => { const m=/(?<a>a)(b)?/.exec('xa'); return `${m[0]}|${m[1]}|${m[2]}|${m.index}|${m.input}|${m.groups.a}|${Array.isArray(m)}`; })()"	"a|a|undefined|1|xa|a|true"	-
+findings	185	accept	"(() => { const r=/a/g; const a=r.test('a a'); const i=r.lastIndex; const b=r.test('a a'); return `${a}|${i}|${b}|${r.lastIndex}`; })()"	"true|1|true|3"	-
+findings	186	accept	"(() => { const r=/a/g; r.lastIndex=2; const m=r.exec('bbb'); return `${m}|${r.lastIndex}`; })()"	"null|0"	-
+findings	187	accept	"(() => { const r=/a/y; r.lastIndex=1; const a=r.test('ba'); const i=r.lastIndex; r.lastIndex=0; const b=r.test('ba'); return `${a}|${i}|${b}|${r.lastIndex}`; })()"	"true|2|false|0"	-
+findings	188	accept	"(() => { const m='xab'.match(/a(b)/); return `${m[0]}|${m[1]}|${m.index}|${m.input}`; })()"	"ab|b|1|xab"	-
+findings	189	accept	"(() => 'aba'.match(/a/g).join('|'))()"	"a|a"	-
+findings	190	accept	"(() => { const r=/b/g; r.lastIndex=2; const n='abc'.search(r); return `${n}|${r.lastIndex}`; })()"	"1|2"	-
+findings	191	accept	"(() => [...'aba'.matchAll(/(?<a>a)/g)].map(m=>`${m[0]}:${m.index}:${m.groups.a}`).join('|'))()"	"a:0:a|a:2:a"	-
+findings	192	accept	"(() => { const r=/a/g; r.lastIndex=2; const out=[...'aba'.matchAll(r)].map(m=>m.index).join(','); return `${out}|${r.lastIndex}`; })()"	"2|2"	-
+findings	193	accept	"'abc'.replace(/b/,'[$$][$&][$`][$\\']')"	"a[$][b][a][c]c"	-
+findings	194	accept	"'abcdefghij'.replace(/(a)(b)(c)/,'$3-$2-$1-$99-$49')"	"c-b-a-$99-$49defghij"	-
+findings	195	accept	"'ab'.replace(/(?<x>a)(b)/,'$<x>-$<missing>-$2')"	"a--b"	-
+findings	196	accept	"'ab ab'.replaceAll(/(?<x>a)(b)/g,(m,a,b,i,s,g)=>`${m}:${a}:${b}:${i}:${s.length}:${g.x}`)"	"ab:a:b:0:5:a ab:a:b:3:5:a"	-
+findings	197	accept	"'aba'.replaceAll('a','[$&][$`][$\\']')"	"[a][][ba]b[a][ab][]"	-
+findings	198	accept	"'aba'.replaceAll(/a/g,'x')"	"xbx"	-
+findings	199	accept	"(() => { try { return 'aba'.replaceAll(/a/,'x'); } catch(e) { return `${e.name}|${e instanceof TypeError}`; } })()"	"TypeError|true"	-
+findings	200	accept	"'a1b2'.split(/(\\d)/).join('|')"	"a|1|b|2|"	-
+findings	201	accept	"'a1b2'.split(/(\\d)/,3).join('|')"	"a|1|b"	-
+findings	202	runtime-reject	"(() => /./.exec('😀')[0])()"	"\ud83d"	TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED
+findings	203	accept	"Object.keys(/(?<x>a)(b)?/.exec('a'))"	"0,1,2,index,input,groups"	-
+findings	204	accept	"(() => { const r = /a/y; r.lastIndex = 1; const value = 'ba'.replace(r, 'X'); return [value, r.lastIndex]; })()"	"bX,2"	-
+findings	205	accept	"(() => { const m=/./u.exec('😀'); return `${m[0]}|${m.index}`; })()"	"😀|0"	-
+findings	206	accept	"(() => [...'😀'.matchAll(/(?:)/gu)].map(m=>m.index).join(','))()"	"0,2"	-
+findings	207	accept	"'ab'.replace(/(?:)/g,'-')"	"-a-b-"	-
+findings	208	accept	"(() => `${new RegExp().source}|${new RegExp().flags}`)()"	"(?:)|"	-
+findings	209	accept	"(() => /a\\//.source)()"	"a\\/"	-
+findings	210	accept	"(() => { const m=/(?<x>a)|(?<y>b)/.exec('a'); return `${m.groups.x}|${m.groups.y}|${Object.keys(m.groups).join(',')}`; })()"	"a|undefined|x,y"	-
+findings	211	accept	"(() => { try { return [...'a'.matchAll(/a/)]; } catch(e) { return `${e.name}|${e instanceof TypeError}`; } })()"	"TypeError|true"	-
+findings	212	accept	"(() => { const r=/a/g; r.lastIndex=99; const m=r.exec('a'); return `${m}|${r.lastIndex}`; })()"	"null|0"	-
+findings	213	accept	"(() => { const r=/(?:)/g; const a=r.exec('x'); const i=r.lastIndex; const b=r.exec('x'); return `${a.index}|${i}|${b.index}|${r.lastIndex}`; })()"	"0|0|0|0"	-
+findings	214	reject	"/a/d"	"/a/d"	TS_REGEX_INDICES_FLAG_UNSUPPORTED
+findings	215	reject	"/a/v"	"/a/v"	TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED
+findings	216	accept	"new RegExp('/').source"	"\\/"	-
+findings	217	accept	"'ab'.split(/(?:)/).join('|')"	"a|b"	-
+findings	218	accept	"''.split(/(?:)/).length"	"0"	-
+findings	219	accept	"'ba'.split(/a/y).join('|')"	"b|"	-
+findings	220	accept	"'a1b2'.split(/(\\d)/,undefined).join('|')"	"a|1|b|2|"	-
+findings	221	accept	"(() => { try { new RegExp('('); } catch(e) { return `${e.name}|${e.message}`; } })()"	"SyntaxError|Invalid regular expression: /(/: Unterminated group"	-
+findings	222	accept	"(() => { try { new RegExp('a','gg'); } catch(e) { return `${e.name}|${e.message}`; } })()"	"SyntaxError|Invalid flags supplied to RegExp constructor 'gg'"	-
+findings	223	accept	"new RegExp(undefined,'g').source"	"(?:)"	-
+findings	224	accept	"'aa ba'.match(/a/gy).join(',')"	"a,a"	-
+findings	225	accept	"'aa ba'.replace(/a/gy,'x')"	"xx ba"	-
+findings	226	accept	"(() => [...'aa ba'.matchAll(/a/gy)].map(m=>m.index).join(','))()"	"0,1"	-
+findings	227	accept	"(() => `${/^b/m.test('a\\nb')}|${/a.b/s.test('a\\nb')}`)()"	"true|true"	-
+findings	228	accept	"(() => { const a=[0]; return 'xx'.replace(/x/g,()=>{a[0]=a[0]+1; return a;}); })()"	"12"	-
+findings	229	accept	"(() => { const o={}; o['\\0lash.regexp.match']=true; o.length=1e100; return `${Array.isArray(o)}|${Object.keys(o).includes('\\0lash.regexp.match')}`; })()"	"false|true"	-
+findings	230	reject	"new RegExp(/a/g)"	"/a/g"	TS_NEW_UNSUPPORTED
+findings	231	reject	"new Set('a'.matchAll(/a/g)).size"	"1"	TS_REGEX_ITERATOR_POSITION
+findings	232	accept	"(() => { const m=/(?<x>a)(b)/.exec('ab'); m[0]='changed'; m.index=7; m['input']='input'; m.groups={x:'group'}; m.length=1; return `${m[0]}|${m.index}|${m.input}|${m.groups.x}|${m.length}`; })()"	"changed|7|input|group|1"	-

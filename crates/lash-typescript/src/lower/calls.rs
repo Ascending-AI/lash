@@ -441,6 +441,14 @@ impl Lowerer {
                     "random",
                 ))));
             }
+            let receiver_is_module_authority = module_path(object)
+                .and_then(|path| path.first().cloned())
+                .is_some_and(|root| !self.has_binding(&root));
+            if !receiver_is_module_authority
+                && let Some(lowered) = self.lower_regexp_method(object, method, args)?
+            {
+                return Ok(lowered);
+            }
             if matches!(method.as_str(), "entries" | "keys" | "values")
                 && static_stdlib_owner(object).is_none()
                 && self.iterable_sink_depth > 0
@@ -564,7 +572,7 @@ impl Lowerer {
                     name: "__typescript_stdlib".into(),
                     args: vec![
                         LashExpr::String("Lash.ArrayFromIterable".into()),
-                        self.lower_iterable_sink(value)?,
+                        self.lower_regexp_iterable_sink(value)?,
                     ],
                 };
                 return if mapping_args.is_empty() {

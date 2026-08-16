@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::RegExpMatchObject;
 
 impl CanonicalHeapObject {
     pub(super) fn from_runtime(object: &HeapObject, id: HeapId) -> Result<Self, ContinuationError> {
@@ -37,6 +38,24 @@ impl CanonicalHeapObject {
                 pattern: regexp.pattern.clone(),
                 flags: regexp.flags.clone(),
                 last_index: regexp.last_index,
+            },
+            HeapObject::RegExpMatch(result) => Self::RegExpMatch {
+                items: canonical_items(&result.items, &location, 0)?,
+                index: CanonicalValue::from_runtime(
+                    &result.index,
+                    &format!("{location}.index"),
+                    0,
+                )?,
+                input: CanonicalValue::from_runtime(
+                    &result.input,
+                    &format!("{location}.input"),
+                    0,
+                )?,
+                groups: CanonicalValue::from_runtime(
+                    &result.groups,
+                    &format!("{location}.groups"),
+                    0,
+                )?,
             },
             HeapObject::Map(map) => Self::Map {
                 entries: map
@@ -133,6 +152,12 @@ impl CanonicalHeapObject {
                 flags,
                 last_index,
             } => {
+                crate::runtime::validate_typescript_regexp(&pattern, &flags).map_err(|error| {
+                    SnapshotDecodeError::InvalidEncoding(format!(
+                        "RegExp pattern or flags violate TypeScript bounds: {}",
+                        error.diagnostic_code()
+                    ))
+                })?;
                 if last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
                     return Err(SnapshotDecodeError::InvalidEncoding(
                         "RegExp last_index exceeds JavaScript's maximum safe length".to_string(),
@@ -145,6 +170,20 @@ impl CanonicalHeapObject {
                     compiled_program: None,
                 })
             }
+            Self::RegExpMatch {
+                items,
+                index,
+                input,
+                groups,
+            } => HeapObject::RegExpMatch(RegExpMatchObject {
+                items: items
+                    .into_iter()
+                    .map(CanonicalValue::into_runtime)
+                    .collect::<Result<_, _>>()?,
+                index: index.into_runtime()?,
+                input: input.into_runtime()?,
+                groups: groups.into_runtime()?,
+            }),
             Self::Map { entries } => HeapObject::Map(MapObject {
                 entries: entries
                     .into_iter()

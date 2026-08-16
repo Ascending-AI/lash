@@ -25,6 +25,7 @@ mod calls;
 mod constructs;
 mod graph;
 mod json_replacer;
+mod regex;
 use constructs::*;
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
@@ -172,6 +173,7 @@ struct Lowerer {
     process_depth: usize,
     await_depth: usize,
     iterable_sink_depth: usize,
+    regexp_iterable_sink_depth: usize,
     declarations: Vec<Declaration>,
     process_bindings: BTreeMap<String, String>,
     process_handle_bindings: BTreeSet<String>,
@@ -1002,6 +1004,14 @@ impl Lowerer {
             Expr::Bool(value) => LashExpr::Bool(*value),
             Expr::Number(value) => LashExpr::Number(*value),
             Expr::String(value) => LashExpr::String(value.as_str().into()),
+            Expr::RegExp { pattern, flags } => LashExpr::BuiltinCall {
+                name: "__typescript_heap_new".into(),
+                args: vec![
+                    LashExpr::String("RegExp".into()),
+                    LashExpr::String(pattern.as_str().into()),
+                    LashExpr::String(flags.as_str().into()),
+                ],
+            },
             Expr::Ident(name) if name == "undefined" && !self.has_binding(name) => {
                 LashExpr::Undefined
             }

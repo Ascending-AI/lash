@@ -13,8 +13,8 @@ pub use id::HeapId;
 #[cfg(test)]
 pub(crate) use javascript_exotics::RegExpProgramCache;
 pub(crate) use javascript_exotics::{
-    DateObject, ErrorKind, ErrorObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpObject, SetObject,
-    canonical_regexp_flags, regexp_string, same_value_zero,
+    DateObject, ErrorKind, ErrorObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpMatchObject,
+    RegExpObject, SetObject, canonical_regexp_flags, regexp_source, regexp_string, same_value_zero,
 };
 pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
@@ -42,6 +42,7 @@ pub(crate) enum HeapObject {
     Record(Box<Record>),
     Closure { function: u32, captures: Vec<Value> },
     RegExp(RegExpObject),
+    RegExpMatch(RegExpMatchObject),
     Map(MapObject),
     Set(SetObject),
     Date(DateObject),
@@ -614,6 +615,14 @@ impl Heap {
                 }
                 Value::Record(std::sync::Arc::new(output))
             }
+            HeapObject::RegExpMatch(result) => Value::List(
+                result
+                    .items
+                    .iter()
+                    .map(|value| self.export_instruction_inner(value, active))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            ),
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
@@ -805,6 +814,14 @@ impl Heap {
                 }
                 Value::Record(std::sync::Arc::new(output))
             }
+            HeapObject::RegExpMatch(result) => Value::List(
+                result
+                    .items
+                    .iter()
+                    .map(|value| self.export_inner(value, active))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into(),
+            ),
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
@@ -936,6 +953,16 @@ impl Heap {
                     .collect::<Result<_, _>>()?,
             },
             HeapObject::RegExp(regexp) => HeapObject::RegExp(regexp.clone()),
+            HeapObject::RegExpMatch(result) => HeapObject::RegExpMatch(RegExpMatchObject {
+                items: result
+                    .items
+                    .iter()
+                    .map(|value| self.stage_isolation(value, staging))
+                    .collect::<Result<_, _>>()?,
+                index: self.stage_isolation(&result.index, staging)?,
+                input: self.stage_isolation(&result.input, staging)?,
+                groups: self.stage_isolation(&result.groups, staging)?,
+            }),
             HeapObject::Map(map) => HeapObject::Map(MapObject {
                 entries: map
                     .entries
@@ -1158,16 +1185,6 @@ impl Heap {
         Ok(Value::Ref(*id))
     }
 
-    /// Whether this value is a list, whether it is held in the heap or still a
-    /// tree.
-    pub(crate) fn is_list(&self, value: &Value) -> bool {
-        match value {
-            Value::List(_) => true,
-            Value::Ref(id) => matches!(self.get(*id), Ok(HeapObject::List(_))),
-            _ => false,
-        }
-    }
-
     pub(crate) fn add_assign_index_number(
         &mut self,
         target: &Value,
@@ -1236,6 +1253,7 @@ impl Heap {
                 });
             }
             object @ (HeapObject::RegExp(_)
+            | HeapObject::RegExpMatch(_)
             | HeapObject::Map(_)
             | HeapObject::Set(_)
             | HeapObject::Date(_)

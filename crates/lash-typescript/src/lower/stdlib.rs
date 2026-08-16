@@ -40,6 +40,7 @@ pub(super) fn is_known_runtime_global(name: &str) -> bool {
             | "Promise"
             | "URL"
             | "URLSearchParams"
+            | "RegExp"
     )
 }
 
@@ -66,6 +67,7 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "clear",
     "delete",
     "entries",
+    "exec",
     "endsWith",
     "filter",
     "fill",
@@ -84,6 +86,8 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "join",
     "lastIndexOf",
     "map",
+    "match",
+    "matchAll",
     "every",
     "padEnd",
     "padStart",
@@ -98,6 +102,7 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "some",
     "splice",
     "split",
+    "search",
     "startsWith",
     "substring",
     "toExponential",
@@ -114,6 +119,7 @@ pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
     "trim",
     "trimEnd",
     "trimStart",
+    "test",
     "valueOf",
     "values",
     "with",
@@ -153,6 +159,8 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
                 | "codePointAt"
                 | "concat"
                 | "endsWith"
+                | "match"
+                | "matchAll"
                 | "includes"
                 | "indexOf"
                 | "lastIndexOf"
@@ -163,6 +171,7 @@ pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> boo
                 | "replaceAll"
                 | "slice"
                 | "split"
+                | "search"
                 | "startsWith"
                 | "substring"
                 | "toLowerCase"

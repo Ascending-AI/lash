@@ -306,6 +306,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             return Ok(());
         }
+        if self.try_execute_regexp_match_stdlib(&values)? {
+            return Ok(());
+        }
         if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
             && matches!(self.heap.get(*receiver)?, HeapObject::Error(_))
         {
@@ -523,6 +526,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
         args: &[Value],
     ) -> Result<(), RuntimeError> {
+        if self.try_execute_regexp_match_method(method, receiver, args)? {
+            return Ok(());
+        }
         let kind = self.heap.get(receiver)?.kind_name();
         if matches!(kind, "URL" | "URLSearchParams") {
             if let Some(result) = self.execute_url_heap_method(kind, method, receiver, args)? {
@@ -769,6 +775,11 @@ fn javascript_json_has_cycle(
     }
     let children: Vec<&Value> = match heap.get(*id)? {
         HeapObject::List(values) | HeapObject::Tuple(values) => values.iter().collect(),
+        HeapObject::RegExpMatch(result) => result
+            .items
+            .iter()
+            .chain([&result.index, &result.input, &result.groups])
+            .collect(),
         HeapObject::Record(record) => record.values().collect(),
         _ => return Ok(false),
     };
@@ -1139,7 +1150,7 @@ fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, Runti
     }
 }
 
-fn javascript_string_method(
+pub(super) fn javascript_string_method(
     method: &str,
     value: &str,
     args: &[Value],
@@ -1315,7 +1326,7 @@ fn javascript_string_method(
     }
 }
 
-fn javascript_array_method(
+pub(super) fn javascript_array_method(
     method: &str,
     items: &[Value],
     args: &[Value],

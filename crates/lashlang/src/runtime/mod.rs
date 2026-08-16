@@ -52,8 +52,8 @@ pub use heap::{
 };
 pub(crate) use heap::{
     DateObject, ErrorKind, ErrorObject, Heap, HeapObject, HeapRestoreWire, MapObject,
-    PersistedRoots, RegExpObject, SetObject, UrlObject, UrlSearchParamsObject,
-    canonical_regexp_flags, regexp_string,
+    PersistedRoots, RegExpMatchObject, RegExpObject, SetObject, UrlObject, UrlSearchParamsObject,
+    canonical_regexp_flags, regexp_source, regexp_string,
 };
 pub use host::{
     AbilityOp, AbilityResult, DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds,
@@ -77,9 +77,12 @@ pub(crate) use schema::{
 pub(crate) use vm::SlotState;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, Vm, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
+    ContinuationError, TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_MAX_NESTING,
+    TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS, TypeScriptRegExpValidationError, Vm, VmContinuation,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
+    VmProfileContinuation, VmRunOutcome, validate_typescript_regexp,
+    validate_typescript_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

@@ -142,6 +142,18 @@ impl Lowerer {
         result
     }
 
+    pub(super) fn lower_regexp_iterable_sink(
+        &mut self,
+        value: &Expr,
+    ) -> Result<LashExpr, Diagnostic> {
+        self.iterable_sink_depth += 1;
+        self.regexp_iterable_sink_depth += 1;
+        let result = self.lower_expr(value);
+        self.regexp_iterable_sink_depth -= 1;
+        self.iterable_sink_depth -= 1;
+        result
+    }
+
     pub(super) fn temporary(&mut self, label: &str) -> String {
         let id = self.next_binding;
         self.next_binding += 1;
@@ -232,7 +244,7 @@ impl Lowerer {
             let next = match element {
                 ArrayElement::Value(value) => LashExpr::List(vec![self.lower_expr(value)?]),
                 ArrayElement::Spread(value) => {
-                    let value = self.lower_iterable_sink(value)?;
+                    let value = self.lower_regexp_iterable_sink(value)?;
                     Self::iterable_copy(value)
                 }
             };
@@ -283,7 +295,7 @@ impl Lowerer {
         let source = if keys {
             self.lower_expr(source)?
         } else {
-            self.lower_iterable_sink(source)?
+            self.lower_regexp_iterable_sink(source)?
         };
         let iterable = if keys {
             Self::stdlib_call("Object.keys", vec![source])
@@ -896,7 +908,7 @@ impl Lowerer {
             let next = match argument {
                 CallArg::Value(value) => LashExpr::List(vec![self.lower_expr(value)?]),
                 CallArg::Spread(value) => {
-                    let value = self.lower_iterable_sink(value)?;
+                    let value = self.lower_regexp_iterable_sink(value)?;
                     Self::iterable_copy(value)
                 }
             };
@@ -1239,6 +1251,7 @@ impl Lowerer {
         let valid_arity = match constructor {
             "URL" => matches!(args.len(), 1 | 2),
             "URLSearchParams" => args.len() <= 1,
+            "RegExp" => args.len() <= 2,
             _ => true,
         };
         if !valid_arity {
@@ -1250,6 +1263,32 @@ impl Lowerer {
                 ),
                 None,
             ));
+        }
+        if constructor == "RegExp" {
+            for (index, argument) in args.iter().enumerate() {
+                let CallArg::Value(argument) = argument else {
+                    unreachable!("constructor spread was rejected before arity validation")
+                };
+                if matches!(
+                    argument,
+                    Expr::Null
+                        | Expr::Bool(_)
+                        | Expr::Number(_)
+                        | Expr::RegExp { .. }
+                        | Expr::Array(_)
+                        | Expr::Object(_)
+                        | Expr::Function(_)
+                ) {
+                    let label = if index == 0 { "pattern" } else { "flags" };
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::NewUnsupported,
+                        format!(
+                            "new RegExp {label} must be a string or undefined; pass an explicit string"
+                        ),
+                        None,
+                    ));
+                }
+            }
         }
         if constructor == "Date" && args.is_empty() {
             return Ok(LashExpr::BuiltinCall {

@@ -16,7 +16,7 @@ mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 5;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 6;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
@@ -404,6 +404,12 @@ enum CanonicalHeapObject {
         flags: String,
         last_index: u64,
     },
+    RegExpMatch {
+        items: Vec<CanonicalValue>,
+        index: CanonicalValue,
+        input: CanonicalValue,
+        groups: CanonicalValue,
+    },
     Map {
         entries: Vec<CanonicalMapEntry>,
     },
@@ -765,6 +771,9 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
     "kind",
     "value",
     "items",
+    "index",
+    "input",
+    "groups",
     "fields",
     "function",
     "captures",

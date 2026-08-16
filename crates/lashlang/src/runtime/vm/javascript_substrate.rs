@@ -1,14 +1,12 @@
 use std::collections::BTreeSet;
 
-use super::super::{
-    ErrorKind, canonical_regexp_flags, ensure_javascript_string_size, javascript_to_string,
-};
+use super::super::{ErrorKind, ensure_javascript_string_size};
 use super::javascript::{ecma_record_entries, js_stdlib_error};
 use super::javascript_json::javascript_json_stringify;
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    fn require_typescript_intrinsic(&self, operation: &str) -> Result<(), RuntimeError> {
+    pub(super) fn require_typescript_intrinsic(&self, operation: &str) -> Result<(), RuntimeError> {
         if self.reference_semantics {
             Ok(())
         } else {
@@ -140,12 +138,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let entries = url_search_params_initial(&self.heap, initial)?;
                 self.heap.allocate_url_search_params(entries)?
             }
-            ("RegExp", [pattern, flags]) => {
-                let pattern = scalar_javascript_string(pattern)?;
-                let flags = canonical_regexp_flags(&scalar_javascript_string(flags)?)
-                    .map_err(js_stdlib_error)?;
-                self.heap.allocate_regexp(pattern, flags)?
-            }
+            ("RegExp", args) => self.construct_regexp(args)?,
             ("Map", []) | ("Map", [Value::Undefined]) => self.heap.allocate_map(Vec::new())?,
             ("Map", [entries]) => {
                 let mut map_entries = Vec::new();
@@ -291,15 +284,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.stack.push(value);
         Ok(())
     }
-}
-
-fn scalar_javascript_string(value: &Value) -> Result<String, RuntimeError> {
-    if matches!(value, Value::Ref(_)) {
-        return Err(js_stdlib_error(
-            "heap constructor scalar argument cannot be an object",
-        ));
-    }
-    Ok(javascript_to_string(value))
 }
 
 fn heap_sequence(heap: &Heap, value: &Value) -> Result<Vec<Value>, RuntimeError> {
@@ -490,6 +474,24 @@ fn javascript_json_stringify_with_errors(
                     .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
                 HeapObject::List(values) | HeapObject::Tuple(values) => {
                     let values = values
+                        .iter()
+                        .map(|value| {
+                            javascript_json_stringify_with_errors(
+                                heap,
+                                value,
+                                active,
+                                whitelist,
+                                gap,
+                                depth + 1,
+                                true,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(join_json_container('[', ']', values, gap, depth))
+                }
+                HeapObject::RegExpMatch(result) => {
+                    let values = result
+                        .items
                         .iter()
                         .map(|value| {
                             javascript_json_stringify_with_errors(

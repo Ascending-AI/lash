@@ -205,13 +205,20 @@ pub(crate) fn read_javascript_heap_field(
             Value::Number(values.len() as f64)
         }
         HeapObject::RegExp(regexp) => match field.text.as_ref() {
-            "source" => Value::String(regexp.pattern.as_str().into()),
+            "source" => Value::String(regexp_source(regexp).into()),
             "flags" => Value::String(regexp.flags.as_str().into()),
             "global" => Value::Bool(regexp.flags.contains('g')),
             "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
             "multiline" => Value::Bool(regexp.flags.contains('m')),
             "sticky" => Value::Bool(regexp.flags.contains('y')),
             "unicode" => Value::Bool(regexp.flags.contains('u')),
+            _ => Value::Undefined,
+        },
+        HeapObject::RegExpMatch(result) => match field.text.as_ref() {
+            "length" => Value::Number(result.items.len() as f64),
+            "index" => result.index.clone(),
+            "input" => result.input.clone(),
+            "groups" => result.groups.clone(),
             _ => Value::Undefined,
         },
         HeapObject::Map(map) if field.text.as_ref() == "size" => {
@@ -252,7 +259,7 @@ pub(crate) fn read_javascript_heap_index(
         HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
         HeapObject::RegExp(regexp) => match key.as_str() {
             "lastIndex" => Value::Number(regexp.last_index as f64),
-            "source" => Value::String(regexp.pattern.as_str().into()),
+            "source" => Value::String(regexp_source(regexp).into()),
             "flags" => Value::String(regexp.flags.as_str().into()),
             "global" => Value::Bool(regexp.flags.contains('g')),
             "ignoreCase" => Value::Bool(regexp.flags.contains('i')),
@@ -260,6 +267,15 @@ pub(crate) fn read_javascript_heap_index(
             "sticky" => Value::Bool(regexp.flags.contains('y')),
             "unicode" => Value::Bool(regexp.flags.contains('u')),
             _ => Value::Undefined,
+        },
+        HeapObject::RegExpMatch(result) => match key.as_str() {
+            "length" => Value::Number(result.items.len() as f64),
+            "index" => result.index.clone(),
+            "input" => result.input.clone(),
+            "groups" => result.groups.clone(),
+            _ => javascript_array_index_key(&key)
+                .and_then(|index| result.items.get(index).cloned())
+                .unwrap_or(Value::Undefined),
         },
         HeapObject::Map(map) if key == "size" => Value::Number(map.entries.len() as f64),
         HeapObject::Set(set) if key == "size" => Value::Number(set.values.len() as f64),

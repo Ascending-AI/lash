@@ -120,6 +120,33 @@ impl Heap {
                         .cloned()
                         .ok_or(RuntimeError::ListAssignmentIndexOutOfBounds)?
                 }
+                (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Field(field)) => {
+                    match names[field].text.as_ref() {
+                        "index" => result.index.clone(),
+                        "input" => result.input.clone(),
+                        "groups" => result.groups.clone(),
+                        _ => {
+                            return Err(RuntimeError::MissingAssignmentField {
+                                field: names[field].text.to_string(),
+                            });
+                        }
+                    }
+                }
+                (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Index) => {
+                    let index = indexes
+                        .get(index_cursor)
+                        .ok_or(RuntimeError::MissingAssignmentIndex)?;
+                    index_cursor += 1;
+                    let key = self.javascript_to_string(index)?;
+                    match key.as_str() {
+                        "index" => result.index.clone(),
+                        "input" => result.input.clone(),
+                        "groups" => result.groups.clone(),
+                        _ => javascript_array_index_key(&key)
+                            .and_then(|index| result.items.get(index).cloned())
+                            .ok_or(RuntimeError::ListAssignmentIndexOutOfBounds)?,
+                    }
+                }
                 (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
                     let index = indexes
                         .get(index_cursor)
@@ -266,6 +293,95 @@ impl Heap {
                 }
                 values[index] = imported;
             }
+            (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Index) => {
+                let index = indexes
+                    .get(index_cursor)
+                    .ok_or(RuntimeError::MissingAssignmentIndex)?;
+                let key = self.javascript_to_string(index)?;
+                match key.as_str() {
+                    "index" => {
+                        result.index = imported;
+                        return self.commit_reference_assignment(target_id, old_object, new_object);
+                    }
+                    "input" => {
+                        result.input = imported;
+                        return self.commit_reference_assignment(target_id, old_object, new_object);
+                    }
+                    "groups" => {
+                        result.groups = imported;
+                        return self.commit_reference_assignment(target_id, old_object, new_object);
+                    }
+                    "length" => {
+                        let length =
+                            javascript_array_length(self.javascript_to_number(&imported)?)?;
+                        if length > result.items.len() {
+                            return Err(RuntimeError::ValidationFailed {
+                                reason: format!(
+                                    "TS_SPARSE_ARRAY_UNSUPPORTED: assigning RegExp match length {length} would create holes; use indexed appends"
+                                ),
+                            });
+                        }
+                        result.items.truncate(length);
+                        return self.commit_reference_assignment(target_id, old_object, new_object);
+                    }
+                    _ => {}
+                }
+                let index = javascript_array_index_key(&key).ok_or_else(|| {
+                    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key }
+                })?;
+                if index > result.items.len() {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: format!(
+                            "TS_SPARSE_ARRAY_UNSUPPORTED: assignment index {index} skips array length {}",
+                            result.items.len()
+                        ),
+                    });
+                }
+                if index == result.items.len() {
+                    let attempted = old_object
+                        .logical_bytes()
+                        .saturating_add(VALUE_SLOT_BYTES + 1);
+                    if attempted > self.logical_byte_limit {
+                        return Err(RuntimeError::MemoryLimitExceeded {
+                            limit: self.logical_byte_limit,
+                            attempted,
+                        });
+                    }
+                    result.items.try_reserve_exact(1).map_err(|_| {
+                        RuntimeError::MemoryLimitExceeded {
+                            limit: self.logical_byte_limit,
+                            attempted,
+                        }
+                    })?;
+                    result.items.push(Value::Undefined);
+                }
+                result.items[index] = imported;
+            }
+            (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Field(field)) => {
+                match names[field].text.as_ref() {
+                    "index" => result.index = imported,
+                    "input" => result.input = imported,
+                    "groups" => result.groups = imported,
+                    "length" => {
+                        let length =
+                            javascript_array_length(self.javascript_to_number(&imported)?)?;
+                        if length > result.items.len() {
+                            return Err(RuntimeError::ValidationFailed {
+                                reason: format!(
+                                    "TS_SPARSE_ARRAY_UNSUPPORTED: assigning RegExp match length {length} would create holes; use indexed appends"
+                                ),
+                            });
+                        }
+                        result.items.truncate(length);
+                    }
+                    _ => {
+                        return Err(RuntimeError::CannotAssignField {
+                            field: names[field].text.to_string(),
+                            actual: "RegExp match array".to_string(),
+                        });
+                    }
+                }
+            }
             (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
                 let index = indexes
                     .get(index_cursor)
@@ -288,11 +404,19 @@ impl Heap {
                 });
             }
         }
-        let old_bytes = old_object.logical_bytes();
+        self.commit_reference_assignment(target_id, old_object, new_object)
+    }
+
+    fn commit_reference_assignment(
+        &mut self,
+        target_id: HeapId,
+        old_object: HeapObject,
+        new_object: HeapObject,
+    ) -> Result<(), RuntimeError> {
         let new_bytes = new_object.logical_bytes();
         let next_live = self
             .live_logical_bytes
-            .saturating_sub(old_bytes)
+            .saturating_sub(old_object.logical_bytes())
             .saturating_add(new_bytes);
         if next_live > self.logical_byte_limit {
             return Err(RuntimeError::MemoryLimitExceeded {
@@ -302,7 +426,16 @@ impl Heap {
         }
         let old_children = old_object.child_refs();
         let new_children = new_object.child_refs();
-        let entry = self.slots[slot].as_mut().expect("heap slot exists");
+        let slot = self.id_to_slot.get(&target_id).copied().ok_or(
+            RuntimeError::DanglingHeapReference {
+                id: target_id.get(),
+            },
+        )?;
+        let entry = self.slots[slot]
+            .as_mut()
+            .ok_or(RuntimeError::DanglingHeapReference {
+                id: target_id.get(),
+            })?;
         entry.object = new_object;
         entry.logical_bytes = new_bytes;
         self.live_logical_bytes = next_live;
@@ -311,6 +444,15 @@ impl Heap {
         self.debug_assert_byte_accounting();
         Ok(())
     }
+}
+
+fn javascript_array_length(number: f64) -> Result<usize, RuntimeError> {
+    if number.is_finite() && number >= 0.0 && number.fract() == 0.0 && number <= u32::MAX as f64 {
+        return Ok(number as usize);
+    }
+    Err(RuntimeError::ValidationFailed {
+        reason: "RangeError: Invalid array length".to_string(),
+    })
 }
 
 fn regexp_last_index(number: f64) -> u64 {

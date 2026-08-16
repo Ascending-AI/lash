@@ -418,6 +418,7 @@ pub(crate) enum IntrinsicOp {
     JavaScriptHeapNew(usize),
     JavaScriptHeapInstanceOf,
     JavaScriptHeapDeleteMember,
+    JavaScriptRegExp(usize),
     JavaScriptGlobalDelete,
     JavaScriptGlobalHas,
     JavaScriptGlobalSet,
@@ -609,6 +610,7 @@ impl IntrinsicOp {
             | IntrinsicOp::Range(argc)
             | IntrinsicOp::JavaScriptStdlib(argc)
             | IntrinsicOp::JavaScriptHeapNew(argc)
+            | IntrinsicOp::JavaScriptRegExp(argc)
             | IntrinsicOp::InvalidArity { argc, .. }
             | IntrinsicOp::Unknown { argc, .. } => argc,
             IntrinsicOp::FormatCompiled(_)
@@ -636,6 +638,7 @@ impl IntrinsicOp {
             IntrinsicOp::JavaScriptHeapNew(_) => BuiltinProfileTag::TypeScriptStdlib,
             IntrinsicOp::JavaScriptHeapInstanceOf
             | IntrinsicOp::JavaScriptHeapDeleteMember
+            | IntrinsicOp::JavaScriptRegExp(_)
             | IntrinsicOp::JavaScriptGlobalDelete
             | IntrinsicOp::JavaScriptGlobalHas
             | IntrinsicOp::JavaScriptGlobalSet

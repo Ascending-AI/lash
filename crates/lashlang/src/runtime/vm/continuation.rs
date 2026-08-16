@@ -16,7 +16,7 @@ pub use types::{
 
 use super::exceptions::PendingErrorOrigin;
 
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 6;
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
@@ -306,6 +306,12 @@ mod continuation_serde {
             flags: String,
             last_index: u64,
         },
+        RegExpMatch {
+            items: Vec<ValueWire>,
+            index: ValueWire,
+            input: ValueWire,
+            groups: ValueWire,
+        },
         Map {
             entries: Vec<(ValueWire, ValueWire)>,
         },
@@ -421,6 +427,16 @@ mod continuation_serde {
                 flags: regexp.flags.clone(),
                 last_index: regexp.last_index,
             },
+            HeapObject::RegExpMatch(result) => HeapObjectWire::RegExpMatch {
+                items: result
+                    .items
+                    .iter()
+                    .map(value_to_wire)
+                    .collect::<Result<_, _>>()?,
+                index: value_to_wire(&result.index)?,
+                input: value_to_wire(&result.input)?,
+                groups: value_to_wire(&result.groups)?,
+            },
             HeapObject::Map(map) => HeapObjectWire::Map {
                 entries: map
                     .entries
@@ -483,6 +499,8 @@ mod continuation_serde {
                 flags,
                 last_index,
             } => {
+                crate::runtime::validate_typescript_regexp(&pattern, &flags)
+                    .map_err(|_| "RegExp pattern or flags violate TypeScript bounds")?;
                 if last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
                     return Err("RegExp last_index exceeds JavaScript's maximum safe length");
                 }
@@ -493,6 +511,20 @@ mod continuation_serde {
                     compiled_program: None,
                 })
             }
+            HeapObjectWire::RegExpMatch {
+                items,
+                index,
+                input,
+                groups,
+            } => HeapObject::RegExpMatch(RegExpMatchObject {
+                items: items
+                    .into_iter()
+                    .map(value_from_wire)
+                    .collect::<Result<_, _>>()?,
+                index: value_from_wire(index)?,
+                input: value_from_wire(input)?,
+                groups: value_from_wire(groups)?,
+            }),
             HeapObjectWire::Map { entries } => HeapObject::Map(MapObject {
                 entries: entries
                     .into_iter()

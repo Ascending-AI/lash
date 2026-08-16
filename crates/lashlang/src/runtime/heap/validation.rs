@@ -214,6 +214,7 @@ impl Heap {
             matches!(
                 object,
                 super::HeapObject::RegExp(_)
+                    | super::HeapObject::RegExpMatch(_)
                     | super::HeapObject::Map(_)
                     | super::HeapObject::Set(_)
                     | super::HeapObject::Date(_)
@@ -246,6 +247,15 @@ impl Heap {
 fn validate_exotic_invariants(heap: &Heap, id: HeapId, object: &HeapObject) -> Result<(), String> {
     match object {
         HeapObject::RegExp(regexp) => {
+            crate::runtime::validate_typescript_regexp(&regexp.pattern, &regexp.flags).map_err(
+                |error| {
+                    format!(
+                        "RegExp object {} violates TypeScript bounds: {}",
+                        id.get(),
+                        error.diagnostic_code()
+                    )
+                },
+            )?;
             let canonical = canonical_regexp_flags(&regexp.flags)
                 .map_err(|reason| format!("RegExp object {} has {reason}", id.get()))?;
             if canonical != regexp.flags {

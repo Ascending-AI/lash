@@ -72,6 +72,9 @@ pub enum RuntimeError {
     /// Active VM execution exceeded its explicit instruction budget.
     #[error("lashlang instruction budget of {limit} instructions exceeded")]
     InstructionBudgetExceeded { limit: u64 },
+    /// RegExp execution consumed its deterministic bytecode/backtrack budget.
+    #[error("regular expression execution budget of {limit} steps exceeded")]
+    RegExpBudgetExceeded { limit: u64 },
     /// Active VM execution exceeded its explicit deadline.
     #[error("lashlang execution deadline of {limit_ms}ms exceeded")]
     ExecutionDeadlineExceeded { limit_ms: u128 },
@@ -456,6 +459,7 @@ impl RuntimeError {
             Self::JavaScriptExoticAtHostBoundary { .. } => ErrorTaxonomy::Catchable,
             Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
             Self::InstructionBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
+            Self::RegExpBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::ExecutionDeadlineExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::MemoryLimitExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::HostCancelled => ErrorTaxonomy::UncatchableTerminal,
@@ -580,6 +584,7 @@ impl RuntimeError {
             Self::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            Self::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
             Self::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
             Self::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
             Self::HostCancelled => "HostCancelled",
@@ -721,6 +726,7 @@ impl RuntimeError {
         matches!(
             self,
             Self::InstructionBudgetExceeded { .. }
+                | Self::RegExpBudgetExceeded { .. }
                 | Self::ExecutionDeadlineExceeded { .. }
                 | Self::MemoryLimitExceeded { .. }
                 | Self::FrameDepthExceeded { .. }
@@ -758,6 +764,7 @@ mod tests {
             RuntimeError::JavaScriptExoticAtHostBoundary { kind: "Map".into() },
             RuntimeError::EffectInBuiltinCallback,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
+            RuntimeError::RegExpBudgetExceeded { limit: 1_000_000 },
             RuntimeError::ExecutionDeadlineExceeded { limit_ms: 20 },
             RuntimeError::UndefinedVariable {
                 name: "name".into(),
@@ -1056,6 +1063,9 @@ mod tests {
                 RuntimeError::InstructionBudgetExceeded { .. } => {
                     "lashlang instruction budget of 10 instructions exceeded"
                 }
+                RuntimeError::RegExpBudgetExceeded { .. } => {
+                    "regular expression execution budget of 1000000 steps exceeded"
+                }
                 RuntimeError::ExecutionDeadlineExceeded { .. } => {
                     "lashlang execution deadline of 20ms exceeded"
                 }
@@ -1302,7 +1312,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 113] = [
+    const RUNTIME_ERROR_CODES: [&str; 114] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1313,6 +1323,7 @@ mod tests {
         "JavaScriptExoticAtHostBoundary",
         "EffectInBuiltinCallback",
         "InstructionBudgetExceeded",
+        "RegExpBudgetExceeded",
         "ExecutionDeadlineExceeded",
         "MemoryLimitExceeded",
         "HostCancelled",
@@ -1436,6 +1447,7 @@ mod tests {
             RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+            RuntimeError::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
             RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
             RuntimeError::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
             RuntimeError::HostCancelled => "HostCancelled",

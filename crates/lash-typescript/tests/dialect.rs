@@ -202,7 +202,6 @@ fn unsupported_constructs_have_stable_named_diagnostics() {
         ("class A {}", Code::ClassUnsupported),
         ("function* f() {}", Code::GeneratorUnsupported),
         ("namespace N {}", Code::NamespaceUnsupported),
-        ("const r = /x/;", Code::RegExpUnsupported),
         ("eval('1')", Code::EvalUnsupported),
         ("new Function('return 1')", Code::NewUnsupported),
         ("label: while (true) break label;", Code::LabelUnsupported),

@@ -87,7 +87,10 @@ pub use runtime::{
 };
 #[doc(hidden)]
 pub use runtime::{
-    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, validate_canonical_messagepack_structure,
+    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+    TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
+    TypeScriptRegExpValidationError, validate_canonical_messagepack_structure,
+    validate_typescript_regexp, validate_typescript_regexp_shape,
 };
 pub use runtime::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
@@ -96,7 +99,7 @@ pub use runtime::{
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 8;
+pub const BYTECODE_FORMAT_VERSION: u32 = 9;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,

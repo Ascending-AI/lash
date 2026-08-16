@@ -30,6 +30,7 @@ lash-core = { workspace = true }
 lash-sansio = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
+regress = { workspace = true }
 rustc-hash = "2"
 rmp-serde = { workspace = true }
 ryu-js = { workspace = true }
