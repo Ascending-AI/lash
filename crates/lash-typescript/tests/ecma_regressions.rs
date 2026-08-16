@@ -540,3 +540,48 @@ fn ordinary_array_construction_is_unaffected_by_the_default_memory_ceiling() {
         Value::Number(1000.0)
     );
 }
+
+/// A member read on `undefined` names the undefined value, not the method.
+///
+/// `globalThis.missing` is `undefined`, so `globalThis.missing.get(k)` is an
+/// ECMA `TypeError` about the receiver. Reporting it as
+/// `TS_METHOD_UNSUPPORTED: method \`get\` is unavailable on this value` pointed
+/// the reader at a missing builtin — the one thing that is not wrong here —
+/// and said nothing about which value was undefined.
+#[test]
+fn a_member_call_on_undefined_names_the_undefined_receiver() {
+    for source in [
+        "finish(globalThis.missing.get('k'));",
+        "const holder: any = undefined; finish(holder.get('k'));",
+        "finish((({ a: 1 }) as any).missing.get('k'));",
+    ] {
+        let error = execute(source).expect_err("a member read on undefined must refuse");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("Cannot read properties of undefined (reading `get`)"),
+            "{source}: {rendered}"
+        );
+        assert!(
+            !rendered.contains("TS_METHOD_UNSUPPORTED"),
+            "the diagnostic must not blame the method: {source}: {rendered}"
+        );
+    }
+
+    let error = execute("const holder: any = null; finish(holder.get('k'));")
+        .expect_err("a member read on null must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("Cannot read properties of null (reading `get`)"),
+        "{error}"
+    );
+
+    // A method that really is unsupported, on a receiver that really exists,
+    // still says so.
+    let error = execute("const holder: any = { a: 1 }; finish(holder.get('k'));")
+        .expect_err("an unsupported method on a record must refuse");
+    assert!(
+        error.to_string().contains("TS_METHOD_UNSUPPORTED"),
+        "{error}"
+    );
+}

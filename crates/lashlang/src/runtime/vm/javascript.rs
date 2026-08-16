@@ -817,11 +817,20 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
             javascript_array_method(method, items.as_ref(), args)
         }
         Value::Number(value) => javascript_number_method(method, *value, args),
-        Value::Null | Value::Undefined if matches!(method.as_str(), "toString" | "valueOf") => {
-            Err(js_stdlib_error(format!(
-                "TS_METHOD_UNSUPPORTED: cannot call `{method}` on null or undefined"
-            )))
-        }
+        // Reading a member of `null`/`undefined` is an ECMA `TypeError` about
+        // the *receiver*, not a statement about the method: `globalThis.missing`
+        // is `undefined`, and reporting `.get` as an unsupported method sent
+        // readers looking for a missing builtin instead of at the undefined
+        // value one step to the left. Named the way ECMA names it, so the
+        // diagnostic matches what the guest would have seen in a browser.
+        Value::Null | Value::Undefined => Err(js_stdlib_error(format!(
+            "TypeError: Cannot read properties of {receiver} (reading `{method}`)",
+            receiver = if matches!(target, Value::Null) {
+                "null"
+            } else {
+                "undefined"
+            }
+        ))),
         _ if method == "toString" && args.is_empty() => {
             Ok(Value::String(javascript_to_string(target).into()))
         }
