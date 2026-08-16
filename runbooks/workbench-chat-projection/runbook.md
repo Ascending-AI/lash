@@ -37,10 +37,23 @@ reconciled them:
   one committed copy survives either way — but **which id holds it depends on the
   termination**, and this runbook must never assume one:
 
-  | trace `done_reason` | reached by | the single committed assistant id | part kind |
+  | trace `done_reason` | reached by | the single committed assistant id | part kinds |
   |---|---|---|---|
   | `assistant_message` | a queued/wake turn, which runs without `require_finish` and answers as bare prose | `m_turn_<turn_id>_assistant` (runtime) | `Prose` |
+  | `assistant_message` with reasoning | the same turn when the model also returned reasoning | `m_rlm_<turn_id>_<iteration>_assistant_response` (RLM protocol) | `Reasoning` + `Prose` |
   | `final_value` | a composer send, where `require_finish` forces the answer through `finish` | `workbench-assistant:<turn_id>` (workbench) | `Text` |
+
+- **FIG-1406** (fixed) — the third row above is where the reply went *missing*. The RLM
+  protocol commits the model's prose itself whenever reasoning rides along, and
+  `materialize_terminal_output` then mints no runtime copy: the answer is already the
+  transcript's last message. The workbench read every plugin-origin RLM message as protocol
+  internals and re-admitted only its reasoning, so a reasoned bare-prose turn rendered its
+  thinking and lost its answer. `durable_rlm_reply_message_ids` in
+  [`chat_projection.rs`](../../examples/agent-workbench/src/main_sections/chat_projection.rs)
+  now admits the last plugin-authored assistant prose message of each turn — abandoning it
+  the moment an ordinary assistant message follows, because that copy is then the reply.
+  This is the mirror defect of FIG-984 and needs the same referee: **zero** rendered agent
+  rows over a committed reply is as much a projection failure as two.
 
 Both defects share one shape: **two id namespaces projecting one logical message**. The
 gate is therefore not "does the reply look right" but "does every layer agree on how many
@@ -329,9 +342,16 @@ the settle gate. Require **exactly**:
   the session graph;
 - 3 `turn_completed` records — one wake, not two.
 
-The wake's single committed copy is the **runtime's** `m_turn_<turn_id>_assistant` (a `Prose`
-part), and there is **no** `workbench-assistant:<turn_id>` row in the graph for it — see the
-termination table above. Count rows by role; never gate on a particular id being present, or
+The wake's single committed copy belongs to the **runtime** or to the **RLM protocol** — see
+the termination table above — and there is **no** `workbench-assistant:<turn_id>` row in the
+graph for it either way. Read the wake's committed assistant node before judging: a
+`m_turn_<turn_id>_assistant` node carries one `Prose` part, while a reasoned answer is
+committed as `m_rlm_<turn_id>_<iteration>_assistant_response` carrying `Reasoning` **and**
+`Prose`. In that second case require, in addition to the counts below, that the wake's
+`Prose` text appears verbatim in exactly one rendered agent row and in
+`/api/state.messages` — a `reasoning` disclosure with no agent row over a committed
+`assistant_response` node is the FIG-1406 defect, not a quiet model. Record which writer
+held the copy in `03-red-press-store.json`. Count rows by role; never gate on a particular id being present, or
 the gate fails on correct behavior. Two id-level traps here: `/api/state.messages` carries the
 runtime id for this turn while the two composer turns carry workbench ids, and the
 product-event log still lists `message:workbench-assistant:<wake_turn_id>` — that is the
@@ -379,6 +399,7 @@ Restate container are gone.
 | Watcher registration | cumulative 2+2 rows = 2+2 API = 2+2 store = 2 `turn_completed` | | `02-watcher-registered.png` |
 | One press, one wake | exactly 1 `workbench-queued-` `turn_completed`; user rows unchanged | | `03-red-press-trace.json` |
 | One press, one new agent row | 3 assistant rows = 3 API = 3 store = 3 `turn_completed` | | `03-after-red-press.png`, `03-red-press-*.json` |
+| Reasoned wake reply | the wake's committed `Prose` renders in exactly one agent row and in `/api/state.messages`, whichever writer holds the copy | | `03-red-press-{dom,state,store}.json` |
 | Reload identity | post-reload row multiset equals pre-reload multiset | | `04-after-reload.png`, `04-reload-multiset.json` |
 | Three-layer cross-check | every step reconciles DOM vs durable vs trace pairwise; no mismatch normalized away | | all four extracts per phase |
 | Duplicate attribution | on any surplus row, the surplus message ids and their writing namespaces are recorded | | `03-duplicate-ids.json` |

@@ -755,9 +755,13 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
 }
 
 fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messages::Message]) {
+    // Settled: no turn of this session is running any more, so a protocol-owned
+    // reply would be admitted here if one stood as this turn's answer. The
+    // workbench's own committed copy follows it, so none does (FIG-1406).
+    let rlm_reply_ids = durable_rlm_reply_message_ids(messages, false);
     let messages = messages
         .iter()
-        .filter_map(project_committed_chat_message)
+        .filter_map(|message| project_committed_chat_message(message, &rlm_reply_ids))
         .collect::<Vec<_>>();
     let marker_messages = messages
         .iter()
