@@ -384,8 +384,21 @@ fn validate_rlm_language_bindings(ctx: &ToolCatalogContext) -> Result<(), Plugin
         }
         required_tool_lashlang_executable(tool)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
-        required_tool_typescript_executable(tool)
+        let typescript = required_tool_typescript_executable(tool)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
+        // Being a catalog member is being advertised, and the TypeScript
+        // execution section advertises the binding's call path as a typed
+        // declaration the model calls verbatim. A path the dialect resolves to
+        // anything but a tool call — a module segment no cell can write, an ECMA
+        // global namespace, a refused method name — can only be advertised as a
+        // callable nothing, so it is refused here instead (FIG-1444).
+        let call_path = typescript.call_path();
+        lash_typescript::ensure_tool_call_path_addressable(&call_path).map_err(|err| {
+            PluginError::Registration(format!(
+                "tool `{}` has a `typescript.tool` binding no TypeScript cell can call as `{call_path}`: {err}",
+                tool.name
+            ))
+        })?;
     }
     Ok(())
 }
@@ -522,6 +535,52 @@ mod tests {
             &test_dialect_registry(),
         )
         .expect("internal process bodies are not Lashlang-callable catalog members");
+    }
+
+    /// Membership is advertisement, so a binding whose call path a TypeScript
+    /// cell cannot write is refused at registration rather than rendered as a
+    /// declaration nothing can call (FIG-1444). `delete` is a module root no
+    /// cell can spell; `Math` is a root the lowerer resolves as an ECMA global
+    /// namespace.
+    #[test]
+    fn rlm_catalog_rejects_typescript_call_paths_no_cell_can_address() {
+        for module in ["delete", "Math"] {
+            let unaddressable = ToolDefinition::raw(
+                "tool:test/purge",
+                "purge",
+                "Purge",
+                ToolContract::default_input_schema(),
+                json!({ "type": "string" }),
+            )
+            .with_lashlang_binding(LashlangToolBinding::new([module], "run"));
+
+            let err = rlm_tool_catalog(
+                ToolCatalogContext {
+                    session_id: "session".to_string(),
+                    tools: vec![unaddressable.manifest()],
+                    resolve_contract: None,
+                    tool_access: lash_core::SessionToolAccess::default(),
+                    subagent: None,
+                    extensions: Default::default(),
+                },
+                &test_dialect_registry(),
+            )
+            .expect_err("an unaddressable TypeScript call path must fail registration");
+
+            assert!(
+                err.to_string().contains("no TypeScript cell can call"),
+                "{err}"
+            );
+            assert!(err.to_string().contains(&format!("{module}.run")), "{err}");
+            // The refusal must lead with why the path is unadvertisable. The
+            // probe's own diagnostic answers a different question — `Math.*`
+            // fails it as `TS_AWAIT_UNSUPPORTED`, which reads as "drop the
+            // await" — so it belongs after the reason, never in place of it.
+            assert!(
+                err.to_string().contains("does not dispatch a tool"),
+                "{err}"
+            );
+        }
     }
 
     #[test]
