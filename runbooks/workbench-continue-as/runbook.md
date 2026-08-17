@@ -60,9 +60,14 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
    needed by the seeded competence probe and a compact supporting fact. Require one RLM seed
    protocol event on the new frame path with exactly those keys and values. The deliberately
    non-seeded marker must not occur anywhere in that seed event.
-3. **Resolve both frames independently.** Record the old and new frame node ids. The new
-   frame's `previous_frame_node_id` must resolve to the old frame. Materialize/read each
-   frame separately: the old view retains its pre-switch rows and the new view does not.
+3. **Resolve both frames independently.** Record the old and new frame node ids. No workbench
+   endpoint serves frame records, and the stored `frame_open` node carries only `frame_key`,
+   `reason`, `assignment`, and `protocol_turn_options` beside its `parent_node_id`, so
+   reconstruct the link the way core derives `AgentFrameRecord.previous_frame_node_id`: walk
+   the active path and take each `frame_open` node's nearest preceding `frame_open` ancestor
+   as its previous frame. The new frame's reconstructed previous frame must be exactly the
+   recorded old frame node id. Materialize/read each frame separately: the old view retains
+   its pre-switch rows and the new view does not.
 4. **Declare the answer before looking.** Save the answer key above with the pre-switch
    transcript snapshot before submitting the switching turn. Compare it to the observed
    post-switch DOM, API/current read model, product log, raw graph, and trace without editing
@@ -197,7 +202,8 @@ the pre-switch transcript as `02-boundary-expected.json` and
 2. one new raw `frame_open` node with `reason == "continue_as"` and matching `frame_key`;
 3. a new-frame RLM seed event containing `seed_baton` and the supporting fact, but not
    `unseeded_secret` or its marker;
-4. the new frame's `previous_frame_node_id` resolves exactly to the recorded old frame;
+4. the new frame's reconstructed previous frame, per golden rule 3, is exactly the recorded
+   old frame node id;
 5. the old-frame read model still contains the pre-switch marker rows, while the new-frame
    read model excludes them;
 6. the distinct follow-frame physical turn completes and the logical turn's one rendered
@@ -268,7 +274,7 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 | Switch lever | organic pressure tried once; actual lever recorded honestly | | `02-lever.json` |
 | Frame switch | matching trace switch + `frame_open{reason:"continue_as"}`; follow frame completed coherently | | `02-frame-graph.json`, `02-switch-trace.json` |
 | Seed materialized | exact seeded keys/values in new frame; non-seeded marker absent | | `02-seed.json` |
-| Previous frame retained | previous-frame id resolves and its read model retains pre-switch rows | | `02-frame-graph.json` |
+| Previous frame retained | previous frame reconstructed from the active path is the recorded old frame node, and its read model retains pre-switch rows | | `02-frame-graph.json` |
 | Boundary rendering | persistent user rows + collapsed old assistant rows match the predeclared answer key across DOM/API/graph/trace | | `02-boundary-expected.json`, `03-boundary-*.json`, `03-crosscheck.json` |
 | Seeded competence | reply contains the seeded baton without restating it in the prompt | | `04-seeded-fact.png`, `04-seeded-judge.json` |
 | Clean window | reply does not contain the deliberately non-seeded marker | | `05-nonseeded-fact.png`, `05-nonseeded-judge.json` |

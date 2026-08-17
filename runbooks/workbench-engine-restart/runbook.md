@@ -114,11 +114,16 @@ renderable; a transient browser fetch failure during the outage is evidence to r
 not permission to continue without the post-start gates.
 
 **Reload once during the outage and gate the outage render.** The parked turn is durable
-truth; the shell must not contradict it. Require that the reloaded page shows the
-connection banner or a connecting/unavailable/reconnecting pill, and that it renders
-**neither** an `idle` pill **nor** "no turns yet". A render that is indistinguishable from
-an empty, idle session is a failure of this phase even though the engine is down.
-Screenshot `02-outage-reload.png`.
+truth; the shell must not contradict it. Require that the reloaded page still shows the
+running pill and **stop turn**, that `/api/state.active_turns` still carries the exact
+Phase 1 address, and that the page renders **neither** an `idle` pill **nor** "no turns
+yet". A render that is indistinguishable from an empty, idle session is a failure of this
+phase even though the engine is down. Screenshot `02-outage-reload.png`.
+
+Do not gate on a connection banner or a connecting/unavailable/reconnecting pill here. The
+shell derives those from its `state`, `product`, and `observation` channels, all served by
+the live web process, so a Restate-only outage leaves the shell in its live phase by
+construction; an engine-reachability affordance is tracked as FIG-1450.
 
 Run `docker start <restate-container>`. Poll—not sleep—until its admin and ingress ports
 are ready. Require the container id, Workbench PID, session id, and endpoint-worker
@@ -176,24 +181,30 @@ worker's original lease could expire.
 
 1. Start a shape-pinned long turn, record its exact session/turn address and the Workbench
    PID, and gate a real `exec_code_started` record. Run `just agent-workbench-restart <port>`
-   without changing the data directory or Restate. Require the PID and boot incarnation to
-   change while the session and turn address remain exact.
+   without changing the data directory or Restate. Require the PID to change and the run log
+   to gain a fresh `starting agent-workbench` line, while the session and turn address remain
+   exact.
 
-   Record the lease identity triple on both sides of the restart:
-   `owner_id`, `incarnation_id`, `executor_id`. All three must change across a real process
-   replacement — a new boot mints a new incarnation, and each runtime open inside it mints a
-   new executor id. This is what makes the replacement worker a *foreign* claimant to the
-   dead worker's still-live lease row, which is precisely the geometry both arms below
-   exercise. An unchanged incarnation means the restart did not happen; an unchanged
-   executor under a changed incarnation means the identity is being derived from something
-   process-stable, which is a **FAIL**.
+   Record the dead worker's lane row on both sides of the restart:
+   `session_execution_leases` in `<data-dir>/lash-sessions/durable-core.db`, columns
+   `lease_owner_id`, `lease_owner_incarnation_id`, `lease_executor_id`,
+   `lease_fencing_token`, and `lease_expires_at_ms`. Copy the database together with its
+   `-wal` and `-shm` files before querying; reading the main file alone reports empty tables.
+   Do not gate on that row changing. The replacement worker does not claim the lane: it
+   commits under the CAS fence (ADR 0029) while the dead row stays live, so the row is
+   expected to keep the dead worker's owner, incarnation, executor, and fencing token for the
+   whole window. Each arm proves the fence instead: exactly one `runtime_turn_commits` row
+   for the arm's turn, whose `committed_at_ms` is below the recorded `lease_expires_at_ms`.
+   A commit at or after that expiry says nothing about the dead TTL and is a retry of the
+   arm. A moved `lease_fencing_token` or `lease_expires_at_ms` means something re-claimed or
+   renewed the lane, so the arm no longer describes a commit inside a dead holder's TTL;
+   record that and rerun.
 2. **Same-turn successor arm:** allow Restate to redrive that exact turn. Require its user and
-   assistant nodes to commit exactly once, the UI/API/store projections to agree, and the
-   trace to show the replacement worker observed the still-live holder before the original
-   TTL elapsed. The `session_execution_lease.busy` evidence must name the *dead* worker's
-   executor as `holder_executor_id` and the replacement's as `claimant_executor_id`: a
-   redrive is not reentry, and identical triples there would mean the runtime handed a
-   rebuilt open its predecessor's identity. Save `06a-same-turn-{state,store,trace}.json` and report this arm separately.
+   assistant nodes to commit exactly once, the UI/API/store projections to agree, and a second
+   `turn_started` for that exact turn id after the restart. Its single `runtime_turn_commits`
+   row carries the fence evidence. Do not gate on `session_execution_lease.*`: those are
+   `tracing` events and the Workbench installs no `tracing` subscriber, so they reach neither
+   `trace.jsonl` nor the process log. Save `06a-same-turn-{state,store,trace}.json` and report this arm separately.
 3. **New-turn-within-TTL arm:** immediately submit a fresh marker turn through the replacement
    worker, while the timestamp is still inside that same original TTL window. Require its
    distinct turn id and ordered user/assistant nodes to commit exactly once, with UI/API/store
@@ -216,7 +227,7 @@ Restate container are gone.
 | Boot identity | Workbench/Restate ready; rendered/API/disk session ids agree | | `00-ready.png` |
 | Durable park | pinned shape has `exec_code_started`; one exact running address agrees across UI, API, disk, trace, and work API | | `01-parked-*`, `01-running-work.json` |
 | Engine-only bounce | same container id; Workbench PID and endpoint stay live | | command log, `02-engine-down.png` |
-| Outage render | reload during the outage shows the connection state, never `idle` / "no turns yet" | | `02-outage-reload.png` |
+| Outage render | reload during the outage still shows the running pill, Stop, and the exact parked address; never `idle` / "no turns yet" | | `02-outage-reload.png` |
 | UI reconvergence | exact pre-bounce address restores running pill + Stop | | `03-reconverged-*` |
 | Stop after reconnect | committed Cancelled terminal carries matching user evidence; baseline process reaches Cancelled with `process.cancel_requested` | | `04-restarted-cancelled.png`, receipt/state/work JSON |
 | Normal post-restart commit | new turn commits and UI/API transcript agree | | `05-post-restart-*` |
