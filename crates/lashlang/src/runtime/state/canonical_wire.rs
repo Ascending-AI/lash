@@ -158,3 +158,130 @@ fn non_canonical(location: &str, reason: &str) -> SnapshotDecodeError {
         reason: reason.to_string(),
     }
 }
+
+fn expect_key(
+    bytes: &[u8],
+    cursor: &mut usize,
+    expected: &str,
+    location: &str,
+) -> Result<(), SnapshotDecodeError> {
+    let found = take_canonical_string(bytes, cursor, location)?;
+    if found != expected {
+        return Err(non_canonical(
+            location,
+            &format!(
+                "struct fields must use canonical order; expected `{expected}`, found `{found}`"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn take_canonical_string<'a>(
+    bytes: &'a [u8],
+    cursor: &mut usize,
+    location: &str,
+) -> Result<&'a str, SnapshotDecodeError> {
+    let marker = take_byte(bytes, cursor)?;
+    let length = match marker {
+        0xa0..=0xbf => usize::from(marker & 0x1f),
+        0xd9 => {
+            let length = usize::from(take_byte(bytes, cursor)?);
+            if length <= 31 {
+                return Err(non_canonical(
+                    location,
+                    "string length is not minimally encoded",
+                ));
+            }
+            length
+        }
+        0xda => {
+            let length = usize::from(take_u16(bytes, cursor)?);
+            if length <= usize::from(u8::MAX) {
+                return Err(non_canonical(
+                    location,
+                    "string length is not minimally encoded",
+                ));
+            }
+            length
+        }
+        0xdb => {
+            let length = usize_from_u32(take_u32(bytes, cursor)?)?;
+            if length <= usize::from(u16::MAX) {
+                return Err(non_canonical(
+                    location,
+                    "string length is not minimally encoded",
+                ));
+            }
+            length
+        }
+        _ => return Err(unexpected_marker(location, "a string", marker)),
+    };
+    let value = take_slice(bytes, cursor, length)?;
+    std::str::from_utf8(value).map_err(|_| invalid_at(location, "string is not valid UTF-8"))
+}
+
+fn validate_f64(
+    bytes: &[u8],
+    cursor: &mut usize,
+    location: &str,
+) -> Result<(), SnapshotDecodeError> {
+    let marker = take_byte(bytes, cursor)?;
+    if marker == 0xcb {
+        let bits = u64::from_be_bytes(take_array::<8>(bytes, cursor)?);
+        let value = f64::from_bits(bits);
+        if value.is_nan() && bits != CANONICAL_NAN_BITS {
+            return Err(non_canonical(
+                location,
+                "NaN must use the canonical bit pattern",
+            ));
+        }
+        return Ok(());
+    }
+    if marker == 0xca || is_integer_marker(marker) {
+        return Err(non_canonical(
+            location,
+            "runtime number must use f64 encoding",
+        ));
+    }
+    Err(unexpected_marker(location, "an f64", marker))
+}
+
+fn validate_json_number(
+    bytes: &[u8],
+    cursor: &mut usize,
+    location: &str,
+) -> Result<(), SnapshotDecodeError> {
+    let marker = take_byte(bytes, cursor)?;
+    if marker == 0xcb {
+        let value = f64::from_bits(u64::from_be_bytes(take_array::<8>(bytes, cursor)?));
+        if !value.is_finite() {
+            return Err(invalid_at(
+                location,
+                "projection JSON number must be finite",
+            ));
+        }
+        return Ok(());
+    }
+    if marker == 0xca {
+        return Err(non_canonical(
+            location,
+            "floating-point number must use f64 encoding",
+        ));
+    }
+    take_canonical_integer(bytes, cursor, location, marker).map(|_| ())
+}
+
+fn validate_unsigned(
+    bytes: &[u8],
+    cursor: &mut usize,
+    location: &str,
+    maximum: u64,
+) -> Result<(), SnapshotDecodeError> {
+    let marker = take_byte(bytes, cursor)?;
+    let value = take_canonical_integer(bytes, cursor, location, marker)?;
+    if value < 0 || value > i128::from(maximum) {
+        return Err(invalid_at(location, "unsigned integer is out of range"));
+    }
+    Ok(())
+}

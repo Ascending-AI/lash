@@ -295,6 +295,7 @@ fn canonical_snapshot_variant_corpus_strategy() -> impl Strategy<Value = Vec<Val
 
                 vec![
                     Value::Null,
+                    Value::Undefined,
                     Value::Bool(boolean),
                     Value::Number(f64::from_bits(number_bits)),
                     Value::Number(f64::INFINITY),
@@ -321,6 +322,7 @@ fn canonical_snapshot_variant_corpus_strategy() -> impl Strategy<Value = Vec<Val
 fn assert_canonical_value_round_trip(expected: &Value, actual: &Value) {
     match (expected, actual) {
         (Value::Null, Value::Null) => {}
+        (Value::Undefined, Value::Undefined) => {}
         (Value::Bool(expected), Value::Bool(actual)) => assert_eq!(actual, expected),
         (Value::Number(expected), Value::Number(actual)) if expected.is_nan() => {
             assert!(actual.is_nan());
