@@ -170,6 +170,8 @@ pub struct InMemorySessionStore {
     #[cfg(test)]
     drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool,
     #[cfg(test)]
+    list_pending_queued_work_count: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
     load_session_count: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     load_session_head_meta_count: std::sync::atomic::AtomicUsize,
@@ -284,6 +286,8 @@ impl InMemorySessionStore {
             drop_next_list_queued_work_batch: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            list_pending_queued_work_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             load_session_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]

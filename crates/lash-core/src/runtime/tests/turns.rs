@@ -5138,6 +5138,57 @@ async fn leading_session_command_drains_before_queued_turn() {
 }
 
 #[tokio::test]
+async fn idle_ordering_read_is_independent_of_pending_command_depth() {
+    for backlog_depth in [1, 256] {
+        let transport = mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                full_text: format!("answer after {backlog_depth} commands"),
+                parts: vec![LlmOutputPart::Text {
+                    text: format!("answer after {backlog_depth} commands"),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        }]);
+        let clock = Arc::new(ManualClock::new(1_500));
+        let store_clock: Arc<dyn crate::Clock> = clock.clone();
+        let (mut runtime, store) =
+            standard_runtime_with_transport_and_queue_store_clock(transport, store_clock).await;
+        for index in 0..backlog_depth {
+            enqueue_session_command(
+                store.as_ref(),
+                "root",
+                &format!("depth-invariance command {index}"),
+            )
+            .await;
+        }
+        clock.advance_ms(1);
+        enqueue_idle_turn_input(store.as_ref(), "root", "user turn after commands").await;
+
+        let drained = runtime
+            .stream_next_queued_work(TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", &format!("depth-invariance-{backlog_depth}")),
+            ))
+            .await
+            .expect("depth-invariance drain succeeds")
+            .expect("queued turn runs after commands");
+
+        assert_eq!(
+            drained.assistant_output.safe_text,
+            format!("answer after {backlog_depth} commands")
+        );
+        assert_eq!(
+            store.list_pending_queued_work_count(),
+            0,
+            "idle ordering must not invoke the payload-hydrating full-list read at depth {backlog_depth}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),

@@ -157,6 +157,51 @@ POSTGRES_SCHEMA_CHANGED = POSTGRES_SCHEMA_BASE.replace(
 ).replace("    lease_term_ms BIGINT NOT NULL DEFAULT 0,\n", "")
 
 
+SQLITE_CONFIG = """
+[[surface]]
+constant = "SCHEMA_VERSION"
+constant_path = "src/lib.rs"
+description = "SQLite catalog with the index-only carve-out"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/schema.rs"]
+symbols = ["SCHEMA"]
+elide = "sql_idempotent_index"
+"""
+
+SQLITE_SCHEMA_BASE = '''
+pub(crate) const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    enqueued_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_enqueued
+    ON sessions(enqueued_at_ms);
+";
+'''
+# The carve-out case: one more idempotent, non-unique index and nothing else.
+SQLITE_SCHEMA_INDEX_ADDED = SQLITE_SCHEMA_BASE.replace(
+    '    ON sessions(enqueued_at_ms);\n',
+    '    ON sessions(enqueued_at_ms);\n\n'
+    'CREATE INDEX IF NOT EXISTS idx_sessions_order\n'
+    '    ON sessions(session_id, enqueued_at_ms);\n',
+)
+# Not the carve-out: a unique index is a constraint, and `IF NOT EXISTS` will not
+# replace a differently-shaped one already in the file.
+SQLITE_SCHEMA_UNIQUE_INDEX_ADDED = SQLITE_SCHEMA_BASE.replace(
+    '    ON sessions(enqueued_at_ms);\n',
+    '    ON sessions(enqueued_at_ms);\n\n'
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_unique\n'
+    '    ON sessions(session_id);\n',
+)
+SQLITE_SCHEMA_COLUMN_ADDED = SQLITE_SCHEMA_BASE.replace(
+    "    enqueued_at_ms INTEGER NOT NULL\n",
+    "    enqueued_at_ms INTEGER NOT NULL,\n    enqueue_seq INTEGER NOT NULL\n",
+)
+
+
 def run(repo: Path, *args: str) -> str:
     result = subprocess.run(
         [*args], cwd=repo, check=True, capture_output=True, text=True
@@ -361,6 +406,49 @@ class VersionBumpFixtureTest(unittest.TestCase):
         self.assertEqual(result.failures[0].surface.constant, "TRACE_SCHEMA_VERSION")
         self.assertEqual(result.failures[0].base_version, 4)
         self.assertEqual(result.failures[0].head_version, 4)
+
+    def sqlite_check(self, head_schema: str):
+        fixture = FixtureRepository(SQLITE_CONFIG)
+        self.addCleanup(fixture.close)
+        fixture.write_file("src/lib.rs", "pub(crate) const SCHEMA_VERSION: i32 = 37;\n")
+        fixture.write_file("src/schema.rs", SQLITE_SCHEMA_BASE)
+        base = fixture.commit("sqlite carve-out base")
+        fixture.write_file("src/schema.rs", head_schema)
+        head = fixture.commit("sqlite catalog change with the version pinned to 37")
+        return self.check(fixture, base, head)
+
+    def test_idempotent_index_addition_needs_no_bump(self) -> None:
+        # The ratified SQLite carve-out: open runs the whole schema with
+        # `IF NOT EXISTS`, so old and new binaries stay mutually compatible on one
+        # file and rejecting live stores would buy nothing.
+        result = self.sqlite_check(SQLITE_SCHEMA_INDEX_ADDED)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.failures, ())
+
+    def test_unique_index_addition_still_needs_a_bump(self) -> None:
+        result = self.sqlite_check(SQLITE_SCHEMA_UNIQUE_INDEX_ADDED)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(result.failures[0].head_version, 37)
+
+    def test_column_addition_still_needs_a_bump_under_the_carve_out(self) -> None:
+        result = self.sqlite_check(SQLITE_SCHEMA_COLUMN_ADDED)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(result.failures[0].head_version, 37)
+
+    def test_unknown_elision_is_a_configuration_error(self) -> None:
+        with self.assertRaises(MODULE.CheckError) as raised:
+            MODULE.load_config(self.elision_config("no_such_elision"))
+        self.assertIn("unsupported elide", str(raised.exception))
+
+    def elision_config(self, elide: str) -> Path:
+        fixture = FixtureRepository(SQLITE_CONFIG.replace("sql_idempotent_index", elide))
+        self.addCleanup(fixture.close)
+        return fixture.root / "surface.toml"
 
     def test_missing_must_cover_shape_at_head_is_an_error(self) -> None:
         fixture = self.fixture()

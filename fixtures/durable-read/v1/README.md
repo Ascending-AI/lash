@@ -113,6 +113,14 @@ Determinism is now verified cross-environment (Postgres 14/16/18 and across runn
 env/TZ/locale), not just two-consecutive-run on one machine: regenerations must
 produce byte-identical artifacts.
 
+An index-only catalog addition is not a reason to regenerate. Indexes are already
+outside the semantic-read contract above, and the SQLite catalog is created with
+`CREATE INDEX IF NOT EXISTS`, so such an addition does not move a store schema
+version: the committed artifact keeps opening and adopts the new index in the
+copy under test. Regenerating would only replace working old-file evidence with a
+file the current binary just wrote. `sqlite/durable-core.db` therefore predates
+the idle-arbitration ordering indexes on purpose.
+
 When a read-back test fails, use this decision procedure:
 
 1. If no intentional durable-format change and store-schema bump exists, treat

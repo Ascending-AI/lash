@@ -291,7 +291,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             batch.session_id,
             batch.source_key.as_deref(),
             batch.delivery_policy.as_str(),
-            batch.kind.as_str(),
+            batch.kind().as_str(),
             encode_json(&batch.authority)?,
             batch.merge_key.as_deref(),
             sql_available_at_ms,

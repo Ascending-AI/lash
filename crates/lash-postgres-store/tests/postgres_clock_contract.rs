@@ -112,6 +112,11 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         ),
         (
             RUNTIME_PERSISTENCE_SOURCE,
+            "async fn pending_session_work_ordering(",
+            "async fn list_pending_queued_work(",
+        ),
+        (
+            RUNTIME_PERSISTENCE_SOURCE,
             "async fn list_pending_queued_work(",
             "impl TurnInputStore for PostgresSessionStore",
         ),

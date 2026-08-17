@@ -86,6 +86,7 @@ let core = builder.build(owner)?;</code></pre>
         <strong>Forward only</strong>
         <p>lash maintains no implicit migration chain, by policy. A version whose schema changed is adopted either by an explicit, published migration or by recreating the store from empty, and either step is one-way: the previous binary refuses the resulting schema on the same exact-match gate. There is no downgrade path, no rollback, and no restore procedure. Recovery from a failed bump is fix-forward.</p>
         <p>This release uses SQLite durable-core version 37, process-registry version 24, effect version 10, and trigger version 5, plus Postgres component version 52. Both durable-core bumps add the attachment GC fence's per-digest condemnation table on top of the executor discriminator on session lease rows; the process-registry and effect versions carry atomic process-parent teardown, versioned tool-intent carriers, and typed execution outcomes. PostgreSQL has explicit migrations from the published component-50 and component-51 shapes to 52, applied before process workers open; other stale versions remain reject-and-recreate boundaries, and SQLite durable-core databases below 37 must be recreated. If an older stamp already sits over newer-generation artifacts, Lash treats that as ledger/schema divergence and refuses with an inspect-and-recreate remedy instead of guessing at a partial migration.</p>
+        <p><strong>Index-only SQLite additions do not move the version.</strong> The durable-core catalog is created with <code>CREATE INDEX IF NOT EXISTS</code> and open always runs the whole schema, so an additive index reaches an existing version-37 file on its next open and a file that already has it stays readable by a binary that does not. The two are mutually compatible, which is why the SQLite side of this release's ordering indexes ships at 37 rather than rejecting live stores for a change that applies in place. The carve-out is index-only: any table, column, or semantic change still bumps and still rejects.</p>
       </aside>
       <aside class="gotcha">
         <strong>Version 25 host migration</strong>
@@ -123,7 +124,7 @@ let core = builder.build(owner)?;</code></pre>
         <li>
           <div>
             <h3>Bump and migrate or recreate</h3>
-            <p>Follow the release-specific schema note. For an explicit Lash-managed migration, let <code>SchemaCheck::Enforce</code> prove the published source shape and apply it before workers open; for a recreate cutover, start the new binary against empty durable state: a fresh database (or one with the <code>lash_*</code> tables dropped), a fresh effect journal, and an attachment prefix consistent with the store you just recreated. A Postgres store stamped below its artifacts — a component-50 stamp over component-51 or component-52 tables — is ledger/schema divergence, not a partial migration to continue: stop, inspect, and recreate it.</p>
+            <p>Follow the release-specific schema note. For an explicit Lash-managed migration, let <code>SchemaCheck::Enforce</code> prove the published source shape and apply it before workers open; for a recreate cutover, start the new binary against empty durable state: a fresh database (or one with the <code>lash_*</code> tables dropped), a fresh effect journal, and an attachment prefix consistent with the store you just recreated. A Postgres store stamped below its artifacts (a component-50 stamp over component-51 or component-52 tables) is ledger/schema divergence, not a partial migration to continue: stop, inspect, and recreate it.</p>
           </div>
         </li>
         <li>
@@ -223,7 +224,7 @@ let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
       <pre data-lang="rust" data-snippet="operations#graceful-drain"><code>// lash ships no drain orchestrator (ADR-0014): each step is an explicit,
 // host-owned lever. The order below and every deadline are host policy.
 
-// 1. Stop admitting new turns. A host-layer decision — flip a readiness
+// 1. Stop admitting new turns. A host-layer decision: flip a readiness
 //    flag, drain the load balancer. lash cannot see your ingress.
 
 // 2. Finish or cancel in-flight turns. Exact retained turn addresses should
@@ -313,7 +314,7 @@ Ok(())</code></pre>
       </div>
       <p>The recipe: list the non-terminal rows, then read four raw fields off each <code>ObservedProcess</code> and classify.</p>
       <pre data-lang="rust"><code>// List the live rows (host-wide, or `list_observed_by`/`list_originated_by`
-// for a session lens), then classify each from raw facts — no derived verdict.
+// for a session lens), then classify each from raw facts, no derived verdict.
 let live = core
     .processes()
     .list(&ProcessListFilter {
@@ -461,7 +462,7 @@ Ok(())</code></pre>
             // the typed provider signal off the turn's issues.
             for issue in &amp;output.result.errors {
                 if issue.retryable == Some(true) {
-                    // Transient provider/transport failure — safe to re-run.
+                    // Transient provider/transport failure, safe to re-run.
                 }
                 if let Some(kind) = issue.provider_failure_kind {
                     let _ = kind; // Timeout, Http, Quota, Auth, Stream, ...

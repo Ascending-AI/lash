@@ -1463,7 +1463,7 @@ struct QueuedBatchIntent<'a> {
     session_id: &'a str,
     source_key: Option<&'a str>,
     delivery_policy: &'a crate::DeliveryPolicy,
-    kind: &'a crate::QueuedWorkKind,
+    kind: crate::QueuedWorkKind,
     authority: &'a crate::QueuedWorkAuthority,
     merge_key: Option<&'a str>,
     payloads: Vec<QueuedPayloadIntent<'a>>,
@@ -1475,7 +1475,7 @@ impl<'a> From<&'a crate::QueuedWorkBatchDraft> for QueuedBatchIntent<'a> {
             session_id: &batch.session_id,
             source_key: batch.source_key.as_deref(),
             delivery_policy: &batch.delivery_policy,
-            kind: &batch.kind,
+            kind: batch.kind(),
             authority: &batch.authority,
             merge_key: batch.merge_key.as_deref(),
             payloads: batch

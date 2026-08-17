@@ -384,7 +384,6 @@ async fn enqueue_queued_work_stress_turn(
                     },
                 )],
             )
-            .with_kind(lash_core::QueuedWorkKind::Control)
             .with_source_key(format!("command:{turn_index}")),
         )
         .await?;

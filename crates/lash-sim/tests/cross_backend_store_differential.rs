@@ -1575,7 +1575,6 @@ impl BackendRunner {
                             },
                         )],
                     )
-                    .with_kind(QueuedWorkKind::Control)
                     .with_source_key("cross-backend-delete-observability"),
                 )
                 .await

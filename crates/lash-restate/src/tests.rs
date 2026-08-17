@@ -4699,6 +4699,13 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
             .await
     }
 
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &str,
+    ) -> Result<lash_core::store::PendingSessionWorkOrdering, lash_core::StoreError> {
+        self.inner.pending_session_work_ordering(session_id).await
+    }
+
     async fn list_queued_work(
         &self,
         session_id: &str,

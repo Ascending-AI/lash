@@ -39,7 +39,10 @@ pub use load::{
     LoadedPersistedSession, load_persisted_session, load_persisted_session_state,
     refresh_persisted_session_state,
 };
-pub use queued_work::{QueuedWorkClass, SelectedQueuedWorkClaimOutcome};
+pub use queued_work::{
+    PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,
+    SelectedQueuedWorkClaimOutcome,
+};
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
     RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
@@ -1489,6 +1492,16 @@ pub trait QueuedWorkStore: Send + Sync {
         session_id: &str,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
+
+    /// Project the earliest pending session-command and next-turn-input ordering
+    /// keys without hydrating either payload family. The session-command side is
+    /// the pending queued-work rows whose durable `work_kind` is `control`, so
+    /// `cancel` rows — which preempt on their own path — enter neither side. Both
+    /// sides apply the same live-claim filter as the corresponding list read.
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &str,
+    ) -> Result<PendingSessionWorkOrdering, StoreError>;
 
     /// List all queued-work batches for a session, including batches held by a
     /// live claim.

@@ -82,7 +82,7 @@ async fn graceful_drain(
     // lash ships no drain orchestrator (ADR-0014): each step is an explicit,
     // host-owned lever. The order below and every deadline are host policy.
 
-    // 1. Stop admitting new turns. A host-layer decision — flip a readiness
+    // 1. Stop admitting new turns. A host-layer decision: flip a readiness
     //    flag, drain the load balancer. lash cannot see your ingress.
 
     // 2. Finish or cancel in-flight turns. Exact retained turn addresses should
@@ -155,7 +155,7 @@ async fn run_turn_with_retry(session: &LashSession, text: &str) -> lash::Result<
                 // the typed provider signal off the turn's issues.
                 for issue in &output.result.errors {
                     if issue.retryable == Some(true) {
-                        // Transient provider/transport failure — safe to re-run.
+                        // Transient provider/transport failure, safe to re-run.
                     }
                     if let Some(kind) = issue.provider_failure_kind {
                         let _ = kind; // Timeout, Http, Quota, Auth, Stream, ...

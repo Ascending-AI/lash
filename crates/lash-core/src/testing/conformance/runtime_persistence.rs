@@ -560,6 +560,8 @@ where
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
     queued_work_source_keys_are_idempotent_and_list_ordered(make("queued-work-source-keys")).await;
+    pending_session_work_ordering_agrees_across_ingress_families(make("pending-work-ordering"))
+        .await;
     concurrent_queue_and_turn_input_claims_have_one_owner(make("concurrent-queue-input")).await;
     checkpoint_work_claims_both_families_once(make("checkpoint-work")).await;
     checkpoint_budget_refusal_preserves_active_turn_input(make("checkpoint-budget-refusal")).await;
@@ -2488,7 +2490,6 @@ fn queued_session_command_draft(session_id: &str, reason: &str) -> QueuedWorkBat
             },
         )],
     )
-    .with_kind(crate::QueuedWorkKind::Control)
 }
 
 fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
@@ -4447,6 +4448,85 @@ async fn queued_work_source_keys_are_idempotent_and_list_ordered(
         vec![first.batch_id.as_str(), second.batch_id.as_str()]
     );
     assert!(listed[0].enqueue_seq < listed[1].enqueue_seq);
+}
+
+/// The projection reports each family's earliest pending row verbatim, and a
+/// timestamp tie between the families resolves to the turn input.
+///
+/// The tie direction is the portable part. The two families number themselves
+/// from independent counters — a PostgreSQL sequence, a SQLite rowid, an
+/// in-memory integer — so their `enqueue_seq` values are not comparable across
+/// the boundary and nothing here may assert a relationship between them. Only
+/// `enqueued_at_ms` may reorder the families; equal timestamps leave the
+/// previous winner in place.
+async fn pending_session_work_ordering_agrees_across_ingress_families(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "pending-work-ordering-tie";
+    store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            session_id,
+            "active-turn",
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "ignored active input",
+        ))
+        .await
+        .expect("seed an active input the next-turn filter must exclude");
+    let command = store
+        .enqueue_queued_work(queued_session_command_draft(session_id, "command first"))
+        .await
+        .expect("enqueue command before tied next-turn input");
+    let input = store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(session_id, "input second"))
+        .await
+        .expect("enqueue tied next-turn input");
+    let ordering = store
+        .pending_session_work_ordering(session_id)
+        .await
+        .expect("read the tied ordering projection");
+    assert_eq!(
+        ordering,
+        crate::store::PendingSessionWorkOrdering {
+            session_command: Some(crate::store::PendingWorkOrderingKey {
+                enqueued_at_ms: command.enqueued_at_ms,
+                enqueue_seq: command.enqueue_seq,
+            }),
+            turn_input: Some(crate::store::PendingWorkOrderingKey {
+                enqueued_at_ms: input.enqueued_at_ms,
+                enqueue_seq: input.enqueue_seq,
+            }),
+        }
+    );
+    assert_eq!(
+        command.enqueued_at_ms, input.enqueued_at_ms,
+        "the tie this case exists to pin must actually be a tie"
+    );
+    assert!(
+        !ordering.session_command_precedes_turn_input(),
+        "a timestamp tie must leave the turn input ahead rather than be broken by two \
+         independently numbered enqueue sequences"
+    );
+
+    let session_id = "pending-work-ordering-command-only";
+    let command = store
+        .enqueue_queued_work(queued_session_command_draft(session_id, "only a command"))
+        .await
+        .expect("enqueue a session command with no pending turn input");
+    let ordering = store
+        .pending_session_work_ordering(session_id)
+        .await
+        .expect("read the command-only ordering projection");
+    assert_eq!(
+        ordering,
+        crate::store::PendingSessionWorkOrdering {
+            session_command: Some(crate::store::PendingWorkOrderingKey {
+                enqueued_at_ms: command.enqueued_at_ms,
+                enqueue_seq: command.enqueue_seq,
+            }),
+            turn_input: None,
+        }
+    );
+    assert!(ordering.session_command_precedes_turn_input());
 }
 
 async fn concurrent_queue_and_turn_input_claims_have_one_owner(store: Arc<dyn RuntimePersistence>) {

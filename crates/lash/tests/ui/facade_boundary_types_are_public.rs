@@ -286,6 +286,16 @@ impl QueuedWorkStore for FacadeStore {
         Ok(None)
     }
 
+    async fn pending_session_work_ordering(
+        &self,
+        _session_id: &str,
+    ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
+        Ok(lash_core::store::PendingSessionWorkOrdering {
+            session_command: None,
+            turn_input: None,
+        })
+    }
+
     async fn list_queued_work(&self, _session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         Ok(Vec::new())
     }

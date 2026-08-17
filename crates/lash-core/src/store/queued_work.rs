@@ -85,6 +85,61 @@ pub enum QueuedWorkClass {
     TurnWork,
 }
 
+/// The payload-free fields that establish one pending work item's position.
+///
+/// `enqueue_seq` totally orders *one* ingress family: each family draws it from
+/// its own counter (a PostgreSQL sequence, a SQLite rowid, an in-memory
+/// mutex-guarded integer), so the two families' sequences are not comparable —
+/// their relative values are decided by unrelated enqueue traffic elsewhere in
+/// the store. That is why [`Ord`] is deliberately not derived: within-family
+/// ordering happens in each store's own `ORDER BY enqueued_at_ms, enqueue_seq`,
+/// and the only cross-family comparison — [`PendingSessionWorkOrdering::
+/// session_command_precedes_turn_input`] — reads the timestamp alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingWorkOrderingKey {
+    pub enqueued_at_ms: u64,
+    pub enqueue_seq: u64,
+}
+
+/// The earliest pending session-command and next-turn-input positions.
+///
+/// Stores project only these scalar keys so the idle drain can arbitrate the
+/// two ingress families without hydrating either family's payloads. The
+/// session-command side is exactly the queued-work rows whose durable
+/// `work_kind` is [`crate::QueuedWorkKind::Control`].
+///
+/// [`crate::QueuedWorkKind::Cancel`] rows belong to neither field: cancellation
+/// preempts through its own path and must not shift which ingress family drains
+/// first, so a pending cancel leaves both keys untouched.
+///
+/// [`Default`] is deliberately not derived. Both fields are public and both
+/// `None` means "nothing is pending on either side", which is a real answer
+/// about the store — an out-of-tree implementation must not be able to satisfy
+/// the projection with `Default::default()` and silently report an idle session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PendingSessionWorkOrdering {
+    pub session_command: Option<PendingWorkOrderingKey>,
+    pub turn_input: Option<PendingWorkOrderingKey>,
+}
+
+impl PendingSessionWorkOrdering {
+    /// Whether the earliest pending session command sorts before the earliest
+    /// pending next-turn input.
+    ///
+    /// The comparison is on `enqueued_at_ms` alone, and a tie resolves to the
+    /// turn input. `enqueue_seq` is *not* a tiebreak here: the two families
+    /// number themselves from independent counters, so a cross-family sequence
+    /// comparison would hand the decision to unrelated enqueue traffic in other
+    /// sessions. Only a real timestamp ordering may reorder the families.
+    pub fn session_command_precedes_turn_input(self) -> bool {
+        match (self.session_command, self.turn_input) {
+            (Some(command), Some(input)) => command.enqueued_at_ms < input.enqueued_at_ms,
+            (Some(_), None) => true,
+            _ => false,
+        }
+    }
+}
+
 /// Claim-id spelling selected by each store family.
 ///
 /// These prefixes are durable bytes. SQLite and Postgres share the production
@@ -1399,5 +1454,30 @@ mod tests {
         let nonced = derive_batch_id("session", Some("key"), 1_000, Some(1));
         assert_ne!(plain, nonced);
         assert!(plain.starts_with("qwb:"));
+    }
+
+    #[test]
+    fn pending_session_ordering_compares_timestamps_only() {
+        let key = |enqueued_at_ms, enqueue_seq| PendingWorkOrderingKey {
+            enqueued_at_ms,
+            enqueue_seq,
+        };
+        let precedes = |command, input| {
+            PendingSessionWorkOrdering {
+                session_command: command,
+                turn_input: input,
+            }
+            .session_command_precedes_turn_input()
+        };
+
+        assert!(precedes(Some(key(10, 9)), Some(key(11, 1))));
+        assert!(!precedes(Some(key(11, 1)), Some(key(10, 9))));
+        // A timestamp tie resolves to the turn input whichever way the two
+        // families' independent sequences happen to fall.
+        assert!(!precedes(Some(key(10, 1)), Some(key(10, 2))));
+        assert!(!precedes(Some(key(10, 2)), Some(key(10, 1))));
+        assert!(!precedes(Some(key(10, 1)), Some(key(10, 1))));
+        assert!(precedes(Some(key(10, 1)), None));
+        assert!(!precedes(None, Some(key(10, 1))));
     }
 }

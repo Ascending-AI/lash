@@ -69,6 +69,14 @@ pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
 ///
 /// Control and cancellation rows are always claimed alone even when a
 /// producer assigns a merge key accidentally.
+///
+/// This is also the durable ingress-family discriminator. [`Self::Control`]
+/// holds exactly when the row's payloads are session commands, because
+/// [`QueuedWorkBatchDraft::new`] derives the kind from the payloads and no
+/// setter exists to break the correspondence. Store ordering projections
+/// therefore read `work_kind = 'control'` for the session-command family rather
+/// than hydrating payloads. [`Self::Cancel`] belongs to neither side of that
+/// comparison: cancellation preempts on its own path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueuedWorkKind {
@@ -469,7 +477,14 @@ pub struct QueuedWorkBatchDraft {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process_wake_source: Option<ProcessWakeSource>,
     pub delivery_policy: DeliveryPolicy,
-    pub kind: QueuedWorkKind,
+    /// Derived ingress family of this draft, never producer-assigned.
+    ///
+    /// [`QueuedWorkKind::Control`] means "this batch carries session commands",
+    /// so the durable `work_kind` column is the ingress-family discriminator a
+    /// store's ordering projection reads. Keeping the field unwritable is what
+    /// makes a `Control` row with non-session-command payloads unrepresentable
+    /// rather than merely rejected.
+    kind: QueuedWorkKind,
     pub authority: QueuedWorkAuthority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_key: Option<String>,
@@ -525,9 +540,12 @@ impl QueuedWorkBatchDraft {
         self
     }
 
-    pub fn with_kind(mut self, kind: QueuedWorkKind) -> Self {
-        self.kind = kind;
-        self
+    /// Reports the ingress family this draft's payloads derive.
+    ///
+    /// There is deliberately no setter: the kind is a function of the payloads,
+    /// so a producer cannot assert [`QueuedWorkKind::Control`] over turn work.
+    pub fn kind(&self) -> QueuedWorkKind {
+        self.kind
     }
 
     pub fn with_authority(mut self, authority: QueuedWorkAuthority) -> Self {

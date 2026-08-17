@@ -2289,6 +2289,99 @@ impl QueuedWorkStore for Store {
             .map_err(sqlite_error)?
     }
 
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &str,
+    ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
+        let session_id = session_id.to_string();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .call(move |conn| {
+                let outcome: Result<lash_core::store::PendingSessionWorkOrdering, StoreError> =
+                    (|| {
+                        let (command_at, command_seq, input_at, input_seq): (
+                            Option<i64>,
+                            Option<i64>,
+                            Option<i64>,
+                            Option<i64>,
+                        ) = conn
+                            .query_row(
+                                "WITH earliest_command AS (
+                                    SELECT enqueued_at_ms, enqueue_seq
+                                    FROM queued_work_batches AS queued
+                                    WHERE session_id = ?1
+                                      AND work_kind = 'control'
+                                      AND (claim_token IS NULL OR NOT EXISTS (
+                                           SELECT 1 FROM session_execution_leases AS lease
+                                           WHERE lease.session_id = ?1
+                                             AND lease.lease_token IS NOT NULL
+                                             AND lease.lease_expires_at_ms > ?2
+                                             AND lease.lease_fencing_token
+                                                 = queued.claim_session_lease_generation
+                                      ))
+                                    ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
+                                    LIMIT 1
+                                 ), earliest_input AS (
+                                    SELECT enqueued_at_ms, enqueue_seq
+                                    FROM pending_turn_inputs AS input
+                                    WHERE session_id = ?1
+                                      AND state = ?3
+                                      AND (claim_token IS NULL OR NOT EXISTS (
+                                           SELECT 1 FROM session_execution_leases AS lease
+                                           WHERE lease.session_id = ?1
+                                             AND lease.lease_token IS NOT NULL
+                                             AND lease.lease_expires_at_ms > ?2
+                                             AND lease.lease_fencing_token
+                                                 = input.claim_session_lease_generation
+                                      ))
+                                    ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
+                                    LIMIT 1
+                                 )
+                                 SELECT command.enqueued_at_ms, command.enqueue_seq,
+                                        input.enqueued_at_ms, input.enqueue_seq
+                                 FROM (SELECT 1) AS singleton
+                                 LEFT JOIN earliest_command AS command ON TRUE
+                                 LEFT JOIN earliest_input AS input ON TRUE",
+                                params![
+                                    session_id,
+                                    now as i64,
+                                    lash_core::TurnInputState::DeferredNextTurn.as_str()
+                                ],
+                                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                            )
+                            .map_err(sqlite_error)?;
+                        let ordering_key =
+                            |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
+                                at.zip(seq)
+                                    .map(|(at, seq)| {
+                                        Ok(lash_core::store::PendingWorkOrderingKey {
+                                            enqueued_at_ms: u64_from_sql(
+                                                kind,
+                                                "enqueued_at_ms",
+                                                at,
+                                            )
+                                            .map_err(sqlite_error)?,
+                                            enqueue_seq: u64_from_sql(kind, "enqueue_seq", seq)
+                                                .map_err(sqlite_error)?,
+                                        })
+                                    })
+                                    .transpose()
+                            };
+                        Ok(lash_core::store::PendingSessionWorkOrdering {
+                            session_command: ordering_key(
+                                "QueuedWorkBatch",
+                                command_at,
+                                command_seq,
+                            )?,
+                            turn_input: ordering_key("PendingTurnInput", input_at, input_seq)?,
+                        })
+                    })();
+                Ok(outcome)
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn list_pending_queued_work(
         &self,
         session_id: &str,
