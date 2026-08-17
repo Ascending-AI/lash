@@ -130,6 +130,13 @@ pub enum RuntimeErrorCode {
     RestateTurnTerminalInvalidResolution,
     RestateTurnCancelScopeMismatch,
     RestateTurnCancelScopeMissing,
+    /// A host assistant-response hook failed while deriving the transformed
+    /// response from an already-journaled raw provider completion (FIG-1276).
+    ///
+    /// Deliberately **not** terminal: the paid completion is durable in phase
+    /// 1, so the correct recovery is to redrive phase 2 and derive again rather
+    /// than to seal an incomplete derivation into the journal.
+    RuntimeEffectAssistantResponseHook,
     RuntimeEffectAttachmentStore,
     RuntimeEffectEnvelopeCanonicalDecode,
     RuntimeEffectEnvelopeCanonicalHashInvariant,
@@ -312,6 +319,7 @@ impl RuntimeErrorCode {
             Self::RestateTurnCancelScopeMismatch => "restate_turn_cancel_scope_mismatch",
             Self::RestateTurnCancelScopeMissing => "restate_turn_cancel_scope_missing",
             Self::RuntimeEffectAttachmentStore => "runtime_effect_attachment_store",
+            Self::RuntimeEffectAssistantResponseHook => "runtime_effect_assistant_response_hook",
             Self::RuntimeEffectEnvelopeCanonicalDecode => {
                 "runtime_effect_envelope_canonical_decode"
             }
@@ -422,6 +430,7 @@ impl RuntimeErrorCode {
                 | Self::RestateAwaitEventSessionUpdate
                 | Self::RestateTurnTerminalAttach
                 | Self::RestateTurnTerminalAttachCeilingElapsed
+                | Self::RuntimeEffectAssistantResponseHook
                 | Self::RuntimePerfStartGateRetry
                 | Self::RuntimeStore
                 | Self::SessionCommandPostDriveRefresh
@@ -661,6 +670,7 @@ impl RuntimeErrorCode {
             "runtime_effect_local_executor_unavailable" => {
                 Self::RuntimeEffectLocalExecutorUnavailable
             }
+            "runtime_effect_assistant_response_hook" => Self::RuntimeEffectAssistantResponseHook,
             "runtime_effect_local_task_closed" => Self::RuntimeEffectLocalTaskClosed,
             "runtime_effect_process_task_join" => Self::RuntimeEffectProcessTaskJoin,
             "runtime_effect_replay_required" => Self::RuntimeEffectReplayRequired,
@@ -907,7 +917,11 @@ mod tests {
 
     fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         match code {
-            RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
+            // A hook failure is an incomplete derivation over an already
+            // durable completion, so redriving phase 2 is the correct recovery
+            // (FIG-1276).
+            RuntimeErrorCode::RuntimeEffectAssistantResponseHook
+            | RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
             | RuntimeErrorCode::SessionExecutionLaneBusy
             | RuntimeErrorCode::StoreCommitContended
             | RuntimeErrorCode::CancelStartGateUnavailable
@@ -1155,6 +1169,7 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectInvocationSubject,
             RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
             RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+            RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
             RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
             RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
             RuntimeErrorCode::RuntimeEffectReplayRequired,
@@ -1240,6 +1255,29 @@ mod tests {
         assert_eq!(
             expected_classification(&foreign),
             ExpectedClassification::Unknown
+        );
+    }
+
+    /// A failed assistant-response hook is an incomplete derivation over a
+    /// completion the journal already holds, so the only correct recovery is to
+    /// redrive phase 2 (FIG-1276). That is a claim about `is_retryable`, not
+    /// merely about staying out of `is_terminal`: an unclassified code is
+    /// `Unknown`, which durable hosts are free to settle either way.
+    #[test]
+    fn assistant_response_hook_failures_are_retryable_not_terminal() {
+        let code = RuntimeErrorCode::RuntimeEffectAssistantResponseHook;
+
+        assert!(code.is_retryable(), "phase 2 must be redrivable");
+        assert!(!code.is_terminal());
+        assert_eq!(code.as_str(), "runtime_effect_assistant_response_hook");
+
+        let error = RuntimeError::new(code.clone(), "assistant response hook failed");
+        assert!(error.is_retryable());
+        assert!(!error.is_terminal());
+        assert_eq!(
+            RuntimeErrorCode::from_wire_code("runtime_effect_assistant_response_hook"),
+            code,
+            "the wire code must decode as first-party, not foreign"
         );
     }
 

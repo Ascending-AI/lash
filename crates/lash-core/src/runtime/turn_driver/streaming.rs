@@ -110,6 +110,29 @@ fn record_protocol_owned_stop_suppression(
 }
 
 impl RuntimeTurnDriver<'_> {
+    /// Runs the staged two-phase LLM-call effect boundary (FIG-1276).
+    ///
+    /// Phase 1 journals the **raw** provider completion: the paid external fact
+    /// becomes durable before any fallible host code runs. Phase 2 is a second,
+    /// distinct journal entry holding what host assistant-response hooks derived
+    /// from that completion: the transformed response together with the plugin
+    /// events those hooks emitted.
+    ///
+    /// Only a *complete* derivation is journaled. A hook failure seals nothing
+    /// and surfaces as a retryable
+    /// [`RuntimeErrorCode::RuntimeEffectAssistantResponseHook`](crate::RuntimeErrorCode::RuntimeEffectAssistantResponseHook),
+    /// because a sealed error would replay as a permanent result over a
+    /// completion that is merely underived.
+    ///
+    /// A crash or hook failure after phase 1 therefore redrives phase 2 only:
+    /// replay serves the recorded completion and the provider is never
+    /// re-invoked. Hooks are consequently **at-least-once**; see
+    /// [`crate::plugin::AssistantResponseHook`].
+    ///
+    /// Honest scope: the window this does *not* cover is journal finalization
+    /// itself — a process that dies after the provider returns but before phase
+    /// 1 becomes durable still has no record to replay. Closing that needs
+    /// provider-side idempotency or resume (FIG-1275), not more staging here.
     pub(super) async fn invoke_turn_llm_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -193,34 +216,43 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
-    async fn transform_assistant_response(
+    /// Phase 2 body of the staged LLM-call boundary: derive the host-visible
+    /// response from the raw completion phase 1 already journaled.
+    ///
+    /// Hook-emitted plugin events are returned rather than forwarded here so
+    /// they are journaled with this phase's outcome and served from it on
+    /// replay. Because this phase redrives independently of phase 1, a hook may
+    /// observe the same raw completion more than once — the at-least-once
+    /// contract documented on [`crate::plugin::AssistantResponseHook`].
+    pub(in crate::runtime) async fn run_assistant_response_hooks(
         &mut self,
-        forwarder: &mut ProviderHostForwarder<'_>,
         response: LlmResponse,
-    ) -> Result<LlmResponse, LlmCallError> {
+    ) -> Result<crate::runtime::RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError>
+    {
         let original = response.clone();
         let transforms = self
             .session
             .plugins()
             .transform_assistant_response(&self.session_id, response)
             .await
-            .map_err(|err| LlmCallError {
-                message: err.to_string(),
-                retryable: false,
-                kind: crate::ProviderFailureKind::Unknown,
-                raw: None,
-                code: Some("plugin_assistant_response".to_string()),
-                terminal_reason: crate::LlmTerminalReason::ProviderError,
-                request_body: None,
-                partial_response: None,
+            .map_err(|err| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
+                    format!("assistant response hook failed: {err}"),
+                )
             })?;
         let mut current: Option<LlmResponse> = None;
+        let mut events = Vec::new();
         for emitted in transforms {
-            emit_plugin_runtime_events_runtime(forwarder, &emitted.plugin_id, emitted.value.events)
-                .await;
+            if !emitted.value.events.is_empty() {
+                events.push(crate::AssistantResponseHookEvents {
+                    plugin_id: emitted.plugin_id,
+                    events: emitted.value.events,
+                });
+            }
             current = Some(emitted.value.response);
         }
-        Ok(current.unwrap_or(original))
+        Ok((current.unwrap_or(original), events))
     }
 
     pub(in crate::runtime) async fn run_llm_call(
@@ -426,13 +458,6 @@ impl RuntimeTurnDriver<'_> {
                                         resp.usage = stream_state.streamed_usage.clone();
                                     }
                                     stream_state.stream_accumulator.apply_to_response(&mut resp);
-                                    let resp = match self
-                                        .transform_assistant_response(&mut host_forwarder, resp)
-                                        .await
-                                    {
-                                        Ok(resp) => resp,
-                                        Err(err) => break Err(err),
-                                    };
                                     break Ok(resp);
                                 }
                                 Err(error) => {
@@ -460,13 +485,6 @@ impl RuntimeTurnDriver<'_> {
                                             .saturating_duration_since(attempt_started),
                                         completion_sideband.replay_drops(),
                                     );
-                                    let resp = match self
-                                        .transform_assistant_response(&mut host_forwarder, resp)
-                                        .await
-                                    {
-                                        Ok(resp) => resp,
-                                        Err(err) => break Err(err),
-                                    };
                                     break Ok(resp);
                                 }
                             }
@@ -497,14 +515,6 @@ impl RuntimeTurnDriver<'_> {
                                 partial_response: error.partial_response,
                             });
                         }
-                        let resp = match self
-                            .transform_assistant_response(&mut host_forwarder, resp)
-                            .await
-                        {
-                            Ok(resp) => resp,
-                            Err(err) => break Err(err),
-                        };
-
                         call_record = Some(aborted_call_record);
 
                         break Ok(resp);
@@ -627,13 +637,6 @@ impl RuntimeTurnDriver<'_> {
                                 resp.usage = streamed_usage.clone();
                             }
                             stream_accumulator.apply_to_response(&mut resp);
-                            let resp = match self
-                                .transform_assistant_response(&mut host_forwarder, resp)
-                                .await
-                            {
-                                Ok(resp) => resp,
-                                Err(err) => break Err(err),
-                            };
                             break Ok(resp)
                         }
                         Err(e) => {

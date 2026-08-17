@@ -47,6 +47,9 @@ fn process_transfer_set_identity(process_ids: &[String]) -> String {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeEffectKind {
     LlmCall,
+    /// Phase 2 of the staged LLM-call boundary: host response hooks derive a
+    /// transformed response from the raw completion phase 1 already journaled.
+    AssistantResponseHooks,
     Direct,
     ToolAttempt,
     ToolBatch,
@@ -68,6 +71,7 @@ impl RuntimeEffectKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LlmCall => "llm_call",
+            Self::AssistantResponseHooks => "assistant_response_hooks",
             Self::Direct => "direct",
             Self::ToolAttempt => "tool_attempt",
             Self::ToolBatch => "tool_batch",
@@ -414,6 +418,14 @@ pub enum RuntimeEffectCommand {
     LlmCall {
         request: Box<LlmRequestSpec>,
     },
+    /// Run host assistant-response hooks over the raw provider completion that
+    /// the paired [`RuntimeEffectCommand::LlmCall`] already journaled.
+    ///
+    /// The payload is a replay-deterministic derivation of phase 1's journaled
+    /// outcome, so this command is reconstructed identically on redrive.
+    AssistantResponseHooks {
+        response: Box<LlmResponse>,
+    },
     Direct {
         request: Box<LlmRequestSpec>,
         usage_source: String,
@@ -475,6 +487,7 @@ impl RuntimeEffectCommand {
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
+            Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
@@ -725,6 +738,19 @@ pub type RuntimeLlmCallOutcome = (
     Option<crate::LlmCallRecord>,
 );
 
+/// Plugin-attributed runtime events emitted by one assistant-response hook.
+///
+/// Journaled with phase 2's outcome so replay serves the events at their
+/// original placement instead of re-running the hook that produced them, and
+/// never folds them into the phase-1 provider-completion entry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AssistantResponseHookEvents {
+    pub plugin_id: String,
+    pub events: Vec<crate::PluginRuntimeEvent>,
+}
+
+pub type RuntimeAssistantResponseHooksOutcome = (LlmResponse, Vec<AssistantResponseHookEvents>);
+
 pub type RuntimeDirectLlmOutcome = (
     Result<LlmResponse, LlmCallError>,
     Option<crate::LlmCallRecord>,
@@ -745,6 +771,18 @@ pub enum RuntimeEffectOutcome {
         /// interrupted before the provider handle returns have no record.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_record: Option<crate::LlmCallRecord>,
+    },
+    /// Phase 2 of the staged LLM-call boundary.
+    ///
+    /// Holds the transformed response host hooks derived from the raw
+    /// completion phase 1 journaled, and the events those hooks emitted. Only a
+    /// *complete* derivation is journaled: a failing hook fails the phase
+    /// instead, so a crash or hook failure between the two phases redrives this
+    /// entry alone and the paid completion is replayed, never re-bought.
+    AssistantResponseHooks {
+        response: Box<LlmResponse>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        events: Vec<AssistantResponseHookEvents>,
     },
     Direct {
         result: Box<Result<LlmResponse, LlmCallError>>,
@@ -931,6 +969,18 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    pub(crate) fn into_assistant_response_hooks(
+        self,
+    ) -> Result<RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError> {
+        match self {
+            Self::AssistantResponseHooks { response, events } => Ok((*response, events)),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::AssistantResponseHooks,
+                other.kind(),
+            )),
+        }
+    }
+
     pub(crate) fn into_direct_response(
         self,
     ) -> Result<RuntimeDirectLlmOutcome, RuntimeEffectControllerError> {
@@ -1094,6 +1144,7 @@ impl RuntimeEffectOutcome {
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
+            Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,

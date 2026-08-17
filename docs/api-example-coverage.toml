@@ -37703,6 +37703,14 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:941#serde_json::to_value(
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::remote::processes::RemoteRuntimeEffectKind::AssistantResponseHooks"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: remote transports must preserve the second phase of the staged LLM-call boundary across their wire boundary, so a peer that replays the journal can tell host response-hook post-processing from the provider completion it derives."
+
+[[api]]
 symbol = "lash::remote::processes::RemoteRuntimeEffectKind::AwaitEvent"
 kind = "variant"
 availability = "default+all-features"
@@ -43962,6 +43970,33 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::tool_calls` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the remote-protocol crate and the `lash` facade itself -- this field is exercised in-repo at crates/lash-remote-protocol/src/core_conversions_tests.rs:864, crates/lash-remote-protocol/src/core_conversions_tests.rs:881, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
+symbol = "lash::runtime::AssistantResponseHookEvents"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::AssistantResponseHookEvents"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers persist and replay the plugin events one assistant-response hook produced, so a replayed phase serves them instead of re-running the hook."
+
+[[api]]
+symbol = "lash::runtime::AssistantResponseHookEvents::events"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::AssistantResponseHookEvents::events"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers carry the recorded runtime events through their journal so replay reproduces the hook's emissions at their original placement."
+
+[[api]]
+symbol = "lash::runtime::AssistantResponseHookEvents::plugin_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::AssistantResponseHookEvents::plugin_id"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers keep each recorded event attributed to the plugin that emitted it, so replayed events reach the same subscribers as the live ones."
+
+[[api]]
 symbol = "lash::runtime::AwaitEventResolver"
 kind = "trait"
 availability = "default+all-features"
@@ -46243,6 +46278,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectCommand::AssistantResponseHooks"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectCommand::AssistantResponseHooks"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers journal host response-hook post-processing as its own transition, distinct from the provider completion it derives from."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectCommand::AssistantResponseHooks::response"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectCommand::AssistantResponseHooks::response"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers read the already-journaled raw completion this phase derives from, which is what makes the command replay-deterministic."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::LanguageRuntimeValue"
 kind = "variant"
 availability = "default+all-features"
@@ -46668,6 +46721,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectKind::AssistantResponseHooks"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectKind::AssistantResponseHooks"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers classify the response-hook phase separately from the provider call, so recovery can redrive post-processing without re-buying a generation."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectKind::LanguageRuntimeValue"
 kind = "variant"
 availability = "default+all-features"
@@ -47026,6 +47088,33 @@ aliases = ["lash_core::RuntimeEffectOutcome::LlmCall"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::AssistantResponseHooks"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::AssistantResponseHooks"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers seal only a complete derivation into this outcome, so an incomplete one redrives against the recorded completion instead of being replayed as a result."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::AssistantResponseHooks::events"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::AssistantResponseHooks::events"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers persist the hook-emitted runtime events with this phase's outcome rather than folding them into the provider-completion entry."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::AssistantResponseHooks::response"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::AssistantResponseHooks::response"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-effect-host implementers return the transformed response the hooks derived, which is what the turn consumes once the phase is journaled."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::LanguageRuntimeValue"
@@ -47885,6 +47974,15 @@ aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectAssistantResponseHook"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectAssistantResponseHook"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this diagnostic to recognise an incomplete response-hook derivation over an already-durable completion, which is retryable rather than terminal."
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectLocalTaskClosed"

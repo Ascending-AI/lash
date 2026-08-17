@@ -45,6 +45,33 @@ pub type ToolCatalogContributor =
     Arc<dyn Fn(ToolCatalogContext) -> Result<ToolCatalogContribution, PluginError> + Send + Sync>;
 pub type AssistantStreamHook =
     Arc<dyn Fn(AssistantStreamHookContext) -> PluginFuture<AssistantStreamTransform> + Send + Sync>;
+/// Derives the host-visible assistant response from the raw provider completion.
+///
+/// **This hook is at-least-once, and idempotency is your obligation.** It runs
+/// as phase 2 of a staged effect boundary: the raw completion is journaled
+/// first, so it is durable before this hook is ever called and is never
+/// re-bought from the provider. The price of that guarantee is that a crash,
+/// redrive, or hook failure replays the *same* raw completion into this hook
+/// again. Treat every invocation as a pure derivation of
+/// [`AssistantResponseHookContext::response`]: same input, same
+/// [`AssistantResponseTransform`], no ambient side effects. Side effects belong
+/// on the effect seam, where they are journaled — not in this hook, where a
+/// second invocation would repeat them.
+///
+/// Returning `Err` is not data loss: it marks the derivation incomplete, and
+/// the paid completion remains in the journal to be derived again.
+///
+/// Events returned in [`AssistantResponseTransform::events`] are journaled with
+/// this phase's outcome and served from it on replay, so they keep their
+/// placement and are never re-emitted by a redrive that replays the entry.
+///
+/// Out of contract, stated so it is not discovered: the journal records the
+/// *phase*, not the hook set that produced it. Registering a response hook on a
+/// session whose earlier drives had none makes phase 2 run live against a
+/// replayed completion and append a new entry; removing the last one orphans an
+/// already-journaled entry and silently uses the raw response. Change the hook
+/// set between drives of the same session only when both readings are
+/// acceptable.
 pub type AssistantResponseHook = Arc<
     dyn Fn(AssistantResponseHookContext) -> PluginFuture<AssistantResponseTransform> + Send + Sync,
 >;

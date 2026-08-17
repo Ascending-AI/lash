@@ -1405,6 +1405,7 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
         command @ (RuntimeEffectCommand::LlmCall { .. }
+        | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::Direct { .. }
         | RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }

@@ -64,9 +64,7 @@ pub fn register_stream_mask(
         .stream_finished(Arc::new(move |ctx: AssistantStreamFinishedContext| {
             let state = Arc::clone(&cleanup_state);
             Box::pin(async move {
-                let _reason = ctx.reason;
-                let mut detector = state.lock_recover();
-                detector.reset();
+                state.lock_recover().note_stream_finished(ctx.reason);
                 Ok(())
             })
         }));
@@ -103,6 +101,15 @@ struct CellDetector {
     emitted_end: bool,
     visible_prose: String,
     cell_body: String,
+    /// A stream that ended with a response still to come has handed its
+    /// accumulated state to phase 2 and must not be read by anything else.
+    ///
+    /// The detector is session-scoped and outlives the turn, so "phase 2 will
+    /// reset it" is not a guarantee: a cancel or a controller error between the
+    /// phases leaves the response hook unrun. Latching the end of the stream
+    /// instead makes the *next* stream reset it on its first chunk, which is
+    /// the only moment both outcomes agree on.
+    stream_ended: bool,
 }
 
 impl CellDetector {
@@ -123,10 +130,37 @@ impl CellDetector {
             emitted_end: false,
             visible_prose: String::new(),
             cell_body: String::new(),
+            stream_ended: false,
+        }
+    }
+
+    /// Records how the provider stream ended.
+    ///
+    /// The response hook is phase 2 of the staged LLM-call boundary (FIG-1276)
+    /// and runs *after* this cleanup, so a reason that still produces a
+    /// response must leave the accumulated cell intact — clearing it here would
+    /// hand phase 2 an empty detector and silently drop the splice. Those
+    /// reasons only latch [`Self::stream_ended`]; every reason that produces no
+    /// response clears immediately.
+    ///
+    /// Redrive caveat: this detector is stream-accumulated state, so a phase-2
+    /// redrive after a host crash sees a fresh detector and derives the raw
+    /// response rather than the spliced one. Stream deltas are not journaled
+    /// either, so recovering that needs the stream seam, not this hook.
+    fn note_stream_finished(&mut self, reason: lash_core::plugin::AssistantStreamFinishReason) {
+        match reason {
+            lash_core::plugin::AssistantStreamFinishReason::Complete
+            | lash_core::plugin::AssistantStreamFinishReason::Aborted => {
+                self.stream_ended = true;
+            }
+            lash_core::plugin::AssistantStreamFinishReason::AttemptReset
+            | lash_core::plugin::AssistantStreamFinishReason::Cancelled
+            | lash_core::plugin::AssistantStreamFinishReason::ProviderError => self.reset(),
         }
     }
 
     fn reset(&mut self) {
+        self.stream_ended = false;
         self.pending.clear();
         self.inside_cell = false;
         self.cell_closed = false;
@@ -146,6 +180,14 @@ impl CellDetector {
     }
 
     fn process_chunk(&mut self, chunk: &str) -> AssistantStreamTransform {
+        // A chunk arriving after the previous stream ended is the first chunk of
+        // a new one, and the previous turn's state is no longer anybody's to
+        // read. Resetting here rather than trusting phase 2 to have run is what
+        // keeps an unrun response hook from suppressing the next turn entirely.
+        if self.stream_ended {
+            self.reset();
+        }
+
         if self.cell_closed {
             return AssistantStreamTransform {
                 chunk: String::new(),
@@ -442,6 +484,52 @@ mod tests {
         assert!(!t.abort_stream);
         assert!(!d.inside_cell);
         assert!(!d.cell_closed);
+    }
+
+    /// The detector is session-scoped, so a turn whose phase 2 never ran must
+    /// not be able to suppress the turn after it.
+    ///
+    /// A closed cell aborts the stream (`Aborted`) and hands the accumulated
+    /// splice to the response hook. If a cancel or a controller error lands
+    /// between the phases that hook never runs, and without the stream-ended
+    /// latch the next turn opens with `cell_closed` still true: every chunk is
+    /// swallowed and the previous turn's cell is spliced into the new response.
+    #[test]
+    fn stream_ended_without_phase_two_does_not_poison_the_next_turn() {
+        let mut d = CellDetector::new();
+        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>\n");
+        assert_eq!(t.chunk, "Visible.\n");
+        assert!(t.abort_stream);
+        assert!(d.cell_closed);
+
+        // The turn dies between the phases: the stream teardown runs, the
+        // response hook never does.
+        d.note_stream_finished(lash_core::plugin::AssistantStreamFinishReason::Aborted);
+        assert!(d.cell_closed, "phase 2 still owns the splice if it runs");
+
+        let t = d.process_chunk("Next turn prose.");
+        assert_eq!(
+            t.chunk, "Next turn prose.",
+            "the next turn's prose must reach the user"
+        );
+        assert!(!t.abort_stream);
+        assert!(!d.cell_closed);
+        assert!(d.cell_body.is_empty());
+        assert_eq!(d.visible_prose, "Next turn prose.");
+    }
+
+    /// The same latch must not cost the splice when phase 2 *does* run: a
+    /// completed stream keeps its accumulated cell until the response hook
+    /// consumes it.
+    #[test]
+    fn stream_ended_keeps_the_splice_available_for_phase_two() {
+        let mut d = CellDetector::new();
+        d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>\n");
+        d.note_stream_finished(lash_core::plugin::AssistantStreamFinishReason::Complete);
+
+        assert!(d.cell_closed);
+        assert_eq!(d.cell_body, "finish 1");
+        assert!(d.spliced_response_text().contains("finish 1"));
     }
 
     #[test]

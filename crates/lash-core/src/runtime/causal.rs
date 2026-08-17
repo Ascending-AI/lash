@@ -26,6 +26,30 @@ pub(crate) fn turn_effect_invocation(
     )
 }
 
+/// Invocation for a later phase of a staged turn effect (FIG-1276).
+///
+/// The phase carries its own effect id — `<id>.<kind>` — so its journal entry,
+/// replay key, and causal reference stay distinct from the phase that minted
+/// its input while remaining a deterministic function of that phase's identity.
+///
+/// It is built as a *child* of the minting phase rather than as a sibling
+/// effect: the two halves are one boundary, and reading the journal has to be
+/// able to say which completion a derivation derives from. A bare turn-scoped
+/// invocation would leave that edge inferable only from the shared effect-id
+/// prefix, which is a naming coincidence, not a recorded fact.
+pub(crate) fn turn_phase_effect_invocation(
+    parent: &RuntimeInvocation,
+    effect_id: EffectId,
+    phase_kind: RuntimeEffectKind,
+) -> RuntimeInvocation {
+    child_effect_invocation(
+        parent,
+        format!("{}.{}", effect_id.0, phase_kind.as_str()),
+        phase_kind,
+        phase_kind.as_str(),
+    )
+}
+
 fn turn_effect_replay_key(
     session_id: &str,
     turn_id: &str,

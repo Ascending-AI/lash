@@ -235,6 +235,50 @@ impl RuntimeTurnDriver<'_> {
         Ok(delivery)
     }
 
+    /// Phase 2 of [`RuntimeTurnDriver::invoke_turn_llm_effect`].
+    pub(super) async fn invoke_assistant_response_hooks_effect(
+        &mut self,
+        machine: &mut TurnMachine,
+        id: crate::sansio::EffectId,
+        response: LlmResponse,
+        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+        cancel: &CancellationToken,
+    ) -> Result<LlmResponse, RuntimeEffectControllerError> {
+        // Rebuilt rather than threaded through: phase 1's invocation is a pure
+        // function of the same turn identity, so this is the identical parent
+        // and the causal edge survives a redrive that only runs phase 2.
+        let phase_one = self.turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)?;
+        let invocation = crate::runtime::causal::turn_phase_effect_invocation(
+            &phase_one,
+            id,
+            RuntimeEffectKind::AssistantResponseHooks,
+        );
+        let (response, events) = self
+            .execute_typed_turn_effect(
+                machine,
+                event_tx,
+                cancel,
+                RuntimeEffectEnvelope::new(
+                    invocation,
+                    RuntimeEffectCommand::AssistantResponseHooks {
+                        response: Box::new(response),
+                    },
+                ),
+                RuntimeEffectOutcome::into_assistant_response_hooks,
+            )
+            .await?;
+        // Emitted from the decoded outcome, so a replayed phase 2 serves the
+        // recorded events rather than re-running the hooks that produced them.
+        for emitted in events {
+            for event in
+                crate::plugin::plugin_runtime_session_events(&emitted.plugin_id, emitted.events)
+            {
+                send_session_event(event_tx, event).await;
+            }
+        }
+        Ok(response)
+    }
+
     pub(super) async fn invoke_turn_execution_environment_sync_effect(
         &mut self,
         machine: &mut TurnMachine,

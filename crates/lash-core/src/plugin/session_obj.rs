@@ -211,6 +211,15 @@ impl PluginSession {
             .collect()
     }
 
+    /// Whether any plugin registered an assistant-response hook.
+    ///
+    /// With none registered the runtime skips phase 2 of the staged LLM-call
+    /// effect boundary entirely, so a hook-free session journals exactly one
+    /// entry per call as before.
+    pub(crate) fn has_assistant_response_hooks(&self) -> bool {
+        !self.contributions.assistant_response_hooks.is_empty()
+    }
+
     pub fn has_assistant_stream_hooks(&self) -> bool {
         !self.contributions.assistant_stream_hooks.is_empty()
     }

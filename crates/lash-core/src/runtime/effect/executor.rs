@@ -1025,6 +1025,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         matches!(
             command,
             RuntimeEffectCommand::LlmCall { .. }
+                | RuntimeEffectCommand::AssistantResponseHooks { .. }
                 | RuntimeEffectCommand::ToolBatch { .. }
                 | RuntimeEffectCommand::ExecCode { .. }
         )
@@ -1053,6 +1054,16 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     call_record,
                 })
             }
+            RuntimeEffectCommand::AssistantResponseHooks { response } => runner
+                .driver
+                .run_assistant_response_hooks(*response)
+                .await
+                .map(
+                    |(response, events)| RuntimeEffectOutcome::AssistantResponseHooks {
+                        response: Box::new(response),
+                        events,
+                    },
+                ),
             RuntimeEffectCommand::ToolBatch { batch } => Box::pin(runner.driver.run_tool_batch(
                 batch,
                 envelope.invocation,
