@@ -411,21 +411,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
             let mut output = target.as_ref().clone();
             for source in args {
-                if matches!(source, Value::Null | Value::Undefined) {
-                    continue;
-                }
-                let source = match source {
+                // This arm runs before the materializing dispatch below, because
+                // a heap receiver has to stay a reference. That left a projected
+                // *source* handle to match no source shape and be skipped
+                // silently, so `Object.assign(target, projected)` copied
+                // nothing. A projected handle is a host-side view of a value:
+                // assign the record behind it. Nullish sources are still
+                // skipped, projected or not.
+                let source = materialize_value(source.clone());
+                let entries = match &source {
                     Value::Ref(id) => match self.heap.get(*id)? {
-                        HeapObject::Record(record) => Some(record.as_ref()),
+                        HeapObject::Record(record) => Some(ecma_record_entries(record)),
                         _ => None,
                     },
-                    Value::Record(record) => Some(record.as_ref()),
+                    Value::Record(record) => Some(ecma_record_entries(record)),
                     _ => None,
                 };
-                if let Some(source) = source {
-                    for (key, value) in ecma_record_entries(source) {
-                        output.insert(key.to_string(), value.clone());
-                    }
+                for (key, value) in entries.unwrap_or_default() {
+                    output.insert(key.to_string(), value.clone());
                 }
             }
             self.heap.replace_javascript_record(*receiver, output)?;

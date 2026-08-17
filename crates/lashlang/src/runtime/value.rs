@@ -463,6 +463,53 @@ impl ProjectedValue {
         self.projection_ref.as_ref()
     }
 
+    /// The value behind a *scalar* projection, which is already in memory and so
+    /// costs nothing to read through. Path reads use this to resolve field and
+    /// index access with the VM's dialect-aware helpers instead of the
+    /// dialect-blind `access.rs` reads `get_field` / `get_index` fall back to —
+    /// a scalar projection of a string has a `.length`, and a missing key on a
+    /// projected record is `undefined` in the TypeScript dialect, exactly as it
+    /// is when the same value is not projected. `None` for a custom projection,
+    /// whose reads belong to the host descriptor and stay lazy.
+    /// Whether this projection is absent, for `??`.
+    ///
+    /// A scalar projection is nullish exactly when the value behind it is —
+    /// `Scalar(Null)` is how this design spells an absent projected value, which
+    /// is the whole point of FIG-1479.
+    ///
+    /// A custom projection stands for a live host view, so it is present, and it
+    /// is deliberately not read to find that out. Reading would invert the
+    /// answer: an unanswered `ProjectedReadRequest` is `Missing`, which
+    /// `materialize_async` maps to `Value::Null`, so every descriptor that does
+    /// not implement `Materialize` — the documented minimum is `type_name` alone
+    /// — would judge its own view absent and hand `??` the fallback. It would
+    /// also be the one read this question must never make, dragging a whole
+    /// session view across to decide presence.
+    ///
+    /// Because nothing is read, `IsNullish` stays completed by the VM's fast path
+    /// rather than bailing to the async projected route the way `ToBool` does:
+    /// truthiness has a `ProjectedReadRequest::Truthy` to await, and presence has
+    /// no counterpart to ask for.
+    ///
+    /// Matched on the kind rather than through `scalar_value` so that a new
+    /// `ProjectedKind` has to state its own answer here instead of inheriting
+    /// "present" from a `None`.
+    pub(crate) fn is_nullish(&self) -> bool {
+        match &self.kind {
+            ProjectedKind::Scalar(value) => {
+                matches!(value.as_ref(), Value::Null | Value::Undefined)
+            }
+            ProjectedKind::Custom(_) => false,
+        }
+    }
+
+    pub(crate) fn scalar_value(&self) -> Option<&Value> {
+        match &self.kind {
+            ProjectedKind::Scalar(value) => Some(value),
+            ProjectedKind::Custom(_) => None,
+        }
+    }
+
     /// Wrap a derived value as a `ProjectedValue` carrying a path-extended name
     /// (e.g. `parent.field`). Pass-through if the inner value is already a
     /// `Value::Projected` so we never double-wrap. Used by field/index access on
