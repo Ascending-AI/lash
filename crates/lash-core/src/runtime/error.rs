@@ -68,6 +68,7 @@ pub enum RuntimeErrorCode {
     AwaitEventUnknownOrRevoked,
     AwaitEventUnsupported,
     CancelStartGateUnavailable,
+    EffectGroupUnsupported,
     EffectJournalRetirementUnsupported,
     InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
@@ -145,6 +146,14 @@ pub enum RuntimeErrorCode {
     RuntimeEffectEnvelopeCanonicalDecode,
     RuntimeEffectEnvelopeCanonicalHashInvariant,
     RuntimeEffectEnvelopeHash,
+    /// A grouped settlement await was cancelled by its cancellation token. The
+    /// group's durable rank is untouched, so a later await resumes at the same
+    /// rank.
+    RuntimeEffectGroupAwaitCancelled,
+    /// A durable effect group was assembled with children that disagree with the
+    /// group they claim to belong to, or an effect carrying group membership
+    /// reached a command shape that cannot honor it.
+    RuntimeEffectGroupShape,
     RuntimeEffectInvocationKind,
     RuntimeEffectInvocationSubject,
     RuntimeEffectLocalExecutorMismatch,
@@ -263,6 +272,7 @@ impl RuntimeErrorCode {
             Self::AwaitEventUnknownOrRevoked => "await_event_unknown_or_revoked",
             Self::AwaitEventUnsupported => "await_event_unsupported",
             Self::CancelStartGateUnavailable => "cancel_start_gate_unavailable",
+            Self::EffectGroupUnsupported => "effect_group_unsupported",
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
             Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
@@ -332,6 +342,8 @@ impl RuntimeErrorCode {
                 "runtime_effect_envelope_canonical_hash_invariant"
             }
             Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
+            Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
+            Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::RuntimeEffectInvocationKind => "runtime_effect_invocation_kind",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
             Self::RuntimeEffectLocalExecutorMismatch => "runtime_effect_local_executor_mismatch",
@@ -470,6 +482,7 @@ impl RuntimeErrorCode {
                 | Self::AwaitEventKeySign
                 | Self::AwaitEventUnknownOrRevoked
                 | Self::AwaitEventUnsupported
+                | Self::EffectGroupUnsupported
                 | Self::EffectJournalRetirementUnsupported
                 | Self::InvalidAwaitEventSessionId
                 | Self::InvalidAwaitEventWaitIdentity
@@ -511,6 +524,8 @@ impl RuntimeErrorCode {
                 | Self::RuntimeEffectEnvelopeCanonicalDecode
                 | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
                 | Self::RuntimeEffectEnvelopeHash
+                | Self::RuntimeEffectGroupAwaitCancelled
+                | Self::RuntimeEffectGroupShape
                 | Self::RuntimeEffectInvocationKind
                 | Self::RuntimeEffectInvocationSubject
                 | Self::RuntimeEffectLocalExecutorMismatch
@@ -603,6 +618,7 @@ impl RuntimeErrorCode {
             "await_event_unknown_or_revoked" => Self::AwaitEventUnknownOrRevoked,
             "await_event_unsupported" => Self::AwaitEventUnsupported,
             "cancel_start_gate_unavailable" => Self::CancelStartGateUnavailable,
+            "effect_group_unsupported" => Self::EffectGroupUnsupported,
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
             "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
@@ -671,6 +687,8 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectEnvelopeCanonicalHashInvariant
             }
             "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
+            "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
+            "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "runtime_effect_invocation_kind" => Self::RuntimeEffectInvocationKind,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
             "runtime_effect_local_executor_mismatch" => Self::RuntimeEffectLocalExecutorMismatch,
@@ -969,6 +987,7 @@ mod tests {
             | RuntimeErrorCode::AwaitEventKeySign
             | RuntimeErrorCode::AwaitEventUnknownOrRevoked
             | RuntimeErrorCode::AwaitEventUnsupported
+            | RuntimeErrorCode::EffectGroupUnsupported
             | RuntimeErrorCode::EffectJournalRetirementUnsupported
             | RuntimeErrorCode::InvalidAwaitEventSessionId
             | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
@@ -1010,6 +1029,8 @@ mod tests {
             | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode
             | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
             | RuntimeErrorCode::RuntimeEffectEnvelopeHash
+            | RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
+            | RuntimeErrorCode::RuntimeEffectGroupShape
             | RuntimeErrorCode::RuntimeEffectInvocationKind
             | RuntimeErrorCode::RuntimeEffectInvocationSubject
             | RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch
@@ -1118,6 +1139,7 @@ mod tests {
             RuntimeErrorCode::AwaitEventUnknownOrRevoked,
             RuntimeErrorCode::AwaitEventUnsupported,
             RuntimeErrorCode::CancelStartGateUnavailable,
+            RuntimeErrorCode::EffectGroupUnsupported,
             RuntimeErrorCode::EffectJournalRetirementUnsupported,
             RuntimeErrorCode::InvalidAwaitEventSessionId,
             RuntimeErrorCode::InvalidAwaitEventWaitIdentity,
@@ -1174,6 +1196,8 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
             RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
             RuntimeErrorCode::RuntimeEffectEnvelopeHash,
+            RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+            RuntimeErrorCode::RuntimeEffectGroupShape,
             RuntimeErrorCode::RuntimeEffectInvocationKind,
             RuntimeErrorCode::RuntimeEffectInvocationSubject,
             RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,

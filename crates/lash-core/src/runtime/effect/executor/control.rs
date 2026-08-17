@@ -9,6 +9,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
+use super::super::group::{
+    CheckedEffectGroup, EffectGroupHandle, GroupSettlement, LoserDisposition,
+};
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor};
 
 // =============================================================================
@@ -974,6 +977,152 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
+
+    /// Whether this controller implements durable child completion and
+    /// first-settlement wake (FIG-1416).
+    ///
+    /// Deliberately a different question from
+    /// [`supports_concurrent_effects`](Self::supports_concurrent_effects), which
+    /// asks "may one coordinator issue overlapping *unstructured*
+    /// `execute_effect` calls?". This asks "can this host run a *structured
+    /// group* of children durably and tell me, durably, which settled first?".
+    /// A single-journal-context engine answers no to the first and yes to the
+    /// second — Restate does.
+    ///
+    /// This is checked once at deployment validation rather than per call: the
+    /// group path is the only tool-batch path, so a controller answering `false`
+    /// has no batch path at all, and a host wiring one should learn that at
+    /// startup instead of mid-turn on the first `Promise.all`. It gates
+    /// *admission*, not dispatch.
+    ///
+    /// A host may answer `true` only if it can also supply `'static` executors
+    /// for the children: a child must be able to outlive its caller to honor
+    /// [`LoserDisposition::RunToCompletion`], and
+    /// [`EffectHost::scoped_static`] is explicitly not universally available.
+    /// The two capabilities are one question and must not drift apart.
+    fn supports_effect_groups(&self) -> bool {
+        false
+    }
+
+    /// Open — or replay — a group of independently journaled child effects.
+    ///
+    /// Returns once the group is durably recorded, **not** when a child settles.
+    ///
+    /// The single [`CheckedEffectGroup`] parameter carries the group together
+    /// with one `'static` executor per child, positionally aligned with
+    /// [`RuntimeEffectGroup::children`](crate::RuntimeEffectGroup::children) — an
+    /// alignment [`CheckedEffectGroup::try_new`] has already established, since it
+    /// is the type's only constructor and this method takes nothing else. That is
+    /// deliberate: "executor `i` runs child `i`" is the load-bearing claim, and a
+    /// two-parameter signature would leave checking it an obligation on every
+    /// implementation rather than a property of the argument.
+    ///
+    /// The `'static` lifetime is the ratified property: children must outlive the
+    /// caller's future under [`LoserDisposition::RunToCompletion`], and the
+    /// borrow-scoped `RuntimeEffectLocalExecutor<'_>` taken by
+    /// [`execute_effect`](Self::execute_effect) carries the one lifetime this
+    /// contract exists to break. A checked `Vec` rather than a factory closure
+    /// keeps that property while making an out-of-range position, a second
+    /// executor for one child, and an arity mismatch unrepresentable instead of
+    /// resolved by panic or convention. A child with no runnable executor is
+    /// expressed as [`RuntimeEffectLocalExecutor::unavailable`], not as a missing
+    /// element.
+    ///
+    /// Each executor is **single-execution**:
+    /// [`RuntimeEffectLocalExecutor::execute`] consumes `self`, so the vec funds
+    /// one attempt per child and no retry. A host that retries a child obtains a
+    /// fresh executor from [`EffectHost::scoped_static`] — the same source the
+    /// capability flag's `'static` requirement points at, and the mechanism by
+    /// which the group-drain path runs or cancels losers after the caller is
+    /// gone. Take ownership through [`CheckedEffectGroup::into_parts`].
+    ///
+    /// A reopen must be fenced on group shape: a host that finds a recorded group
+    /// under this key whose child count or wake rule differs from the group
+    /// passed here must refuse rather than reopen, because a shrunk child vec
+    /// under one key silently renumbers every rank above the truncation and the
+    /// per-child envelope-hash fence cannot see it.
+    ///
+    /// The default errors loudly rather than mis-executing a group, matching
+    /// [`AwaitEventResolver::cancel_await_events_for_session`]: an out-of-tree
+    /// controller that has not implemented groups fails closed with a named
+    /// error.
+    async fn open_effect_group(
+        &self,
+        _group: CheckedEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::EffectGroupUnsupported,
+            "this effect controller does not implement durable effect groups",
+        ))
+    }
+
+    /// Await the next settlement in the group's durable settlement order.
+    ///
+    /// The obligation, stated engine-portably: **settlement `n` of a group is a
+    /// durable fact, and every replay observes the same child at position `n`.**
+    /// A host must not re-derive position `n` by racing live children once `n`
+    /// has been decided. How the fact is stored is the host's business — a SQL
+    /// row, a Restate journal entry, a Temporal history event.
+    ///
+    /// Settlements are served by *rank* — the child holding the
+    /// `(handle.consumed() + 1)`-th smallest sequence — never by literal sequence
+    /// equality, because sequences are monotonic without being gapless.
+    ///
+    /// The handle is the sole cursor of record and is taken by `&mut`: an
+    /// implementation calls [`EffectGroupHandle::advance`] on exactly the
+    /// settlements it returns and keeps no per-caller consumption state of its
+    /// own, which is what makes consumption exactly-once across a crash. See
+    /// [`EffectGroupHandle`] for the full normative rule.
+    ///
+    /// Cancellation returns
+    /// [`RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled`](crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled)
+    /// and leaves the cursor and the durable rank untouched, so a later await
+    /// resumes at the same rank. Exhaustion has no code because it is the
+    /// caller's arithmetic: check
+    /// [`EffectGroupHandle::is_exhausted`] rather than awaiting past the last
+    /// child.
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut EffectGroupHandle,
+        _cancel: CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::EffectGroupUnsupported,
+            "this effect controller does not implement durable effect groups",
+        ))
+    }
+
+    /// Release the caller's interest in the group.
+    ///
+    /// Under [`LoserDisposition::RunToCompletion`] the remaining children keep
+    /// running under host ownership and journal their own settlements; the host
+    /// owns their redrive. Under [`LoserDisposition::Cancel`] the host cancels
+    /// them and journals each cancellation as that child's terminal. Either way
+    /// the caller may not observe further settlements.
+    ///
+    /// `disposition` may only **narrow** the one the group declared at open:
+    /// resolve it through
+    /// [`LoserDisposition::resolve_close`] and refuse a widening request. The
+    /// declared disposition is authoritative — it is journaled with the group
+    /// row, so a group abandoned by a crash before its close is drained under it
+    /// too, and no policy is invented at drain time.
+    ///
+    /// Close is **idempotent**, and its failure is retryable. Taking the handle
+    /// by value blocks reuse only in-process: the handle is `Deserialize`, so a
+    /// crash between a successful close and the continuation commit means a
+    /// replayed frame closes the same group again by construction. A second close
+    /// under the same disposition must therefore succeed rather than raise on a
+    /// healthy replay path.
+    async fn close_effect_group(
+        &self,
+        _handle: EffectGroupHandle,
+        _disposition: LoserDisposition,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::EffectGroupUnsupported,
+            "this effect controller does not implement durable effect groups",
+        ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

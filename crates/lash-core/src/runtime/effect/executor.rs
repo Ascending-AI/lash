@@ -783,15 +783,21 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         let RuntimeEffectEnvelope {
             invocation,
             command,
+            group,
         } = envelope;
         match command {
             RuntimeEffectCommand::Trigger { command } => {
+                crate::runtime::effect::refuse_unhonored_group_membership(
+                    group.as_deref(),
+                    "trigger",
+                )?;
                 self.execute_trigger(invocation, *command).await
             }
             command => {
                 self.execute(RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 })
                 .await
             }

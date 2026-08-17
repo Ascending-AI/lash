@@ -323,6 +323,7 @@ pub mod facade_support {
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::promise_semantics;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
+    pub use crate::runtime::refuse_unhonored_group_membership;
     #[doc(hidden)]
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
@@ -910,10 +911,11 @@ pub use store::{TurnId, WorkClaim, WorkCompletion};
 // surface; the rest of the runtime block above stays crate-internal.
 
 pub use runtime::{
-    AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
-    ProcessEffectOutcome, ProcessEventSemanticsSpec, ProcessOutcomeObserver,
+    AssistantResponseHookEvents, CheckedEffectGroup, CheckpointClaimSet, EffectGroupHandle,
+    EffectGroupMembership, GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserDisposition,
+    ProcessCommand, ProcessEffectOutcome, ProcessEventSemanticsSpec, ProcessOutcomeObserver,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,
     RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState,
     ToolAttemptLaunch,

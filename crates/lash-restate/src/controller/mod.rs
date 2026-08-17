@@ -23,7 +23,8 @@ use lash_core::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimeErrorCode, RuntimeInvocation, ScopedEffectController,
     facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
-    facade_support::RuntimeSleepOptions, facade_support::validate_replayed_effect_envelope,
+    facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
+    facade_support::validate_replayed_effect_envelope,
 };
 use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
@@ -594,7 +595,7 @@ where
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let execution = restate_effect_execution(envelope);
+        let execution = restate_effect_execution(envelope)?;
         self.remember_trace_invocation(execution.invocation());
         match execution {
             RestateEffectExecution::DirectProcess {
@@ -962,9 +963,11 @@ async fn execute_restate_journaled_effect(
     let RuntimeEffectEnvelope {
         invocation,
         command,
+        group,
     } = envelope;
     match command {
         RuntimeEffectCommand::Trigger { command } => {
+            refuse_unhonored_group_membership(group.as_deref(), "restate trigger")?;
             local_executor.execute_trigger(invocation, *command).await
         }
         command => {
@@ -972,6 +975,7 @@ async fn execute_restate_journaled_effect(
                 .execute(RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 })
                 .await
         }
@@ -1401,32 +1405,49 @@ impl RestateEffectExecution {
 /// it also names the command this attempt was trying to write, not the
 /// journal's contents. FIG-790 was the incident that exposed this SDK
 /// diagnostic inversion.
-pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> RestateEffectExecution {
+///
+/// Fallible because four of its arms rebuild the envelope into a target with no
+/// slot for [`EffectGroupMembership`] — `Timer`, `AwaitEvent`, `PeekAwaitEvent`,
+/// and both `Process` arms record no canonical envelope at all, so on this tier
+/// those commands have no envelope-hash fence to fold a wake rule into. A grouped
+/// child reaching them is refused rather than silently stripped of its
+/// membership. Worth naming for the Restate layer: `Sleep` and `AwaitEvent` are
+/// exactly the two children of the design's deadline/signal select, so this is
+/// the refusal that layer must convert into real child invocations.
+pub(crate) fn restate_effect_execution(
+    envelope: RuntimeEffectEnvelope,
+) -> Result<RestateEffectExecution, RuntimeEffectControllerError> {
     let RuntimeEffectEnvelope {
         invocation,
         command,
+        group,
     } = envelope;
-    match command {
+    Ok(match command {
         RuntimeEffectCommand::Process { command }
             if matches!(
                 command.as_ref(),
                 ProcessCommand::ParentEnd { .. } | ProcessCommand::Signal { .. }
             ) =>
         {
+            refuse_unhonored_group_membership(group.as_deref(), "restate durable process command")?;
             RestateEffectExecution::DurableProcessCommand {
                 invocation,
                 command,
             }
         }
-        RuntimeEffectCommand::Process { command } => RestateEffectExecution::DirectProcess {
-            invocation,
-            command,
-        },
+        RuntimeEffectCommand::Process { command } => {
+            refuse_unhonored_group_membership(group.as_deref(), "restate direct process")?;
+            RestateEffectExecution::DirectProcess {
+                invocation,
+                command,
+            }
+        }
         command @ RuntimeEffectCommand::ToolBatch { .. } => {
             RestateEffectExecution::DurableToolBatch {
                 envelope: RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 },
             }
         }
@@ -1434,16 +1455,22 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,
+                group,
             },
         },
-        RuntimeEffectCommand::Sleep { duration_ms } => RestateEffectExecution::Timer {
-            invocation,
-            duration_ms,
-        },
+        RuntimeEffectCommand::Sleep { duration_ms } => {
+            refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
+            RestateEffectExecution::Timer {
+                invocation,
+                duration_ms,
+            }
+        }
         RuntimeEffectCommand::AwaitEvent { key } => {
+            refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;
             RestateEffectExecution::AwaitEvent { invocation, key }
         }
         RuntimeEffectCommand::PeekAwaitEvent { key } => {
+            refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
         command @ (RuntimeEffectCommand::LlmCall { .. }
@@ -1458,10 +1485,11 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
                 envelope: RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 },
             }
         }
-    }
+    })
 }
 
 pub(crate) fn restate_effect_name(invocation: &RuntimeInvocation) -> String {
