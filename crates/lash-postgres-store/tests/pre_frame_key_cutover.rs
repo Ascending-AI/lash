@@ -153,7 +153,7 @@ async fn postgres_refuses_completed_pre_frame_key_continue_as_at_open_when_confi
     let result = PostgresStorage::from_pool(pool.clone()).await;
 
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = 52 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET version = 53 WHERE component = 'lash-postgres-store'",
     )
     .execute(&pool)
     .await
@@ -170,6 +170,6 @@ async fn postgres_refuses_completed_pre_frame_key_continue_as_at_open_when_confi
     };
     assert_eq!(
         message,
-        "store backend error: Postgres schema component `lash-postgres-store` has version 43, expected 52. The component schema is normally a reject-and-recreate boundary. This build has explicit Lash-managed migrations from the published component-50 and component-51 shapes to 52; they run only under SchemaCheck::Enforce after an exact source-shape preflight. This mismatch has no applicable migration. Drain affected sessions and recreate the whole Lash trust domain with this version: provision the database from this build's schema.sql artifact, and reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions. This gate is unconditional; SchemaCheck::WarnOnly does not relax it."
+        "store backend error: Postgres schema component `lash-postgres-store` has version 43, expected 53. The component schema is normally a reject-and-recreate boundary. This build has explicit Lash-managed migrations from the published component-50, component-51, and component-52 shapes to 53; they run only under SchemaCheck::Enforce after an exact source-shape preflight. This mismatch has no applicable migration. Drain affected sessions and recreate the whole Lash trust domain with this version: provision the database from this build's schema.sql artifact, and reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions. This gate is unconditional; SchemaCheck::WarnOnly does not relax it."
     );
 }

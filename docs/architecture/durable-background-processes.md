@@ -233,7 +233,7 @@ PostgreSQL tables. The operations runbook reset consequently clears
 
 Figments coordination is one Lash revision. SQLite durable-core schema 37 includes
 the keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover. PostgreSQL schema 52 includes those cutovers,
+immutable graph-generation cutover. PostgreSQL schema 53 includes those cutovers,
 the indexed recovery worklist, and the session-metadata payload cutover.
 Process-registry schema 24 adds atomic pending process-parent teardown to the v3
 process-environment reference cutover; trigger schema 5 carries its existing

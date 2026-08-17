@@ -186,7 +186,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 52 adds the attachment GC fence's per-digest condemnation table.
 // Lash-managed version-51 stores take the explicit 51 -> 52 creation-only
 // migration at open.
-const SCHEMA_VERSION: i32 = 52;
+// Version 53 indexes the ordering keys that let idle arbitration compare the
+// earliest pending session command with the earliest pending turn input without
+// hydrating either queue. Both indexes cover columns 52 already stores, so
+// version-50, -51, and -52 stores take a creation-only migration at open.
+const SCHEMA_VERSION: i32 = 53;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -446,8 +450,8 @@ impl PostgresStorage {
     ///
     /// The component schema is normally a reject-and-recreate boundary. This
     /// build has two explicit exceptions: Lash-managed `Enforce` mode can apply
-    /// the creation-only migrations from the published component-50 or
-    /// component-51 shapes to 52 after an exact source-shape preflight. An older
+    /// the creation-only migrations from the published component-50, -51, or
+    /// -52 shapes to 53 after an exact source-shape preflight. An older
     /// stamp over newer artifacts is ledger/schema divergence and is refused
     /// with an inspect-and-recreate remedy; other mismatches are rejected at
     /// open.

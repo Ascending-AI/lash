@@ -41,6 +41,23 @@ const TOOL_INTENT_SUBMISSIONS_DDL: &str = r#"CREATE TABLE lash_tool_intent_submi
 const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_intent_submissions_scope
             ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index)"#;
 
+/// The two ordering indexes that back idle ingress-family arbitration.
+///
+/// Both cover columns component 52 already stores, so introducing them is
+/// creation-only: no column is added and no row is rewritten. This is why the
+/// 53 generation is reachable by migration at all.
+///
+/// `IF NOT EXISTS` makes each statement idempotent on its own, so a migration
+/// that is retried after failing later in its transaction cannot die on a
+/// duplicate-object error. The divergence probe over `introduced_relations` still
+/// refuses a stamp that already carries either index before any DDL runs; this
+/// is the second line, not a replacement for it.
+const QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
+            ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)"#;
+
+const PENDING_TURN_INPUT_ORDER_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
+            ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq)"#;
+
 /// Explicit, creation-only migrations into the current component generation.
 ///
 /// The version-bump recreation harness
@@ -48,31 +65,57 @@ const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_in
 /// fixtures to this table's newest generation: `MIGRATION_FLOOR_VERSION` (the
 /// oldest `from` below), `POST_FLOOR_TABLES` / `POST_FLOOR_ARTIFACTS` (the floor
 /// migration's `source_missing_tables` / `introduced_relations`, dropped to
-/// rebuild the published floor catalog), and `DIVERGENT_ARTIFACTS` (the
-/// predecessor migration's `introduced_relations`, which the divergence refusal
-/// must enumerate). A bump that introduces a relation moves all of them.
+/// rebuild the published floor catalog), `POST_FLOOR_INDEXES` (the subset of
+/// those artifacts that dropping the post-floor tables does not take with them),
+/// and `DIVERGENT_ARTIFACTS` (the predecessor migration's
+/// `introduced_relations`, which the divergence refusal must enumerate). A bump
+/// that introduces a relation moves all of them.
 ///
 /// `scripts/check_version_bump_fixtures.py` recomputes each of those from this
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    // The 53 generation adds only the two ordering indexes, so a component-52
+    // store crosses it without any table, column, or row change.
+    SchemaMigration {
+        from: 52,
+        to: 53,
+        source_missing_tables: &[],
+        introduced_relations: &[
+            "idx_lash_queued_work_session_command_order",
+            "idx_lash_pending_turn_input_order",
+        ],
+        statements: &[
+            QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
+            PENDING_TURN_INPUT_ORDER_INDEX_DDL,
+            r#"UPDATE lash_schema_versions
+               SET version = 53
+             WHERE component = 'lash-postgres-store' AND version = 52"#,
+        ],
+    },
     SchemaMigration {
         from: 51,
-        to: 52,
+        to: 53,
         source_missing_tables: &["lash_attachment_condemnations"],
-        introduced_relations: &["lash_attachment_condemnations"],
+        introduced_relations: &[
+            "lash_attachment_condemnations",
+            "idx_lash_queued_work_session_command_order",
+            "idx_lash_pending_turn_input_order",
+        ],
         statements: &[
             ATTACHMENT_CONDEMNATIONS_DDL,
+            QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
+            PENDING_TURN_INPUT_ORDER_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 52
+               SET version = 53
              WHERE component = 'lash-postgres-store' AND version = 51"#,
         ],
     },
     // Component-50 stores skipped the 51 generation entirely; they take one
-    // creation-only migration that lands both generations at once.
+    // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 52,
+        to: 53,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
@@ -83,14 +126,18 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_process_parent_end_plans",
             "lash_tool_intent_submissions",
             "idx_lash_tool_intent_submissions_scope",
+            "idx_lash_queued_work_session_command_order",
+            "idx_lash_pending_turn_input_order",
         ],
         statements: &[
             PROCESS_PARENT_END_PLANS_DDL,
             TOOL_INTENT_SUBMISSIONS_DDL,
             TOOL_INTENT_SUBMISSIONS_INDEX_DDL,
             ATTACHMENT_CONDEMNATIONS_DDL,
+            QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
+            PENDING_TURN_INPUT_ORDER_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 52
+               SET version = 53
              WHERE component = 'lash-postgres-store' AND version = 50"#,
         ],
     },
@@ -595,9 +642,9 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is normally a reject-and-recreate boundary. This build has \
-         explicit Lash-managed migrations from the published component-50 and component-51 \
-         shapes to 52; they run only under SchemaCheck::Enforce after an exact source-shape \
-         preflight. This mismatch \
+         explicit Lash-managed migrations from the published component-50, component-51, and \
+         component-52 shapes to 53; they run only under SchemaCheck::Enforce after an exact \
+         source-shape preflight. This mismatch \
          has no applicable migration. Drain affected sessions and recreate the whole Lash trust \
          domain with this version: provision \
          the database from this build's schema.sql artifact, and reset the tombstones, await-event \
