@@ -2720,6 +2720,7 @@ dependencies = [
  "swc_ecma_ast",
  "swc_ecma_parser",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

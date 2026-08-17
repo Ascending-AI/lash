@@ -97,11 +97,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
+    /// An ECMA operator reads its operand as a *value*, so a projected host
+    /// handle is resolved to the value behind it first. Leaving the handle in
+    /// place sent it into the scalar ECMA coercions, which have no host to read
+    /// and answered `"[object Object]"` / `NaN` / `object` for it.
+    ///
+    /// `materialize_value` resolves it by blocking on the host read, with the
+    /// caveats recorded on `javascript_to_primitive_string_or_number`. The
+    /// Lashlang `Binary` opcode resolves the same operand by awaiting instead —
+    /// it routes a projected operand to the async path — and FIG-1481 tracks
+    /// moving this seam there too.
     pub(super) fn execute_javascript_unary(
         &mut self,
         op: JavaScriptUnaryOp,
     ) -> Result<(), RuntimeError> {
-        let value = self.pop_stack()?;
+        let value = materialize_value(self.pop_stack()?);
         if op == JavaScriptUnaryOp::TypeOf
             && let Value::Ref(id) = value
         {
@@ -130,12 +140,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    /// Operands are resolved for the same reason as in `execute_javascript_unary`
+    /// above: `text + "!"` is a coercion of what the host holds, not of the
+    /// handle to it.
     pub(super) fn execute_javascript_binary(
         &mut self,
         op: JavaScriptBinaryOp,
     ) -> Result<(), RuntimeError> {
-        let mut right = self.pop_stack()?;
-        let mut left = self.pop_stack()?;
+        let mut right = materialize_value(self.pop_stack()?);
+        let mut left = materialize_value(self.pop_stack()?);
         let strict = matches!(
             op,
             JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual
@@ -474,9 +487,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(result);
             return Ok(());
         }
+        // The pure stdlib dispatches on value shape, so both kinds of indirection
+        // have to be resolved first: a heap reference by exporting it, and a
+        // projected host handle by reading the value behind it. Leaving a handle
+        // here matched no receiver shape and reported the guest's method as
+        // unavailable.
         for value in &mut values {
-            if matches!(value, Value::Ref(_)) {
-                *value = self.heap.export_for_instruction(value)?;
+            match value {
+                Value::Ref(_) => *value = self.heap.export_for_instruction(value)?,
+                Value::Projected(_) => *value = materialize_value(value.clone()),
+                _ => {}
             }
         }
         // Array-likes are the one stdlib shape whose result size a guest names

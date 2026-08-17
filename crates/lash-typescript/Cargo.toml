@@ -36,3 +36,4 @@ serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"
 swc_common = { workspace = true }
 swc_ecma_ast = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

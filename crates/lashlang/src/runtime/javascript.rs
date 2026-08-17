@@ -108,6 +108,16 @@ pub(crate) fn eval_javascript_binary(left: Value, op: JavaScriptBinaryOp, right:
 }
 
 pub(crate) fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
+    // A projected handle is not a distinct ECMA value: comparing it compares
+    // what the host has behind it. Leaving the wrapper in place made every
+    // comparison fall to `_ => false`, and made the loose ladder below recurse
+    // on an object that never became a primitive.
+    if let Value::Projected(left) = left {
+        return javascript_strict_equal(&left.materialize(), right);
+    }
+    if let Value::Projected(right) = right {
+        return javascript_strict_equal(left, &right.materialize());
+    }
     match (left, right) {
         (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,
@@ -125,6 +135,12 @@ pub(crate) fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
 }
 
 fn javascript_loose_equal(left: &Value, right: &Value) -> bool {
+    if let Value::Projected(left) = left {
+        return javascript_loose_equal(&left.materialize(), right);
+    }
+    if let Value::Projected(right) = right {
+        return javascript_loose_equal(left, &right.materialize());
+    }
     if javascript_strict_equal(left, right) {
         return true;
     }
@@ -181,6 +197,24 @@ pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
             debug_assert_exported_value("scalar JavaScript primitive coercion");
             Value::String("[object Object]".into())
         }
+        // The ECMA opcodes resolve a projected *operand* before they run, so what
+        // reaches here is the container case: a projected value the guest stored
+        // inside a list or record, met while coercing the container.
+        //
+        // How the read happens is a live constraint, not a detail.
+        // `ProjectedValue::materialize` drives the host read with
+        // `futures_executor::block_on`, and every coercion in this file is
+        // synchronous with no `.await` to spend, so the read runs on whatever
+        // thread is stepping the VM. That is safe for the descriptors this repo
+        // has — all of them answer from memory and never pend — but a
+        // store-backed `ProjectedHostDescriptor` would block that worker, and
+        // would deadlock a current-thread runtime. Moving this seam onto the
+        // async projected path is FIG-1481. Reading is still the right answer
+        // until then: the alternative is not laziness, it is `"[object Object]"`
+        // for a value the host is holding.
+        Value::Projected(projected) => {
+            javascript_to_primitive_string_or_number(&projected.materialize())
+        }
         other => other.clone(),
     }
 }
@@ -194,8 +228,8 @@ pub(crate) fn javascript_to_number(value: &Value) -> f64 {
         Value::String(value) => javascript_string_to_number(value),
         // Heap-aware VM paths resolve references before reaching this scalar
         // fallback. Keeping the fallback total prevents an accidentally
-        // unhandled reference or projection from recursing unchanged forever.
-        Value::Ref(_) | Value::Projected(_) => f64::NAN,
+        // unhandled reference from recursing unchanged forever.
+        Value::Ref(_) => f64::NAN,
         value => javascript_to_number(&javascript_to_primitive_string_or_number(value)),
     }
 }
@@ -271,10 +305,11 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
         Value::Number(value) if *value == 0.0 => "0".to_string(),
         Value::Number(value) => javascript_number_to_string(*value),
         Value::String(value) => value.to_string(),
-        Value::Ref(_) | Value::Projected(_) => {
+        Value::Ref(_) => {
             debug_assert_exported_value("scalar JavaScript string coercion");
             "[object Object]".to_string()
         }
+        Value::Projected(projected) => javascript_to_string(&projected.materialize()),
         value => match javascript_to_primitive_string_or_number(value) {
             Value::String(value) => value.to_string(),
             primitive => javascript_to_string(&primitive),
