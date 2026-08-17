@@ -83,15 +83,21 @@ impl GoogleOAuthProvider {
                 continue;
             };
             for part in parts {
-                if let Some(text) = part.get("text").and_then(|t| t.as_str())
-                    && !text.is_empty()
-                {
-                    out.push((
-                        text.to_string(),
-                        Self::thought_signature(part),
-                        part.get("thought").and_then(Value::as_bool) == Some(true),
-                    ));
+                let text = part.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                let is_thought = part.get("thought").and_then(Value::as_bool) == Some(true);
+                let signature = Self::thought_signature(part);
+                // A thought part may carry only a `thoughtSignature` (no text
+                // or empty text). Keep it so the replay payload survives; the
+                // reasoning accumulator turns it into an empty-text part. A
+                // `functionCall` part is excluded: `tool_call_part` already
+                // carries that signature on the ToolCall replay, so keeping it
+                // here too would duplicate the signature across two parts.
+                let signature_only_thought =
+                    is_thought && signature.is_some() && part.get("functionCall").is_none();
+                if text.is_empty() && !signature_only_thought {
+                    continue;
                 }
+                out.push((text.to_string(), signature, is_thought));
             }
         }
 
@@ -419,28 +425,31 @@ impl GoogleOAuthProvider {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
-                if let Some(text) = item.get("text").and_then(|t| t.as_str())
-                    && !text.is_empty()
-                {
-                    if is_thought {
-                        // Gemini flags reasoning text with `thought: true`.
-                        // Route those into Reasoning so downstream code
-                        // doesn't show them as assistant prose. Signature
-                        // lives on the same part.
-                        parts.push(LlmOutputPart::Reasoning {
-                            text: text.to_string(),
-                            replay: Self::reasoning_replay(signature.clone(), origin_model),
-                        });
-                    } else {
-                        parts.push(LlmOutputPart::Text {
-                            text: text.to_string(),
-                            response_meta: signature.clone().map(|signature| ResponseTextMeta {
-                                provider_payload: Some(signature),
-                                origin: origin_model.map(Self::route_identity_for_model),
-                                ..ResponseTextMeta::default()
-                            }),
-                        });
-                    }
+                let text = item.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                // Same exclusion as the streaming extractor: a signature on a
+                // `functionCall` part belongs to the ToolCall replay only.
+                let signature_only_thought =
+                    signature.is_some() && item.get("functionCall").is_none();
+                if is_thought && (!text.is_empty() || signature_only_thought) {
+                    // Gemini flags reasoning text with `thought: true`.
+                    // Route those into Reasoning so downstream code
+                    // doesn't show them as assistant prose. Signature
+                    // lives on the same part, and a signature-only part
+                    // (no text or empty text) still has to survive so the
+                    // replay payload reaches the next request.
+                    parts.push(LlmOutputPart::Reasoning {
+                        text: text.to_string(),
+                        replay: Self::reasoning_replay(signature.clone(), origin_model),
+                    });
+                } else if !text.is_empty() {
+                    parts.push(LlmOutputPart::Text {
+                        text: text.to_string(),
+                        response_meta: signature.clone().map(|signature| ResponseTextMeta {
+                            provider_payload: Some(signature),
+                            origin: origin_model.map(Self::route_identity_for_model),
+                            ..ResponseTextMeta::default()
+                        }),
+                    });
                 }
                 if let Some(tool_call) = Self::tool_call_part(item, origin_model) {
                     parts.push(tool_call);
