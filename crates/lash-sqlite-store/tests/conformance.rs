@@ -968,7 +968,9 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
 #[tokio::test]
 async fn sqlite_session_store_factory_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_core::testing::conformance::session_store_factory(|| {
+    let unbound = Store::memory().await.expect("unbound durable-core store");
+    let unbound = Some(Arc::new(unbound) as Arc<dyn lash_core::StoreMaintenance>);
+    lash_core::testing::conformance::session_store_factory("sqlite", unbound, || {
         let dir = tempfile::tempdir().expect("tempdir");
         let factory =
             Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;

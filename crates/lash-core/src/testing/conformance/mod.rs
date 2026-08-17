@@ -37,6 +37,7 @@ mod observer_intent;
 mod process_change_feed;
 mod process_continuation_store;
 mod process_filters;
+mod process_prune_reclaim;
 mod process_references;
 mod process_registry;
 mod process_trigger_retention;
@@ -46,6 +47,7 @@ mod session_execution_lease_renewal;
 mod session_graph_append;
 mod session_graph_state_machine;
 mod session_store_factory;
+mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_recovery;
 mod tool_intent_runtime;
@@ -67,6 +69,7 @@ pub use lineage::*;
 pub use live_replay::*;
 pub use observer_intent::*;
 pub use process_continuation_store::*;
+pub use process_prune_reclaim::*;
 pub use process_registry::*;
 pub use process_trigger_retention::*;
 pub use runtime_persistence::*;
@@ -501,7 +504,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
-        session_store_factory(|| {
+        let unbound = crate::InMemorySessionStore::default();
+        session_store_factory("in-memory", Some(Arc::new(unbound)), || {
             Arc::new(crate::InMemorySessionStoreFactory::new())
                 as Arc<dyn crate::SessionStoreFactory>
         })

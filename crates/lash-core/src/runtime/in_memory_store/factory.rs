@@ -106,6 +106,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     Arc::clone(&self.deleted_session_ids),
                     Arc::clone(&self.attachment_condemnations),
                 ));
+                *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
                     relation: binding.relation.clone(),
@@ -439,6 +440,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.deleted_session_ids),
             Arc::clone(&self.attachment_condemnations),
         ));
+        *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
         *store.session_graph.lock_recover() = resident_graph.clone();
         *store.checkpoint.lock_recover() = Some(checkpoint);
         *store.session_head_meta.lock_recover() = Some(crate::store::SessionHeadMeta::assemble(

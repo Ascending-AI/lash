@@ -66,8 +66,11 @@ impl InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<(), crate::StoreError> {
+        // The whole read-modify-write below runs inside the factory's write
+        // transaction (see `InMemorySessionStoreFactory::delete_session`), so
+        // these snapshots cannot be raced by another writer.
         let mut heads = self.global_session_heads.lock_recover().clone();
-        let graph = self.global_session_graph.lock_recover().clone();
+        let mut graph = self.global_session_graph.lock_recover().clone();
         let mut owners = self.global_node_owners.lock_recover().clone();
         let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
         let anchors = self
@@ -113,18 +116,45 @@ impl InMemorySessionStore {
             );
         }
 
-        let reclaimed = tombstoned.clone();
-        let nodes = graph
-            .nodes
-            .iter()
-            .filter(|node| !reclaimed.contains(&node.node_id))
-            .cloned()
-            .collect();
-        owners.retain(|node_id, _| !reclaimed.contains(node_id));
-        tombstoned.clear();
+        // Delete-time reclaim, scoped to sessions that can never vacuum again:
+        // physically drop the tombstoned rows this session owns, plus tombstoned
+        // rows owned by an already-deleted session. Exactly as the SQLite and
+        // Postgres backends do (`DELETE FROM graph_nodes WHERE tombstoned AND
+        // (session_id = ? OR session_id IN (deleted sessions))`).
+        //
+        // The already-deleted arm is what keeps reclaim total: a node can be
+        // tombstoned *after* its owning session is gone (unpin of a pinned leaf
+        // whose session was deleted, or ancestry retired at a fork child's
+        // delete), and no session-scoped vacuum can ever reach it — the owner's
+        // id is permanently unbindable. Those ids can never be re-bound, so this
+        // stays inside the session-scoping law and is not a catalog-wide sweep:
+        // rows owned by live sessions stay resident for their own vacuum.
+        let reclaimed = {
+            let deleted_session_ids = self.deleted_session_ids.lock_recover();
+            tombstoned
+                .iter()
+                .filter(|node_id| {
+                    owners.get(*node_id).is_some_and(|owner| {
+                        owner.as_str() == session_id || deleted_session_ids.contains(owner)
+                    })
+                })
+                .cloned()
+                .collect::<HashSet<_>>()
+        };
+        if !reclaimed.is_empty() {
+            let nodes = graph
+                .nodes
+                .iter()
+                .filter(|node| !reclaimed.contains(&node.node_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            graph = crate::SessionGraph::from_nodes(nodes, None)?;
+            owners.retain(|node_id, _| !reclaimed.contains(node_id));
+            tombstoned.retain(|node_id| !reclaimed.contains(node_id));
+        }
 
         *self.global_session_heads.lock_recover() = heads;
-        *self.global_session_graph.lock_recover() = crate::SessionGraph::from_nodes(nodes, None)?;
+        *self.global_session_graph.lock_recover() = graph;
         *self.global_node_owners.lock_recover() = owners;
         *self.tombstoned_node_ids.lock_recover() = tombstoned;
         *self.session_graph.lock_recover() = crate::SessionGraph::default();
@@ -141,5 +171,213 @@ impl InMemorySessionStore {
             .lock_recover()
             .retain(|(target_session_id, _), _| target_session_id != session_id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::SessionStoreFactory;
+    use crate::runtime::in_memory_store::InMemorySessionStoreFactory;
+    use crate::testing::conformance::{
+        append_conformance_event_node, commit_conformance_state, session_store_request,
+    };
+    use lash_sansio::sync::MutexExt;
+
+    /// Node ids still physically resident in the factory-global graph, tombstoned
+    /// or not. `load_node` hides tombstones, so only this raw view can tell a
+    /// reclaimed row from a merely hidden one.
+    fn resident_graph_node_ids(factory: &InMemorySessionStoreFactory) -> Vec<String> {
+        let mut ids = factory
+            .global_session_graph
+            .lock_recover()
+            .nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
+    fn resident_tombstoned_node_ids(factory: &InMemorySessionStoreFactory) -> Vec<String> {
+        let mut ids = factory
+            .tombstoned_node_ids
+            .lock_recover()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
+    /// Unpinning a pinned leaf *after* its owning session was deleted tombstones a
+    /// node whose owner can never be bound again, so no session-scoped vacuum can
+    /// reach it. The next session delete must drain that residue.
+    ///
+    /// The pre-delete store handle is deliberately dropped before the delete: a
+    /// live handle can still vacuum its own session and would mask the leak.
+    #[tokio::test]
+    async fn delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete() {
+        let factory = InMemorySessionStoreFactory::new();
+        let owner = session_store_request(
+            "orphan-owner",
+            "tombstone-model",
+            crate::SessionRelation::Root,
+        );
+        let leaf = {
+            let store = factory
+                .create_store(&owner)
+                .await
+                .expect("create owner store");
+            let mut state = crate::RuntimeSessionState {
+                session_id: owner.session_id.clone(),
+                ..crate::RuntimeSessionState::new(owner.policy.clone())
+            };
+            state.ensure_agent_frame_initialized();
+            let leaf = state
+                .session_graph
+                .leaf_node_id
+                .clone()
+                .expect("owner leaf");
+            store
+                .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+                .await
+                .expect("commit owner");
+            leaf
+        };
+
+        factory.pin(&leaf).await.expect("pin owner leaf");
+        factory
+            .delete_session(&owner.session_id)
+            .await
+            .expect("delete owner session");
+        factory
+            .unpin(&leaf)
+            .await
+            .expect("unpin after owner delete");
+
+        assert_eq!(
+            resident_tombstoned_node_ids(&factory),
+            vec![leaf.clone()],
+            "the unpin must tombstone the deleted owner's leaf"
+        );
+
+        let sweeper = session_store_request(
+            "orphan-sweeper",
+            "tombstone-model",
+            crate::SessionRelation::Root,
+        );
+        drop(
+            factory
+                .create_store(&sweeper)
+                .await
+                .expect("create sweeper store"),
+        );
+        factory
+            .delete_session(&sweeper.session_id)
+            .await
+            .expect("delete sweeper session");
+
+        assert!(
+            resident_tombstoned_node_ids(&factory).is_empty(),
+            "a delete must reclaim tombstones owned by already-deleted sessions"
+        );
+        assert!(
+            !resident_graph_node_ids(&factory).contains(&leaf),
+            "the orphaned tombstone row must be physically gone, not just hidden"
+        );
+    }
+
+    /// Fork ancestry owned by a session deleted *before* its child is the second
+    /// orphaning flow: the ancestry is only tombstoned when the child is deleted,
+    /// by which time its owner is already unbindable. The same delete must reclaim
+    /// it.
+    #[tokio::test]
+    async fn delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete() {
+        let factory = InMemorySessionStoreFactory::new();
+        let parent = session_store_request(
+            "orphan-fork-parent",
+            "tombstone-model",
+            crate::SessionRelation::Root,
+        );
+        let parent_leaf = {
+            let store = factory
+                .create_store(&parent)
+                .await
+                .expect("create parent store");
+            let mut state = crate::RuntimeSessionState {
+                session_id: parent.session_id.clone(),
+                ..crate::RuntimeSessionState::new(parent.policy.clone())
+            };
+            state.ensure_agent_frame_initialized();
+            let leaf = state
+                .session_graph
+                .leaf_node_id
+                .clone()
+                .expect("parent leaf");
+            store
+                .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+                .await
+                .expect("commit parent");
+            leaf
+        };
+
+        let child_session_id = "orphan-fork-child".to_string();
+        factory
+            .fork_at(&crate::ForkSessionRequest {
+                session_id: child_session_id.clone(),
+                node_id: parent_leaf.clone(),
+                relation: crate::SessionRelation::Root,
+                policy: parent.policy.clone(),
+            })
+            .await
+            .expect("fork at the parent's live tip");
+        let child_leaf = {
+            let child = factory
+                .open_existing_store(&crate::SessionStoreCreateRequest {
+                    session_id: child_session_id.clone(),
+                    relation: crate::SessionRelation::Root,
+                    policy: parent.policy.clone(),
+                })
+                .await
+                .expect("open forked child")
+                .expect("forked child exists");
+            let mut child_state = crate::store::load_persisted_session_state(child.as_ref())
+                .await
+                .expect("load child state")
+                .expect("child state exists");
+            append_conformance_event_node(&mut child_state, "orphan-fork-child-node", "child node");
+            commit_conformance_state(&child, &mut child_state)
+                .await
+                .expect("advance forked child");
+            child_state
+                .session_graph
+                .leaf_node_id
+                .clone()
+                .expect("child leaf")
+        };
+
+        factory
+            .delete_session(&parent.session_id)
+            .await
+            .expect("delete parent session");
+        assert!(
+            resident_graph_node_ids(&factory).contains(&parent_leaf),
+            "the parent's node survives its own delete while the fork child hangs off it"
+        );
+
+        factory
+            .delete_session(&child_session_id)
+            .await
+            .expect("delete forked child session");
+
+        assert!(
+            resident_tombstoned_node_ids(&factory).is_empty(),
+            "the child's delete must reclaim ancestry owned by the already-deleted parent"
+        );
+        let resident = resident_graph_node_ids(&factory);
+        assert!(
+            !resident.contains(&parent_leaf) && !resident.contains(&child_leaf),
+            "both the child's node and the orphaned parent ancestry must be gone, got {resident:?}"
+        );
     }
 }

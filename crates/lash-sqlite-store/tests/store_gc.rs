@@ -3,7 +3,7 @@ use lash_core::{
     HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part,
     PersistedTurnState, PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState,
     SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState,
+    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
     facade_support::shared_parts,
 };
 use lash_sqlite_store::{
@@ -772,6 +772,273 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
+    let root = unique_temp_dir("unbound-vacuum");
+    let factory = SqliteSessionStoreFactory::new(&root);
+
+    // 1. Live session with cancelled pending input
+    let live_req = SessionStoreCreateRequest {
+        session_id: "unbound-vacuum-live".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let live_store = factory
+        .create_store(&live_req)
+        .await
+        .expect("create live store");
+    let cancelled = live_store
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                "unbound-vacuum-live",
+                lash_core::TurnInputIngress::NextTurn,
+                lash_core::TurnInput::text("input"),
+            )
+            .with_source_key("test-key"),
+        )
+        .await
+        .expect("enqueue");
+    live_store
+        .cancel_pending_turn_input("unbound-vacuum-live", &cancelled.input_id)
+        .await
+        .expect("cancel");
+
+    // 2. Deleted session with unpinned tombstoned node
+    let del_req = SessionStoreCreateRequest {
+        session_id: "unbound-vacuum-del".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let del_store = factory
+        .create_store(&del_req)
+        .await
+        .expect("create del store");
+    let mut state = factory_state(&del_store, "unbound-vacuum-del", 0).await;
+    state.ensure_agent_frame_initialized();
+    let leaf = state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("leaf node id");
+    del_store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit");
+    factory.pin(&leaf).await.expect("pin");
+    factory
+        .delete_session(&del_req.session_id)
+        .await
+        .expect("delete");
+    factory.unpin(&leaf).await.expect("unpin");
+
+    // Open an unbound store handle over the catalog path
+    let unbound = Store::open(&factory.catalog_path())
+        .await
+        .expect("open unbound store");
+    let err = unbound
+        .vacuum()
+        .await
+        .expect_err("unbound vacuum must return typed error");
+    assert!(
+        matches!(err, StoreError::SessionNotBound),
+        "expected SessionNotBound, got {err:?}"
+    );
+
+    // Verify catalog rows were NOT deleted by unbound vacuum
+    let live_report = live_store.vacuum().await.expect("vacuum live store");
+    assert_eq!(live_report.removed_node_count, 0);
+    assert_eq!(live_report.removed_pending_turn_input_tombstone_count, 1);
+
+    let del_report = del_store.vacuum().await.expect("vacuum del store");
+    assert_eq!(del_report.removed_node_count, 1);
+    assert_eq!(del_report.removed_pending_turn_input_tombstone_count, 0);
+}
+
+/// Node ids physically resident in the catalog, tombstoned or not: reads hide
+/// tombstones, so only raw SQL can tell a reclaimed row from a hidden one.
+fn resident_graph_node_ids(factory: &SqliteSessionStoreFactory) -> Vec<String> {
+    raw_node_ids(factory, "SELECT node_id FROM graph_nodes ORDER BY node_id")
+}
+
+fn resident_tombstoned_node_ids(factory: &SqliteSessionStoreFactory) -> Vec<String> {
+    raw_node_ids(
+        factory,
+        "SELECT node_id FROM graph_nodes WHERE tombstoned = 1 ORDER BY node_id",
+    )
+}
+
+fn raw_node_ids(factory: &SqliteSessionStoreFactory, sql: &str) -> Vec<String> {
+    let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
+    let mut statement = conn.prepare(sql).expect("prepare node id probe");
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query node ids")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("read node ids")
+}
+
+async fn commit_single_root_node(
+    factory: &SqliteSessionStoreFactory,
+    session_id: &str,
+) -> (std::sync::Arc<dyn lash_core::RuntimePersistence>, String) {
+    let store = factory
+        .create_store(&SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: lash_core::SessionRelation::Root,
+            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create store");
+    let mut state = factory_state(&store, session_id, 0).await;
+    state.ensure_agent_frame_initialized();
+    let leaf = state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("root leaf node id");
+    store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit root node");
+    (store, leaf)
+}
+
+/// Unpinning a pinned leaf *after* its owning session was deleted tombstones a
+/// row whose owner can never be bound again, so no session-scoped vacuum can
+/// reach it. The next session delete must drain that residue.
+///
+/// The owner's store handle is dropped before its delete on purpose: a live
+/// handle can still vacuum its own session and would mask the leak.
+#[tokio::test]
+async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete() {
+    let root = unique_temp_dir("orphan-unpin-after-delete");
+    let factory = SqliteSessionStoreFactory::new(&root);
+
+    let leaf = {
+        let (store, leaf) = commit_single_root_node(&factory, "orphan-owner").await;
+        drop(store);
+        leaf
+    };
+    factory.pin(&leaf).await.expect("pin owner leaf");
+    factory
+        .delete_session("orphan-owner")
+        .await
+        .expect("delete owner session");
+    factory
+        .unpin(&leaf)
+        .await
+        .expect("unpin after owner delete");
+
+    assert_eq!(
+        resident_tombstoned_node_ids(&factory),
+        vec![leaf.clone()],
+        "the unpin must tombstone the deleted owner's leaf"
+    );
+
+    drop(commit_single_root_node(&factory, "orphan-sweeper").await);
+    factory
+        .delete_session("orphan-sweeper")
+        .await
+        .expect("delete sweeper session");
+
+    assert!(
+        resident_tombstoned_node_ids(&factory).is_empty(),
+        "a delete must reclaim tombstones owned by already-deleted sessions"
+    );
+    assert!(
+        !resident_graph_node_ids(&factory).contains(&leaf),
+        "the orphaned tombstone row must be physically gone, not just hidden"
+    );
+}
+
+/// Fork ancestry owned by a session deleted *before* its child is the second
+/// orphaning flow: the ancestry is only tombstoned when the child is deleted, by
+/// which time its owner is already unbindable. The same delete must reclaim it.
+#[tokio::test]
+async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete() {
+    let root = unique_temp_dir("orphan-fork-ancestry");
+    let factory = SqliteSessionStoreFactory::new(&root);
+
+    let parent_leaf = {
+        let (store, leaf) = commit_single_root_node(&factory, "orphan-fork-parent").await;
+        drop(store);
+        leaf
+    };
+    let policy = SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    factory
+        .fork_at(&lash_core::ForkSessionRequest {
+            session_id: "orphan-fork-child".to_string(),
+            node_id: parent_leaf.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: policy.clone(),
+        })
+        .await
+        .expect("fork at the parent's live tip");
+    {
+        let child = factory
+            .open_existing_store(&SessionStoreCreateRequest {
+                session_id: "orphan-fork-child".to_string(),
+                relation: lash_core::SessionRelation::Root,
+                policy,
+            })
+            .await
+            .expect("open forked child")
+            .expect("forked child exists");
+        let mut child_state = lash_core::store::load_persisted_session_state(child.as_ref())
+            .await
+            .expect("load child state")
+            .expect("child state exists");
+        let parent_node_id = child_state.session_graph.leaf_node_id.clone();
+        child_state
+            .session_graph
+            .push_node_record(lash_core::SessionNodeRecord {
+                node_id: "orphan-fork-child-node".to_string(),
+                parent_node_id,
+                timestamp: "2026-08-17T00:00:00Z".to_string(),
+                payload: lash_core::SessionNodePayload::Event {
+                    event: lash_core::SessionHistoryRecord::Protocol(
+                        lash_core::ProtocolEvent::typed(
+                            "orphan-fork-child-event",
+                            serde_json::json!({ "content": "child node" }),
+                        )
+                        .expect("typed child event"),
+                    ),
+                },
+            });
+        child_state
+            .session_graph
+            .set_leaf_node_id(Some("orphan-fork-child-node".to_string()));
+        child
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&child_state, &[]))
+            .await
+            .expect("advance forked child");
+    }
+
+    factory
+        .delete_session("orphan-fork-parent")
+        .await
+        .expect("delete parent session");
+    assert!(
+        resident_graph_node_ids(&factory).contains(&parent_leaf),
+        "the parent's node survives its own delete while the fork child hangs off it"
+    );
+
+    factory
+        .delete_session("orphan-fork-child")
+        .await
+        .expect("delete forked child session");
+
+    assert!(
+        resident_tombstoned_node_ids(&factory).is_empty(),
+        "the child's delete must reclaim ancestry owned by the already-deleted parent"
+    );
+    let resident = resident_graph_node_ids(&factory);
+    assert!(
+        resident.is_empty(),
+        "both the child's nodes and the orphaned parent ancestry must be gone, got {resident:?}"
+    );
 }
 
 fn unique_temp_dir(name: &str) -> std::path::PathBuf {

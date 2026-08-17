@@ -338,12 +338,10 @@ impl Store {
     }
 
     fn selected_session_id(&self) -> Result<String, StoreError> {
-        self.session_id.get().cloned().ok_or_else(|| {
-            StoreError::Backend(
-                "SQLite durable-core store is not bound to a session; use SqliteSessionStoreFactory"
-                    .to_string(),
-            )
-        })
+        self.session_id
+            .get()
+            .cloned()
+            .ok_or(StoreError::SessionNotBound)
     }
 
     async fn resolve_session_id_for_read(&self) -> Result<Option<String>, StoreError> {
@@ -766,7 +764,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        delete_session_from_catalog(&self.root, session_id, true).await?;
+        delete_session_from_catalog(&self.root, session_id).await?;
         if let Some(process_registry_path) = self.process_registry_path.as_deref() {
             delete_wake_allocation_floors_from_process_registry(process_registry_path, session_id)
                 .await?;
@@ -912,11 +910,7 @@ fn warn_process_registry_not_wired() {
     );
 }
 
-async fn delete_session_from_catalog(
-    root: &Path,
-    session_id: &str,
-    tombstone_host_facing_id: bool,
-) -> Result<(), String> {
+async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<(), String> {
     let path = root.join("durable-core.db");
     if !path.exists() {
         return Ok(());
@@ -940,10 +934,13 @@ async fn delete_session_from_catalog(
                 .optional()
                 .map_err(sqlite_error)?
                 .is_some();
-            if tombstone_host_facing_id && existed {
-                // Permanent identity evidence for host-facing ids only.
-                // Runtime-internal process session ids are lash-minted and
-                // reclaimed without a tombstone.
+            if existed {
+                // Permanent identity evidence for every deleted session id,
+                // host-facing and runtime-internal alike. The deleted set is
+                // also the reclaim frontier for the delete arm below: a
+                // process-owned session id that never entered it would leave
+                // its tombstoned rows unreachable forever, because the id is
+                // just as unbindable as a host-facing one once deleted.
                 tx.execute(
                     "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
                     params![session_id],
@@ -996,8 +993,21 @@ async fn delete_session_from_catalog(
             for node_id in unreachable_candidates {
                 persistence::retire_unreachable_ancestry_conn(tx, &node_id)?;
             }
-            tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])
-                .map_err(sqlite_error)?;
+            // Delete-time reclaim covers this session's tombstoned rows plus any
+            // tombstoned row owned by an already-deleted session. A node can be
+            // tombstoned *after* its owner is gone (unpin of a pinned leaf whose
+            // session was deleted, or ancestry retired at a fork child's delete),
+            // and no session-scoped vacuum could ever reach it: the owning id is
+            // permanently unbindable. Live sessions' rows stay resident for their
+            // own vacuum, so this is not a catalog-wide sweep.
+            tx.execute(
+                "DELETE FROM graph_nodes
+                 WHERE tombstoned = 1
+                   AND (session_id = ?1
+                        OR session_id IN (SELECT session_id FROM deleted_sessions))",
+                params![session_id],
+            )
+            .map_err(sqlite_error)?;
             tx.execute(
                 "DELETE FROM fork_lineage WHERE session_id = ?1",
                 params![session_id],

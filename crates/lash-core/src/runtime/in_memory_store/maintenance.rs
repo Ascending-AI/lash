@@ -27,12 +27,32 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
     async fn vacuum(&self) -> Result<crate::store::VacuumReport, crate::store::StoreError> {
         // `deleted_session_ids` is deliberately exempt: it is permanent
         // identity evidence that prevents reuse after all other state is gone.
+        // The binding is the only admissible scope source, matching the SQLite
+        // backend: metadata a handle merely happened to read is not a binding,
+        // and inferring scope from it would let an unbound handle vacuum.
+        let session_id = self
+            .bound_session_id
+            .lock_recover()
+            .clone()
+            .ok_or(crate::store::StoreError::SessionNotBound)?;
+
         let _transaction = self.write_transaction.lock_recover();
-        let ids = {
+        let session_tombstones = {
             let mut tombstoned = self.tombstoned_node_ids.lock_recover();
-            std::mem::take(&mut *tombstoned)
+            let owners = self.global_node_owners.lock_recover();
+            let session_tombstones: std::collections::HashSet<String> = tombstoned
+                .iter()
+                .filter(|node_id| {
+                    owners
+                        .get(*node_id)
+                        .is_some_and(|owner| owner == &session_id)
+                })
+                .cloned()
+                .collect();
+            tombstoned.retain(|node_id| !session_tombstones.contains(node_id));
+            session_tombstones
         };
-        let removed_node_count = if ids.is_empty() {
+        let removed_node_count = if session_tombstones.is_empty() {
             0
         } else {
             let mut graph = self.global_session_graph.lock_recover();
@@ -40,23 +60,24 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             let nodes = graph
                 .nodes
                 .iter()
-                .filter(|node| !ids.contains(&node.node_id))
+                .filter(|node| !session_tombstones.contains(&node.node_id))
                 .cloned()
                 .collect::<Vec<_>>();
             let removed_node_count = before.saturating_sub(nodes.len());
             *graph = crate::SessionGraph::from_nodes(nodes, None)?;
             self.global_node_owners
                 .lock_recover()
-                .retain(|node_id, _| !ids.contains(node_id));
+                .retain(|node_id, _| !session_tombstones.contains(node_id));
             removed_node_count
         };
         let mut pending = self.pending_turn_inputs.lock_recover();
         let before = pending.len();
         pending.retain(|entry| {
-            !matches!(
-                entry.input.state,
-                crate::TurnInputState::Cancelled | crate::TurnInputState::Completed
-            )
+            !(entry.input.session_id == session_id
+                && matches!(
+                    entry.input.state,
+                    crate::TurnInputState::Cancelled | crate::TurnInputState::Completed
+                ))
         });
         Ok(crate::store::VacuumReport {
             removed_node_count,

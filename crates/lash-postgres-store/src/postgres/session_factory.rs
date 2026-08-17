@@ -762,10 +762,23 @@ pub(crate) async fn delete_session_tx(
     for node_id in unreachable_candidates {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
     }
-    sqlx::query("DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE")
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    // Delete-time reclaim covers this session's tombstoned rows plus any
+    // tombstoned row owned by an already-deleted session. A node can be
+    // tombstoned *after* its owner is gone (unpin of a pinned leaf whose session
+    // was deleted, or ancestry retired at a fork child's delete), and no
+    // session-scoped vacuum could ever reach it: the owning id is permanently
+    // unbindable. Live sessions' rows stay resident for their own vacuum, so
+    // this is not a catalog-wide sweep.
+    sqlx::query(
+        "DELETE FROM lash_graph_nodes
+         WHERE tombstoned = TRUE
+           AND (session_id = $1
+                OR session_id IN (SELECT session_id FROM lash_deleted_sessions))",
+    )
+    .bind(session_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     for sql in [
         "DELETE FROM lash_attachment_manifest WHERE session_id = $1",
         "DELETE FROM lash_queued_work_items WHERE batch_id IN (SELECT batch_id FROM lash_queued_work_batches WHERE session_id = $1)",
@@ -801,8 +814,14 @@ pub(crate) async fn delete_session_tx(
 }
 
 /// Deletes process-owned runtime sessions as one batch inside the process
-/// prune transaction. Process runtime session ids are internal, so they never
-/// receive host-facing deletion tombstones.
+/// prune transaction.
+///
+/// The batch obeys the same two laws as a single-session delete: every
+/// materialized id it removes joins the permanent deleted set, and the reclaim
+/// arm drops tombstoned rows owned by any already-deleted session, not only by
+/// the batch. Process runtime session ids are lash-minted, but they are just as
+/// unbindable as host-facing ids once deleted, so a row left tombstoned under
+/// one of them could never be reached by a session-scoped vacuum again.
 pub(crate) async fn delete_process_sessions_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[String],
@@ -821,6 +840,27 @@ pub(crate) async fn delete_process_sessions_tx(
              FROM unnest($1::TEXT[]) AS target(session_id)
              ORDER BY session_id
          ) AS ordered",
+    )
+    .bind(session_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+
+    // Permanent identity evidence for every materialized id in the batch,
+    // recorded before the rows go away so the reclaim arm below can see it.
+    sqlx::query(
+        "INSERT INTO lash_deleted_sessions (session_id)
+         SELECT target.session_id
+         FROM unnest($1::TEXT[]) AS target(session_id)
+         WHERE EXISTS (
+                   SELECT 1 FROM lash_session_meta AS meta
+                   WHERE meta.session_id = target.session_id
+               )
+            OR EXISTS (
+                   SELECT 1 FROM lash_sessions AS session
+                   WHERE session.session_id = target.session_id
+               )
+         ON CONFLICT (session_id) DO NOTHING",
     )
     .bind(session_ids)
     .execute(&mut **tx)
@@ -893,8 +933,18 @@ pub(crate) async fn delete_process_sessions_tx(
         .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
         .collect::<Vec<_>>();
     sqlx::query(
+        // Delete-time reclaim covers the batch's tombstoned rows plus any
+        // tombstoned row owned by an already-deleted session. The ancestry
+        // retire above tombstones a node regardless of who owns it, so a batch
+        // can strand a row belonging to a session outside it; that owner is
+        // unbindable, so no session-scoped vacuum could ever reach the row.
+        // Live sessions' rows stay resident for their own vacuum, so this is
+        // not a catalog-wide sweep.
         "WITH deleted_graph_nodes AS (
-             DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE
+             DELETE FROM lash_graph_nodes
+             WHERE tombstoned = TRUE
+               AND (session_id = ANY($1)
+                    OR session_id IN (SELECT session_id FROM lash_deleted_sessions))
              RETURNING node_id
          ),
          deleted_attachment_manifest AS (

@@ -1520,7 +1520,21 @@ pub trait QueuedWorkStore: Send + Sync {
 #[async_trait::async_trait]
 pub trait StoreMaintenance: Send + Sync {
     /// Physically delete tombstoned graph-node rows and prune terminal
-    /// pending-turn-input evidence rows. See [`VacuumReport`].
+    /// pending-turn-input evidence rows for the bound session. See [`VacuumReport`].
+    ///
+    /// Vacuum is always scoped to the session bound to this store handle; it must
+    /// never prune rows catalog-wide. So vacuum is not the only reclaim step: a
+    /// node tombstoned *after* its owning session was deleted (unpinning a deleted
+    /// leaf, fork ancestry retired at a child's delete, or a process prune
+    /// retiring ancestry it does not own) is unreachable by any session-scoped
+    /// vacuum. Both delete paths — session delete and process prune — therefore
+    /// reclaim tombstoned rows owned by already-deleted sessions too, still never
+    /// catalog-wide: live sessions' rows wait for their own vacuum.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::SessionNotBound`] when invoked on an unbound store
+    /// handle that is not bound to a session.
     async fn vacuum(&self) -> Result<VacuumReport, StoreError>;
 
     /// Delete blobs no longer reachable from any retained root.
