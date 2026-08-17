@@ -48,6 +48,7 @@ fn main() -> AnyhowResult<()> {
 
 async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
+    tracing_subscriber::fmt::init();
     let context_window_tokens = context_window_tokens_from_environment()?;
     WORKBENCH_CONTEXT_WINDOW_TOKENS
         .set(context_window_tokens)
