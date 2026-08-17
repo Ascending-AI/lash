@@ -191,8 +191,15 @@ pub(crate) fn single_llm_extraction_payload(machine: &TurnMachine) -> serde_json
         })
         .collect();
     assert_eq!(payloads.len(), 1, "expected one llm_extraction diagnostic");
-    let payload = payloads.into_iter().next().expect("payload");
+    let mut payload = payloads.into_iter().next().expect("payload");
     assert_no_legacy_llm_extraction_keys(&payload);
+    // The reply fingerprint is a digest of the model's own reply. Asserted by
+    // shape above and dropped here: pinning a hash in every scenario fixture
+    // would cost the readability of the reply text without adding a check.
+    payload
+        .as_object_mut()
+        .expect("diagnostic payload object")
+        .remove("reply_fingerprint");
     payload
 }
 
@@ -200,8 +207,20 @@ pub(crate) fn assert_no_legacy_llm_extraction_keys(payload: &serde_json::Value) 
     let object = payload.as_object().expect("diagnostic payload object");
     assert_eq!(
         object.len(),
-        4,
-        "llm_extraction payload should only contain turn_id, decision, termination, and counts"
+        5,
+        "llm_extraction payload should only contain turn_id, reply_fingerprint, decision, termination, and counts"
+    );
+    // The reply fingerprint is host-visible evidence of a repeated reply, with
+    // no runtime behavior attached, so every attempt must carry one for a host
+    // to be able to compare attempts at all.
+    let fingerprint = object
+        .get("reply_fingerprint")
+        .and_then(serde_json::Value::as_str)
+        .expect("every extraction diagnostic fingerprints its reply");
+    assert_eq!(fingerprint.len(), 16, "fingerprint: {fingerprint}");
+    assert!(
+        fingerprint.chars().all(|c| c.is_ascii_hexdigit()),
+        "fingerprint: {fingerprint}"
     );
     // The turn id is what scopes the no-progress count across a session whose
     // active path carries every earlier turn's diagnostics.

@@ -3,6 +3,7 @@ mod cell;
 mod driver;
 pub(crate) mod finish;
 pub(crate) mod prompt;
+mod stall;
 mod state;
 #[cfg(test)]
 mod tests;

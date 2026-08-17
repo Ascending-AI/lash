@@ -344,6 +344,12 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
         dialect.invalid_cell_retry_copy("no closing tag"),
     ));
     fragments.push(("output limit", dialect.output_limit_cell_copy(Some(2_048))));
+    fragments.push((
+        "malformed cell fence retry",
+        dialect.malformed_cell_fence_retry_copy(),
+    ));
+    // `foreign_cell_retry_copy` is deliberately absent: its whole job is to name
+    // the *other* dialect's tag, which is the marker this walker hunts.
 
     // Copy the *driver* assembles around the dialect's own fragments. These
     // reach the model on ordinary turns — a truncated history entry and an

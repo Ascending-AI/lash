@@ -15,7 +15,7 @@ use lash_core::plugin::{
 };
 
 use crate::cell_scan::{
-    complete_end_tag_span, complete_start_tag_span, possible_start_tag_suffix_len,
+    StreamedCellStart, complete_cell_start, complete_end_tag_span, possible_start_tag_suffix_len,
 };
 #[cfg(test)]
 use crate::dialect::LashlangDialect;
@@ -203,16 +203,35 @@ impl CellDetector {
 
         self.pending.push_str(chunk);
 
-        if let Some(span) = complete_start_tag_span(&self.pending, self.dialect.cell_tags()) {
-            self.inside_cell = true;
-            let prose_before = self.pending[..span.start_tag_start].to_string();
-            self.visible_prose.push_str(&prose_before);
-            let body_suffix = self.pending[span.body_start..span.body_end].to_string();
-            self.pending.clear();
+        // `allow_eof` stays false for the same reason it does inside a body: a
+        // chunk boundary is not the end of the response, and an inline cell read
+        // from a half-arrived line would make the provider's framing decide what
+        // executed. [`Self::finish_response`] runs the EOF leg.
+        match complete_cell_start(&self.pending, false, self.dialect.cell_tags()) {
+            Some(StreamedCellStart::Block(span)) => {
+                self.inside_cell = true;
+                let prose_before = self.pending[..span.start_tag_start].to_string();
+                self.visible_prose.push_str(&prose_before);
+                let body_suffix = self.pending[span.body_start..span.body_end].to_string();
+                self.pending.clear();
 
-            let events = vec![self.start_event()];
+                let events = vec![self.start_event()];
 
-            return self.capture_cell_body_chunk(&body_suffix, prose_before, events);
+                return self.capture_cell_body_chunk(&body_suffix, prose_before, events);
+            }
+            // An inline cell arrives already closed: there is no later body to
+            // wait for, so the mask opens and closes it in one step and aborts
+            // the provider stream on the same boundary a block cell does.
+            Some(StreamedCellStart::Inline(span)) => {
+                let prose_before = self.take_inline_cell(span);
+                return AssistantStreamTransform {
+                    chunk: prose_before,
+                    reasoning_deltas: Vec::new(),
+                    events: vec![self.start_event(), self.end_event()],
+                    abort_stream: true,
+                };
+            }
+            None => {}
         }
 
         let safe_len = self.pending.len()
@@ -265,8 +284,42 @@ impl CellDetector {
         }
     }
 
+    /// Consume the inline cell `span` addresses out of [`Self::pending`],
+    /// returning the prose that preceded it on the way.
+    fn take_inline_cell(&mut self, span: crate::cell_scan::CellSpan) -> String {
+        let prose_before = self.pending[..span.start_tag_start].to_string();
+        self.visible_prose.push_str(&prose_before);
+        self.cell_body = self.pending[span.body_start..span.body_end].to_string();
+        self.pending.clear();
+        self.inside_cell = true;
+        self.cell_closed = true;
+        prose_before
+    }
+
     fn finish_response(&mut self) -> Vec<PluginRuntimeEvent> {
-        if self.cell_closed || !self.inside_cell {
+        if self.cell_closed {
+            return Vec::new();
+        }
+        if !self.inside_cell {
+            // No cell has opened and no more text is coming, so a held line that
+            // could still have closed as an inline cell now either is one or is
+            // prose. This is the inline shape's EOF leg, the counterpart of the
+            // one `complete_end_tag_span` has always had for the block shape.
+            let tags = self.dialect.cell_tags();
+            if let Some(StreamedCellStart::Inline(span)) =
+                complete_cell_start(&self.pending, true, tags)
+            {
+                self.take_inline_cell(span);
+                return vec![self.start_event(), self.end_event()];
+            }
+            // Prose after all. It was withheld from the live deltas while the
+            // line might still have become a cell, and this hook has no delta to
+            // emit it on; recording it as visible prose is what keeps the
+            // detector's own account of the response whole. The transcript is
+            // unaffected either way — with no cell, the response passes through
+            // untransformed, tail included.
+            let held = std::mem::take(&mut self.pending);
+            self.visible_prose.push_str(&held);
             return Vec::new();
         }
         // Genuine response EOF, so a closing tag at the buffer end counts.
@@ -420,6 +473,130 @@ mod tests {
         assert_eq!(t.chunk, "");
         assert!(!t.abort_stream);
         assert_eq!(d.cell_body, "finish \"hi\"\n");
+    }
+
+    /// A one-line cell is masked, not shown: its source never reaches the
+    /// visible stream, and the splice hands history the canonical block form.
+    ///
+    /// Terminated here; the same reply without its newline is the EOF leg below.
+    #[test]
+    fn one_line_cell_is_masked_and_normalized() {
+        let mut d = CellDetector::new();
+        let t = d.process_chunk("Checking.\n<lashlang>finish 1</lashlang>\n");
+        assert_eq!(t.chunk, "Checking.\n");
+        assert!(t.abort_stream);
+        assert!(d.cell_closed);
+        assert_eq!(d.cell_body, "finish 1");
+        assert_eq!(
+            event_names(&t.events),
+            vec!["rlm_lashlang_cell_start", "rlm_lashlang_cell_end"]
+        );
+        assert_eq!(
+            d.spliced_response_text(),
+            "Checking.\n<lashlang>\nfinish 1\n</lashlang>"
+        );
+    }
+
+    /// A one-line cell that is the response's last line closes at EOF, where the
+    /// line is known to be whole.
+    #[test]
+    fn one_line_cell_at_response_end_closes_on_the_eof_leg() {
+        let mut d = CellDetector::new();
+        let t = d.process_chunk("Checking.\n<lashlang>finish 1</lashlang>");
+        assert_eq!(t.chunk, "Checking.\n");
+        assert!(!t.abort_stream, "an unfinished line decides nothing yet");
+        assert!(!d.cell_closed);
+
+        let events = d.finish_response();
+        assert!(d.cell_closed);
+        assert_eq!(d.cell_body, "finish 1");
+        assert_eq!(
+            event_names(&events),
+            vec!["rlm_lashlang_cell_start", "rlm_lashlang_cell_end"]
+        );
+        assert_eq!(
+            d.spliced_response_text(),
+            "Checking.\n<lashlang>\nfinish 1\n</lashlang>"
+        );
+    }
+
+    /// The source of a one-line cell must not be flushed as prose while the
+    /// line is still arriving.
+    #[test]
+    fn one_line_cell_split_mid_source_holds_the_line() {
+        let mut d = CellDetector::new();
+        assert_eq!(d.process_chunk("<lashlang>fin").chunk, "");
+        let t = d.process_chunk("ish 1</lashlang>\n");
+        assert_eq!(t.chunk, "");
+        assert!(t.abort_stream);
+        assert_eq!(d.cell_body, "finish 1");
+    }
+
+    /// Held prose reaches the detector's account of the response at EOF instead
+    /// of vanishing with the buffer, in both the tag-prefix and opened-line
+    /// shapes.
+    #[test]
+    fn an_unfinished_line_that_is_prose_is_released_at_response_end() {
+        for raw in [
+            "<lashlang> is the opening tag.",
+            "The tag is <lash",
+            "<lashlang>print 1</lashlang> ok",
+        ] {
+            let mut d = CellDetector::new();
+            d.process_chunk(raw);
+            let events = d.finish_response();
+            assert!(events.is_empty(), "{raw:?} is not a cell");
+            assert!(!d.cell_closed, "{raw:?} is not a cell");
+            assert!(d.pending.is_empty(), "{raw:?} left text held");
+            assert_eq!(d.visible_prose, raw, "{raw:?} lost its tail");
+        }
+    }
+
+    /// What executed may not depend on where the provider split its chunks —
+    /// including for a line whose closing tag is *not* the end of it, the shape
+    /// that reads as a finished cell in every prefix.
+    #[test]
+    fn one_line_cell_is_independent_of_where_the_stream_splits() {
+        fn accepted(chunks: &[&str]) -> Option<String> {
+            let mut detector = CellDetector::new();
+            for chunk in chunks {
+                if detector.process_chunk(chunk).abort_stream {
+                    break;
+                }
+            }
+            detector.finish_response();
+            detector
+                .cell_closed
+                .then(|| detector.spliced_response_text())
+        }
+
+        for (raw, expected) in [
+            (
+                "Plan.\n<lashlang>finish 1</lashlang>",
+                Some("Plan.\n<lashlang>\nfinish 1\n</lashlang>".to_string()),
+            ),
+            (
+                "Plan.\n<lashlang>finish 1</lashlang>\ntail",
+                Some("Plan.\n<lashlang>\nfinish 1\n</lashlang>".to_string()),
+            ),
+            // Prose, at every split: a trailer after the closing tag means the
+            // line was never a cell.
+            ("Plan.\n<lashlang>print 1</lashlang> ok\n", None),
+            ("Plan.\n<lashlang>print 1</lashlang> ok", None),
+        ] {
+            assert_eq!(accepted(&[raw]), expected, "whole: {raw:?}");
+            for split in raw
+                .char_indices()
+                .map(|(index, _)| index)
+                .chain([raw.len()])
+            {
+                assert_eq!(
+                    accepted(&[&raw[..split], &raw[split..]]),
+                    expected,
+                    "{raw:?} changed at byte split {split}"
+                );
+            }
+        }
     }
 
     #[test]

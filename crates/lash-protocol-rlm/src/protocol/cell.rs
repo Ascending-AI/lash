@@ -2,6 +2,7 @@
 //! lives in [`crate::cell_scan`]; this module only layers the
 //! extraction-and-projection conveniences the driver needs.
 
+pub(crate) use crate::cell_scan::malformed_cell_fence;
 use crate::cell_scan::{complete_start_tag_span, first_cell_span};
 use crate::dialect::CellTags;
 
@@ -147,17 +148,21 @@ mod tests {
 
     /// A whitespace-dirtied open tag is not a cell, in any dialect.
     ///
-    /// `<typescript >` is not recognized, so a reply carrying one falls back to
-    /// the prose path this diagnostic exists to replace. That is deliberate and
-    /// symmetric rather than an oversight: the *active* dialect's grammar
-    /// refuses the same shape, so recognizing it here would name a foreign cell
-    /// in a case where the model's own dialect would have refused an identical
-    /// tag. The residue is named here so the next reader does not have to
-    /// rediscover which half of the behaviour is designed.
+    /// `<typescript >` is not recognized as a *foreign* cell, which is
+    /// deliberate and symmetric rather than an oversight: the active dialect's
+    /// grammar refuses the same shape, so naming a foreign cell here would
+    /// correct the tag in a case where the model's own dialect would have
+    /// refused an identical one. What such a reply no longer falls back to is
+    /// silence — [`malformed_cell_fence`] recognizes the attempted fence in the
+    /// active dialect and the driver answers it by naming the rule.
     #[test]
     fn a_malformed_open_tag_is_not_a_cell_in_either_dialect() {
         let malformed = "<typescript >\nfinish(1);\n</typescript>";
         assert_eq!(foreign_dialect_cell(malformed, LASHLANG_TAGS), None);
+        assert!(
+            malformed_cell_fence(malformed, TYPESCRIPT_TAGS),
+            "a session running the dialect it dirtied must still be told the rule"
+        );
         // And the active dialect's own grammar agrees, which is what makes the
         // asymmetry a non-issue: neither reading executes anything.
         assert!(

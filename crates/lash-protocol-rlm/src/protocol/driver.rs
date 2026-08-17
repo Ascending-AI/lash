@@ -31,12 +31,16 @@ use crate::rlm_support::decode_rlm_termination_options;
 
 use super::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
 use super::cell::{
-    CellExtraction, CellExtractionError, extract_cell, project_visible_assistant_prose_with_tags,
+    CellExtraction, CellExtractionError, extract_cell, malformed_cell_fence,
+    project_visible_assistant_prose_with_tags,
 };
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
     internal_assistant_prose_message, invalid_cell_message, no_progress_stop_message,
     output_limit_retry_message, turn_limit_final_message, validate_finish_value,
+};
+use super::stall::{
+    LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, reply_fingerprint, stalled_attempts,
 };
 use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
 
@@ -99,10 +103,6 @@ impl Default for RlmDriver {
 }
 
 const MAX_EXEC_TOOL_CALL_RECORDS: usize = 128;
-/// Diagnostic phase emitted exactly once per provider attempt.
-const LLM_EXTRACTION_PHASE: &str = "llm_extraction";
-/// Diagnostic phase that records a turn stopped by its no-progress budget.
-const NO_PROGRESS_BUDGET_PHASE: &str = "no_progress_budget";
 const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
 const EXEC_TOOL_CALL_OVERFLOW_NAME: &str = "lash.exec_tool_call_overflow";
 
@@ -150,6 +150,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         let tags = self.dialect.cell_tags();
         let assistant_text = projected.assistant_text;
         let reasoning = projected.reasoning;
+        let fingerprint = reply_fingerprint(&assistant_text);
         let visible_prose = project_visible_assistant_prose_with_tags(&assistant_text, tags);
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: ctx.protocol_iteration(),
@@ -197,6 +198,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
                         ctx.turn_id(),
+                        &fingerprint,
                         decision,
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -246,6 +248,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
                         ctx.turn_id(),
+                        &fingerprint,
                         "retry_foreign_dialect_cell",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -289,6 +292,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
                         ctx.turn_id(),
+                        &fingerprint,
                         "retry_output_limit_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -329,11 +333,70 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
                 return actions;
             }
+            // A reply that opened a line with the active dialect's tag and still
+            // produced no cell put a fence somewhere the grammar refuses. Read
+            // as prose it is silence: the model is asked to finish, answers with
+            // the same reply, and nothing in the loop ever names what was wrong
+            // with it (FIG-1475).
+            //
+            // Only where a cell is *required*. On a `Natural` turn prose is an
+            // answer, and prose about cells — "`<lashlang>` and `</lashlang>`
+            // are the tags you asked about" — opens a line with the tag while
+            // being exactly what the user wanted. Correcting a fence there would
+            // bury the answer under a lecture and spend the turn's attempts on a
+            // reply that had nothing wrong with it.
+            if !matches!(termination, RlmTermination::Natural)
+                && malformed_cell_fence(&assistant_text, tags)
+            {
+                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
+                    LLM_EXTRACTION_PHASE,
+                    llm_extraction_payload(
+                        ctx.turn_id(),
+                        &fingerprint,
+                        "retry_malformed_cell_fence",
+                        &termination,
+                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                    ),
+                )]));
+                let mut retry_events = Vec::new();
+                if !visible_prose.trim().is_empty() || !reasoning.is_empty() {
+                    retry_events.push(conversation_event(internal_assistant_prose_message(
+                        rlm_message_id(
+                            ctx.turn_id(),
+                            ctx.protocol_iteration(),
+                            "assistant_response",
+                        ),
+                        visible_prose,
+                        &reasoning,
+                    )));
+                }
+                retry_events.push(conversation_event(invalid_cell_message(
+                    self.dialect.as_ref(),
+                    rlm_message_id(
+                        ctx.turn_id(),
+                        ctx.protocol_iteration(),
+                        "malformed_cell_fence",
+                    ),
+                    &self.dialect.malformed_cell_fence_retry_copy(),
+                )));
+                if let Err(err) = continue_or_stop_after_nonterminal(
+                    self.dialect.as_ref(),
+                    &ctx,
+                    &mut actions,
+                    Vec::new(),
+                    retry_events,
+                    AttemptProgress::Stalled,
+                ) {
+                    return invalid_turn_options_actions(err);
+                }
+                return actions;
+            }
             if matches!(termination, RlmTermination::Natural) {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
                         ctx.turn_id(),
+                        &fingerprint,
                         "finish_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -369,6 +432,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 LLM_EXTRACTION_PHASE,
                 llm_extraction_payload(
                     ctx.turn_id(),
+                    &fingerprint,
                     "request_finish",
                     &termination,
                     LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -414,6 +478,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             LLM_EXTRACTION_PHASE,
             llm_extraction_payload(
                 ctx.turn_id(),
+                &fingerprint,
                 self.dialect.execution_diagnostic_name(),
                 &termination,
                 LlmExtractionCounts::cell(&assistant_text, &reasoning, &cell),
@@ -764,96 +829,6 @@ enum AttemptProgress {
     Executed,
     /// No cell executed, or the one that did reported an error.
     Stalled,
-}
-
-/// Consecutive provider attempts *in this turn*, ending at its latest record,
-/// that committed no error-free execution.
-///
-/// Derived from committed records rather than carried in driver state: driver
-/// state is rebuilt per protocol iteration, and a counter that survives park,
-/// replay, and continuation has to be readable from what the turn committed.
-/// Every attempt appends exactly one `llm_extraction` diagnostic, so counting
-/// those since the last error-free trajectory entry counts attempts.
-///
-/// The scan runs backwards and stops at the first record that is not this
-/// turn's, because the driver's history is the whole active session path. A
-/// forward scan over that path leaks earlier turns into the count: only an
-/// error-free execution resets, and a prose-only chat turn, a finish request, a
-/// turn-limit stop, and a no-progress stop all end their turn leaving a
-/// trailing diagnostic with no execution behind it. Counting those would spend
-/// a fresh turn's whole budget on its first attempt.
-///
-/// Pending actions are counted too. Whether this attempt's own diagnostic is
-/// already committed depends on which handler is deciding — the extraction
-/// paths decide in the same action batch that appends it, the execution path
-/// decides an effect later — and a count that reads only committed history
-/// would be one short on exactly one of them.
-fn stalled_attempts(ctx: &DriverContextView<'_>, actions: &[DriverAction]) -> usize {
-    let turn_id = ctx.turn_id();
-    let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
-    let mut attempts = 0;
-    for record in ctx.events().iter().rev() {
-        let SessionHistoryRecord::Protocol(event) = record else {
-            continue;
-        };
-        match crate::projection::decode_rlm_protocol_event(event) {
-            Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                if diagnostic.phase == LLM_EXTRACTION_PHASE =>
-            {
-                if diagnostic.payload.get("turn_id").and_then(Value::as_str) != Some(turn_id) {
-                    break;
-                }
-                attempts += 1;
-            }
-            // A closed turn's own stop record. Nothing before it is this turn's.
-            Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                if diagnostic.phase == NO_PROGRESS_BUDGET_PHASE =>
-            {
-                break;
-            }
-            // An earlier turn's execution, or this turn's last progress point.
-            Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                if !entry.id.starts_with(&trajectory_prefix) || entry.error.is_none() =>
-            {
-                break;
-            }
-            _ => {}
-        }
-    }
-    count_pending_attempts(actions, &trajectory_prefix, &mut attempts);
-    attempts
-}
-
-/// Apply the not-yet-committed action batch to `attempts`, forwards, since the
-/// batch is this turn's and is ordered.
-fn count_pending_attempts(actions: &[DriverAction], trajectory_prefix: &str, attempts: &mut usize) {
-    for action in actions {
-        let DriverAction::AppendEvents(records) = action else {
-            continue;
-        };
-        for record in records {
-            let SessionHistoryRecord::Protocol(event) = record else {
-                continue;
-            };
-            match crate::projection::decode_rlm_protocol_event(event) {
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                    if entry.error.is_none() && entry.id.starts_with(trajectory_prefix) =>
-                {
-                    *attempts = 0;
-                }
-                Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                    if diagnostic.phase == LLM_EXTRACTION_PHASE =>
-                {
-                    *attempts += 1;
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-fn trajectory_entry_turn_prefix(turn_id: &str) -> String {
-    format!("lashlang_step_{turn_id}_")
 }
 
 fn continue_or_stop_after_nonterminal(
@@ -1253,8 +1228,14 @@ fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
 /// turn-limit stop) leave a trailing diagnostic with no execution after it.
 /// Diagnostics written before this field existed name no turn and are read as
 /// belonging to an earlier one, which under-counts rather than mis-stops.
+///
+/// `reply_fingerprint` is evidence for hosts only; lash attaches no runtime
+/// behavior to a repeat. It is derived state, not new information, and it lives
+/// in the diagnostic for the same reason the count does: the driver's only
+/// durable view of the turn is what the turn committed.
 fn llm_extraction_payload(
     turn_id: &str,
+    reply_fingerprint: &str,
     decision: &str,
     termination: &RlmTermination,
     counts: LlmExtractionCounts,
@@ -1262,6 +1243,7 @@ fn llm_extraction_payload(
     serde_json::json!({
         "turn_id": turn_id,
         "decision": decision,
+        "reply_fingerprint": reply_fingerprint,
         "termination": termination_diagnostic_name(termination),
         "counts": {
             "full_text_chars": counts.full_text_chars,
