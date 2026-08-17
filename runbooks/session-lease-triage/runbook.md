@@ -81,7 +81,8 @@ the case that used to go unreported.
   `/operations.html`, and stop the server during teardown. The server only exposes static
   in-repo files.
 - Source truth for the surfaces under test:
-  `crates/lash-core/src/runtime/session_execution_lease.rs` (the four events),
+  `crates/lash-core/src/runtime/session_execution_lease.rs` (the lease event surface —
+  the module doc's event table is the authoritative list; do not rely on a fixed count),
   `crates/lash/src/session_lease.rs` (the reading), and
   `examples/agent-service/src/lease_triage.rs` (the operator endpoint).
 - Save command output and rendered text in the run artifact directory. Do not edit docs or
