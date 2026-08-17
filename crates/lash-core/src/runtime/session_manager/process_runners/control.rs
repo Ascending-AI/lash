@@ -419,6 +419,13 @@ impl ProcessCapability {
         let registration = request.into_registration(None).with_process_provenance(
             crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
         );
+        // A recorded intent declares its own execution env, so the engine gate
+        // runs against the recorded spec instead of a stored env ref. It must
+        // run here: once the start command crosses the journal the entry is
+        // committed and replays forever.
+        let registration = self
+            .validate_and_stamp_engine_start(current, session_id, registration, env_spec.as_ref())
+            .await?;
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         self.command_runner(current, &scope)?
@@ -437,20 +444,59 @@ impl ProcessCapability {
         session_id: &str,
         registration: crate::ProcessRegistration,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
+        if !matches!(
+            registration.input.as_ref(),
+            crate::ProcessInput::Engine { .. }
+        ) {
+            return Ok(registration);
+        }
+        let env_spec = match registration.env_ref.as_ref() {
+            Some(env_ref) => Some(
+                crate::load_process_execution_env(
+                    current.host.core.durability.process_env_store.as_ref(),
+                    env_ref,
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        self.validate_and_stamp_engine_start(current, session_id, registration, env_spec.as_ref())
+            .await
+    }
+
+    /// Both parts of the engine-admission gate documented on
+    /// [`crate::ProcessEngineRegistry::require`]: resolve the kind, validate the
+    /// payload against this session's resolved tool catalog, then stamp the
+    /// engine identity. Every start route that holds a live session — the
+    /// request-shaped path (env loaded from the captured env ref) and the
+    /// recorded-intent path (env carried by the recorded request) — runs it
+    /// before the start command crosses the journal.
+    async fn validate_and_stamp_engine_start(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        registration: crate::ProcessRegistration,
+        env_spec: Option<&crate::ProcessExecutionEnvSpec>,
+    ) -> Result<crate::ProcessRegistration, crate::PluginError> {
         let crate::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
             return Ok(registration);
         };
-        let Some(env_ref) = registration.env_ref.as_ref() else {
+        // Deliberate asymmetry between the two routes, and not a new refusal.
+        // A request-shaped start captures the live session env before it reaches
+        // this gate (`capture_execution_env_ref`), so its env is never absent. A
+        // recorded intent must be validated against the env its own record
+        // carries — substituting the live session env would make the admitted
+        // start depend on when it was realized, which a journaled command may
+        // never do. With no recorded env there is nothing to validate against,
+        // and such a start was already refused with this exact error downstream
+        // in `validate_process_registration`; the gate only moves the same
+        // refusal ahead of the journal.
+        let Some(env_spec) = env_spec else {
             return Err(crate::PluginError::Session(format!(
                 "process `{}` requires a captured execution env",
                 registration.id
             )));
         };
-        let env_spec = crate::load_process_execution_env(
-            current.host.core.durability.process_env_store.as_ref(),
-            env_ref,
-        )
-        .await?;
         let engine = current.host.core.process_engines.require(kind)?;
         let tool_catalog = current.plugins.resolved_tool_catalog(session_id)?;
         engine
@@ -461,7 +507,7 @@ impl ProcessCapability {
                     current.host.process_registry.is_some(),
                 ),
                 payload,
-                Some(&env_spec),
+                Some(env_spec),
             )
             .await?;
         let identity = engine.identity(payload);

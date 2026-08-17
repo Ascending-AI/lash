@@ -575,7 +575,29 @@ impl ProcessEngineRegistry {
         self.engines.get(kind).cloned()
     }
 
-    pub(crate) fn require(&self, kind: &str) -> Result<Arc<dyn ProcessEngine>, crate::PluginError> {
+    /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind
+    /// this host never registered.
+    ///
+    /// # Engine-admission gate
+    ///
+    /// Every route that turns a caller-supplied `ProcessInput::Engine` into a
+    /// process start crosses an admission gate with two parts:
+    ///
+    /// 1. **Kind + identity** (this method, then [`ProcessEngine::identity`]).
+    ///    Pure and catalog-free, so every route can run it — including host
+    ///    front doors that hold no live session. Without it a caller can
+    ///    journal a start for an engine kind that does not exist on this host,
+    ///    and the row carries no engine identity.
+    /// 2. **Payload validation** ([`ProcessEngine::validate_start`]). Judges the
+    ///    payload against the starting session's resolved tool catalog, so only
+    ///    routes holding that live session can run it. `ProcessEngine::run` is
+    ///    the authoritative backstop: it re-resolves the engine and re-reads its
+    ///    own inputs, so a route that runs part 1 only defers an invalid payload
+    ///    to a retryable run failure rather than admitting an unrunnable row.
+    ///
+    /// Both parts must complete before the start command crosses the journal:
+    /// an admitted start is a committed entry that replays forever.
+    pub fn require(&self, kind: &str) -> Result<Arc<dyn ProcessEngine>, crate::PluginError> {
         self.get(kind).ok_or_else(|| {
             crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
         })

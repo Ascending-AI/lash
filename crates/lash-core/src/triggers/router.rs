@@ -662,6 +662,14 @@ impl TriggerRouter {
             &originator_scope_id,
             &occurrence.occurrence_id,
         );
+        // Engine-admission ruling (FIG-1488): this route deliberately stays
+        // outside the gate. A delivery does not carry a caller-supplied engine
+        // payload — it replays the subscription's own durable target and the
+        // `target_identity` recorded when the subscription was registered, so
+        // the admission decision was made once at registration. Re-gating per
+        // occurrence would make a delivery fail on catalog drift the
+        // subscription already survived, and every delivery for one reservation
+        // must stay deterministic.
         let registration = crate::ProcessRegistration::new(
             reservation.process_id.clone(),
             target.clone(),

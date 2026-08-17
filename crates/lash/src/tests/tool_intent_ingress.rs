@@ -1388,3 +1388,181 @@ async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind
     );
     Ok(())
 }
+
+const INGRESS_ENGINE_KIND: &str = "ingress-admission-engine";
+
+/// Engine registered on the ingress host, so a submitted start can be checked
+/// against a kind that exists and one that does not.
+struct IngressAdmissionEngine;
+
+#[async_trait::async_trait]
+impl lash_core::ProcessEngine for IngressAdmissionEngine {
+    fn kind(&self) -> &'static str {
+        INGRESS_ENGINE_KIND
+    }
+
+    async fn run(
+        &self,
+        _context: lash_core::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> std::result::Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+        Ok(lash_core::ProcessAwaitOutput::Success {
+            value: serde_json::json!({"ingress_engine": "ran"}),
+            control: None,
+        }
+        .into())
+    }
+
+    fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {
+        lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
+            .with_label(payload.get("program").and_then(serde_json::Value::as_str))
+            .with_definition(Some(payload.clone()))
+    }
+}
+
+struct IngressAdmissionEnginePlugin;
+
+impl lash_core::plugin::SessionPlugin for IngressAdmissionEnginePlugin {
+    fn id(&self) -> &'static str {
+        "ingress-admission-engine-plugin"
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::plugin::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
+struct IngressAdmissionEngineFactory;
+
+impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
+    fn id(&self) -> &'static str {
+        "ingress-admission-engine-factory"
+    }
+
+    fn process_engine_contributions(
+        &self,
+        _ctx: &lash_core::ProcessEngineContributionContext<'_>,
+    ) -> std::result::Result<Vec<Arc<dyn lash_core::ProcessEngine>>, lash_core::PluginError> {
+        Ok(vec![Arc::new(IngressAdmissionEngine)])
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::plugin::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError>
+    {
+        Ok(Arc::new(IngressAdmissionEnginePlugin))
+    }
+}
+
+async fn ingress_engine_core() -> Result<(LashCore, Arc<TestLocalProcessRegistry>)> {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .plugin(Arc::new(IngressAdmissionEngineFactory))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
+        .build(crate::testing::runtime_lease_owner())?;
+    let _session = core.session(SESSION).open().await?;
+    Ok((core, registry))
+}
+
+fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
+    lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
+        session_id: SESSION.to_string(),
+        request: lash_core::ProcessStartRequest::new(
+            "ingress-engine-start",
+            lash_core::ProcessInput::Engine {
+                kind: kind.to_string(),
+                payload,
+            },
+            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::ProcessOriginator::host(),
+        )
+        .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::default(),
+            lash_core::SessionPolicy {
+                model: mock_model_spec(),
+                ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            },
+        )),
+        on_parent_end: Default::default(),
+    }))
+}
+
+/// FIG-1488: the host front door is a start route too. A submitted intent naming
+/// an engine kind this host never registered must be refused before anything is
+/// journaled or registered, and an admitted one must carry the engine identity
+/// stamp — neither happened while ingress built its Start command unchecked.
+#[tokio::test]
+async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
+    let (core, registry) = ingress_engine_core().await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+
+    let unregistered_key = ingress.key("ingress-unregistered-engine", 0);
+    let unregistered_id = unregistered_key.identity().replay_key.clone();
+    let refused = ingress
+        .submit(
+            unregistered_key,
+            engine_start_intent("ingress-engine-never-registered", serde_json::json!({})),
+        )
+        .await;
+    match &refused {
+        crate::tools::ToolIntentIngressOutcome::Admitted {
+            outcome:
+                lash_core::ToolIntentExecutionOutcome::Refused {
+                    kind: lash_core::ToolIntentKind::StartProcess,
+                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed { message, .. },
+                    ..
+                },
+            replayed: false,
+        } => assert!(
+            message.contains("process engine `ingress-engine-never-registered` is not configured"),
+            "the refusal must carry the engine registry's own typed miss: {message}"
+        ),
+        other => panic!("unregistered engine kind must be refused, got {other:?}"),
+    }
+    assert!(
+        registry.get_process(&unregistered_id).await?.is_none(),
+        "a refused start must register nothing"
+    );
+
+    let payload = serde_json::json!({"program": "known"});
+    let admitted_key = ingress.key("ingress-registered-engine", 0);
+    let admitted_id = admitted_key.identity().replay_key.clone();
+    let admitted = ingress
+        .submit(
+            admitted_key,
+            engine_start_intent(INGRESS_ENGINE_KIND, payload.clone()),
+        )
+        .await;
+    assert!(
+        matches!(
+            &admitted,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                    kind: lash_core::ToolIntentKind::StartProcess,
+                    ..
+                },
+                ..
+            }
+        ),
+        "a registered engine kind must still be admitted: {admitted:?}"
+    );
+    let started = registry
+        .get_process(&admitted_id)
+        .await?
+        .expect("admitted start registers its row");
+    assert_eq!(
+        started.identity,
+        lash_core::ProcessEngine::identity(&IngressAdmissionEngine, &payload),
+        "the admitted row must carry the engine identity stamp"
+    );
+    Ok(())
+}

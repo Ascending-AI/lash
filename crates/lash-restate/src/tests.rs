@@ -7096,6 +7096,30 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
     }
 }
 
+/// Engine backing the parent-end law's recorded child starts. Recorded-intent
+/// starts cross the same engine admission gate direct starts do, so the kind the
+/// intent declares must be registered on the host.
+struct RestateParentEndLawEngine;
+
+#[async_trait::async_trait]
+impl lash_core::ProcessEngine for RestateParentEndLawEngine {
+    fn kind(&self) -> &'static str {
+        "restate-parent-end-law"
+    }
+
+    async fn run(
+        &self,
+        _context: lash_core::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+        Ok(lash_core::ProcessAwaitOutput::Success {
+            value: serde_json::json!({"parent_end_law": "child ran"}),
+            control: None,
+        }
+        .into())
+    }
+}
+
 #[derive(Default)]
 struct RestateParentEndFaultState {
     crash_before_record_remaining: AtomicUsize,
@@ -7840,6 +7864,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
+    let host = host.with_process_engine(Arc::new(RestateParentEndLawEngine));
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
             .await

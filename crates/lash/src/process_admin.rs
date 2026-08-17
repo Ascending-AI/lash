@@ -254,6 +254,12 @@ impl Processes {
         }
     }
 
+    /// Engine-admission ruling (FIG-1488): this route deliberately stays outside
+    /// the gate. It is an operator seam — the host names the registration
+    /// itself, on its own authority, exactly as a host calling the process
+    /// registry directly does. The gate exists to stop a *model or leaf* payload
+    /// from becoming a committed start; it is not a guard against the operator's
+    /// own request. `ProcessEngine::run` still refuses an unrunnable row.
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
