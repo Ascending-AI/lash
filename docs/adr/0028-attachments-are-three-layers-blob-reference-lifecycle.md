@@ -97,8 +97,13 @@ arms the delete (`arm_attachment_delete`, refused if a writer revoked), issues
 the physical delete only for an armed digest, and releases. Whoever loses a CAS
 yields: a writer parks and re-puts after the release, and a sweep that meets a
 peer's condemnation defers the digest to the next sweep. Nothing waits on a
-lease, a TTL, or a clock, and no SQL/blob-store atomicity is needed, because the
-authority's state machine — not the backend — decides whether bytes may die.
+lease or a TTL, and no SQL/blob-store atomicity is needed, because the
+authority's state machine — not the backend — decides whether bytes may die. A
+parked writer does pace its re-acquires with a bounded backoff rather than
+spinning, since a physical delete against remote storage takes real time; that
+delay is politeness between CAS attempts, and it is the *only* place time
+appears. No transition, and above all no reclamation, is ever authorized by
+elapsed time.
 Clearing a condemnation left behind by a sweeper that died mid-delete is host
 policy under ADR 0014, exposed as
 `AttachmentRootSet::release_attachment_condemnation`; lash expires nothing on a
@@ -107,6 +112,15 @@ timer.
 The freshness re-check survives as what it always was, a cheap pre-filter, and it
 now runs while the digest is condemned, which is exactly the window a writer can
 still revoke.
+
+Answering `Fenced` is a claim about five methods across two traits —
+`AttachmentManifest::begin_attachment_write` plus the root set's `fence`,
+`condemn_attachment`, `arm_attachment_delete`, and
+`release_attachment_condemnation` — and a partial implementation is worse than
+none, because it silences the warning while keeping the loss. The sweep
+downgrades its own report to `BestEffort` when a self-declared fenced authority
+cannot condemn, but it cannot detect a missing writer half; that one is on the
+implementer.
 
 A root authority that implements neither half reports
 `AttachmentGcFence::BestEffort` and runs the legacy path: a targeted root
