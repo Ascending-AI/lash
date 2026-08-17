@@ -2046,7 +2046,7 @@ impl QueuedWorkStore for Store {
                         .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Result<Vec<_>, StoreError>>()?;
                     let selected_len =
-                        select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+                        select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
                     if selected_len == 0 {
                         return Ok(SelectedQueuedWorkClaimOutcome::new(
                             None,

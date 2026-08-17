@@ -406,6 +406,21 @@ pub fn select_turn_work_claim_indices(
     );
     let requested = policy.drain_policy.select_drain(&request).drain_count();
     let selected = requested.clamp(1, compatible_prefix_len);
+    // Every row a policy pulls in must clear the oversize law on its own, not
+    // just the head: a non-head row larger than the whole window would be
+    // rejected by the provider on every attempt, and the interrupted-claim
+    // redrive would restore that same doomed composition forever.
+    for candidate in &candidates[..selected] {
+        let candidate_tokens = rendered_token_upper_bound(std::slice::from_ref(candidate));
+        if candidate_tokens > policy.max_context_tokens {
+            return Err(StoreError::QueuedWorkRowExceedsContextWindow {
+                batch_id: candidate.batch_id.clone(),
+                batch_enqueue_seq: candidate.enqueue_seq,
+                rendered_tokens: candidate_tokens,
+                max_context_tokens: policy.max_context_tokens,
+            });
+        }
+    }
     let rendered_tokens = rendered_token_upper_bound(&candidates[..selected]);
     tracing::debug!(
         target: "lash::queued_work_batching",
@@ -446,6 +461,33 @@ pub fn select_turn_work_claim_prefix(
         .enumerate()
         .take_while(|(prefix_index, selected_index)| prefix_index == selected_index)
         .count())
+}
+
+/// Size an exact, host-named drain composition.
+///
+/// The host already chose which rows travel together, so the configured
+/// [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) is not consulted here: an
+/// automatic policy that drains one row per wake would otherwise shrink an
+/// exact two-row selection to one, and the caller — which requires the whole
+/// requested composition or none of it — would abandon the partial claim as
+/// unclaimable, permanently and deterministically. The policy answers *how much
+/// of the pending queue to take*, a question an exact selection has already
+/// answered.
+///
+/// Every Lash claim law still applies: the head class, the delivery boundary,
+/// merge-key/authority/kind compatibility, `max_rows`, and the oversized-row
+/// refusal all bound the exact request exactly as they bound an automatic one.
+pub fn select_exact_turn_work_claim_prefix(
+    candidates: &[ClaimCandidate],
+    boundary: QueuedWorkClaimBoundary,
+    policy: &QueuedWorkClaimPolicy,
+    now_epoch_ms: u64,
+) -> Result<usize, StoreError> {
+    let policy = QueuedWorkClaimPolicy {
+        drain_policy: crate::runtime::exact_selection_drain_policy(),
+        ..policy.clone()
+    };
+    select_turn_work_claim_prefix(candidates, boundary, &policy, now_epoch_ms)
 }
 
 /// Resolve an exact-ID selection against interrupted predecessor identities.
@@ -1060,6 +1102,98 @@ mod tests {
             )
             .unwrap(),
             vec![0]
+        );
+    }
+
+    #[test]
+    fn an_exact_host_selection_is_never_sized_by_the_automatic_drain_policy() {
+        let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
+        let claim_policy = policy(1_000, 100);
+        assert_eq!(claim_policy.drain_policy.name(), "one_at_a_time");
+        // Automatic drains take the head alone under the shipped default...
+        assert_eq!(
+            select_turn_work_claim_prefix(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                &claim_policy,
+                1_000,
+            )
+            .unwrap(),
+            1
+        );
+        // ...but the host named this exact two-row composition, and a partial
+        // exact claim is abandoned as unclaimable by the caller, so shrinking it
+        // would wedge `stream_selected_queued_work` forever.
+        assert_eq!(
+            select_exact_turn_work_claim_prefix(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                &claim_policy,
+                1_000,
+            )
+            .unwrap(),
+            2
+        );
+        // Lash's own laws still bound the exact request.
+        let mut bounded = claim_policy.clone();
+        bounded.max_rows = 1;
+        assert_eq!(
+            select_exact_turn_work_claim_prefix(
+                &candidates,
+                QueuedWorkClaimBoundary::Idle,
+                &bounded,
+                1_000,
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn every_selected_row_must_fit_the_window_not_only_the_head() {
+        let mut first = candidate(1, Some("wake"));
+        first.input_texts = vec!["a".repeat(8)];
+        let mut second = candidate(2, Some("wake"));
+        second.input_texts = vec!["b".repeat(4_000)];
+        let mut claim_policy = policy(1_000, 100);
+        claim_policy.drain_policy =
+            std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
+        // The head fits, so a head-only check would admit the oversized second
+        // row; the provider would then reject the drain and the interrupted
+        // redrive would restore that identical doomed composition forever.
+        let error = select_turn_work_claim_indices(
+            &[first.clone(), second],
+            QueuedWorkClaimBoundary::Idle,
+            &claim_policy,
+            1_000,
+        )
+        .expect_err("an oversized non-head row must be refused by name");
+        match error {
+            StoreError::QueuedWorkRowExceedsContextWindow {
+                batch_id,
+                batch_enqueue_seq,
+                rendered_tokens,
+                max_context_tokens,
+            } => {
+                assert_eq!(batch_id, "qwb-2");
+                assert_eq!(batch_enqueue_seq, 2);
+                assert!(rendered_tokens > max_context_tokens);
+                assert_eq!(max_context_tokens, 1_000);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        // A row the policy did not select cannot refuse a drain it never joined.
+        let mut third = candidate(2, Some("wake"));
+        third.input_texts = vec!["c".repeat(4_000)];
+        assert_eq!(
+            select_turn_work_claim_prefix(
+                &[first, third],
+                QueuedWorkClaimBoundary::Idle,
+                &policy(1_000, 100),
+                1_000,
+            )
+            .unwrap(),
+            1
         );
     }
 

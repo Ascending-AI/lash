@@ -1982,7 +1982,8 @@ impl QueuedWorkStore for PostgresSessionStore {
             .zip(selected_batches.iter())
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+        let selected_len =
+            select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
         if selected_len == 0 {
             tx.rollback().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(

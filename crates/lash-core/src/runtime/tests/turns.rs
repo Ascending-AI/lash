@@ -7529,6 +7529,122 @@ async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_histor
     );
 }
 
+/// FIG-1313: an exact host selection is not resized by the automatic policy.
+///
+/// The host named this composition, so the drain policy — which answers only
+/// "how much of the pending queue should this wake take?" — is not consulted.
+/// Under the shipped one-at-a-time default a policy-sized exact claim would
+/// take one of the two requested rows, and the caller would abandon the partial
+/// claim as unclaimable: `stream_selected_queued_work` on two mergeable wakes
+/// could then never succeed, permanently and deterministically.
+#[tokio::test]
+async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_default() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured_requests = Arc::clone(&requests);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |req| {
+            let captured_requests = Arc::clone(&captured_requests);
+            async move {
+                captured_requests.lock_recover().push(req);
+                Ok(LlmResponse {
+                    full_text: "both wakes answered".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "both wakes answered".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    // The shipped default: no `with_drain_mode`, so `DrainMode::OneAtATime`.
+    runtime.host.core.durability.queued_work_batching = crate::QueuedWorkBatchingConfig::new(100);
+    assert_eq!(
+        runtime
+            .host
+            .core
+            .durability
+            .queued_work_batching
+            .drain_policy()
+            .name(),
+        "one_at_a_time"
+    );
+    let registry = runtime
+        .host
+        .process_registry
+        .as_ref()
+        .expect("process registry")
+        .clone();
+    registry
+        .register_process(
+            crate::ProcessRegistration::new(
+                "paired-wake-proc",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+            )
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some("root".to_string())),
+        )
+        .await
+        .expect("register wake process");
+    for text in ["first paired wake", "second paired wake"] {
+        append_process_wake_to_queue(
+            registry.as_ref(),
+            store.as_ref(),
+            "paired-wake-proc",
+            crate::ProcessEventAppendRequest::new(
+                "process.wake",
+                json!({"text": text, "value": {"status": "done"}}),
+            ),
+        )
+        .await;
+    }
+
+    // Both rows share `PROCESS_WAKE_MERGE_KEY`, so they are mergeable and the
+    // automatic policy would have a choice to make here.
+    let batch_ids = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list queued wakes")
+        .into_iter()
+        .map(|batch| batch.batch_id)
+        .collect::<Vec<_>>();
+    assert_eq!(batch_ids.len(), 2);
+
+    runtime
+        .stream_selected_queued_work(
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "paired-exact-drain"),
+            ),
+            &batch_ids,
+        )
+        .await
+        .expect("an exact two-row selection is claimable")
+        .expect("the exact selection produces a turn");
+
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list queue after exact drain");
+    assert!(
+        pending.is_empty(),
+        "both selected rows must drain together: {pending:?}"
+    );
+    let requests = requests.lock_recover().clone();
+    let last = requests.last().expect("a provider call");
+    assert!(request_contains_text(last, "first paired wake"));
+    assert!(
+        request_contains_text(last, "second paired wake"),
+        "the exact composition, not a policy-sized prefix, must reach the model"
+    );
+}
+
 /// FIG-1313 red-side anchor (b): the irreducible residue stays typed.
 ///
 /// A single queued row larger than the whole context window can never be

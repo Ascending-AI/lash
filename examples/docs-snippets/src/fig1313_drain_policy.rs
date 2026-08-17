@@ -147,6 +147,38 @@ async fn drain_mode_all_coalesces_every_compatible_pending_row() -> anyhow::Resu
     Ok(())
 }
 
+#[tokio::test]
+async fn an_exact_selection_ignores_the_drain_policy() -> anyhow::Result<()> {
+    let store_factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+    // The one-at-a-time default: it sizes automatic drains, not host-named ones.
+    let core = core(
+        Arc::clone(&store_factory),
+        lash::QueuedWorkBatchingConfig::new(1024),
+        32_768,
+    )?;
+    let session = core.session(format!("{SESSION}-exact")).open().await?;
+    let first = enqueue(store_factory.as_ref(), &session, "exact-a", "first").await?;
+    let second = enqueue(store_factory.as_ref(), &session, "exact-b", "second").await?;
+
+    // Naming both rows drains both: your selection *is* the composition.
+    let turn = session
+        .queued_turn()
+        .batch_ids([first.clone(), second.clone()])
+        .run()
+        .await?
+        .expect("an exact selection drains");
+    let claimed = turn
+        .activities
+        .iter()
+        .find_map(|activity| match &activity.event {
+            TurnEvent::QueuedWorkStarted { batch_ids, .. } => Some(batch_ids.clone()),
+            _ => None,
+        })
+        .expect("a drain reports the rows it claimed");
+    assert_eq!(claimed, vec![first, second]);
+    Ok(())
+}
+
 /// A host policy that pairs rows up — the escape hatch for selection Lash does
 /// not ship.
 #[derive(Debug)]

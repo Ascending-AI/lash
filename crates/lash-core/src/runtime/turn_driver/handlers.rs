@@ -17,29 +17,17 @@ impl RuntimeTurnDriver<'_> {
     /// What remains here is the one cost Lash genuinely cannot project: an
     /// external or provider-file attachment, whose model-context weight is not
     /// bounded by any bytes Lash can measure.
-    async fn ensure_queued_work_cost_is_bounded(
-        &self,
-        request: &LlmRequest,
-    ) -> Result<(), RuntimeError> {
+    fn ensure_queued_work_cost_is_bounded(&self, request: &LlmRequest) -> Result<(), RuntimeError> {
         if self.pending_queue_claims.is_empty()
             || !self.turn_context.enforces_selected_queued_work_cost_bound()
         {
             return Ok(());
         }
-        let request = crate::attachments::resolve_llm_request_attachments(
-            request.clone(),
-            self.host.core.durability.attachment_store.as_ref(),
-        )
-        .await
-        .map_err(|err| {
-            RuntimeError::new(
-                RuntimeErrorCode::QueuedWork,
-                format!(
-                    "cannot measure the complete projected queued-work request because an \
-                     attachment could not be resolved: {err}"
-                ),
-            )
-        })?;
+        // Attachment *resolution* is deliberately not performed here: it only
+        // materializes stored bytes, leaving `attachments` — the sources this
+        // guard reads — untouched. Since FIG-1313 removed the projected-request
+        // token comparison, resolving would buy nothing but store reads and a
+        // new failure mode on the selected-drain path.
         if request.attachments.iter().any(|source| {
             matches!(
                 source,
@@ -108,7 +96,7 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         }
-        self.ensure_queued_work_cost_is_bounded(&request).await?;
+        self.ensure_queued_work_cost_is_bounded(&request)?;
         let (result, text_streamed, call_record) = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx, cancel)
             .await

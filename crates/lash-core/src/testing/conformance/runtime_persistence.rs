@@ -6366,7 +6366,8 @@ async fn queued_work_redrive_ignores_a_changed_drain_policy(store: Arc<dyn Runti
             .iter()
             .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        expected
+        expected,
+        "a redrive must serve the journaled composition, not re-run the successor's drain policy"
     );
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }

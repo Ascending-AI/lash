@@ -189,6 +189,9 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
             4_096,
         )
         .await;
@@ -305,6 +308,9 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
             4_096,
         )
         .await;
@@ -821,6 +827,9 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
             4_096,
         )
         .await;
@@ -1005,6 +1014,9 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
             4_096,
         )
         .await;
@@ -1114,6 +1126,9 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
             4_096,
         )
         .await;

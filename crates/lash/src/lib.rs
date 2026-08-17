@@ -241,7 +241,8 @@ pub mod persistence {
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub mod queued_work {
         pub use lash_core::store::queued_work::{
-            QueuedWorkClass, claim_scan_limit, derive_batch_id, select_leading_session_command,
+            QueuedWorkClass, claim_scan_limit, derive_batch_id,
+            select_exact_turn_work_claim_prefix, select_leading_session_command,
             select_turn_work_claim_prefix,
         };
     }

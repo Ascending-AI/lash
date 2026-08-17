@@ -156,6 +156,22 @@ pub trait QueuedDrainPolicy: std::fmt::Debug + Send + Sync {
     /// Called only when more than one row is eligible, and the returned count
     /// is clamped into `1..=candidates.len()`: a policy can neither starve its
     /// own queue nor reach past the rows Lash offered.
+    ///
+    /// # Where this runs
+    ///
+    /// Inside the store's claim critical section — an open Postgres
+    /// transaction, or SQLite's blocking connection closure — behind the
+    /// session lease fence, with the claim about to commit. An implementation
+    /// must therefore be:
+    ///
+    /// * **deterministic** for a given request, since the answer is committed
+    ///   with the claim and redriving that claim never asks again;
+    /// * **non-blocking**: no I/O, no locks, no async, no store calls. A slow
+    ///   selection holds a database transaction open for every session.
+    /// * **panic-free**: a panic here unwinds the claim, not just the turn.
+    ///
+    /// Exact host-named selections do not call this at all: the host already
+    /// chose the composition.
     fn select_drain(&self, request: &QueuedDrainRequest<'_>) -> QueuedDrainSelection;
 }
 
@@ -219,14 +235,40 @@ impl QueuedDrainPolicy for DrainModePolicy {
     }
 }
 
+/// Returns the one shared [`DrainModePolicy`] instance for `mode`.
+///
+/// Every shipped mode resolves to a process-wide singleton so that two
+/// configurations naming the same mode hold the *same* policy, which is what
+/// lets configuration equality compare policies by identity without lying about
+/// custom implementations.
+pub(crate) fn shared_drain_mode_policy(mode: DrainMode) -> Arc<dyn QueuedDrainPolicy> {
+    static ONE_AT_A_TIME: std::sync::OnceLock<Arc<dyn QueuedDrainPolicy>> =
+        std::sync::OnceLock::new();
+    static ALL: std::sync::OnceLock<Arc<dyn QueuedDrainPolicy>> = std::sync::OnceLock::new();
+    let slot = match mode {
+        DrainMode::OneAtATime => &ONE_AT_A_TIME,
+        DrainMode::All => &ALL,
+    };
+    Arc::clone(slot.get_or_init(|| Arc::new(DrainModePolicy::new(mode))))
+}
+
 /// The policy Lash uses when a host configures none: [`DrainMode::OneAtATime`].
 ///
 /// Hosts reach this through
 /// [`QueuedWorkBatchingConfig::drain_policy`](crate::QueuedWorkBatchingConfig::drain_policy)
 /// rather than directly, so it stays crate-internal.
 pub(crate) fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
-    static DEFAULT: std::sync::OnceLock<Arc<dyn QueuedDrainPolicy>> = std::sync::OnceLock::new();
-    Arc::clone(DEFAULT.get_or_init(|| Arc::new(DrainModePolicy::new(DrainMode::OneAtATime))))
+    shared_drain_mode_policy(DrainMode::default())
+}
+
+/// The policy used to size an exact, host-named selection: take every row the
+/// host asked for that Lash's claim laws admit.
+///
+/// Exact selections bypass the configured policy entirely (see
+/// [`select_exact_turn_work_claim_prefix`](crate::store::queued_work::select_exact_turn_work_claim_prefix)),
+/// so this stands in for it rather than competing with it.
+pub(crate) fn exact_selection_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
+    shared_drain_mode_policy(DrainMode::All)
 }
 
 #[cfg(test)]

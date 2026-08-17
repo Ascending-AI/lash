@@ -153,9 +153,12 @@ impl QueuedWorkAuthority {
 
 /// Host policy bounding one automatically selected queued-work claim.
 ///
-/// The action reserve is required and has no Lash default. Row count and
-/// maximum pending age retain Lash defaults because a poor choice affects
-/// batching efficiency rather than context-window correctness.
+/// Row count and maximum pending age retain Lash defaults because a poor
+/// choice affects batching efficiency rather than context-window correctness.
+/// The action reserve is required and has no Lash default; since FIG-1313 it is
+/// advisory evidence for a custom [`QueuedDrainPolicy`](crate::QueuedDrainPolicy)
+/// plus a misconfiguration check, because no shipped drain mode does token
+/// arithmetic (see [`action_token_reserve`](Self::action_token_reserve)).
 ///
 /// How much of the legal, FIFO-ordered claimable prefix actually drains on one
 /// wake is a separate, explicitly named host policy: the
@@ -175,18 +178,19 @@ pub struct QueuedWorkBatchingConfig {
 }
 
 impl PartialEq for QueuedWorkBatchingConfig {
-    /// Compares the scalar bounds and the *identity* of the configured drain
-    /// policy: two hosts sharing one policy instance compare equal, while
-    /// separately built custom policies never claim equality Lash cannot prove.
+    /// Compares the scalar bounds and the *resolved* drain policy by identity.
+    ///
+    /// Resolving first keeps the shipped modes honest: an unset policy and an
+    /// explicit [`with_drain_mode`](Self::with_drain_mode) naming the same mode
+    /// share one instance and compare equal. Two separately constructed *custom*
+    /// policies never do, even when they behave identically — Lash cannot prove
+    /// that, so it does not claim it. Hosts that compare configurations holding
+    /// custom policies should share one `Arc`.
     fn eq(&self, other: &Self) -> bool {
         self.action_token_reserve == other.action_token_reserve
             && self.max_rows == other.max_rows
             && self.max_pending_age == other.max_pending_age
-            && match (self.drain_policy.as_ref(), other.drain_policy.as_ref()) {
-                (None, None) => true,
-                (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
-                _ => false,
-            }
+            && std::sync::Arc::ptr_eq(&self.drain_policy(), &other.drain_policy())
     }
 }
 
@@ -231,7 +235,7 @@ impl QueuedWorkBatchingConfig {
     /// Unset, Lash uses [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime):
     /// one queued row per drain, strict FIFO, no token arithmetic.
     pub fn with_drain_mode(mut self, mode: crate::DrainMode) -> Self {
-        self.drain_policy = Some(std::sync::Arc::new(crate::DrainModePolicy::new(mode)));
+        self.drain_policy = Some(crate::runtime::shared_drain_mode_policy(mode));
         self
     }
 

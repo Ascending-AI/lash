@@ -1436,8 +1436,12 @@ impl QueuedWorkStore for RuntimePerfStore {
                 )
             })
             .collect::<Vec<_>>();
-        let selected_len =
-            store::queued_work::select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+        let selected_len = store::queued_work::select_exact_turn_work_claim_prefix(
+            &candidates,
+            boundary,
+            &policy,
+            now,
+        )?;
         if selected_len == 0 {
             return Ok(SelectedQueuedWorkClaimOutcome::new(
                 None,

@@ -24366,7 +24366,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessEventSemanticsSpec"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:357#semantics: lash::process::ProcessEventSemanticsSpec {"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:363#semantics: lash::process::ProcessEventSemanticsSpec {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -24385,8 +24385,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessEventSemanticsSpec::wake"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:333#.expect(\"valid wake expiry\")"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:339#.expect(\"valid wake expiry\")"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 
 [[api]]
 symbol = "lash::process::ProcessEventSink"
@@ -27464,7 +27464,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:359#when: Some(lash::process::ProcessValueSelector::Present("
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:365#when: Some(lash::process::ProcessValueSelector::Present("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -27501,7 +27501,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Pointer"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:362#input: lash::process::ProcessValueSelector::Pointer("
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:368#input: lash::process::ProcessValueSelector::Pointer("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -27511,8 +27511,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Pointer::0"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:362#input: lash::process::ProcessValueSelector::Pointer("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:337#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:368#input: lash::process::ProcessValueSelector::Pointer("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:343#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessValueSelector::Present"
@@ -27521,7 +27521,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Present"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:359#when: Some(lash::process::ProcessValueSelector::Present("
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:365#when: Some(lash::process::ProcessValueSelector::Present("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -27531,8 +27531,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessValueSelector::Present::0"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:359#when: Some(lash::process::ProcessValueSelector::Present("
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:337#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:365#when: Some(lash::process::ProcessValueSelector::Present("
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:343#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::ProcessValueSelector::Template"
@@ -28300,8 +28300,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -28311,8 +28311,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::delivery_expiry_ms"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryConfig::enqueuing_stale_after_ms"
@@ -28321,8 +28321,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::enqueuing_stale_after_ms"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:337#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:337#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:343#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:343#assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryConfig::new"
@@ -28331,8 +28331,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::new"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -28342,8 +28342,8 @@ availability = "default+all-features"
 aliases = ["lash_core::WakeDeliveryConfig::with_enqueuing_stale_after_ms"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:336#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:342#assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -28352,7 +28352,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:468#let redelivery: lash::process::WakeDeliveryDriveReport ="
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:474#let redelivery: lash::process::WakeDeliveryDriveReport ="
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -28361,8 +28361,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:480#assert_eq!(redelivery.discarded_expired, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:480#assert_eq!(redelivery.discarded_expired, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:486#assert_eq!(redelivery.discarded_expired, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:486#assert_eq!(redelivery.discarded_expired, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::discarded_sequence_rewound"
@@ -28370,8 +28370,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:483#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:483#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:489#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:489#assert_eq!(redelivery.discarded_sequence_rewound, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::discarded_target_gone"
@@ -28379,8 +28379,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:481#assert_eq!(redelivery.discarded_target_gone, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:481#assert_eq!(redelivery.discarded_target_gone, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:487#assert_eq!(redelivery.discarded_target_gone, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:487#assert_eq!(redelivery.discarded_target_gone, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::enqueued"
@@ -28388,8 +28388,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:479#assert_eq!(redelivery.enqueued, 1);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:479#assert_eq!(redelivery.enqueued, 1);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:485#assert_eq!(redelivery.enqueued, 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:485#assert_eq!(redelivery.enqueued, 1);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::floor_absorbed"
@@ -28397,8 +28397,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:482#assert_eq!(redelivery.floor_absorbed, 1);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:482#assert_eq!(redelivery.floor_absorbed, 1);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:488#assert_eq!(redelivery.floor_absorbed, 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:488#assert_eq!(redelivery.floor_absorbed, 1);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::inspected"
@@ -28406,8 +28406,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:465#assert_eq!(before_stale_boundary.inspected, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:465#assert_eq!(before_stale_boundary.inspected, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:471#assert_eq!(before_stale_boundary.inspected, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:471#assert_eq!(before_stale_boundary.inspected, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriveReport::retryable_failures"
@@ -28415,8 +28415,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:484#assert_eq!(redelivery.retryable_failures, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:484#assert_eq!(redelivery.retryable_failures, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:490#assert_eq!(redelivery.retryable_failures, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:490#assert_eq!(redelivery.retryable_failures, 0);"
 
 [[api]]
 symbol = "lash::process::WakeDeliveryDriver"
@@ -28424,8 +28424,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:465#assert_eq!(before_stale_boundary.inspected, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:465#assert_eq!(before_stale_boundary.inspected, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:471#assert_eq!(before_stale_boundary.inspected, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:471#assert_eq!(before_stale_boundary.inspected, 0);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -28442,8 +28442,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:465#assert_eq!(before_stale_boundary.inspected, 0);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:465#assert_eq!(before_stale_boundary.inspected, 0);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:471#assert_eq!(before_stale_boundary.inspected, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:471#assert_eq!(before_stale_boundary.inspected, 0);"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -28460,7 +28460,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:497#let expiry_clock = Arc::new("
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:503#let expiry_clock = Arc::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -71412,7 +71412,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::SelectedQueuedWorkDrainRefused"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:230#lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:233#lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -71422,8 +71422,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::SelectedQueuedWorkDrainRefused::cause"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:230#lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:233#} => assert_eq!(unclaimed_batch_ids, vec![\"recording-qwb-3\".to_string()]),"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:233#lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:236#} => assert_eq!(unclaimed_batch_ids, vec![\"recording-qwb-3\".to_string()]),"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainRefusalCause"
@@ -71431,7 +71431,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:231#lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:234#lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -71440,7 +71440,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:238#lash::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:241#lash::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -71449,7 +71449,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:235#InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!("
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:238#InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -71458,7 +71458,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:235#InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!("
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:238#InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!("
 reason = "The agent-workbench selected-drain example binds and reports the complete required composition when handling this alternative; its deterministic key-break scenario reaches the separately asserted unclaimable-together branch."
 
 [[api]]
@@ -71467,7 +71467,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:231#lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:234#lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -71476,8 +71476,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:233#} => assert_eq!(unclaimed_batch_ids, vec![\"recording-qwb-3\".to_string()]),"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:233#} => assert_eq!(unclaimed_batch_ids, vec![\"recording-qwb-3\".to_string()]),"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:236#} => assert_eq!(unclaimed_batch_ids, vec![\"recording-qwb-3\".to_string()]),"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:236#} => assert_eq!(unclaimed_batch_ids, vec![\"recording-qwb-3\".to_string()]),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -71660,8 +71660,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::run"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:226#.run()"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1043#assert!(claimed.turn.is_some());"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:229#.run()"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1055#assert!(claimed.turn.is_some());"
 
 [[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::stream_to"
@@ -71681,8 +71681,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1045#assert_eq!(claimed.satisfied, claimed_satisfaction);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1045#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1057#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1057#assert_eq!(claimed.satisfied, claimed_satisfaction);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -71692,8 +71692,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1059#assert_eq!(replay.satisfied, replay_satisfaction);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1059#assert_eq!(replay.satisfied, replay_satisfaction);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1071#assert_eq!(replay.satisfied, replay_satisfaction);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1071#assert_eq!(replay.satisfied, replay_satisfaction);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -71703,8 +71703,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied::batch_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1055#batch_id: batch.batch_id,"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1059#assert_eq!(replay.satisfied, replay_satisfaction);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1067#batch_id: batch.batch_id,"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1071#assert_eq!(replay.satisfied, replay_satisfaction);"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow"
@@ -71713,8 +71713,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::ClaimedNow"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1045#assert_eq!(claimed.satisfied, claimed_satisfaction);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1045#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1057#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1057#assert_eq!(claimed.satisfied, claimed_satisfaction);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -71724,8 +71724,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkBatchSatisfaction::ClaimedNow::batch_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1041#batch_id: batch.batch_id.clone(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1045#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1053#batch_id: batch.batch_id.clone(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1057#assert_eq!(claimed.satisfied, claimed_satisfaction);"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainOutcome"
@@ -71734,8 +71734,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1034#let claimed = session"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1043#assert!(claimed.turn.is_some());"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1046#let claimed = session"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1055#assert!(claimed.turn.is_some());"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainOutcome::expect"
@@ -71744,7 +71744,7 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::expect"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:676#.expect(\"a selection naming an already-drained batch is a no-op, not an error\")"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:682#.expect(\"a selection naming an already-drained batch is a no-op, not an error\")"
 reason = "The workbench unwraps the successful typed result before directly asserting that the selected drain needed no new turn."
 
 [[api]]
@@ -71754,8 +71754,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::satisfied"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1045#assert_eq!(claimed.satisfied, claimed_satisfaction);"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1045#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1057#assert_eq!(claimed.satisfied, claimed_satisfaction);"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1057#assert_eq!(claimed.satisfied, claimed_satisfaction);"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainOutcome::turn"
@@ -71764,8 +71764,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1043#assert!(claimed.turn.is_some());"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1043#assert!(claimed.turn.is_some());"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1055#assert!(claimed.turn.is_some());"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1055#assert!(claimed.turn.is_some());"
 
 [[api]]
 symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome"
@@ -76706,8 +76706,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::settled_without_selected_turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1058#assert!(replay.settled_without_selected_turn());"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1058#assert!(replay.settled_without_selected_turn());"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1070#assert!(replay.settled_without_selected_turn());"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1070#assert!(replay.settled_without_selected_turn());"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainOutcome::executed_selected_turn"
@@ -76716,8 +76716,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedWorkDrainOutcome::executed_selected_turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1044#assert!(claimed.executed_selected_turn());"
-assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1044#assert!(claimed.executed_selected_turn());"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1056#assert!(claimed.executed_selected_turn());"
+assertion = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:1056#assert!(claimed.executed_selected_turn());"
 
 [[api]]
 symbol = "lash::persistence::SelectedQueuedWorkClaimOutcome::acquired_no_rows"
@@ -76735,8 +76735,8 @@ availability = "default+all-features"
 aliases = ["lash_core::DrainMode"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:275#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:275#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:307#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:307#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
 
 [[api]]
 symbol = "lash::DrainMode::All"
@@ -76755,8 +76755,8 @@ availability = "default+all-features"
 aliases = ["lash_core::DrainMode::OneAtATime"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:275#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:275#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:307#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:307#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
 
 [[api]]
 symbol = "lash::DrainMode::as_str"
@@ -76765,8 +76765,8 @@ availability = "default+all-features"
 aliases = ["lash_core::DrainMode::as_str"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:276#assert_eq!(DrainMode::OneAtATime.as_str(), \"one_at_a_time\");"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:276#assert_eq!(DrainMode::OneAtATime.as_str(), \"one_at_a_time\");"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:308#assert_eq!(DrainMode::OneAtATime.as_str(), \"one_at_a_time\");"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:308#assert_eq!(DrainMode::OneAtATime.as_str(), \"one_at_a_time\");"
 
 [[api]]
 symbol = "lash::DrainModePolicy"
@@ -76775,8 +76775,8 @@ availability = "default+all-features"
 aliases = ["lash_core::DrainModePolicy"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:277#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:277#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:309#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:309#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
 
 [[api]]
 symbol = "lash::DrainModePolicy::mode"
@@ -76785,8 +76785,8 @@ availability = "default+all-features"
 aliases = ["lash_core::DrainModePolicy::mode"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:275#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:275#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:307#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:307#assert_eq!(one_at_a_time.mode(), DrainMode::OneAtATime);"
 
 [[api]]
 symbol = "lash::DrainModePolicy::new"
@@ -76795,8 +76795,8 @@ availability = "default+all-features"
 aliases = ["lash_core::DrainModePolicy::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:277#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:277#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:309#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:309#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
 
 [[api]]
 symbol = "lash::QueuedDrainCandidate"
@@ -76805,8 +76805,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainCandidate"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:263#assert_eq!(head.enqueue_seq, 1);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:263#assert_eq!(head.enqueue_seq, 1);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:295#assert_eq!(head.enqueue_seq, 1);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:295#assert_eq!(head.enqueue_seq, 1);"
 
 [[api]]
 symbol = "lash::QueuedDrainCandidate::authority"
@@ -76815,8 +76815,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainCandidate::authority"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:246#authority: QueuedWorkAuthority::new(\"docs-principal\"),"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:266#assert_eq!(next.authority, QueuedWorkAuthority::new(\"docs-principal\"));"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:278#authority: QueuedWorkAuthority::new(\"docs-principal\"),"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:298#assert_eq!(next.authority, QueuedWorkAuthority::new(\"docs-principal\"));"
 
 [[api]]
 symbol = "lash::QueuedDrainCandidate::enqueue_seq"
@@ -76825,8 +76825,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainCandidate::enqueue_seq"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:243#enqueue_seq: 1,"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:263#assert_eq!(head.enqueue_seq, 1);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:275#enqueue_seq: 1,"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:295#assert_eq!(head.enqueue_seq, 1);"
 
 [[api]]
 symbol = "lash::QueuedDrainCandidate::kind"
@@ -76835,8 +76835,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainCandidate::kind"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:244#kind: QueuedWorkKind::Turn,"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:264#assert_eq!(head.kind, QueuedWorkKind::Turn);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:276#kind: QueuedWorkKind::Turn,"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:296#assert_eq!(head.kind, QueuedWorkKind::Turn);"
 
 [[api]]
 symbol = "lash::QueuedDrainCandidate::merge_key"
@@ -76845,8 +76845,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainCandidate::merge_key"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:245#merge_key: Some(\"docs-drain-policy\".to_string()),"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:265#assert_eq!(next.merge_key.as_deref(), Some(\"docs-drain-policy\"));"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:277#merge_key: Some(\"docs-drain-policy\".to_string()),"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:297#assert_eq!(next.merge_key.as_deref(), Some(\"docs-drain-policy\"));"
 
 [[api]]
 symbol = "lash::QueuedDrainCandidate::pending_age_ms"
@@ -76855,8 +76855,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainCandidate::pending_age_ms"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:256#pending_age_ms: 250,"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:268#assert_eq!(next.pending_age_ms, 250);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:288#pending_age_ms: 250,"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:300#assert_eq!(next.pending_age_ms, 250);"
 
 [[api]]
 symbol = "lash::QueuedDrainCandidate::projected_tokens"
@@ -76865,8 +76865,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainCandidate::projected_tokens"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:255#projected_tokens: 4_096,"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:267#assert_eq!(next.projected_tokens, 4_096);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:287#projected_tokens: 4_096,"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:299#assert_eq!(next.projected_tokens, 4_096);"
 
 [[api]]
 symbol = "lash::QueuedDrainPolicy"
@@ -76875,7 +76875,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainPolicy"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:181#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:146#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
 assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:146#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
 
 [[api]]
@@ -76885,8 +76885,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainPolicy::name"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:277#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:277#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:309#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:309#assert_eq!(one_at_a_time.name(), \"one_at_a_time\");"
 
 [[api]]
 symbol = "lash::QueuedDrainPolicy::select_drain"
@@ -76895,8 +76895,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainPolicy::select_drain"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:279#assert_eq!(selection, QueuedDrainSelection::head_only());"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:279#assert_eq!(selection, QueuedDrainSelection::head_only());"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:311#assert_eq!(selection, QueuedDrainSelection::head_only());"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:311#assert_eq!(selection, QueuedDrainSelection::head_only());"
 
 [[api]]
 symbol = "lash::QueuedDrainRequest"
@@ -76905,8 +76905,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainRequest"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:262#assert_eq!(request.candidates().len(), 2);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:262#assert_eq!(request.candidates().len(), 2);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:294#assert_eq!(request.candidates().len(), 2);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:294#assert_eq!(request.candidates().len(), 2);"
 
 [[api]]
 symbol = "lash::QueuedDrainRequest::available_tokens"
@@ -76915,8 +76915,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainRequest::available_tokens"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:269#assert_eq!(request.available_tokens(), 31_744);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:269#assert_eq!(request.available_tokens(), 31_744);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:301#assert_eq!(request.available_tokens(), 31_744);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:301#assert_eq!(request.available_tokens(), 31_744);"
 
 [[api]]
 symbol = "lash::QueuedDrainRequest::boundary"
@@ -76925,8 +76925,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainRequest::boundary"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:272#assert_eq!(request.boundary(), Idle);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:272#assert_eq!(request.boundary(), Idle);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:304#assert_eq!(request.boundary(), Idle);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:304#assert_eq!(request.boundary(), Idle);"
 
 [[api]]
 symbol = "lash::QueuedDrainRequest::candidates"
@@ -76935,8 +76935,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainRequest::candidates"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:263#assert_eq!(head.enqueue_seq, 1);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:263#assert_eq!(head.enqueue_seq, 1);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:295#assert_eq!(head.enqueue_seq, 1);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:295#assert_eq!(head.enqueue_seq, 1);"
 
 [[api]]
 symbol = "lash::QueuedDrainRequest::max_context_tokens"
@@ -76945,8 +76945,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainRequest::max_context_tokens"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:270#assert_eq!(request.max_context_tokens(), 32_768);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:270#assert_eq!(request.max_context_tokens(), 32_768);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:302#assert_eq!(request.max_context_tokens(), 32_768);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:302#assert_eq!(request.max_context_tokens(), 32_768);"
 
 [[api]]
 symbol = "lash::QueuedDrainRequest::max_rows"
@@ -76955,8 +76955,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainRequest::max_rows"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:271#assert_eq!(request.max_rows(), 64);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:271#assert_eq!(request.max_rows(), 64);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:303#assert_eq!(request.max_rows(), 64);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:303#assert_eq!(request.max_rows(), 64);"
 
 [[api]]
 symbol = "lash::QueuedDrainRequest::new"
@@ -76965,8 +76965,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainRequest::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:262#assert_eq!(request.candidates().len(), 2);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:262#assert_eq!(request.candidates().len(), 2);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:294#assert_eq!(request.candidates().len(), 2);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:294#assert_eq!(request.candidates().len(), 2);"
 
 [[api]]
 symbol = "lash::QueuedDrainSelection"
@@ -76975,8 +76975,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainSelection"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:278#let selection = one_at_a_time.select_drain(&request);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:279#assert_eq!(selection, QueuedDrainSelection::head_only());"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:310#let selection = one_at_a_time.select_drain(&request);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:311#assert_eq!(selection, QueuedDrainSelection::head_only());"
 
 [[api]]
 symbol = "lash::QueuedDrainSelection::drain_count"
@@ -76985,8 +76985,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainSelection::drain_count"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:289#assert_eq!(everything.drain_count(), 2);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:289#assert_eq!(everything.drain_count(), 2);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:321#assert_eq!(everything.drain_count(), 2);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:321#assert_eq!(everything.drain_count(), 2);"
 
 [[api]]
 symbol = "lash::QueuedDrainSelection::everything"
@@ -76995,8 +76995,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainSelection::everything"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:288#assert_eq!(everything, QueuedDrainSelection::everything(&request));"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:288#assert_eq!(everything, QueuedDrainSelection::everything(&request));"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:320#assert_eq!(everything, QueuedDrainSelection::everything(&request));"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:320#assert_eq!(everything, QueuedDrainSelection::everything(&request));"
 
 [[api]]
 symbol = "lash::QueuedDrainSelection::head_only"
@@ -77005,8 +77005,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainSelection::head_only"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:279#assert_eq!(selection, QueuedDrainSelection::head_only());"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:279#assert_eq!(selection, QueuedDrainSelection::head_only());"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:311#assert_eq!(selection, QueuedDrainSelection::head_only());"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:311#assert_eq!(selection, QueuedDrainSelection::head_only());"
 
 [[api]]
 symbol = "lash::QueuedDrainSelection::leading"
@@ -77015,7 +77015,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedDrainSelection::leading"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:164#QueuedDrainSelection::leading(2.min(request.candidates().len()))"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:196#QueuedDrainSelection::leading(2.min(request.candidates().len()))"
 assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:146#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
 
 [[api]]
@@ -77025,8 +77025,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkBatchingConfig::drain_policy"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:293#assert_eq!(default_config.drain_policy().name(), \"one_at_a_time\");"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:293#assert_eq!(default_config.drain_policy().name(), \"one_at_a_time\");"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:325#assert_eq!(default_config.drain_policy().name(), \"one_at_a_time\");"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:325#assert_eq!(default_config.drain_policy().name(), \"one_at_a_time\");"
 
 [[api]]
 symbol = "lash::QueuedWorkBatchingConfig::with_drain_mode"
@@ -77035,8 +77035,8 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkBatchingConfig::with_drain_mode"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:295#assert_eq!(all_config.drain_policy().name(), \"all\");"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:146#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:327#assert_eq!(all_config.drain_policy().name(), \"all\");"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:327#assert_eq!(all_config.drain_policy().name(), \"all\");"
 
 [[api]]
 symbol = "lash::QueuedWorkBatchingConfig::with_drain_policy"
@@ -77045,7 +77045,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkBatchingConfig::with_drain_policy"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:181#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:146#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
 assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:146#assert_eq!(drained_batch_ids(&session).await?, vec![first, second]);"
 
 [[api]]
@@ -77054,8 +77054,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:220#assert_eq!(refused, batch_id);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:220#assert_eq!(refused, batch_id);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:252#assert_eq!(refused, batch_id);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:252#assert_eq!(refused, batch_id);"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::batch_id"
@@ -77063,8 +77063,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:211#batch_id: refused,"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:220#assert_eq!(refused, batch_id);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:243#batch_id: refused,"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:252#assert_eq!(refused, batch_id);"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::max_context_tokens"
@@ -77072,8 +77072,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:221#assert_eq!(max_context_tokens, 1_024);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:221#assert_eq!(max_context_tokens, 1_024);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:253#assert_eq!(max_context_tokens, 1_024);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:253#assert_eq!(max_context_tokens, 1_024);"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::required_context_tokens"
@@ -77081,8 +77081,8 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:222#assert!(required_context_tokens > max_context_tokens);"
-assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:222#assert!(required_context_tokens > max_context_tokens);"
+usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:254#assert!(required_context_tokens > max_context_tokens);"
+assertion = "examples/docs-snippets/src/fig1313_drain_policy.rs:254#assert!(required_context_tokens > max_context_tokens);"
 
 [[api]]
 symbol = "lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::batch_enqueue_seq"
@@ -77109,3 +77109,11 @@ aliases = ["lash_core::StoreError::QueuedWorkRowExceedsContextWindow::batch_id"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime embedders and custom durable-store implementors configure, persist, inspect, and enforce queued-work batching semantics at the public store boundary."
+
+[[api]]
+symbol = "lash::persistence::queued_work::select_exact_turn_work_claim_prefix"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Store-implementor seam: a backend calls this instead of select_turn_work_claim_prefix on its exact-ID claim path so a host-named composition is not resized by the automatic drain policy. Only an alternate RuntimePersistence implementation reaches it; the shipped backends are covered by the runtime_persistence conformance suite."
