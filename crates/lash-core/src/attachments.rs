@@ -69,7 +69,7 @@ pub enum AttachmentStoreError {
     )]
     EmptyRootSetRefused,
     #[error(
-        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. Retry the put — the fence clears when the sweep releases the digest. A condemnation that never clears is a sweeper that died mid-delete; the host clears it with `AttachmentRootSet::release_attachment_condemnation` once no sweep is running."
+        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; the fence clears when the sweep releases the digest. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
     )]
     ReclamationInFlight {
         attachment_id: AttachmentId,
@@ -222,6 +222,32 @@ pub trait AttachmentRootSet: Send + Sync {
     /// not override both this and the condemnation transitions below runs the
     /// sweep's unfenced path, which cannot exclude a concurrent writer from the
     /// query/delete window. See [`reclaim_unreferenced_attachments`].
+    ///
+    /// # Answering `Fenced` is a five-method claim, across two traits
+    ///
+    /// The fence is only real when *all* of the following are implemented
+    /// against the same durable store, with each one a single conditional
+    /// mutation:
+    ///
+    /// 1. [`AttachmentManifest::begin_attachment_write`] — the **writer half**,
+    ///    on the manifest trait, not this one. Overriding the four methods below
+    ///    while leaving this at its default means writers record intents without
+    ///    consulting the condemnation, so a sweep deletes bytes behind a live
+    ///    intent while this method reports `Fenced`. There is no fence without
+    ///    it.
+    /// 2. [`Self::condemn_attachment`] — `Free -> Condemned`, conditional on the
+    ///    root predicate.
+    /// 3. [`Self::arm_attachment_delete`] — `Condemned -> Deleting`, conditional
+    ///    on the condemnation still being held.
+    /// 4. [`Self::release_attachment_condemnation`] — back to `Free`.
+    /// 5. This method, answering [`AttachmentGcFence::Fenced`].
+    ///
+    /// A partial implementation is worse than none: it silences the sweep's
+    /// best-effort warning while keeping the loss. As a backstop the sweep
+    /// downgrades its own report to [`AttachmentGcFence::BestEffort`] whenever a
+    /// self-declared `Fenced` authority answers
+    /// [`AttachmentCondemnation::Unsupported`], but it cannot detect a missing
+    /// writer half — that one is on the implementer.
     fn fence(&self) -> AttachmentGcFence {
         AttachmentGcFence::BestEffort
     }
@@ -257,13 +283,29 @@ pub trait AttachmentRootSet: Send + Sync {
     /// longer there, which is exactly the case where a writer took the digest
     /// back. The sweep then issues no delete at all, so the physical delete is
     /// only ever issued for a digest this call armed — no SQL/blob-store
-    /// atomicity required.
+    /// atomicity required. `Revoked` MUST mean the caller does not own this
+    /// digest's delete and must not release it: either a writer already
+    /// returned it to `Free`, or the transition is owned elsewhere (a digest
+    /// already in `Deleting` also answers `Revoked`, which the sweep cannot
+    /// reach — arming requires having won the condemnation first). An
+    /// implementation that answers `Revoked` for a condemnation this caller
+    /// still owns strands that digest, since the sweep will not hand it back.
+    ///
+    /// The default is an error, not `Revoked`: it is only ever reached by an
+    /// authority that implemented [`Self::condemn_attachment`] without this,
+    /// which would otherwise condemn digests it can never arm or hand back —
+    /// blocking writers permanently. Failing loudly makes the sweep release the
+    /// condemnation and report the digest in
+    /// [`AttachmentReclamationReport::failed_ids`] instead.
     async fn arm_attachment_delete(
         &self,
         id: &AttachmentId,
     ) -> Result<AttachmentDeleteArming, StoreError> {
         let _ = id;
-        Ok(AttachmentDeleteArming::Revoked)
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "AttachmentRootSet::arm_attachment_delete (required alongside \
+                        condemn_attachment)",
+        })
     }
 
     /// Drop the digest's condemnation, returning it to `Free`.
@@ -477,7 +519,7 @@ where
     let intent_grace_cutoff = now.saturating_sub(grace_period_ms);
     let live = root_set.live_attachment_refs(intent_grace_cutoff).await;
     let blobs = backend.list().await?;
-    let fence = root_set.fence();
+    let mut fence = root_set.fence();
     let mut report = AttachmentReclamationReport {
         scanned_blob_count: blobs.len(),
         fence,
@@ -539,7 +581,25 @@ where
                 report.condemn_deferred_ids.push(blob.id);
                 continue;
             }
-            Ok(AttachmentCondemnation::Unsupported) => false,
+            Ok(AttachmentCondemnation::Unsupported) => {
+                // A self-declared `Fenced` authority that cannot actually
+                // condemn is a partial implementation. Believe the transition,
+                // not the flag: this sweep's deletes ran the unfenced path, so
+                // it reports itself best-effort like any other unfenced sweep.
+                if fence == AttachmentGcFence::Fenced {
+                    tracing::error!(
+                        attachment_id = %blob.id,
+                        "attachment root authority reported `Fenced` but answered \
+                         `Unsupported` to condemn_attachment; this sweep's deletes are \
+                         NOT fenced and are reported best-effort. Implement all five \
+                         fence methods (including AttachmentManifest::begin_attachment_write) \
+                         or report AttachmentGcFence::BestEffort"
+                    );
+                    fence = AttachmentGcFence::BestEffort;
+                    report.fence = AttachmentGcFence::BestEffort;
+                }
+                false
+            }
             // Could not reach the authority: do not delete a blob we cannot
             // fence.
             Err(_) => {
@@ -619,6 +679,12 @@ where
         if condemned {
             match root_set.arm_attachment_delete(&blob.id).await {
                 Ok(AttachmentDeleteArming::Armed) => {}
+                // No release here, deliberately: `Revoked` means the
+                // condemnation row is already gone (a writer took the digest
+                // back), and it may since have been re-condemned by a peer
+                // sweeper that now owns it. Releasing would clear *their*
+                // condemnation. The contract on `arm_attachment_delete` is
+                // therefore that `Revoked` implies the row no longer stands.
                 Ok(AttachmentDeleteArming::Revoked) => {
                     report.condemn_deferred_ids.push(blob.id);
                     continue;
@@ -786,12 +852,43 @@ impl AttachmentStore for InMemoryAttachmentStore {
 /// How many times a `put` re-acquires the write fence before giving the digest
 /// back to the caller as [`AttachmentStoreError::ReclamationInFlight`].
 ///
-/// Each attempt is one yield, not one tick: the bound exists so a condemnation
-/// abandoned by a dead sweeper surfaces as a typed, actionable error instead of
-/// spinning forever. It is not a timeout, and clearing such a condemnation is
-/// host policy — see
+/// The bound exists so a condemnation abandoned by a sweeper that died
+/// mid-delete surfaces as a typed, actionable error instead of spinning
+/// forever; clearing such a condemnation is host policy — see
 /// [`AttachmentRootSet::release_attachment_condemnation`].
-const RECLAMATION_FENCE_ATTEMPTS: u32 = 1024;
+const RECLAMATION_FENCE_ATTEMPTS: u32 = 64;
+
+/// The first few re-acquires are pure yields, for the common case where the
+/// sweep's delete is a local unlink already in flight.
+const RECLAMATION_FENCE_YIELD_ATTEMPTS: u32 = 8;
+
+/// Backoff floor and ceiling for the remaining re-acquires.
+///
+/// These delays pace a retry loop; they do not bound anyone's liveness and
+/// nothing expires because of them. The protocol stays clockless in the sense
+/// that matters: no state transition, and in particular no reclamation, is ever
+/// authorized by elapsed time. Sleeping between CAS attempts is a politeness to
+/// the store, not a lease.
+///
+/// The ceiling is chosen so the total wait comfortably outlasts a remote
+/// object-store delete (tens to hundreds of milliseconds) rather than a
+/// scheduler quantum: the previous yield-only loop could exhaust itself in
+/// microseconds against a perfectly healthy sweeper.
+const RECLAMATION_FENCE_BACKOFF_MIN: std::time::Duration = std::time::Duration::from_millis(2);
+const RECLAMATION_FENCE_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Wait before the `attempt`-th re-acquire of the write fence.
+async fn reclamation_fence_backoff(attempt: u32) {
+    if attempt <= RECLAMATION_FENCE_YIELD_ATTEMPTS {
+        tokio::task::yield_now().await;
+        return;
+    }
+    let doublings = (attempt - RECLAMATION_FENCE_YIELD_ATTEMPTS - 1).min(16);
+    let delay = RECLAMATION_FENCE_BACKOFF_MIN
+        .saturating_mul(1u32 << doublings)
+        .min(RECLAMATION_FENCE_BACKOFF_MAX);
+    tokio::time::sleep(delay).await;
+}
 
 pub fn content_id(bytes: &[u8]) -> AttachmentId {
     AttachmentId::new(format!("{:x}", Sha256::digest(bytes)))
@@ -968,10 +1065,10 @@ impl SessionAttachmentStore {
                 AttachmentWriteFence::Granted => break,
                 // A sweep armed this digest's delete before we recorded an
                 // intent. Writing bytes into an in-flight delete would lose
-                // them, so yield and re-acquire: the sweep releases the digest
-                // as soon as the delete lands, and the granted retry re-puts the
-                // content. This is a CAS retry, not a timed wait — nothing here
-                // reads a clock.
+                // them, so back off and re-acquire: the sweep releases the
+                // digest as soon as the delete lands, and the granted retry
+                // re-puts the content. The delay paces the retry; it authorizes
+                // nothing and expires nothing.
                 AttachmentWriteFence::ReclamationInFlight => {
                     if attempts >= RECLAMATION_FENCE_ATTEMPTS {
                         return Err(AttachmentStoreError::ReclamationInFlight {
@@ -979,7 +1076,7 @@ impl SessionAttachmentStore {
                             attempts,
                         });
                     }
-                    tokio::task::yield_now().await;
+                    reclamation_fence_backoff(attempts).await;
                 }
             }
         }
