@@ -47,8 +47,8 @@ pub(crate) fn reasoning_replay_wire(provider_tag: &str) -> ProviderWire {
     ProviderWire::body(json!({})).with_reasoning_replay_round_trip(
         sse,
         vec![
-            ReplayItemExpectation::new(first, "/input/0/encrypted_content"),
-            ReplayItemExpectation::new(second, "/input/1/encrypted_content"),
+            ReplayItemExpectation::new(first.clone(), "/input/0/encrypted_content", json!(first)),
+            ReplayItemExpectation::new(second.clone(), "/input/1/encrypted_content", json!(second)),
         ],
     )
 }
@@ -71,10 +71,18 @@ pub(crate) fn tool_call_replay_wire() -> ProviderWire {
     ProviderWire::body(json!({})).with_tool_call_replay_round_trip(
         sse,
         vec![
-            ReplayItemExpectation::new("fc_conformance_0", "/input/0/id")
-                .associated_with("/input/0/call_id", "call_0"),
-            ReplayItemExpectation::new("fc_conformance_1", "/input/1/id")
-                .associated_with("/input/1/call_id", "call_1"),
+            ReplayItemExpectation::new(
+                "fc_conformance_0",
+                "/input/0/id",
+                json!("fc_conformance_0"),
+            )
+            .associated_with("/input/0/call_id", "call_0"),
+            ReplayItemExpectation::new(
+                "fc_conformance_1",
+                "/input/1/id",
+                json!("fc_conformance_1"),
+            )
+            .associated_with("/input/1/call_id", "call_1"),
         ],
     )
 }
@@ -114,10 +122,20 @@ pub(crate) fn chat_tool_call_replay_wire() -> ProviderWire {
     ProviderWire::body(json!({})).with_tool_call_replay_round_trip(
         sse,
         vec![
-            ReplayItemExpectation::new(first.to_string(), "/messages/0/reasoning_details/0")
-                .associated_with("/messages/0/tool_calls/0/id", "call_0"),
-            ReplayItemExpectation::new(second.to_string(), "/messages/0/reasoning_details/1")
-                .associated_with("/messages/0/tool_calls/1/id", "call_1"),
+            // The chat dialect must replay each detail as an OBJECT, not as its
+            // JSON-string serialization: the declared shape is the document.
+            ReplayItemExpectation::new(
+                first.to_string(),
+                "/messages/0/reasoning_details/0",
+                first.clone(),
+            )
+            .associated_with("/messages/0/tool_calls/0/id", "call_0"),
+            ReplayItemExpectation::new(
+                second.to_string(),
+                "/messages/0/reasoning_details/1",
+                second.clone(),
+            )
+            .associated_with("/messages/0/tool_calls/1/id", "call_1"),
         ],
     )
 }

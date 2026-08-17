@@ -1497,12 +1497,14 @@ mod tests {
                             sse,
                             vec![
                                 ReplayItemExpectation::new(
-                                    first,
+                                    first.clone(),
                                     "/messages/0/content/0/signature",
+                                    json!(first),
                                 ),
                                 ReplayItemExpectation::new(
-                                    second,
+                                    second.clone(),
                                     "/messages/0/content/1/signature",
+                                    json!(second),
                                 ),
                             ],
                         )

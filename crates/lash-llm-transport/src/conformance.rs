@@ -198,6 +198,16 @@ pub struct ReplayItemExpectation {
     pub payload: String,
     /// JSON Pointer locating that payload in the serialized next request.
     pub request_json_pointer: String,
+    /// The exact JSON value the dialect must place at `request_json_pointer`.
+    /// The fixture DECLARES this shape rather than letting the gate infer it
+    /// from whatever it finds: a dialect either carries the opaque bytes as a
+    /// JSON string (Anthropic's `signature`, Gemini's `thoughtSignature`) or
+    /// replays the JSON document those bytes encode (OpenAI Chat Completions
+    /// re-emits a whole `reasoning.encrypted` detail object in
+    /// `reasoning_details`). Inferring the mode from the found value made the
+    /// two indistinguishable whenever the payload is itself JSON text, so a
+    /// builder that shipped an object as its JSON-string serialization passed.
+    pub replayed_wire_value: Value,
     /// Optional sibling fact — a JSON Pointer and the string it must hold —
     /// proving the payload landed with the item it belongs to. Pointer equality
     /// alone would still pass if a builder emitted both payloads in the right
@@ -206,10 +216,19 @@ pub struct ReplayItemExpectation {
 }
 
 impl ReplayItemExpectation {
-    pub fn new(payload: impl Into<String>, request_json_pointer: impl Into<String>) -> Self {
+    /// `replayed_wire_value` is the wire shape the dialect must emit at
+    /// `request_json_pointer` — `Value::String(payload)` for dialects that carry
+    /// the opaque bytes as text, or the JSON document those bytes encode for
+    /// dialects that replay it structurally.
+    pub fn new(
+        payload: impl Into<String>,
+        request_json_pointer: impl Into<String>,
+        replayed_wire_value: Value,
+    ) -> Self {
         Self {
             payload: payload.into(),
             request_json_pointer: request_json_pointer.into(),
+            replayed_wire_value,
             request_association: None,
         }
     }
@@ -838,6 +857,7 @@ fn assert_replay_round_trip(
         expectations.len()
     );
     for (index, expectation) in expectations.iter().enumerate() {
+        assert_declared_shape_carries_payload(who, scenario, index, expectation);
         assert!(
             expectations[..index]
                 .iter()
@@ -887,12 +907,14 @@ fn assert_replay_round_trip(
     let request = n.build_next_request(scenario, standard_next_request_messages(&parts));
     for (index, expectation) in expectations.iter().enumerate() {
         let pointer = expectation.request_json_pointer.as_str();
-        let (found, expected) = replayed_payload_at(&request, pointer, &expectation.payload);
         assert_eq!(
-            found.as_deref(),
-            Some(expected.as_str()),
+            request.pointer(pointer),
+            Some(&expectation.replayed_wire_value),
             "[{who}] {scenario:?}: replay payload for item {index} must survive durable history \
-             and reappear byte-faithfully at next-request path {pointer}; request = {request}"
+             and reappear at next-request path {pointer} byte-faithfully AND in the wire shape the \
+             fixture declares — a matching payload in the wrong JSON shape (a string where the \
+             dialect requires a document, or the reverse) is a wire corruption, not a pass; \
+             request = {request}"
         );
         if let Some((association_pointer, expected_identity)) = &expectation.request_association {
             let found_identity = request.pointer(association_pointer).and_then(Value::as_str);
@@ -907,22 +929,31 @@ fn assert_replay_round_trip(
     }
 }
 
-/// Read the replayed payload at `pointer` and pair it with the form of
-/// `payload` it must equal. A dialect either carries the opaque bytes as a JSON
-/// string, or replays the JSON document those bytes encode — OpenAI's Chat
-/// Completions dialect stores a whole `reasoning.encrypted` detail object in
-/// `replay.opaque` and re-emits it as an object in `reasoning_details`. Both are
-/// compared in the payload's own encoding, so neither loses byte-faithfulness.
-fn replayed_payload_at(request: &Value, pointer: &str, payload: &str) -> (Option<String>, String) {
-    match request.pointer(pointer) {
-        Some(Value::String(found)) => (Some(found.clone()), payload.to_string()),
-        Some(document) => (
-            Some(document.to_string()),
-            serde_json::from_str::<Value>(payload)
-                .map(|expected| expected.to_string())
-                .unwrap_or_else(|_| payload.to_string()),
+/// A fixture's declared wire shape must be the same bytes the replayed part
+/// carries: either the payload string itself, or the JSON document that string
+/// encodes. This keeps the declaration honest about shape without letting it
+/// drift into asserting a payload the part never carried.
+fn assert_declared_shape_carries_payload(
+    who: &str,
+    scenario: Scenario,
+    index: usize,
+    expectation: &ReplayItemExpectation,
+) {
+    match &expectation.replayed_wire_value {
+        Value::String(declared) => assert_eq!(
+            declared, &expectation.payload,
+            "[{who}] {scenario:?}: item {index}'s declared wire string must be the replay payload \
+             itself"
         ),
-        None => (None, payload.to_string()),
+        document => {
+            let encoded = serde_json::from_str::<Value>(&expectation.payload).ok();
+            assert_eq!(
+                encoded.as_ref(),
+                Some(document),
+                "[{who}] {scenario:?}: item {index} declares a JSON document wire shape, so its \
+                 replay payload must be exactly the bytes that document encodes"
+            );
+        }
     }
 }
 

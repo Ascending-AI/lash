@@ -152,12 +152,14 @@ impl ProviderNormalizer for GoogleNormalizer {
                     ],
                     vec![
                         ReplayItemExpectation::new(
-                            first,
+                            first.clone(),
                             "/request/contents/0/parts/0/thoughtSignature",
+                            json!(first),
                         ),
                         ReplayItemExpectation::new(
-                            second,
+                            second.clone(),
                             "/request/contents/0/parts/1/thoughtSignature",
+                            json!(second),
                         ),
                     ],
                 )
@@ -190,13 +192,15 @@ impl ProviderNormalizer for GoogleNormalizer {
                     ],
                     vec![
                         ReplayItemExpectation::new(
-                            first,
+                            first.clone(),
                             "/request/contents/0/parts/0/thoughtSignature",
+                            json!(first),
                         )
                         .associated_with("/request/contents/0/parts/0/functionCall/id", "call_0"),
                         ReplayItemExpectation::new(
-                            second,
+                            second.clone(),
                             "/request/contents/0/parts/1/thoughtSignature",
+                            json!(second),
                         )
                         .associated_with("/request/contents/0/parts/1/functionCall/id", "call_1"),
                     ],
