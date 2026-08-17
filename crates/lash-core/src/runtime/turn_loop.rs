@@ -21,9 +21,21 @@ use std::pin::Pin;
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkDrainRefusalCause {
-    UnclaimableTogether { unclaimed_batch_ids: Vec<String> },
-    InterruptedBatchRequiresFullComposition { required_batch_ids: Vec<String> },
+    UnclaimableTogether {
+        unclaimed_batch_ids: Vec<String>,
+    },
+    InterruptedBatchRequiresFullComposition {
+        required_batch_ids: Vec<String>,
+    },
     ExecutionLaneBusy,
+    /// One requested row alone renders larger than the whole model context
+    /// window, so no drain policy can ever make it fit (FIG-1313).
+    QueuedItemExceedsContextWindow {
+        batch_id: String,
+        batch_enqueue_seq: u64,
+        required_context_tokens: usize,
+        max_context_tokens: usize,
+    },
 }
 
 /// How one distinct requested batch ID satisfied a successful selected drain.
@@ -56,19 +68,21 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
         Self { turn, satisfied }
     }
 
-    /// Reports whether this was a fully satisfied drain that needed no new turn.
+    /// Reports whether this successful drain settled every requested ID without
+    /// executing a selected turn.
     ///
     /// Because refusals are returned as errors, `true` never means that
     /// selected work was busy or unclaimable. It means every distinct requested
     /// ID was satisfied without a selected turn, or the selection was empty.
-    pub fn is_none(&self) -> bool {
+    pub fn settled_without_selected_turn(&self) -> bool {
         self.turn.is_none()
     }
 
     /// Reports whether this successful drain executed a newly claimed turn.
     ///
-    /// `false` has the same fully-satisfied meaning as [`Self::is_none`].
-    pub fn is_some(&self) -> bool {
+    /// `false` has the same fully-satisfied meaning as
+    /// [`Self::settled_without_selected_turn`].
+    pub fn executed_selected_turn(&self) -> bool {
         self.turn.is_some()
     }
 
@@ -1855,6 +1869,30 @@ impl LashRuntime {
                 return Err(SelectedQueuedWorkDrainError::Refused {
                     cause: SelectedQueuedWorkDrainRefusalCause::
                         InterruptedBatchRequiresFullComposition { required_batch_ids },
+                });
+            }
+            Err(crate::StoreError::QueuedWorkRowExceedsContextWindow {
+                batch_id,
+                batch_enqueue_seq,
+                rendered_tokens,
+                max_context_tokens,
+            }) => {
+                // The irreducible residue of FIG-1313: no drain policy, host or
+                // shipped, can fit this row. Name it and the window it needs
+                // instead of wedging the queue silently.
+                session_execution_lease
+                    .release_if_live()
+                    .await
+                    .map_err(|err| {
+                        RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
+                    })?;
+                return Err(SelectedQueuedWorkDrainError::Refused {
+                    cause: SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
+                        batch_id,
+                        batch_enqueue_seq,
+                        required_context_tokens: rendered_tokens,
+                        max_context_tokens,
+                    },
                 });
             }
             other => other.map_err(super::runtime_error_from_store_commit)?,

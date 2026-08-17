@@ -65,9 +65,10 @@ pub enum StoreError {
         action_token_reserve: usize,
     },
     #[error(
-        "queued-work row at enqueue sequence {batch_enqueue_seq} renders to at least {rendered_tokens} tokens, exceeding model context window {max_context_tokens}; the row remains pending for host review"
+        "queued-work row `{batch_id}` at enqueue sequence {batch_enqueue_seq} renders to at least {rendered_tokens} tokens, exceeding model context window {max_context_tokens}; the row remains pending for host review"
     )]
     QueuedWorkRowExceedsContextWindow {
+        batch_id: String,
         batch_enqueue_seq: u64,
         rendered_tokens: usize,
         max_context_tokens: usize,

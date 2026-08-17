@@ -27,6 +27,21 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
     /// Another host currently owns the session's execution lane while at least
     /// one requested row remains present.
     ExecutionLaneBusy,
+    /// One requested row renders larger than the entire model context window.
+    ///
+    /// No drain policy can make such a row fit, so Lash names it and the window
+    /// it would require rather than wedging the queue. Recovery is host policy:
+    /// compact or split the work, or run the session on a larger-window model.
+    QueuedItemExceedsContextWindow {
+        /// Durable identity of the oversized row.
+        batch_id: String,
+        /// Durable queue position of the oversized row.
+        batch_enqueue_seq: u64,
+        /// Conservative tokens this row alone needs.
+        required_context_tokens: usize,
+        /// The session model's context window.
+        max_context_tokens: usize,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

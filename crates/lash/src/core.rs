@@ -1290,7 +1290,7 @@ impl LashCoreBuilder {
         let live_replay_clock = Arc::clone(&core.clock);
         let mut env_builder = RuntimeEnvironment::builder(
             core.durability.commit_budget,
-            core.durability.queued_work_batching,
+            core.durability.queued_work_batching.clone(),
         )
         .with_plugin_host(Arc::new(default_plugin_host))
         .with_runtime_host_config(core);

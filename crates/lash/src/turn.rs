@@ -6,13 +6,14 @@ use crate::support::*;
 use futures_util::Stream;
 use lash_core::facade_support::{
     RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
-    SelectedQueuedWorkBatchSatisfaction as CoreSelectedQueuedWorkBatchSatisfaction,
-    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError,
-    SelectedQueuedWorkDrainRefusalCause as CoreSelectedQueuedWorkDrainRefusalCause,
-    TurnContextFacadeOps,
+    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnContextFacadeOps,
 };
 
 pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
+
+mod selected_drain;
+
+use selected_drain::{selected_drain_outcome, selected_drain_refusal_cause};
 
 /// How one distinct requested batch ID satisfied a successful selected drain.
 ///
@@ -36,7 +37,8 @@ pub enum SelectedQueuedWorkBatchSatisfaction {
 ///
 /// Every distinct requested ID was either executed now or had no remaining
 /// durable row. A present ID that cannot join the exact claim returns
-/// [`EmbedError::SelectedQueuedWorkDrainRefused`] before selected execution.
+/// [`EmbedError::SelectedQueuedWorkDrainRefused`]
+/// before selected execution.
 #[derive(Clone, Debug)]
 pub struct SelectedQueuedWorkDrainOutcome<T> {
     /// Executed turn, absent only for a fully satisfied drain with no selected turn.
@@ -46,18 +48,20 @@ pub struct SelectedQueuedWorkDrainOutcome<T> {
 }
 
 impl<T> SelectedQueuedWorkDrainOutcome<T> {
-    /// Reports whether this fully satisfied drain produced no selected turn.
+    /// Reports whether this successful drain settled every requested ID without
+    /// executing a selected turn.
     ///
     /// Refusals are errors, so `true` means every distinct ID was satisfied
     /// without a selected turn (or the selection was empty), never unclaimable.
-    pub fn is_none(&self) -> bool {
+    pub fn settled_without_selected_turn(&self) -> bool {
         self.turn.is_none()
     }
 
     /// Reports whether this successful drain executed a newly claimed turn.
     ///
-    /// `false` has the same fully-satisfied meaning as [`Self::is_none`].
-    pub fn is_some(&self) -> bool {
+    /// `false` has the same fully-satisfied meaning as
+    /// [`Self::settled_without_selected_turn`].
+    pub fn executed_selected_turn(&self) -> bool {
         self.turn.is_some()
     }
 
@@ -66,26 +70,6 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
     #[track_caller]
     pub fn expect(self, message: &str) -> T {
         self.turn.expect(message)
-    }
-}
-
-fn selected_drain_outcome<T>(
-    outcome: lash_core::facade_support::SelectedQueuedWorkDrainOutcome<T>,
-) -> SelectedQueuedWorkDrainOutcome<T> {
-    SelectedQueuedWorkDrainOutcome {
-        turn: outcome.turn,
-        satisfied: outcome
-            .satisfied
-            .into_iter()
-            .map(|satisfaction| match satisfaction {
-                CoreSelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id } => {
-                    SelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id }
-                }
-                CoreSelectedQueuedWorkBatchSatisfaction::AlreadySatisfied { batch_id } => {
-                    SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied { batch_id }
-                }
-            })
-            .collect(),
     }
 }
 
@@ -819,7 +803,7 @@ impl SelectedQueuedTurnBuilder {
     }
 
     /// Drains exactly and collects any turn activity. Fully satisfied means
-    /// [`SelectedQueuedWorkDrainOutcome::is_none`] is `true`; unclaimable means
+    /// [`SelectedQueuedWorkDrainOutcome::settled_without_selected_turn`] is `true`; unclaimable means
     /// a typed refusal before provider or tool execution.
     pub async fn run(self) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
         let collector = RunActivityCollector::default();
@@ -1209,21 +1193,7 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
         }
         Err(CoreSelectedQueuedWorkDrainError::Refused { cause }) => {
             return Err(EmbedError::SelectedQueuedWorkDrainRefused {
-                cause: match cause {
-                    CoreSelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                        unclaimed_batch_ids,
-                    } => SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                        unclaimed_batch_ids,
-                    },
-                    CoreSelectedQueuedWorkDrainRefusalCause::
-                        InterruptedBatchRequiresFullComposition { required_batch_ids } => {
-                        SelectedQueuedWorkDrainRefusalCause::
-                            InterruptedBatchRequiresFullComposition { required_batch_ids }
-                    }
-                    CoreSelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
-                        SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
-                    }
-                },
+                cause: selected_drain_refusal_cause(cause),
             });
         }
     };

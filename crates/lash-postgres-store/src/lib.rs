@@ -40,7 +40,8 @@ use lash_core::runtime::{
 };
 use lash_core::store::queued_work::{
     ClaimCandidate, WorkClaimLease, claim_scan_limit, derive_batch_id,
-    select_leading_session_command, select_turn_work_claim_prefix,
+    select_exact_turn_work_claim_prefix, select_leading_session_command,
+    select_turn_work_claim_prefix,
 };
 use lash_core::store::{
     HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit, RuntimeCommitResult,

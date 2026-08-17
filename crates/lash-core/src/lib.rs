@@ -252,6 +252,10 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
     pub use crate::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD;
+    pub use crate::runtime::QueuedDrainCandidate;
+    pub use crate::runtime::QueuedDrainPolicy;
+    pub use crate::runtime::QueuedDrainRequest;
+    pub use crate::runtime::QueuedDrainSelection;
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkClaimPolicy;
@@ -839,21 +843,22 @@ pub(crate) use provider::{
 pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
+pub(crate) use runtime::default_queued_drain_policy;
 #[doc(hidden)]
 pub use runtime::drive_with_event_pump;
 
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AwaitEventKey, AwaitEventResolver,
-    AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock, DeliveryPolicy, EffectHost,
-    EffectJournalRetirement, ExecutionScope, ForkPoint, ForkSessionRequest, ForkSessionResult,
-    InputItem, LiveReplayGapReason, LiveReplayResult, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeResult, LiveReplaySubscription, ObserverInheritance,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessCancelSummary, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessContinuationStore, ProcessEngine, ProcessEngineRunContext,
+    AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock, DeliveryPolicy, DrainMode,
+    DrainModePolicy, EffectHost, EffectJournalRetirement, ExecutionScope, ForkPoint,
+    ForkSessionRequest, ForkSessionResult, InputItem, LiveReplayGapReason, LiveReplayResult,
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult, LiveReplaySubscription,
+    ObserverInheritance, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessAwaitOutput,
+    ProcessCancelSummary, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine, ProcessEngineRunContext,
     ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendRequest,
     ProcessEventAppendResult, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
@@ -867,10 +872,11 @@ pub use runtime::{
     ProcessTerminalSpec, ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery,
     ProcessWakeSpec, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, QueuedWorkAuthority, QueuedWorkBatchingConfig,
-    QueuedWorkClaimPolicy, QueuedWorkKind, RecoveryDisposition, Resolution, ResolveOutcome,
-    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController, SegmentHandover,
-    SegmentProgress, SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
+    ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy,
+    QueuedWorkKind, RecoveryDisposition, Resolution, ResolveOutcome, RuntimeError,
+    RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController, SegmentHandover, SegmentProgress,
+    SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
     SessionRevision, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
     TokenLedgerEntry, ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelOriginHint,

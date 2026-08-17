@@ -53,11 +53,12 @@ pub use crate::turn::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, EffectReplayOwnership,
-    FrameKey, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder,
-    NoProgressBudget, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
-    PendingTurnInputSuffixCancelOutcome, QueuedWorkBatchingConfig, Resolution, ResolveOutcome,
+    AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, DrainMode,
+    DrainModePolicy, EffectReplayOwnership, FrameKey, InputItem, LlmCallRecord, ModelLimits,
+    ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
+    PendingTurnInputSuffixCancelOutcome, QueuedDrainCandidate, QueuedDrainPolicy,
+    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, Resolution, ResolveOutcome,
     SessionCreateRequest, SessionError, SessionStartPoint, TurnActivity, TurnActivityId,
     TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent, TurnInput, TurnInputApplication,
     facade_support::ExecutionSummary, facade_support::GenerationOverlay,
@@ -240,7 +241,8 @@ pub mod persistence {
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub mod queued_work {
         pub use lash_core::store::queued_work::{
-            QueuedWorkClass, claim_scan_limit, derive_batch_id, select_leading_session_command,
+            QueuedWorkClass, claim_scan_limit, derive_batch_id,
+            select_exact_turn_work_claim_prefix, select_leading_session_command,
             select_turn_work_claim_prefix,
         };
     }

@@ -189,7 +189,10 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
-            32_768,
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
+            4_096,
         )
         .await;
         let session_id = state.current_session_id();
@@ -238,6 +241,10 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
                 lash::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
                     panic!("key-break example does not hold the execution lane")
                 }
+                lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
+                    batch_id,
+                    ..
+                } => panic!("key-break example rows fit the window: {batch_id}"),
             },
             other => panic!("expected typed unclaimable-together refusal, got {other:?}"),
         }
@@ -301,7 +308,10 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
-            32_768,
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
+            4_096,
         )
         .await;
         let session_id = state.current_session_id();
@@ -670,7 +680,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .run()
                 .await
                 .expect("a selection naming an already-drained batch is a no-op, not an error")
-                .is_none(),
+                .settled_without_selected_turn(),
             "a selection with no claimable batch must not produce a turn"
         );
         let Json(still_queued) =
@@ -700,7 +710,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .run()
                 .await
                 .expect("run earlier workbench batch after later")
-                .is_some()
+                .executed_selected_turn()
         );
         assert!(
             target
@@ -817,7 +827,10 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
-            32_768,
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
+            4_096,
         )
         .await;
         let session_id = state.current_session_id();
@@ -1001,7 +1014,10 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
-            32_768,
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
+            4_096,
         )
         .await;
         let session_id = state.current_session_id();
@@ -1037,7 +1053,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
             batch_id: batch.batch_id.clone(),
         }];
         assert!(claimed.turn.is_some());
-        assert!(claimed.is_some());
+        assert!(claimed.executed_selected_turn());
         assert_eq!(claimed.satisfied, claimed_satisfaction);
 
         let replay = session
@@ -1051,7 +1067,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
                 batch_id: batch.batch_id,
             }];
         assert!(replay.turn.is_none());
-        assert!(replay.is_none());
+        assert!(replay.settled_without_selected_turn());
         assert_eq!(replay.satisfied, replay_satisfaction);
         let _ = std::fs::remove_dir_all(data_dir);
     });
@@ -1110,7 +1126,10 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_driver()),
-            32_768,
+            // FIG-1313 regression witness: a small model window that the old
+            // hardwired projected-request guard wedged, refusing every selected
+            // drain. It must now drain one row per wake.
+            4_096,
         )
         .await;
         let session_id = state.current_session_id();

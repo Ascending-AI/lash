@@ -7414,9 +7414,16 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
     );
 }
 
+/// FIG-1313 red-side anchor (a): the small-window wedge.
+///
+/// A 1,000-token model with roughly 900 tokens of retained history used to
+/// refuse every selected queued drain outright — the complete projected
+/// request (prompt + history + wake + action reserve) could not fit, so the
+/// queue could never drain even one short wake, while ordinary turns on the
+/// same fixture kept succeeding. Drain size is host policy now, and the shipped
+/// one-at-a-time default leaves the provider as the authority on fit.
 #[tokio::test]
-async fn selected_queued_wake_reserve_refuses_the_complete_projected_request_with_retained_history()
-{
+async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_history() {
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let captured_provider_calls = Arc::clone(&provider_calls);
     let transport = TestProvider::builder()
@@ -7425,11 +7432,7 @@ async fn selected_queued_wake_reserve_refuses_the_complete_projected_request_wit
         .complete(move |_| {
             let provider_calls = Arc::clone(&captured_provider_calls);
             async move {
-                let call = provider_calls.fetch_add(1, Ordering::SeqCst);
-                assert_eq!(
-                    call, 0,
-                    "the refused queued turn must not reach the provider"
-                );
+                provider_calls.fetch_add(1, Ordering::SeqCst);
                 Ok(LlmResponse {
                     full_text: "retained answer".to_string(),
                     parts: vec![LlmOutputPart::Text {
@@ -7487,7 +7490,7 @@ async fn selected_queued_wake_reserve_refuses_the_complete_projected_request_wit
         )
         .await
         .expect("register wake process");
-    let wake = append_process_wake_to_queue(
+    append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
         "reserve-proc",
@@ -7506,22 +7509,237 @@ async fn selected_queued_wake_reserve_refuses_the_complete_projected_request_wit
         .expect("queued wake")
         .batch_id;
 
-    let err = runtime
+    runtime
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "full-projection-reserve"),
+                named_turn_scope("root", "small-window-drain"),
             ),
             &[batch_id],
         )
         .await
-        .expect_err("retained history plus wake and reserve must be refused");
-    let super::super::turn_loop::SelectedQueuedWorkDrainError::Runtime(err) = err else {
-        panic!("projected-request refusal must remain a runtime error");
+        .expect("a short wake drains under a small window");
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list drained queue");
+    assert!(
+        pending.is_empty(),
+        "the drained wake must not remain pending: {pending:?}"
+    );
+}
+
+/// FIG-1313: an exact host selection is not resized by the automatic policy.
+///
+/// The host named this composition, so the drain policy — which answers only
+/// "how much of the pending queue should this wake take?" — is not consulted.
+/// Under the shipped one-at-a-time default a policy-sized exact claim would
+/// take one of the two requested rows, and the caller would abandon the partial
+/// claim as unclaimable: `stream_selected_queued_work` on two mergeable wakes
+/// could then never succeed, permanently and deterministically.
+#[tokio::test]
+async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_default() {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured_requests = Arc::clone(&requests);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |req| {
+            let captured_requests = Arc::clone(&captured_requests);
+            async move {
+                captured_requests.lock_recover().push(req);
+                Ok(LlmResponse {
+                    full_text: "both wakes answered".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "both wakes answered".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    // The shipped default: no `with_drain_mode`, so `DrainMode::OneAtATime`.
+    runtime.host.core.durability.queued_work_batching = crate::QueuedWorkBatchingConfig::new(100);
+    assert_eq!(
+        runtime
+            .host
+            .core
+            .durability
+            .queued_work_batching
+            .drain_policy()
+            .name(),
+        "one_at_a_time"
+    );
+    let registry = runtime
+        .host
+        .process_registry
+        .as_ref()
+        .expect("process registry")
+        .clone();
+    registry
+        .register_process(
+            crate::ProcessRegistration::new(
+                "paired-wake-proc",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+            )
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some("root".to_string())),
+        )
+        .await
+        .expect("register wake process");
+    for text in ["first paired wake", "second paired wake"] {
+        append_process_wake_to_queue(
+            registry.as_ref(),
+            store.as_ref(),
+            "paired-wake-proc",
+            crate::ProcessEventAppendRequest::new(
+                "process.wake",
+                json!({"text": text, "value": {"status": "done"}}),
+            ),
+        )
+        .await;
+    }
+
+    // Both rows share `PROCESS_WAKE_MERGE_KEY`, so they are mergeable and the
+    // automatic policy would have a choice to make here.
+    let batch_ids = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list queued wakes")
+        .into_iter()
+        .map(|batch| batch.batch_id)
+        .collect::<Vec<_>>();
+    assert_eq!(batch_ids.len(), 2);
+
+    runtime
+        .stream_selected_queued_work(
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "paired-exact-drain"),
+            ),
+            &batch_ids,
+        )
+        .await
+        .expect("an exact two-row selection is claimable")
+        .expect("the exact selection produces a turn");
+
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list queue after exact drain");
+    assert!(
+        pending.is_empty(),
+        "both selected rows must drain together: {pending:?}"
+    );
+    let requests = requests.lock_recover().clone();
+    let last = requests.last().expect("a provider call");
+    assert!(request_contains_text(last, "first paired wake"));
+    assert!(
+        request_contains_text(last, "second paired wake"),
+        "the exact composition, not a policy-sized prefix, must reach the model"
+    );
+}
+
+/// FIG-1313 red-side anchor (b): the irreducible residue stays typed.
+///
+/// A single queued row larger than the whole context window can never be
+/// drained by any policy. It must name itself and the window it needs, not
+/// wedge the queue silently.
+#[tokio::test]
+async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| async move {
+            panic!("an irreducibly oversized row must never reach the provider");
+        })
+        .build();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    runtime.host.core.durability.queued_work_batching = crate::QueuedWorkBatchingConfig::new(100);
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(
+                crate::ModelSpec::builder("mock-model")
+                    .context_window_tokens(1_000)
+                    .build()
+                    .expect("valid constrained model"),
+            ),
+            ..Default::default()
+        })
+        .await
+        .expect("constrain context window");
+
+    let registry = runtime
+        .host
+        .process_registry
+        .as_ref()
+        .expect("process registry")
+        .clone();
+    registry
+        .register_process(
+            crate::ProcessRegistration::new(
+                "oversized-proc",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryDisposition::ExternallyOwned,
+                crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+            )
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some("root".to_string())),
+        )
+        .await
+        .expect("register wake process");
+    let wake = append_process_wake_to_queue(
+        registry.as_ref(),
+        store.as_ref(),
+        "oversized-proc",
+        crate::ProcessEventAppendRequest::new(
+            "process.wake",
+            json!({"text": "w".repeat(4_000), "value": {"status": "done"}}),
+        ),
+    )
+    .await;
+
+    let batch_id = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
+        .await
+        .expect("list oversized wake")
+        .into_iter()
+        .next()
+        .expect("queued wake")
+        .batch_id;
+
+    let err = runtime
+        .stream_selected_queued_work(
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "oversized-row"),
+            ),
+            std::slice::from_ref(&batch_id),
+        )
+        .await
+        .expect_err("a row larger than the window must be refused");
+    let super::super::turn_loop::SelectedQueuedWorkDrainError::Refused { cause } = err else {
+        panic!("an oversized row must surface as a typed refusal, not a bare runtime error");
     };
-    assert_eq!(err.code, crate::RuntimeErrorCode::QueuedWork);
-    assert!(err.message.contains("complete projected request"));
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    let super::super::turn_loop::SelectedQueuedWorkDrainRefusalCause::
+        QueuedItemExceedsContextWindow {
+            batch_id: refused_batch_id,
+            required_context_tokens,
+            max_context_tokens,
+            ..
+        } = cause
+    else {
+        panic!("expected the oversized-row refusal, got {cause:?}");
+    };
+    assert_eq!(refused_batch_id, batch_id);
+    assert_eq!(max_context_tokens, 1_000);
+    assert!(required_context_tokens > max_context_tokens);
     let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
         .await
         .expect("list refused wake");

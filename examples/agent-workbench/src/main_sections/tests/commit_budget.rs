@@ -12,7 +12,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     let batching = lash::QueuedWorkBatchingConfig::new(1)
         .with_max_rows(8)
         .with_max_pending_age(std::time::Duration::from_secs(5));
-    let host = lash::durability::RuntimeHostConfig::in_memory(bounded, batching);
+    let host = lash::durability::RuntimeHostConfig::in_memory(bounded, batching.clone());
     assert_eq!(host.durability.commit_budget, bounded);
     assert_eq!(host.durability.queued_work_batching, batching);
     assert_eq!(batching.action_token_reserve(), 1);

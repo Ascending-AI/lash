@@ -26,6 +26,7 @@ mod process_worker;
 pub(crate) use process_worker::{
     ensure_process_execution_permit, release_process_execution_permit_while,
 };
+mod queued_drain_policy;
 mod queued_work_driver;
 pub mod scenario_contracts;
 mod session_api;
@@ -374,6 +375,13 @@ pub use process_worker::{
     ProcessDrainDeferred, ProcessDrainReport, ProcessExecutionConcurrencyError,
     ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
 };
+pub use queued_drain_policy::{
+    DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection,
+};
+pub(crate) use queued_drain_policy::{
+    default_queued_drain_policy, exact_selection_drain_policy, shared_drain_mode_policy,
+};
 #[cfg(any(test, feature = "testing"))]
 pub use queued_work_driver::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
 pub use queued_work_driver::{
@@ -660,7 +668,7 @@ pub struct TurnContext {
     prompt: crate::PromptLayer,
     local_cancel_origin: TurnCancelOriginHint,
     claim_checkpoint_queued_work: bool,
-    enforce_selected_queued_work_reserve: bool,
+    enforce_selected_queued_work_cost_bound: bool,
 }
 
 impl Default for TurnContext {
@@ -671,7 +679,7 @@ impl Default for TurnContext {
             prompt: crate::PromptLayer::default(),
             local_cancel_origin: TurnCancelOriginHint::default(),
             claim_checkpoint_queued_work: true,
-            enforce_selected_queued_work_reserve: false,
+            enforce_selected_queued_work_cost_bound: false,
         }
     }
 }
@@ -715,11 +723,11 @@ impl TurnContext {
 
     pub(crate) fn mark_selected_queued_work_drain(&mut self) {
         self.claim_checkpoint_queued_work = false;
-        self.enforce_selected_queued_work_reserve = true;
+        self.enforce_selected_queued_work_cost_bound = true;
     }
 
-    pub(crate) fn enforces_selected_queued_work_reserve(&self) -> bool {
-        self.enforce_selected_queued_work_reserve
+    pub(crate) fn enforces_selected_queued_work_cost_bound(&self) -> bool {
+        self.enforce_selected_queued_work_cost_bound
     }
 
     pub(crate) fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
