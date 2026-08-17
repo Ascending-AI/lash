@@ -382,7 +382,7 @@ Write one script inside standalone `<typescript>` and `</typescript>` lines. Top
 
 ```typescript
 interface ProcessDefinition<Input, Output> { readonly name: string }
-interface ProcessHandle<Output> extends PromiseLike<Output> {}
+interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
 declare const console: {
   log(...values: unknown[]): void;
   warn(...values: unknown[]): void;
@@ -789,6 +789,30 @@ mod tests {
             "the prompt stdlib inventory must come from the lowering signature table"
         );
         insta::assert_snapshot!("typescript_execution_section", section);
+    }
+
+    #[test]
+    fn process_handle_interface_advertises_id_member() {
+        let dialect = TypescriptDialect::new(
+            LashlangSurface::default(),
+            LashlangDialectServices {
+                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
+                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+                deferred_tool_resolver: None,
+                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            },
+        );
+        let prompt = dialect
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            )
+            .expect("render execution section");
+        assert!(
+            prompt.contains("interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }"),
+            "the ProcessHandle interface must advertise its `id` member: {prompt}"
+        );
     }
 
     /// The prompt's `start` declaration must teach the calling convention the

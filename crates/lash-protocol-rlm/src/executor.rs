@@ -2019,6 +2019,59 @@ mod tests {
 
     struct EmptyTypeScriptSignalToolProvider;
 
+    fn status_inspect_definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:status_inspect",
+            "status_inspect",
+            "Inspect a process status",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "process_id": { "type": "string" }
+                },
+                "required": ["process_id"]
+            }),
+            serde_json::json!({ "type": "string" }),
+        )
+        .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+            ["status_tool"],
+            "inspect",
+        ))
+    }
+
+    struct TypeScriptProcessInspectionToolProvider {
+        inspected_process_id: Arc<std::sync::Mutex<Option<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for TypeScriptProcessInspectionToolProvider {
+        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+            vec![status_inspect_definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+            (name == "status_inspect" || name == "tool:status_inspect")
+                .then(|| Arc::new(status_inspect_definition().contract()))
+        }
+
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+            if call.name == "status_inspect" || call.name == "tool:status_inspect" {
+                let pid = call
+                    .args
+                    .get("process_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                *self.inspected_process_id.lock().unwrap() = pid;
+                lash_core::ToolResult::ok(serde_json::json!("inspected-ok"))
+            } else {
+                lash_core::ToolResult::err(serde_json::json!(format!(
+                    "unknown tool `{}`",
+                    call.name
+                )))
+            }
+        }
+    }
+
     #[async_trait::async_trait]
     impl lash_core::ToolProvider for EmptyTypeScriptSignalToolProvider {
         fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
@@ -2384,6 +2437,131 @@ mod tests {
                 control: None,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation() {
+        let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+            Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
+        let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
+            lash_core::facade_support::InlineRuntimeEffectController::default()
+                .allow_process_lifetime_completion_keys(),
+        );
+        let inspected = Arc::new(std::sync::Mutex::new(None));
+        let tool_provider = Arc::new(TypeScriptProcessInspectionToolProvider {
+            inspected_process_id: Arc::clone(&inspected),
+        });
+        let tool_catalog =
+            lash_core::ToolCatalog::from_tool_definitions(vec![status_inspect_definition()]);
+        let surface = LashlangSurface::new(
+            lashlang::LashlangAbilities::default()
+                .with_processes()
+                .with_process_signals(),
+            lashlang::LashlangLanguageFeatures::default(),
+            lash_lashlang_runtime::lashlang_resources_from_tool_catalog(&tool_catalog)
+                .expect("surface resources"),
+        );
+        let session_policy = lash_core::SessionPolicy {
+            model: lash_core::ModelSpec::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("TypeScript process handle id test model"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+            Arc::new(
+                lash_core::facade_support::InlineEffectHost::new(controller.clone())
+                    .allow_process_lifetime_completion_keys(),
+            ),
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            process_env_store.clone(),
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
+            artifact_store.clone(),
+            surface.clone(),
+        )));
+        let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+        let _worker = lash_core::facade_support::DurableProcessWorker::new(
+            lash_core::facade_support::DurableProcessWorkerConfig::new(
+                Arc::new(lash_core::facade_support::PluginHost::new(
+                    lash_core::testing::test_code_protocol_factories(),
+                )),
+                runtime_host,
+                Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+                registry_dyn,
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(session_policy.clone()),
+        );
+        let processes: Arc<dyn lash_core::ProcessService> =
+            Arc::new(TypeScriptSignalProcessService {
+                registry: registry.clone(),
+                controller: controller.clone(),
+            });
+        let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
+            tool_provider,
+            tool_catalog,
+            None,
+            processes,
+            controller,
+            process_env_store,
+            lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                session_policy,
+            ),
+        );
+        let (_, response) = execute_typescript_code_with_bounds(
+            RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+            ctx,
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: r#"
+                    const worker = defineProcess({
+                      name: "worker", signals: {},
+                      run: async () => { return "done"; }
+                    });
+                    const handle = start(worker);
+                    const processId = handle.id;
+                    const status = await status_tool.inspect({ process_id: processId });
+                    finish({ id: processId, status: status });
+                "#
+                .to_string(),
+                accept_finish: true,
+            },
+            artifact_store,
+            surface,
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+        )
+        .await
+        .expect("execute TypeScript start handle id cell");
+
+        assert!(response.error.is_none(), "{:?}", response.error);
+        let finish = response.terminal_finish.expect("finish result");
+        let finish_id = finish
+            .get("id")
+            .and_then(|v| v.as_str())
+            .expect("id string");
+        assert!(!finish_id.is_empty(), "id must not be empty");
+        assert_eq!(
+            finish.get("status"),
+            Some(&serde_json::json!("inspected-ok"))
+        );
+
+        let recorded_pid = inspected
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("inspected process id");
+        assert_eq!(finish_id, recorded_pid);
     }
 
     fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
