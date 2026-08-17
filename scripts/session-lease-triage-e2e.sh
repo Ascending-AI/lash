@@ -71,6 +71,10 @@ LEASE_EVENTS = (
     "session_execution_lease.lost",
     "session_execution_lease.taken_over",
     "session_execution_lease.commit_cas_rejected",
+    "session_execution_lease.busy",
+    "session_execution_lease.busy_advisory",
+    "session_execution_lease.busy_wait",
+    "session_execution_lease.busy_gave_up",
 )
 
 
