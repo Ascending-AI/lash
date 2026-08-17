@@ -308,6 +308,12 @@ jobs:
       # Provider test support is deliberately outside each crate's default
       # feature set. Keep the shared normalization contract explicit so a
       # production-safe default cannot silently reduce conformance coverage.
+      #
+      # A bare `cargo test -p lash-provider-*` now runs these laws too: each
+      # crate carries a self dev-dependency that turns `testing` on for its test
+      # builds, plus a sentinel test that fails if the law is ever compiled out.
+      # This step stays because it pins the feature by name, independently of
+      # that wiring.
       - name: Test provider response-normalization conformance
         run: |
           cargo test -p lash-provider-openai --features testing --locked conformance

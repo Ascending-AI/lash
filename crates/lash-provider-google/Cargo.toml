@@ -37,6 +37,10 @@ tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+# Self dev-dependency so `testing` is on for every test build of this crate:
+# a bare `cargo test -p lash-provider-google` runs the conformance law instead of
+# quietly compiling it out (FIG-1266).
+lash-provider-google = { path = ".", features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
 proptest = "1"
 tokio = { workspace = true, features = ["rt", "time"] }
