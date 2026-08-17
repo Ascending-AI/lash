@@ -12,6 +12,20 @@ use crate::*;
 /// beyond the other side's transaction.
 pub(crate) const ATTACHMENT_FENCE_LOCK_NAMESPACE: i32 = 715_422;
 
+/// Test-only fault injection: how long the writer half holds its transaction
+/// open between reading a digest's condemnation phase and revoking it.
+///
+/// That gap is microseconds in production — two round trips — which is exactly
+/// why a transition running bare on the pool instead of under the per-digest
+/// advisory key can slip through it unnoticed. Widening it makes the race
+/// deterministic for
+/// [`arming_a_delete_and_a_concurrent_writer_never_both_win`](crate::tests). The
+/// fenced implementation is unaffected: a concurrent `arm` waits on the key
+/// regardless of how long the window is.
+#[cfg(test)]
+pub(crate) static FENCE_WRITER_WINDOW_DELAY_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// Take the per-digest fence lock for the rest of `tx`.
 pub(crate) async fn lock_attachment_fence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -81,6 +95,14 @@ impl AttachmentManifest for PostgresSessionStore {
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
+            #[cfg(test)]
+            if phase.is_some() {
+                let window_ms =
+                    FENCE_WRITER_WINDOW_DELAY_MS.load(std::sync::atomic::Ordering::Relaxed);
+                if window_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(window_ms)).await;
+                }
+            }
             match phase.as_deref() {
                 // The physical delete is already in flight: record nothing, so
                 // these bytes cannot land inside it.
@@ -89,14 +111,25 @@ impl AttachmentManifest for PostgresSessionStore {
                     return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
                 }
                 // Take the digest back before the sweeper can arm its delete.
+                // The predicate is repeated on the DELETE as a second belt: even
+                // if the phase read above were ever to observe a stale
+                // `condemned`, this removes only a row that is still condemned,
+                // and zero rows means the delete was armed underneath us — park
+                // rather than erase a `deleting` row.
                 Some(_) => {
-                    sqlx::query(
-                        "DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1",
+                    let revoked = sqlx::query(
+                        "DELETE FROM lash_attachment_condemnations
+                         WHERE attachment_id = $1 AND phase = 'condemned'",
                     )
                     .bind(intent.attachment_id.as_str())
                     .execute(&mut *tx)
                     .await
-                    .map_err(store_sqlx_error)?;
+                    .map_err(store_sqlx_error)?
+                    .rows_affected();
+                    if revoked == 0 {
+                        tx.commit().await.map_err(store_sqlx_error)?;
+                        return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
+                    }
                 }
                 None => {}
             }

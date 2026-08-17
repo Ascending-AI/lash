@@ -644,15 +644,23 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         &self,
         id: &lash_core::AttachmentId,
     ) -> Result<lash_core::AttachmentDeleteArming, lash_core::StoreError> {
+        // Under the same per-digest advisory key the writer half takes, and in a
+        // transaction: a bare pooled UPDATE could commit *inside* a writer's
+        // open `begin_attachment_write` — after it read `condemned` and before
+        // it deleted the row — leaving the writer to erase a `deleting` row and
+        // put bytes into an in-flight delete.
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         let armed = sqlx::query(
             "UPDATE lash_attachment_condemnations SET phase = 'deleting'
              WHERE attachment_id = $1 AND phase = 'condemned'",
         )
         .bind(id.as_str())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if armed == 1 {
             lash_core::AttachmentDeleteArming::Armed
         } else {
@@ -665,11 +673,16 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         &self,
         id: &lash_core::AttachmentId,
     ) -> Result<(), lash_core::StoreError> {
+        // Same key, same reason: the release must not interleave with a writer's
+        // open condemnation read.
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
             .bind(id.as_str())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
     }
 }

@@ -535,13 +535,22 @@ impl AttachmentManifest for Store {
                                 return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
                             }
                             // Take the digest back before the sweeper can arm.
+                            // The predicate is repeated on the DELETE so this
+                            // can only ever remove a still-condemned row, the
+                            // same belt the PostgreSQL writer wears.
                             Some(_) => {
-                                tx.execute(
-                                    "DELETE FROM attachment_condemnations
-                                     WHERE attachment_id = ?1",
-                                    params![attachment_id],
-                                )
-                                .map_err(sqlite_error)?;
+                                let revoked = tx
+                                    .execute(
+                                        "DELETE FROM attachment_condemnations
+                                         WHERE attachment_id = ?1 AND phase = 'condemned'",
+                                        params![attachment_id],
+                                    )
+                                    .map_err(sqlite_error)?;
+                                if revoked == 0 {
+                                    return Ok(
+                                        lash_core::AttachmentWriteFence::ReclamationInFlight,
+                                    );
+                                }
                             }
                             None => {}
                         }
