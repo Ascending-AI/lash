@@ -231,30 +231,28 @@ pub fn render_tool_signature(
     let input = json_schema_to_type_expr(input_schema);
     let output = output_schema.map_or(TypeExpr::Any, json_schema_to_type_expr);
     let segments = name.split('.').collect::<Vec<_>>();
+    let (operation, modules) = segments.split_last().expect("split never yields nothing");
     if segments.len() > 1
         && segments
             .iter()
             .all(|segment| is_identifier(segment) && !is_reserved_word(segment))
     {
-        let (operation, modules) = segments.split_last().expect("non-empty call path");
-        let mut declaration = format!(
-            "function {operation}(input: {}): Promise<{}>;",
+        let signature = format!(
+            "(input: {}): Promise<{}>",
             render_type(&input),
             render_type(&output)
         );
-        // Only the outermost wrapper may carry `declare`: a nested one is
-        // already inside an ambient context, and `declare namespace a { declare
-        // namespace b { … } }` is not valid TypeScript. This is prompt text the
-        // model reads as ground truth.
-        for (depth, module) in modules.iter().rev().enumerate() {
-            let ambient = if depth + 1 == modules.len() {
-                "declare "
-            } else {
-                ""
-            };
-            declaration = format!("{ambient}namespace {module} {{ {declaration} }}");
+        {
+            let mut declaration = format!("function {operation}{signature};");
+            // Only the outermost wrapper may carry `declare`: a nested one is
+            // already inside an ambient context, and `declare namespace a {
+            // declare namespace b { … } }` is not valid TypeScript. This is
+            // prompt text the model reads as ground truth.
+            for module in modules.iter().rev() {
+                declaration = format!("namespace {module} {{ {declaration} }}");
+            }
+            format!("declare {declaration}")
         }
-        declaration
     } else {
         format!(
             "declare function {}(input: {}): Promise<{}>;",
@@ -262,6 +260,60 @@ pub fn render_tool_signature(
             render_type(&input),
             render_type(&output)
         )
+    }
+}
+
+/// Confirms a TypeScript cell can address `call_path` verbatim as a tool call.
+///
+/// The check lowers the call the catalog advertises instead of re-deriving the
+/// dialect's name rules, so every reason a path is unreachable — a reserved word
+/// no cell can write in expression position, an ECMA global namespace the
+/// lowerer resolves itself, a method name the dialect refuses outright — is
+/// honored by construction and cannot drift from the lowerer. Registration calls
+/// it so a tool whose path the dialect resolves to anything other than a tool
+/// call is refused rather than advertised as a callable nothing (FIG-1444).
+pub fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), crate::Diagnostic> {
+    let segments = call_path.split('.').collect::<Vec<_>>();
+    let (operation, modules) = segments.split_last().expect("split never yields nothing");
+    if modules.is_empty() {
+        return Err(crate::Diagnostic::new(
+            crate::DiagnosticCode::UnknownBinding,
+            format!(
+                "tool call path `{call_path}` has no module path, so a TypeScript cell has no receiver to call it on"
+            ),
+            None,
+        ));
+    }
+    let program = crate::parse(&format!("finish(await {call_path}({{}}));"))?;
+    if addresses_tool(&program.main, modules, operation) {
+        return Ok(());
+    }
+    Err(crate::Diagnostic::refusal(
+        crate::DiagnosticCode::MethodUnsupported,
+        format!(
+            "tool call path `{call_path}` does not lower to a tool call in a TypeScript cell, so advertising it would promise a callable no binding provides"
+        ),
+        None,
+    ))
+}
+
+fn addresses_tool(expr: &lashlang::Expr, modules: &[&str], operation: &str) -> bool {
+    match expr {
+        lashlang::Expr::ReceiverCall {
+            receiver,
+            operation: called,
+            ..
+        } if called.as_str() == operation => match receiver.as_ref() {
+            lashlang::Expr::ResourceRef(resource) => resource
+                .path
+                .iter()
+                .map(|segment| segment.as_str())
+                .eq(modules.iter().copied()),
+            _ => false,
+        },
+        _ => expr
+            .children()
+            .any(|child| addresses_tool(child, modules, operation)),
     }
 }
 
@@ -344,89 +396,161 @@ fn is_identifier(name: &str) -> bool {
 }
 
 fn is_reserved_word(name: &str) -> bool {
-    matches!(
-        name,
-        "abstract"
-            | "accessor"
-            | "any"
-            | "as"
-            | "asserts"
-            | "async"
-            | "await"
-            | "bigint"
-            | "boolean"
-            | "break"
-            | "case"
-            | "catch"
-            | "class"
-            | "const"
-            | "constructor"
-            | "continue"
-            | "debugger"
-            | "declare"
-            | "default"
-            | "delete"
-            | "do"
-            | "else"
-            | "enum"
-            | "export"
-            | "extends"
-            | "false"
-            | "finally"
-            | "for"
-            | "from"
-            | "function"
-            | "get"
-            | "global"
-            | "if"
-            | "implements"
-            | "import"
-            | "in"
-            | "infer"
-            | "instanceof"
-            | "interface"
-            | "is"
-            | "keyof"
-            | "let"
-            | "module"
-            | "namespace"
-            | "never"
-            | "new"
-            | "null"
-            | "number"
-            | "object"
-            | "of"
-            | "override"
-            | "package"
-            | "private"
-            | "protected"
-            | "public"
-            | "readonly"
-            | "require"
-            | "return"
-            | "satisfies"
-            | "set"
-            | "static"
-            | "string"
-            | "super"
-            | "switch"
-            | "symbol"
-            | "this"
-            | "throw"
-            | "true"
-            | "try"
-            | "type"
-            | "typeof"
-            | "undefined"
-            | "unique"
-            | "unknown"
-            | "using"
-            | "var"
-            | "void"
-            | "while"
-            | "with"
-            | "yield"
-    )
+    RESERVED_WORDS.contains(&name)
+}
+
+/// Every word the renderer declines to emit in identifier position.
+///
+/// Exposed through [`reserved_words`] so the advertisement sweep can be driven
+/// by this table instead of a hand-copied one: a word added here is swept for
+/// callability without anybody remembering to extend the test.
+const RESERVED_WORDS: &[&str] = &[
+    "abstract",
+    "accessor",
+    "any",
+    "as",
+    "asserts",
+    "async",
+    "await",
+    "bigint",
+    "boolean",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "constructor",
+    "continue",
+    "debugger",
+    "declare",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "get",
+    "global",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "infer",
+    "instanceof",
+    "interface",
+    "is",
+    "keyof",
+    "let",
+    "module",
+    "namespace",
+    "never",
+    "new",
+    "null",
+    "number",
+    "object",
+    "of",
+    "override",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "require",
+    "return",
+    "satisfies",
+    "set",
+    "static",
+    "string",
+    "super",
+    "switch",
+    "symbol",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "type",
+    "typeof",
+    "undefined",
+    "unique",
+    "unknown",
+    "using",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+];
+
+/// Every word this dialect declines to render in identifier position.
+pub fn reserved_words() -> &'static [&'static str] {
+    RESERVED_WORDS
+}
+
+/// The subset of [`RESERVED_WORDS`] ECMAScript also forbids as an *expression*
+/// identifier, so a cell cannot write it as the root of a call path at all.
+///
+/// The rest of the table — `type`, `get`, `any`, `string`, … — is reserved only
+/// where TypeScript expects a declaration name; a cell writes those as plain
+/// identifiers and the parser accepts them. Keeping the two apart is what lets
+/// a module path spelled with a contextual keyword be advertised the way it is
+/// actually called.
+const EXPRESSION_RESERVED_WORDS: &[&str] = &[
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "null",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+];
+
+fn is_expression_reserved_word(name: &str) -> bool {
+    EXPRESSION_RESERVED_WORDS.contains(&name)
 }
 
 #[cfg(test)]

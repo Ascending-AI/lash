@@ -633,6 +633,7 @@ impl RlmDialectSession for TypescriptDialectSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::plugin::ToolCatalogContext;
     use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
 
     #[test]
@@ -1077,5 +1078,290 @@ mod tests {
                 assert_eq!(response.error, None);
                 assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
             });
+    }
+    /// Every identifier the rendered catalog advertises must link to a binding.
+    ///
+    /// The instance defect — a reserved-word operation advertised only as
+    /// `__lash_tool_<hex>`, which rejects with `TS_UNKNOWN_BINDING` for itself —
+    /// is one member of a class: any name the renderer spells differently from
+    /// the way a cell must call it is a promise the catalog cannot keep. This
+    /// sweep holds both halves of the contract over every hazardous name in
+    /// every path position: registration refuses the paths no cell can address,
+    /// and every declaration rendered for the paths it admits is callable
+    /// exactly as advertised (FIG-1444).
+    #[test]
+    fn every_advertised_catalog_identifier_is_callable_verbatim() {
+        let mut hazards = lash_typescript::reserved_words().to_vec();
+        // Names the lowerer resolves itself rather than dispatching: the promise
+        // chaining refusal (`then`/`catch`/`finally`) and the instance stdlib
+        // collision matrix FIG-1443 fixed.
+        hazards.extend(["then", "catch", "finally"]);
+        hazards.extend(lash_typescript::accepted_instance_methods());
+        // Roots the lowerer treats as ECMA global namespaces, so a tool module
+        // can never be addressed under them.
+        hazards.extend([
+            "Math",
+            "Date",
+            "Promise",
+            "String",
+            "Object",
+            "Symbol",
+            "globalThis",
+            "Intl",
+            "Error",
+            "Set",
+            "URL",
+            "RegExp",
+            "JSON",
+            "Number",
+            "Array",
+            "Map",
+            "console",
+            "crypto",
+        ]);
+        hazards.sort_unstable();
+        hazards.dedup();
+
+        let candidates = hazards
+            .iter()
+            .flat_map(|word| {
+                [
+                    (vec![word.to_string()], "op".to_string()),
+                    (
+                        vec!["outer".to_string(), word.to_string()],
+                        "op".to_string(),
+                    ),
+                    (vec!["probe".to_string()], word.to_string()),
+                    (
+                        vec!["probe".to_string(), "inner".to_string()],
+                        word.to_string(),
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        let mut admitted = Vec::new();
+        let mut refused = Vec::new();
+        for (modules, operation) in &candidates {
+            let call_path = format!("{}.{operation}", modules.join("."));
+            let name = format!("t_{}", call_path.replace('.', "_"));
+            let tool = lash_core::ToolDefinition::raw(
+                format!("tool:test/{name}"),
+                name.clone(),
+                "Probe",
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": { "id": { "type": "string" } },
+                    "required": ["id"]
+                }),
+                serde_json::json!({ "type": "string" }),
+            )
+            .with_lashlang_binding(LashlangToolBinding::new(
+                modules.clone(),
+                operation.as_str(),
+            ));
+            let registration = crate::tool_catalog::rlm_tool_catalog(ToolCatalogContext {
+                session_id: "session".to_string(),
+                tools: vec![tool.manifest()],
+                resolve_contract: None,
+                tool_access: lash_core::SessionToolAccess::default(),
+                subagent: None,
+                extensions: Default::default(),
+            });
+            match registration {
+                Ok(_) => admitted.push((tool, modules.clone(), operation.clone(), call_path)),
+                Err(error) => {
+                    assert!(
+                        error.to_string().contains("no TypeScript cell can call"),
+                        "{call_path} was refused for an unrelated reason: {error}"
+                    );
+                    refused.push(call_path);
+                }
+            }
+        }
+
+        // The refusals are the paths a cell cannot write or the lowerer claims
+        // for itself; every one of them used to be advertised as a callable.
+        for expected in [
+            "delete.op",
+            "new.op",
+            "Math.op",
+            "probe.then",
+            "probe.catch",
+        ] {
+            assert!(
+                refused.iter().any(|path| path == expected),
+                "registration must refuse `{expected}`: {refused:?}"
+            );
+        }
+        assert!(
+            admitted.len() > 200,
+            "the sweep must admit the bulk of the matrix, not just a handful: {}",
+            admitted.len()
+        );
+
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(
+            admitted.iter().map(|(tool, ..)| tool.clone()).collect(),
+        );
+        let section = TypescriptDialect::prompt_only(LashlangSurface::default())
+            .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
+            .expect("render execution section");
+        let declarations = tool_declarations(&section);
+        assert_eq!(
+            declarations.len(),
+            admitted.len(),
+            "every admitted tool must be advertised once"
+        );
+
+        let advertised = declarations
+            .iter()
+            .map(|declaration| advertised_call_path(declaration))
+            .collect::<std::collections::BTreeSet<_>>();
+        for (_, modules, operation, call_path) in &admitted {
+            assert!(
+                advertised.contains(call_path),
+                "`{call_path}` is in the catalog but is not advertised under its call path: {declarations:?}"
+            );
+            lash_typescript::ensure_tool_call_path_addressable(call_path)
+                .expect("an admitted path is addressable");
+            assert_eq!(
+                dispatch_through(call_path, modules, operation),
+                vec![(modules.join("."), operation.clone())],
+                "`{call_path}` must dispatch the binding it advertises"
+            );
+        }
+    }
+
+    /// The declarations inside the rendered `### Tools` block, one per tool.
+    fn tool_declarations(section: &str) -> Vec<String> {
+        let tools = section
+            .split_once("### Tools")
+            .expect("a catalog with tools renders a Tools section")
+            .1;
+        let block = tools
+            .split_once("```typescript\n")
+            .expect("the Tools section renders a TypeScript block")
+            .1
+            .split_once("\n```")
+            .expect("the TypeScript block is closed")
+            .0;
+        block.lines().map(str::to_string).collect()
+    }
+
+    /// The call path a rendered declaration advertises.
+    ///
+    /// Deliberately parses the rendered text rather than asking the renderer
+    /// what it meant: the sweep's whole claim is that the text a model reads
+    /// names something callable, and a shape this does not recognize is a new
+    /// advertisement form that has to be judged, not skipped.
+    fn advertised_call_path(declaration: &str) -> String {
+        let mut rest = declaration
+            .trim()
+            .strip_prefix("declare ")
+            .unwrap_or_else(|| panic!("unrecognized declaration: {declaration}"));
+        let mut segments = Vec::new();
+        while let Some(tail) = rest.strip_prefix("namespace ") {
+            let (module, tail) = tail
+                .split_once(" {")
+                .unwrap_or_else(|| panic!("unrecognized namespace: {declaration}"));
+            segments.push(module.trim().to_string());
+            rest = tail.trim_start();
+        }
+        if let Some(tail) = rest.strip_prefix("function ") {
+            let (operation, _) = tail
+                .split_once('(')
+                .unwrap_or_else(|| panic!("unrecognized function: {declaration}"));
+            segments.push(operation.trim().to_string());
+        } else if let Some(tail) = rest.strip_prefix("const ") {
+            // `const root: { module: { … { operation(input: …): … } } };` — the
+            // tail is a chain of property levels ending in a callable member.
+            let mut rest = tail;
+            loop {
+                let member = rest
+                    .find(|character| matches!(character, ':' | '('))
+                    .unwrap_or_else(|| panic!("unrecognized const member: {declaration}"));
+                let (name, tail) = rest.split_at(member);
+                segments.push(name.trim().trim_matches('"').to_string());
+                if tail.starts_with('(') {
+                    break;
+                }
+                rest = tail[1..].trim_start().trim_start_matches('{').trim_start();
+            }
+        } else {
+            panic!("unrecognized declaration shape: {declaration}");
+        }
+        segments.join(".")
+    }
+
+    /// Links and runs the advertised call against a host binding for
+    /// `modules`/`operation`, returning what the host was asked to dispatch.
+    fn dispatch_through(
+        call_path: &str,
+        modules: &[String],
+        operation: &str,
+    ) -> Vec<(String, String)> {
+        struct RecordingHost {
+            dispatched: std::sync::Mutex<Vec<(String, String)>>,
+        }
+        impl lashlang::ExecutionHost for RecordingHost {
+            async fn perform(
+                &self,
+                op: lashlang::AbilityOp,
+            ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+                match op {
+                    lashlang::AbilityOp::ResourceOperation(call) => {
+                        let alias = match &call.receiver {
+                            lashlang::Value::Resource(handle) => handle.alias.clone(),
+                            other => format!("{other:?}"),
+                        };
+                        self.dispatched
+                            .lock()
+                            .expect("dispatched lock")
+                            .push((alias, call.operation));
+                        Ok(lashlang::AbilityResult::Value(lashlang::Value::String(
+                            "tool-ok".into(),
+                        )))
+                    }
+                    lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
+                    other => Err(lashlang::ExecutionHostError::new(format!(
+                        "unexpected ability {other:?}"
+                    ))),
+                }
+            }
+        }
+
+        let mut catalog = lashlang::LashlangHostCatalog::new();
+        catalog
+            .add_module_operation_binding(
+                modules.to_vec(),
+                "ToolModule",
+                operation,
+                format!("tool:test/{}", modules.join("_")),
+                lashlang::ResourceOperationBinding {
+                    input_ty: lashlang::TypeExpr::Any,
+                    output_ty: lashlang::TypeExpr::Any,
+                    output_from_input: None,
+                },
+            )
+            .expect("operation binding");
+        let environment =
+            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+        let source = format!(r#"finish(await {call_path}({{ id: "m1" }}));"#);
+        let linked = lash_typescript::link(&source, &environment)
+            .unwrap_or_else(|error| panic!("`{source}` must link: {error:?}"));
+        let host = RecordingHost {
+            dispatched: std::sync::Mutex::new(Vec::new()),
+        };
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime")
+            .block_on(lashlang::execute(
+                &lash_typescript::compile_linked(&linked),
+                &mut lashlang::State::new(),
+                &host,
+            ))
+            .unwrap_or_else(|error| panic!("`{source}` must execute: {error:?}"));
+        host.dispatched.lock().expect("dispatched lock").clone()
     }
 }

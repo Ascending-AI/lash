@@ -54,7 +54,10 @@ pub fn accepted_instance_methods() -> &'static [&'static str] {
 pub use diagnostics::{
     CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan, format_diagnostic,
 };
-pub use signatures::{render_stdlib_contract, render_tool_signature, stdlib_name_count};
+pub use signatures::{
+    ensure_tool_call_path_addressable, render_stdlib_contract, render_tool_signature,
+    reserved_words, stdlib_name_count,
+};
 
 /// Parses and lowers a TypeScript dialect program into the VM's shared AST.
 pub fn parse(source: &str) -> Result<lashlang::Program, Diagnostic> {
