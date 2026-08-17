@@ -40,6 +40,10 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+# Self dev-dependency so `testing` is on for every test build of this crate:
+# a bare `cargo test -p lash-provider-openai` runs the conformance law instead of
+# quietly compiling it out (FIG-1266).
+lash-provider-openai = { path = ".", features = ["testing"] }
 # The runtime facade, so the Codex WebSocket path is proven end-to-end through
 # a normal `LashCore` turn in `tests/codex_websocket_runtime.rs`.
 lash = { workspace = true }
