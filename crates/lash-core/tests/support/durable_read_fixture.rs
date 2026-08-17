@@ -1063,9 +1063,12 @@ pub fn assert_committed_expectations_match_current_writes(committed: &[u8], writ
         "durable fixture write-shape drift: this build writes durable payloads the committed \
          expectations do not carry.{}\nDecide first whether the new write shape is intended. If \
          it is not, revert the shape change: regenerating here would absorb the drift into the \
-         committed surface, which is the failure FIG-1433 closed. Only once the change is \
-         intended, bump DURABLE_READ_FIXTURE_SCHEMA_VERSION and regenerate both backends:\n  \
-         {REGENERATION_COMMANDS}",
+         committed surface, which is the failure FIG-1433 closed. Drift that appears or \
+         disappears between runs (without a code change) means nondeterminism in the fixture \
+         inputs — e.g. a non-empty HashMap reaching serialization, or a tie in the `ORDER BY \
+         generation` read — and must be fixed at the source, NOT by regenerating the fixture. \
+         Only once the change is intended, bump DURABLE_READ_FIXTURE_SCHEMA_VERSION and \
+         regenerate both backends:\n  {REGENERATION_COMMANDS}",
         rendered_expectation_drift(committed, written_now)
     );
 }

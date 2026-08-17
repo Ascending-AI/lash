@@ -51,6 +51,11 @@ registrations are the same shape of gap: `registration_fingerprint` is only
 compared against a re-registration by the same build, so it agrees with itself
 whatever the payload became.
 
+It also does not cover a new field whose fixture value is skipped during
+serialization (e.g. a `None` that serde skips): such a field is invisible to the
+law unless a fixture scenario populates it. The `prompt` field was caught only
+because it serialized as `Some(empty)`.
+
 Closing those gaps means extending `ExpectedFixture`, which necessarily
 regenerates `expected.json` and moves the fixture declaration, so it is follow-up
 work on its own ticket rather than something to bundle into an unrelated change.
@@ -103,8 +108,10 @@ read the resulting records through supported surfaces.
 ## Regeneration policy
 
 Regeneration is deterministic: the generator fixes its clock, signing secret,
-lease nonces, trigger incarnation, operation ids, and other identity inputs. Two
-consecutive regenerations must produce byte-identical artifacts.
+lease nonces, trigger incarnation, operation ids, and other identity inputs.
+Determinism is now verified cross-environment (Postgres 14/16/18 and across runner
+env/TZ/locale), not just two-consecutive-run on one machine: regenerations must
+produce byte-identical artifacts.
 
 When a read-back test fails, use this decision procedure:
 
