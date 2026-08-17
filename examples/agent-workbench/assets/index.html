@@ -1348,7 +1348,7 @@
       border-left: 1px solid var(--line);
       background: var(--form);
       display: grid;
-      grid-template-rows: auto auto auto minmax(0, 1fr);
+      grid-template-rows: auto auto auto auto minmax(0, 1fr);
       min-height: 0;
     }
 
@@ -1407,6 +1407,91 @@
       border-bottom: 1px solid var(--line);
       background: oklch(0.74 0.155 65 / 0.035);
     }
+
+    .approval-ledger {
+      max-height: 38vh;
+      overflow: auto;
+      padding: var(--space-sm) var(--space-lg);
+      border-bottom: 1px solid var(--line);
+      background: var(--error-tint);
+    }
+
+    .approval-list { display: grid; gap: var(--space-xs); }
+
+    .approval-card {
+      display: grid;
+      gap: var(--space-xs);
+      padding: var(--space-sm);
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--form-deep);
+    }
+
+    .approval-tool {
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      color: var(--chalk);
+      overflow-wrap: anywhere;
+    }
+
+    .approval-args {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--chalk-mid);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .approval-meta {
+      display: grid;
+      gap: var(--space-3xs);
+      font-size: 0.7rem;
+      color: var(--ash-text);
+    }
+
+    .approval-key {
+      font-family: var(--font-mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .approval-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
+
+    .approval-approve,
+    .approval-deny {
+      min-height: 2rem;
+      padding: 0 var(--space-sm);
+      border-radius: 4px;
+      font-family: var(--font-ui);
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .approval-approve:hover { background: var(--sodium); color: var(--form-deep); }
+    .approval-deny:hover { background: var(--error); color: var(--form-deep); }
+    .approval-approve:active,
+    .approval-deny:active { transform: translateY(1px); }
+    .approval-approve:focus-visible,
+    .approval-deny:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+    .approval-approve {
+      border: 1px solid var(--sodium);
+      background: var(--sodium-tint);
+      color: var(--sodium-soft);
+    }
+
+    .approval-deny {
+      border: 1px solid var(--error);
+      background: var(--error-tint);
+      color: var(--error);
+    }
+
+    .approval-approve:disabled,
+    .approval-deny:disabled { opacity: 0.5; cursor: wait; }
 
     .queued-work-heading {
       display: flex;
@@ -2556,6 +2641,13 @@
           <input type="checkbox" id="filterForeground" /> foreground
         </label>
       </div>
+      <section class="approval-ledger" aria-label="Pending approvals">
+        <div class="queued-work-heading">
+          <span>approvals</span>
+          <span id="approvalCount">0 pending</span>
+        </div>
+        <div id="approvalList" class="approval-list"></div>
+      </section>
       <section class="queued-work-ledger" aria-label="Pending queued work">
         <div class="queued-work-heading">
           <span>queued batches</span>
@@ -2607,6 +2699,8 @@
     const workCount = document.getElementById("workCount");
     const queuedWorkList = document.getElementById("queuedWorkList");
     const queuedWorkCount = document.getElementById("queuedWorkCount");
+    const approvalList = document.getElementById("approvalList");
+    const approvalCount = document.getElementById("approvalCount");
     const workFilterProcess = document.getElementById("filterProcess");
     const workFilterForeground = document.getElementById("filterForeground");
     // Processes are the durable, interesting work; foreground Lashlang is every
@@ -5439,6 +5533,7 @@
       renderShellStatus();
       renderUsage(state.usage);
       renderQueuedWork(state.queued_work || []);
+      renderApprovals(state.pending_approvals || []);
       renderStateTranscript(state);
       rebuildExecutionScorecard(
         executionScorecardState,
@@ -5724,6 +5819,98 @@
        an in-progress text selection and resets a copy control mid-flash, so an
        unchanged payload is not re-rendered. */
     let lastQueuedWorkSignature = "";
+
+    function formatApprovalAge(ageMs) {
+      const seconds = Math.max(0, Math.floor((Number(ageMs) || 0) / 1000));
+      if (seconds < 60) return seconds + "s";
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return minutes + "m";
+      return Math.floor(minutes / 60) + "h";
+    }
+
+    function renderApprovals(approvals) {
+      approvalList.innerHTML = "";
+      approvalCount.textContent = approvals.length + " pending";
+      if (!approvals.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "no changes awaiting sign-off";
+        approvalList.appendChild(empty);
+        return;
+      }
+      for (const approval of approvals) {
+        const card = document.createElement("article");
+        card.className = "approval-card";
+        card.dataset.approvalKey = approval.key;
+
+        const tool = document.createElement("div");
+        tool.className = "approval-tool";
+        tool.textContent = approval.tool;
+
+        const args = document.createElement("pre");
+        args.className = "approval-args";
+        args.textContent = JSON.stringify(approval.arguments, null, 2);
+
+        const meta = document.createElement("div");
+        meta.className = "approval-meta";
+        const session = document.createElement("span");
+        session.textContent = "session " + approval.requesting_session;
+        const age = document.createElement("span");
+        age.textContent = "waiting " + formatApprovalAge(approval.age_ms);
+        const key = document.createElement("span");
+        key.className = "approval-key";
+        key.textContent = "key " + approval.key;
+        key.title = approval.key;
+        meta.append(session, age, key);
+
+        const actions = document.createElement("div");
+        actions.className = "approval-actions";
+        const approve = document.createElement("button");
+        approve.className = "approval-approve";
+        approve.type = "button";
+        approve.textContent = "approve";
+        approve.setAttribute("aria-label", "Approve " + approval.tool);
+        const deny = document.createElement("button");
+        deny.className = "approval-deny";
+        deny.type = "button";
+        deny.textContent = "deny";
+        deny.setAttribute("aria-label", "Deny " + approval.tool);
+
+        async function decide(decision, button) {
+          approve.disabled = true;
+          deny.disabled = true;
+          button.textContent = decision === "approve" ? "approving" : "denying";
+          try {
+            const response = await fetch(
+              "/api/approvals/" + encodeURIComponent(approval.key) + "/" + decision,
+              { method: "POST" }
+            );
+            if (!response.ok) throw new Error("approval decision failed");
+            await loadState();
+          } catch (_) {
+            approve.disabled = false;
+            deny.disabled = false;
+            button.textContent = "retry " + decision;
+            approvalCount.textContent = decision + " failed — retry";
+          }
+        }
+        approve.addEventListener("click", () => decide("approve", approve));
+        deny.addEventListener("click", () => decide("deny", deny));
+        actions.append(approve, deny);
+        card.append(tool, args, meta, actions);
+        approvalList.appendChild(card);
+      }
+    }
+
+    async function refreshApprovals() {
+      try {
+        const response = await fetch("/api/approvals");
+        if (!response.ok) throw new Error("approval request failed");
+        renderApprovals(await response.json());
+      } catch (_) {
+        approvalCount.textContent = "updates paused";
+      }
+    }
 
     async function refreshQueuedWork() {
       try {
@@ -6882,6 +7069,7 @@
       restartEventStreams();
       refreshWork();
       refreshQueuedWork();
+      refreshApprovals();
     });
 
     /* Paint the pre-hydration state before any request is in flight: the shell
@@ -6893,12 +7081,14 @@
     loadState().catch(() => {}).finally(() => {
       refreshWork();
       refreshQueuedWork();
+      refreshApprovals();
       loadTriggers();
       loadSessions();
       restartEventStreams();
     });
     setInterval(refreshWork, 1400);
     setInterval(refreshQueuedWork, 1400);
+    setInterval(refreshApprovals, 1400);
     setInterval(loadTriggers, 1400);
     setInterval(loadAccounts, 1500);
     /* Slower than the other rails: the roster reads each session's recorded

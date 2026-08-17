@@ -399,6 +399,7 @@
                 subagent_registry,
                 deferred_tools::WorkbenchDeferredTools::in_memory()
                     .expect("open deferred-tool grants"),
+                approvals::WorkbenchApprovals::in_memory().expect("open approval ledger"),
             );
             let host = lash::plugins::PluginHost::new(plugins.into_factories());
             let session = host

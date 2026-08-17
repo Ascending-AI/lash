@@ -1,3 +1,4 @@
+mod approvals;
 mod deferred_tools;
 mod execution_graphs;
 mod failure_provider;
@@ -95,6 +96,7 @@ include!("main_sections/state.rs");
 include!("main_sections/attachment_media.rs");
 include!("main_sections/chat_projection.rs");
 include!("main_sections/routes.rs");
+include!("main_sections/approval_routes.rs");
 include!("main_sections/session_routes.rs");
 include!("main_sections/turn_ingress.rs");
 include!("main_sections/admin.rs");

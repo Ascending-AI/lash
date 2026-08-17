@@ -206,6 +206,7 @@
             mail_world: mail::MailWorld::new(),
             active_turns: active_turns.clone(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let target_session_id = state.current_session_id();
         let session_store =

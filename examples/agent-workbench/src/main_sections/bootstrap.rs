@@ -15,12 +15,14 @@ fn configure_workbench_plugins(
     mail_world: mail::MailWorld,
     subagent_registry: Arc<lash_subagents::CapabilityRegistry>,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    approvals: approvals::WorkbenchApprovals,
 ) {
     plugins.push(Arc::new(RollingHistoryPluginFactory::default()));
     plugins.push(Arc::new(
         WorkbenchPluginFactory::new(tavily_api_key)
             .with_mail_world(mail_world)
-            .with_deferred_tools(deferred_tools),
+            .with_deferred_tools(deferred_tools)
+            .with_approvals(approvals),
     ));
     plugins.push(Arc::new(
         lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
@@ -168,6 +170,8 @@ async fn async_main() -> AnyhowResult<()> {
         data_dir.join("deferred-tool-grants.db"),
     )
     .context("open workbench deferred-tool grants")?;
+    let approvals = approvals::WorkbenchApprovals::open(data_dir.join("approvals.db"))
+        .context("open workbench approval ledger")?;
     // Best-effort freshness feed for appended process events (ADR 0017). The
     // sink is a freshness overlay on the durable event log, never truth: no
     // delivery guarantee, and a consumer needing completeness reconciles from
@@ -269,6 +273,7 @@ async fn async_main() -> AnyhowResult<()> {
                 mail_world.clone(),
                 subagent_registry,
                 deferred_tools.clone(),
+                approvals.clone(),
             );
         })
         .process_work_driver(process_work_driver.clone())
@@ -314,6 +319,7 @@ async fn async_main() -> AnyhowResult<()> {
         mail_world,
         active_turns,
         authorization: WorkbenchAuthorization::allow_all(),
+        approvals,
     };
     restate::spawn_restate_endpoint(
         restate_endpoint_addr,
@@ -344,6 +350,9 @@ async fn async_main() -> AnyhowResult<()> {
         .route("/", get(index))
         .route("/healthz", get(healthz))
         .route("/api/state", get(app_state))
+        .route("/api/approvals", get(list_approvals))
+        .route("/api/approvals/{key}/approve", post(approve_wait))
+        .route("/api/approvals/{key}/deny", post(deny_wait))
         .route("/api/events", get(session_events))
         .route("/api/observations", get(session_observations))
         .route("/api/turn", post(send_turn))

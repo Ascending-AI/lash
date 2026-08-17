@@ -5,6 +5,7 @@ struct WorkbenchPluginFactory {
     config_changes: WorkbenchConfigChanges,
     context_budget: WorkbenchContextBudget,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    approvals: approvals::WorkbenchApprovals,
 }
 
 impl WorkbenchPluginFactory {
@@ -17,6 +18,8 @@ impl WorkbenchPluginFactory {
             context_budget: WorkbenchContextBudget::default(),
             deferred_tools: deferred_tools::WorkbenchDeferredTools::in_memory()
                 .expect("open in-memory deferred-tool grants"),
+            approvals: approvals::WorkbenchApprovals::in_memory()
+                .expect("open in-memory approval ledger"),
         }
     }
 
@@ -30,6 +33,11 @@ impl WorkbenchPluginFactory {
         deferred_tools: deferred_tools::WorkbenchDeferredTools,
     ) -> Self {
         self.deferred_tools = deferred_tools;
+        self
+    }
+
+    fn with_approvals(mut self, approvals: approvals::WorkbenchApprovals) -> Self {
+        self.approvals = approvals;
         self
     }
 
@@ -80,6 +88,7 @@ impl PluginFactory for WorkbenchPluginFactory {
             config_changes: self.config_changes.clone(),
             context_budget: self.context_budget.clone(),
             deferred_tools: self.deferred_tools.clone(),
+            approvals: self.approvals.clone(),
         }))
     }
 }
@@ -91,6 +100,7 @@ struct WorkbenchSessionPlugin {
     config_changes: WorkbenchConfigChanges,
     context_budget: WorkbenchContextBudget,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
+    approvals: approvals::WorkbenchApprovals,
 }
 
 impl SessionPlugin for WorkbenchSessionPlugin {
@@ -141,6 +151,7 @@ impl SessionPlugin for WorkbenchSessionPlugin {
             .provider(self.deferred_tools.search_provider())?;
         reg.tools()
             .provider(self.deferred_tools.execution_provider())?;
+        reg.tools().provider(self.approvals.provider())?;
         reg.tools().provider(Arc::new(mail::MockMailProvider::new(
             self.mail_world.clone(),
         )))?;

@@ -1253,6 +1253,7 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       sessionDialect: element(),
       renderUsage() {},
       renderQueuedWork() {},
+      renderApprovals() {},
       renderStateTranscript() {},
       renderIngressReceipt() {},
       recordTurnInputApplications() {},

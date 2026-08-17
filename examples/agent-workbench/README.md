@@ -202,6 +202,24 @@ later turns and after `just agent-workbench-restart` reopens the same data
 directory. See [`runbooks/workbench-deferred-tools`](../../runbooks/workbench-deferred-tools/runbook.md)
 for the real-model, three-layer restart check.
 
+### Durable approval is host policy
+
+The resident `ops.apply_change` demo tool shows the approval pattern without
+adding an approval concept to Lash. The provider calls
+`ToolContext::completion_key()`, writes the key, tool arguments, requesting
+session, and request time to the host-owned `<data-dir>/approvals.db`, and
+returns `ToolResult::Pending`. The right-rail approval ledger and
+`GET /api/approvals` list those waits; approve and deny actions resolve the
+existing key through `LashCore::completions()`.
+
+Approval is host policy. Lash core will never grow a manifest approval flag or
+approval/revert API: hosts decide which tools need sign-off, how operators are
+authorized, and what approve or deny means. Lash supplies only the durable
+completion-key park/resume primitive. The workbench's local authorization is
+an allow-all example, not a production admin boundary. See
+[`runbooks/workbench-approval`](../../runbooks/workbench-approval/runbook.md)
+for approve, deny, and parked-restart checks.
+
 The **stop turn** button (or **Esc**) cooperatively cancels the exact running
 turn: `POST /api/turn/cancel` sends its stable session and turn address through
 `TurnWorkDriver::request_cancel`. The request lives on Lash's durable

@@ -95,6 +95,7 @@ mod process_work_tests {
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
 
         // Register, append one non-terminal event, and complete — all through
@@ -286,6 +287,7 @@ mod process_work_tests {
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let session_id = state.current_session_id();
         let process_id = "process-survives-session-delete";
@@ -953,6 +955,7 @@ mod process_work_tests {
             mail_world: mail::MailWorld::new(),
             active_turns: ActiveTurns::default(),
             authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
         };
         let deleted_session_id = state.current_session_id();
         let surviving_session_id = format!("{deleted_session_id}-survivor");
