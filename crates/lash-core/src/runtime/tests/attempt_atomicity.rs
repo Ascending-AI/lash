@@ -19,6 +19,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use lash_sansio::sync::MutexExt as _;
+
 use crate::ProcessRegistry as _;
 use crate::testing::attempt_sentinel::{AttemptAtomicitySentinel, NestedJournalLedger};
 
@@ -29,6 +31,9 @@ const CALL_ID: &str = "attempt-atomicity-call";
 const LIVE_PROCESS: &str = "attempt-atomicity-live";
 const TERMINAL_PROCESS: &str = "attempt-atomicity-terminal";
 const EXTERNAL_PROCESS: &str = "attempt-atomicity-external";
+const DIRECT_MODEL: &str = "mock-model";
+const DIRECT_TEXT: &str = "unstubbed direct answer";
+const FOLLOW_ON_EFFECT_ID: &str = "attempt-atomicity-follow-on";
 
 /// A controller-owned tier stand-in with an explicit journal-addressing model.
 struct ControllerOwnedTier {
@@ -103,9 +108,31 @@ struct Fixtures {
     trigger_store: Arc<crate::facade_support::InMemoryTriggerStore>,
     lease: crate::ProcessLease,
     child_process_starts: Arc<AtomicUsize>,
+    /// A real runtime, kept alive so the direct-completion client handed to the
+    /// matrix is the production one. A stubbed client answers before the
+    /// position classification runs, which would make every direct-completion
+    /// row pass by construction instead of exercising the routing decision.
+    runtime: crate::runtime::LashRuntime,
+}
+
+fn direct_mock_call() -> super::helpers::MockCall {
+    super::helpers::MockCall {
+        stream_events: Vec::new(),
+        response: Ok(crate::LlmResponse {
+            full_text: DIRECT_TEXT.to_string(),
+            ..crate::LlmResponse::default()
+        }),
+    }
 }
 
 async fn fixtures() -> Fixtures {
+    let runtime = super::helpers::runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(crate::testing::EmptyToolProvider),
+        super::helpers::mock_provider(vec![direct_mock_call(), direct_mock_call()]),
+        crate::runtime::EmbeddedRuntimeHost::new(super::helpers::test_runtime_host_config()),
+    )
+    .await;
     let host = Arc::new(
         crate::testing::MockSessionManager::default().with_tool_registry(
             crate::ToolRegistry::from_tool_provider(Arc::new(crate::testing::EmptyToolProvider))
@@ -190,6 +217,7 @@ async fn fixtures() -> Fixtures {
         trigger_store,
         lease,
         child_process_starts: Arc::new(AtomicUsize::new(0)),
+        runtime,
     }
 }
 
@@ -235,6 +263,15 @@ fn tool_context_with_provider<'run>(
         .expect("build attempt-atomicity plugin session");
     let processes = crate::testing::effect_backed_process_service(Arc::clone(&fixtures.registry));
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
+    let effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
+    // The production client, minted against the very controller the sentinel
+    // wraps: an `Independent` classification therefore shows up in the ledger
+    // as a real crossing instead of being swallowed by a stub.
+    let direct_completions = fixtures
+        .runtime
+        .runtime_session_services()
+        .expect("attempt-atomicity session manager")
+        .direct_completion_client(effect_controller.clone(), Some(TURN.to_string()));
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools,
@@ -249,24 +286,8 @@ fn tool_context_with_provider<'run>(
             Some(Arc::clone(&fixtures.registry)),
             None,
         )),
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
-        // Production runs a tool-position direct completion locally
-        // (`DirectExecutionPosition::ToolAttempt` in
-        // `runtime/session_manager/direct.rs`), never through the controller.
-        // The test source stands in for the provider, not for the routing
-        // decision.
-        direct_completions: crate::DirectCompletionClient::from_fn(|_request, _usage_source| {
-            Ok(crate::plugin::DirectCompletion {
-                text: "direct ok".to_string(),
-                usage: crate::TokenUsage::default(),
-                llm_call: crate::LlmCallRecord {
-                    call_id: crate::LlmCallId("attempt-atomicity-direct".to_string()),
-                    label: None,
-                    attempts: Vec::new(),
-                    replay_drops: Vec::new(),
-                },
-            })
-        }),
+        effect_controller,
+        direct_completions,
         parent_invocation: Some(attempt_invocation()),
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
@@ -438,6 +459,22 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
                 .await;
             let _ = attempt.session_id();
             let _ = attempt.execution_scope_id();
+            // FIG-1486: the sealed leaf environment also owns a direct-completion
+            // capability. It carries the recorded attempt's invocation, so the
+            // completion runs locally; classified `Independent` it would journal
+            // a second entry inside the attempt and wedge the redrive.
+            assert_eq!(
+                attempt
+                    .direct_completions()
+                    .complete(
+                        crate::DirectRequest::text(DIRECT_MODEL, "attempt direct completion"),
+                        "attempt-atomicity",
+                    )
+                    .await
+                    .expect("attempt-context direct completion stays local")
+                    .text,
+                DIRECT_TEXT
+            );
             Ok(crate::RuntimeEffectOutcome::ToolAttempt {
                 launch: Box::new(crate::ToolAttemptLaunch::Done {
                     record: Box::new(crate::ToolCallRecord {
@@ -577,16 +614,13 @@ async fn legacy_tool_context_guards_and_journal_free_routes_hold_inside_recorded
             assert_eq!(
                 tool.direct_completions()
                     .complete(
-                        crate::DirectRequest::text(
-                            "attempt-atomicity-model",
-                            "legacy direct completion",
-                        ),
+                        crate::DirectRequest::text(DIRECT_MODEL, "legacy direct completion"),
                         "attempt-atomicity",
                     )
                     .await
                     .expect("direct completion stays local")
                     .text,
-                "direct ok"
+                DIRECT_TEXT
             );
 
             let events = tool.process_events();
@@ -1106,5 +1140,360 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
     assert_eq!(
         redriven_frames, command_frames,
         "redrive reuses the recorded command frame instead of taking a live-state branch"
+    );
+}
+
+/// One recorded journal entry: the ordinal identity a redrive compares against,
+/// plus the outcome the entry replays.
+struct JournalEntry {
+    identity: String,
+    /// `None` until the command settles: a real journal holds the command at
+    /// its ordinal from the moment it is issued, not from the moment it
+    /// completes.
+    outcome: Option<crate::RuntimeEffectOutcome>,
+}
+
+/// An ordinal-addressed journal with the two behaviors that make the FIG-1486
+/// wedge reachable: a recorded entry replays *without* re-entering its body,
+/// and a command that meets a different recorded entry at its ordinal is
+/// refused the way an ordinal-addressed engine refuses it (Restate `RT0016`).
+struct OrdinalJournaledTier {
+    inner: crate::InlineRuntimeEffectController,
+    journal: std::sync::Mutex<Vec<JournalEntry>>,
+    replaying: std::sync::atomic::AtomicBool,
+    cursor: AtomicUsize,
+}
+
+impl OrdinalJournaledTier {
+    fn recording() -> Self {
+        Self {
+            inner: crate::InlineRuntimeEffectController::default(),
+            journal: std::sync::Mutex::new(Vec::new()),
+            replaying: std::sync::atomic::AtomicBool::new(false),
+            cursor: AtomicUsize::new(0),
+        }
+    }
+
+    /// Drops the first incarnation and hands the recorded journal to a fresh
+    /// one, which re-issues the same commands from the top.
+    fn start_redrive(&self) {
+        self.cursor.store(0, Ordering::SeqCst);
+        self.replaying.store(true, Ordering::SeqCst);
+    }
+
+    fn journal_identities(&self) -> Vec<String> {
+        self.journal
+            .lock_recover()
+            .iter()
+            .map(|entry| entry.identity.clone())
+            .collect()
+    }
+
+    fn identity(envelope: &crate::RuntimeEffectEnvelope) -> String {
+        let kind = envelope
+            .invocation
+            .effect_kind()
+            .map(crate::RuntimeEffectKind::as_str)
+            .unwrap_or("no_effect_kind");
+        let effect_id = envelope.invocation.effect_id().unwrap_or("no_effect_id");
+        format!("{kind}:{effect_id}")
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for OrdinalJournaledTier {
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        crate::EffectReplayOwnership::Controller
+    }
+
+    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
+        crate::EffectJournalAddressing::OrdinalAddressed
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for OrdinalJournaledTier {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let identity = Self::identity(&envelope);
+        if self.replaying.load(Ordering::SeqCst) {
+            let ordinal = self.cursor.fetch_add(1, Ordering::SeqCst);
+            let journal = self.journal.lock_recover();
+            let Some(entry) = journal.get(ordinal) else {
+                return Err(crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RestateEffectHashMismatch,
+                    format!("RT0016: journal ended before ordinal {ordinal} (`{identity}`)"),
+                ));
+            };
+            if entry.identity != identity {
+                return Err(crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RestateEffectHashMismatch,
+                    format!(
+                        "RT0016: journal mismatch at ordinal {ordinal}: recorded `{}`, handler issued `{identity}`",
+                        entry.identity
+                    ),
+                ));
+            }
+            let Some(outcome) = entry.outcome.clone() else {
+                return Err(crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RestateEffectHashMismatch,
+                    format!("RT0016: recorded entry `{identity}` never settled"),
+                ));
+            };
+            return Ok(outcome);
+        }
+        // The command occupies its ordinal from the moment it is issued, so a
+        // command emitted from inside another command's body lands after it.
+        let ordinal = {
+            let mut journal = self.journal.lock_recover();
+            journal.push(JournalEntry {
+                identity,
+                outcome: None,
+            });
+            journal.len() - 1
+        };
+        let outcome = self.inner.execute_effect(envelope, local_executor).await?;
+        self.journal.lock_recover()[ordinal].outcome = Some(outcome.clone());
+        Ok(outcome)
+    }
+}
+
+fn follow_on_invocation() -> crate::RuntimeInvocation {
+    crate::RuntimeInvocation::effect(
+        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        FOLLOW_ON_EFFECT_ID,
+        crate::RuntimeEffectKind::Sleep,
+        FOLLOW_ON_EFFECT_ID,
+    )
+}
+
+fn attempt_effect_envelope() -> crate::RuntimeEffectEnvelope {
+    crate::RuntimeEffectEnvelope::new(
+        attempt_invocation(),
+        crate::RuntimeEffectCommand::ToolAttempt {
+            call: prepared_tool_call(),
+            execution_grant: None,
+            attempt: 1,
+            max_attempts: 1,
+        },
+    )
+}
+
+fn attempt_done_outcome() -> crate::RuntimeEffectOutcome {
+    crate::RuntimeEffectOutcome::ToolAttempt {
+        launch: Box::new(crate::ToolAttemptLaunch::Done {
+            record: Box::new(crate::ToolCallRecord {
+                call_id: Some(CALL_ID.to_string()),
+                tool: "attempt_atomicity".to_string(),
+                args: serde_json::Value::Null,
+                output: crate::ToolCallOutput::success(serde_json::json!("ok")),
+                duration_ms: 0,
+            }),
+            intents: crate::ToolIntents::default(),
+        }),
+        triggers: Vec::new(),
+    }
+}
+
+/// FIG-1486's interleaving, end to end on an ordinal-addressed journal: a
+/// recorded attempt whose body issues a direct completion is crashed after the
+/// attempt settles and redriven by a fresh incarnation. The replayed attempt
+/// does not re-enter its body, so a direct entry journaled from inside it would
+/// still sit at the next ordinal and wedge the following command with `RT0016`.
+#[tokio::test]
+async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_mismatch() {
+    let fixtures = fixtures().await;
+    let tier = OrdinalJournaledTier::recording();
+    let bodies_entered = Arc::new(AtomicUsize::new(0));
+
+    let first_incarnation_bodies = Arc::clone(&bodies_entered);
+    let scoped =
+        crate::ScopedEffectController::borrowed(&tier, crate::ExecutionScope::turn(SESSION, TURN))
+            .expect("scoped ordinal-journaled controller");
+    let tool = tool_context(scoped, &fixtures);
+    crate::RuntimeEffectController::execute_effect(
+        &tier,
+        attempt_effect_envelope(),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            first_incarnation_bodies.fetch_add(1, Ordering::SeqCst);
+            let attempt = crate::AttemptContext::__for_testing(&tool, TURN);
+            assert_eq!(
+                attempt
+                    .direct_completions()
+                    .complete(
+                        crate::DirectRequest::text(DIRECT_MODEL, "redrive direct completion"),
+                        "attempt-atomicity",
+                    )
+                    .await
+                    .expect("attempt-context direct completion")
+                    .text,
+                DIRECT_TEXT
+            );
+            Ok(attempt_done_outcome())
+        }),
+    )
+    .await
+    .expect("first incarnation records the attempt");
+    // The command the handler issues once the attempt settles. On redrive it
+    // must meet the attempt's successor ordinal, not an entry the body left
+    // behind.
+    crate::RuntimeEffectController::execute_effect(
+        &tier,
+        crate::RuntimeEffectEnvelope::new(
+            follow_on_invocation(),
+            crate::RuntimeEffectCommand::Sleep { duration_ms: 0 },
+        ),
+        crate::RuntimeEffectLocalExecutor::testing(|_envelope| async {
+            Ok(crate::RuntimeEffectOutcome::Sleep)
+        }),
+    )
+    .await
+    .expect("first incarnation records the follow-on command");
+    assert_eq!(bodies_entered.load(Ordering::SeqCst), 1);
+
+    tier.start_redrive();
+    let redriven_bodies = Arc::clone(&bodies_entered);
+    let redriven_scoped =
+        crate::ScopedEffectController::borrowed(&tier, crate::ExecutionScope::turn(SESSION, TURN))
+            .expect("scoped redrive controller");
+    let redriven_tool = tool_context(redriven_scoped, &fixtures);
+    let replayed = crate::RuntimeEffectController::execute_effect(
+        &tier,
+        attempt_effect_envelope(),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            redriven_bodies.fetch_add(1, Ordering::SeqCst);
+            let _attempt = crate::AttemptContext::__for_testing(&redriven_tool, TURN);
+            Ok(attempt_done_outcome())
+        }),
+    )
+    .await
+    .expect("redrive replays the recorded attempt");
+    assert!(matches!(
+        replayed,
+        crate::RuntimeEffectOutcome::ToolAttempt { .. }
+    ));
+    assert_eq!(
+        bodies_entered.load(Ordering::SeqCst),
+        1,
+        "the recorded attempt replays without re-entering its body"
+    );
+
+    let follow_on = crate::RuntimeEffectController::execute_effect(
+        &tier,
+        crate::RuntimeEffectEnvelope::new(
+            follow_on_invocation(),
+            crate::RuntimeEffectCommand::Sleep { duration_ms: 0 },
+        ),
+        crate::RuntimeEffectLocalExecutor::testing(|_envelope| async {
+            Ok(crate::RuntimeEffectOutcome::Sleep)
+        }),
+    )
+    .await;
+    assert!(
+        follow_on.is_ok(),
+        "the invocation must complete after redrive instead of wedging: {:?}",
+        follow_on.err().map(|error| error.to_string())
+    );
+    assert_eq!(
+        tier.journal_identities(),
+        vec![
+            format!("tool_attempt:{ATTEMPT_EFFECT_ID}"),
+            format!("sleep:{FOLLOW_ON_EFFECT_ID}"),
+        ],
+        "a recorded attempt owns exactly one entry; a direct completion from its body adds none"
+    );
+}
+
+fn direct_llm_request(request_id: &str) -> crate::LlmRequest {
+    crate::LlmRequest {
+        model: DIRECT_MODEL.to_string(),
+        messages: vec![crate::llm::types::LlmMessage::new(
+            crate::llm::types::LlmRole::User,
+            vec![crate::llm::types::LlmContentBlock::Text {
+                text: Arc::from("attempt direct llm completion"),
+                response_meta: None,
+                cache_breakpoint: false,
+            }],
+        )],
+        attachments: Vec::new(),
+        resolved_stored: Default::default(),
+        tools: Arc::new(Vec::new()),
+        tool_choice: crate::llm::types::LlmToolChoice::None,
+        model_variant: Default::default(),
+        model_capability: crate::ModelCapability::default(),
+        scope: crate::LlmRequestScope::new(SESSION, format!("{SESSION}:frame"), request_id),
+        output_spec: None,
+        stream_events: None,
+        generation: crate::GenerationOptions::default(),
+        provider_trace: None,
+    }
+}
+
+/// `direct_llm_completion` has no tool-attributed entry point, so it classifies
+/// its journal position from the invocation its client was minted inside. A
+/// client derived for a recorded attempt — as the attempt-scoped dispatch
+/// derives it in production — must keep the full-output direct call local too.
+#[tokio::test]
+async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal() {
+    let fixtures = fixtures().await;
+    let tier = ControllerOwnedTier::ordinal_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let scoped = crate::ScopedEffectController::borrowed(
+        &sentinel,
+        crate::ExecutionScope::turn(SESSION, TURN),
+    )
+    .expect("scoped direct-llm sentinel controller");
+    let direct_completions = fixtures
+        .runtime
+        .runtime_session_services()
+        .expect("attempt-atomicity session manager")
+        .direct_completion_client(
+            crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
+            Some(TURN.to_string()),
+        )
+        .with_parent_invocation(Some(attempt_invocation()));
+
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        attempt_effect_envelope(),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            let completion = direct_completions
+                .direct_llm_completion(
+                    direct_llm_request("attempt-atomicity:direct-llm"),
+                    "attempt-atomicity",
+                )
+                .await
+                .expect("attempt-scoped direct llm completion");
+            assert_eq!(completion.response.full_text, DIRECT_TEXT);
+            Ok(attempt_done_outcome())
+        }),
+    )
+    .await
+    .expect("attempt completes with a local direct llm completion");
+
+    assert_eq!(
+        ledger.crossings_inside_attempt(),
+        Vec::<String>::new(),
+        "an attempt-scoped client journals no direct entry from inside the attempt"
     );
 }
