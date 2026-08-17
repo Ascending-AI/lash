@@ -43,6 +43,7 @@ rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 session-lease-triage = { tier = "deterministic", model = "scripted-provider" }
 tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 version-bump-recreation = { tier = "deterministic", model = "scripted-provider" }
+workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 2 calls a provider" }
 workbench-break-glass = { tier = "deterministic", model = "scripted-provider" }
 workbench-chat-projection = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "Surfaces A-E, on the named dev-provider scenarios; only Phases 0-4 call a provider" }
