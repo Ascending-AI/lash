@@ -63,6 +63,11 @@ pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVoca
         finish_statement: "finish(value)",
         continue_as_call: "control.continue_as(...)",
         continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
+        // A TypeScript session has no type-literal form: the lowerer never
+        // builds `Expr::TypeLiteral`, so its only nested-shape route would be
+        // hand-writing the runtime's reserved `$lash_type` wrapper. Silence is
+        // the honest rendering; flat string descriptors are what it can write.
+        type_literal_hint: "",
     };
 
 /// Lashlang's type syntax in TypeScript's spelling.

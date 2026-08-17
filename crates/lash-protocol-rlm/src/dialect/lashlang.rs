@@ -55,6 +55,7 @@ pub(crate) const LASHLANG_PROMPT_VOCABULARY: crate::dialect::DialectPromptVocabu
         finish_statement: "finish <value>",
         continue_as_call: "control.continue_as(...)",
         continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } })?",
+        type_literal_hint: ", or pass a `Type { ... }` literal for nested shapes",
     };
 
 impl RlmDialect for LashlangDialect {

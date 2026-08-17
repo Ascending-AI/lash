@@ -14,6 +14,14 @@
 //!
 //! This walks every fragment the crate contributes to an assembled prompt, for
 //! both dialects, and fails on any word that belongs to the other one.
+//!
+//! It cannot reach the *other* half of the prompt's tool docs. A tool's
+//! description and schema prose are authored in the crate that owns the tool and
+//! rendered verbatim, so this walker's synthetic fixture proves nothing about
+//! what `lash-subagents` or a host plugin actually wrote — and three `lashlang`
+//! strings reached TypeScript sessions through exactly that gap. The sibling
+//! gate is `tool_catalog::validate_dialect_neutral_tool_prose`, which sweeps
+//! whatever a session registers at registration time instead of a fixture here.
 
 use super::*;
 use crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
@@ -161,7 +169,50 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
         ["web"],
         "fetch",
     ));
-    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
+    // A second member whose *shapes* are collections of records, like
+    // `processes.list`. The first fixture's schema is one string field, so the
+    // tool-docs fragment never rendered a collection or record type label and
+    // the walker could not see what a TypeScript reader is shown for them.
+    let listing = lash_core::ToolDefinition::raw(
+        "tool:test/list_process_handles",
+        "list_process_handles",
+        "List process runs visible to this session",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "status": { "type": "string", "enum": ["running", "any"] },
+                "definition": {
+                    "type": "object",
+                    "description": "A process definition value, for example `on_button`."
+                }
+            },
+            "additionalProperties": false
+        }),
+        serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Process handle id." },
+                    "descriptor": {
+                        "type": "object",
+                        "properties": { "kind": { "type": "string" } },
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["id", "descriptor"],
+                "additionalProperties": false
+            }
+        }),
+    )
+    .with_examples(vec![
+        r#"await processes.list({ status: "any" })?"#.to_string(),
+    ])
+    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+        ["processes"],
+        "list",
+    ));
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool, listing]);
 
     let mut fragments = vec![(
         "execution section",
@@ -173,6 +224,25 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
     fragments.push((
         "tool docs",
         crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect),
+    ));
+
+    // The deferred-tool advertisement, which is prose a *lower* crate composes
+    // (`lash_lashlang_runtime::catalogue_preview`) and a host contributes to the
+    // execution section. It is model-facing on every turn of any session with a
+    // deferred catalogue, it takes no vocabulary, and neither this walker nor
+    // the tool-prose gate saw it: a judged TypeScript session was advertised
+    // `await tools.search({ query: "..." })?`, try-operator included.
+    fragments.push((
+        "deferred-tool advertisement",
+        lash_lashlang_runtime::catalogue_preview_contribution_for_entries([
+            lash_lashlang_runtime::CataloguePreviewEntry {
+                module_path: vec!["workbench_deferred".to_string()],
+                call: "stats".to_string(),
+            },
+        ])
+        .expect("one catalogued entry renders an advertisement")
+        .content
+        .to_string(),
     ));
 
     // Bound variables, rendered through the dialect's **own session**, which is
@@ -349,6 +419,14 @@ const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[
     "typescript prompt fragment `bound variables` contains `?: any |`",
     "typescript prompt fragment `bound variables` contains `list[`",
     "typescript prompt fragment `tool docs` contains `-> str`",
+    // A collection-of-records result — `processes.list` is the shipped one —
+    // renders its return shape as `list[record{id: str, …}]`. Same renderer,
+    // same residual as `-> str`: the label comes from `lash_core`'s contract
+    // renderer, and the walker only saw scalars until the fixture catalog grew
+    // a listing member. Measured here rather than left invisible; closing it is
+    // the same cross-crate typed-rendering change as the rows above.
+    "typescript prompt fragment `tool docs` contains `: str,`",
+    "typescript prompt fragment `tool docs` contains `list[`",
 ];
 
 /// The walker only measures if its marker list can fire. Both vocabularies are

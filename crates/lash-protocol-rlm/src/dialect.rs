@@ -122,6 +122,18 @@ pub(crate) struct DialectPromptVocabulary {
     pub(crate) continue_as_call: &'static str,
     /// A complete continue-as example for the tool doc.
     pub(crate) continue_as_example: &'static str,
+    /// How this dialect tells a model to describe a *nested* typed shape, as a
+    /// clause that continues a sentence about flat string descriptors — empty
+    /// when the dialect has no way to write one.
+    ///
+    /// Type literals are a Lashlang surface: `Type { ... }` compiles through
+    /// `Expr::TypeLiteral`, which the TypeScript lowerer never constructs, and
+    /// the type-literal prompt section is rendered only by the Lashlang
+    /// execution section. A host tool that accepts a typed shape (`agents.spawn`
+    /// does) therefore cannot describe the nested form in one dialect-neutral
+    /// sentence: for a TypeScript reader the clause is not merely
+    /// foreign-sounding, it is *false*.
+    pub(crate) type_literal_hint: &'static str,
 }
 
 impl Default for DialectPromptVocabulary {
@@ -131,7 +143,42 @@ impl Default for DialectPromptVocabulary {
     }
 }
 
+/// One authored token and the vocabulary field that answers it.
+pub(crate) type ToolProseToken = (&'static str, fn(DialectPromptVocabulary) -> &'static str);
+
+/// The tokens a host or plugin may write in model-facing tool prose so the
+/// *session's* dialect spells the dialect-specific part.
+///
+/// Tool descriptions and JSON-Schema `description` strings are authored once,
+/// in the crate that owns the tool, and served to sessions of every registered
+/// dialect. A dialect word written literally there is a leak no dialect
+/// renderer can undo — which is how three `lashlang` strings reached
+/// TypeScript sessions through `agents.spawn` and `processes.list`. Anything a
+/// dialect owns is spelled by the dialect: prose that needs a dialect word
+/// writes the token, [`rlm_prompt_tool_docs`](crate::tool_catalog) resolves it
+/// against the active dialect's vocabulary, and
+/// [`crate::tool_catalog::validate_dialect_neutral_tool_prose`] refuses
+/// registration for the literal spelling.
+///
+/// One table, read by both the renderer and the guard, so a token can neither
+/// be resolved without being accepted nor accepted without being resolved.
+pub(crate) const TOOL_PROSE_TOKENS: &[ToolProseToken] =
+    &[("{{type_literal_hint}}", |vocabulary| {
+        vocabulary.type_literal_hint
+    })];
+
 impl DialectPromptVocabulary {
+    /// Resolve every [`TOOL_PROSE_TOKENS`] token in one authored prose string.
+    pub(crate) fn render_tool_prose(&self, text: &str) -> String {
+        let mut text = text.to_string();
+        for (token, resolve) in TOOL_PROSE_TOKENS {
+            if text.contains(token) {
+                text = text.replace(token, resolve(*self));
+            }
+        }
+        text
+    }
+
     /// `print x` / `console.log(x)` for one expression.
     pub(crate) fn print_statement(&self, expression: &str) -> String {
         format!(
@@ -220,6 +267,29 @@ pub(crate) trait RlmDialect: Send + Sync {
     fn stream_cell_end_event_name(&self) -> &'static str;
 }
 
+/// The words that identify one dialect wherever they appear, lowercased.
+///
+/// Read from the dialect itself rather than listed, so registering a third
+/// dialect extends the tool-prose guard by construction. Deliberately narrow:
+/// the language's own name, its cell tags and its finish form are unmistakable,
+/// while `print_call` ("print") would fire on any tool that talks about
+/// printing. A word this list omits is a leak the guard cannot see, not a leak
+/// it permits.
+pub(crate) fn dialect_identity_markers(dialect: &dyn RlmDialect) -> Vec<String> {
+    let vocabulary = dialect.prompt_vocabulary();
+    let tags = dialect.cell_tags();
+    let mut markers = vec![
+        dialect.language_id().to_lowercase(),
+        vocabulary.language_name.to_lowercase(),
+        tags.open.to_lowercase(),
+        tags.close.to_lowercase(),
+        vocabulary.finish_statement.to_lowercase(),
+    ];
+    markers.sort();
+    markers.dedup();
+    markers
+}
+
 /// The TypeScript dialect's words, for assertions that need a vocabulary which
 /// is provably not the default.
 #[cfg(test)]
@@ -241,6 +311,11 @@ impl RlmDialectRegistry {
         Self {
             dialects: Arc::new(dialects),
         }
+    }
+
+    /// Every registered dialect, in language-id order.
+    pub(crate) fn dialects(&self) -> impl Iterator<Item = &Arc<dyn RlmDialect>> {
+        self.dialects.values()
     }
 
     pub(crate) fn resolve(
