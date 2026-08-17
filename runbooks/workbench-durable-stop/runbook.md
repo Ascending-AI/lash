@@ -18,6 +18,15 @@ running turn, and `TurnWorkDriver` resolves the reserved gate and terminal promi
 successful restart case therefore proves the Stop path is not secretly process-local or
 using the Restate Admin API.
 
+**FIG-1445 referee linkage.** A shallow Stop issued ~0.3s into process start proves
+immediate keyed-promise resolution but says nothing about cancellation deep inside a
+durable sleep (where FIG-1445 recorded evidence stopped ~230s deep). This runbook
+therefore separates process-await cancellation into two distinct arms: a shallow-dwell
+arm (Stop issued immediately upon start) and an explicit deep-dwell arm (refereeing
+FIG-1445, where Stop is issued while the process is ≥120s parked inside a durable sleep).
+Separate named phases and scorecard gates distinguish shallow-stop latency from deep-stop
+latency so a judge cannot credit the deep claim from the shallow arm.
+
 **Real tokens.** Turns use OpenRouter. Their prose and duration are nondeterministic;
 gate on the running affordance, cancel receipt, terminal state, and evidence—not text
 quality. This runbook is authored for a deliberate token-spending browser run.
@@ -43,6 +52,13 @@ quality. This runbook is authored for a deliberate token-spending browser run.
    registration because the session no longer exists. It must not emit
    `process.cancel_requested`; the independent process remains visible in `/api/work`
    until its own terminal.
+7. **Distinguish shallow vs deep durable-sleep cancellation (FIG-1445).** The shallow arm
+   issues Stop immediately after the process starts (~0.3s in). The deep-dwell arm
+   mandates that the process is genuinely parked in durable sleep for ≥120s before Stop
+   is issued (verified through `/api/work` lifecycle, events, and timestamps, not
+   wall-clock harness busy-waiting). Both shallow and deep cancellation must commit
+   `Cancelled` promptly (<10s from request) without waiting for the remainder of the
+   durable sleep timer. A judge cannot credit the deep claim from the shallow arm.
 
 ## Working material
 
@@ -61,7 +77,7 @@ quality. This runbook is authored for a deliberate token-spending browser run.
   container name and require the startup trace payload's `store_backend` to be
   `"postgres"` before Phase 1.
 - Browser affordances: chat composer, **stop turn** button, running/idle pill, transcript.
-- Backend truth: `GET /api/state`; `POST /api/turn`; `POST /api/turn/cancel`.
+- Backend truth: `GET /api/state`; `POST /api/turn`; `POST /api/turn/cancel`; `GET /api/work`.
   `/api/state.active_turns` exposes routing addresses so reload can restore the Stop
   affordance. The cancel response contains `accepted` and `cancellations[]`, each with
   `address`, gate `outcome`, and authoritative `terminal`.
@@ -112,26 +128,68 @@ Phase 1. Additionally require the terminal evidence request id to be new and the
 show the recovered request against the pre-restart turn id. Screenshot
 `03-restored-cancelled.png`; save `03-cancel-receipt.json`.
 
-## Phase 3 — Stop over process await, then prove process-survives revocation
+## Phase 3 — Shallow-dwell Stop over process await (shallow arm)
 
-Submit a prompt that makes the agent declare and start a process with a long sleep, then
-foreground-await its handle. This phase is valid only if `/api/state` shows one active
-turn and `/api/work` shows that named process as non-terminal before Stop. If the model
-does not produce that shape, retry the phase; ordinary model or tool work is not
-process-await evidence.
+Submit a prompt that makes the agent declare and start a process with a long sleep (e.g.
+`sleep for "300s"`), then foreground-await its handle. This phase is valid only if
+`/api/state` shows one active turn and `/api/work` shows that named process as
+non-terminal (`lifecycle: "running"`) before Stop. If the model does not produce that
+shape, retry the phase; ordinary model or tool work is not process-await evidence.
 
-Press **stop turn** and repeat the Phase 1 receipt gates. Additionally require:
+Issue Stop immediately once the process-await is running (~0.3s dwell, no intentional
+dwell) while capturing the `POST /api/turn/cancel` response. Repeat the Phase 1 receipt
+gates and gate shallow-stop latency:
 
 1. the turn terminal is committed `Cancelled`, with the Stop request evidence;
-2. the named process reaches terminal `Cancelled` in `/api/work`;
+2. the named process reaches terminal `Cancelled` in `/api/work` within 10 seconds of
+   the Stop request;
 3. that process's events include `process.cancel_requested`;
-4. neither terminal waits for the process's original sleep deadline.
+4. neither terminal waits for the process's original sleep deadline;
+5. pre-Stop dwell was shallow (<5s elapsed).
 
 Save the pre-Stop and terminal `/api/work` responses as
 `04-process-await-running.json` and `05-process-await-cancelled.json`. Screenshot the
 committed turn terminal as `05-process-await-cancelled.png`.
 
-Start a second process-await whose process can complete soon enough to observe, but leave
+## Phase 4 — Deep-dwell Stop over durable sleep (referees FIG-1445)
+
+Submit a prompt that makes the agent declare and start a named process with a durable
+sleep of at least 300 seconds, then foreground-await its handle. Require this
+spawned process-await shape.
+
+Poll `/api/state` and `/api/work` until:
+- `/api/state.active_turns` contains exactly one active address;
+- `/api/work` contains the named process with `lifecycle: "running"`;
+- the process is genuinely parked inside its durable sleep.
+
+**Gate the deep dwell before pressing Stop.** The process must genuinely remain parked in
+durable sleep for ≥120 seconds. Poll `/api/work` and the workbench trace to verify that
+the process has been continuously running in its durable sleep state for at least 120
+seconds since its start/sleep entry, while the foreground turn remains active in await.
+Do not busy-wait in the harness; confirm genuine durable parking from `/api/work`
+timestamps/events and trace evidence.
+
+Capture the parked pre-Stop state and `/api/work` response as `06a-deep-dwell-running.json`
+once the ≥120s dwell requirement is satisfied.
+
+Press **stop turn** while capturing the `POST /api/turn/cancel` response. Gate deep-stop
+latency:
+
+1. response `accepted` is true for the active address;
+2. the turn terminal is committed `Cancelled`, carrying matching Stop request evidence;
+3. the deeply parked process reaches terminal `Cancelled` in `/api/work` within 10
+   seconds of the Stop request;
+4. that process's events include `process.cancel_requested`;
+5. neither terminal waits for the remaining duration of the original sleep timer (e.g.
+   the remaining ~180s+ of the 300s timer);
+6. the recorded pre-Stop dwell is confirmed ≥120s from `/api/work` process start/event
+   timestamps, proving the cancellation was refereed against a deep durable sleep.
+
+Save `06b-deep-dwell-cancelled.json` and screenshot `06b-deep-dwell-cancelled.png`.
+
+## Phase 5 — Process survives session revocation
+
+Start another process-await whose process can complete soon enough to observe, but leave
 the foreground turn suspended. Record the old session id and process id, then call
 `DELETE /api/session?session_id=<old-session-id>` instead of Stop. Gate the semantic
 split:
@@ -143,12 +201,12 @@ split:
 - its events contain no `process.cancel_requested`;
 - it later reaches its own successful terminal with the expected value.
 
-Save the work snapshots as `06-revoked-process-running.json` and
-`07-revoked-process-survived.json`, and retain the trace lines containing the
+Save the work snapshots as `07-revoked-process-running.json` and
+`08-revoked-process-survived.json`, and retain the trace lines containing the
 deleted-session refusal. A cancelled process, a missing process, or a stranded old turn
 is Abort/RCA.
 
-## Phase 4 — Teardown and score
+## Phase 6 — Teardown and score
 
 Run `just agent-workbench-down <port>` and confirm both the workbench process and its
 Restate container are gone.
@@ -160,16 +218,17 @@ Restate container are gone.
 | Routing persistence | same session/turn address before and after restart | | `02-restored-running.png`, state files/API |
 | Restored Stop affordance | running pill + Stop restored from `/api/state.active_turns` | | `02-restored-running.png` |
 | Post-restart Stop | committed Cancelled terminal + evidence for original address | | `03-restored-cancelled.png`, `03-cancel-receipt.json` |
-| Stop over process await | turn and awaited process both commit Cancelled before the original deadline | | `04-process-await-running.json`, `05-process-await-cancelled.json`, screenshot |
+| Shallow-stop latency (process await) | Stop issued ~0.3s after start; turn and awaited process both commit Cancelled within 10s (< original deadline); pre-Stop dwell < 5s | | `04-process-await-running.json`, `05-process-await-cancelled.json`, `05-process-await-cancelled.png` |
+| Deep-stop latency (FIG-1445 durable sleep ≥120s) | Stop issued while process is ≥120s parked in durable sleep; turn and process commit Cancelled within 10s of Stop request; durable dwell ≥120s recorded in work events/trace | | `06a-deep-dwell-running.json`, `06b-deep-dwell-cancelled.json`, `06b-deep-dwell-cancelled.png` |
 | Revoked turn settlement | old turn completes with typed `SessionDeleted` refusal | | reset response + trace |
-| Process survives revocation | process stays globally visible, has no cancel event, and reaches its own terminal | | `06-revoked-process-running.json`, `07-revoked-process-survived.json` |
+| Process survives revocation | process stays globally visible, has no cancel event, and reaches its own terminal | | `07-revoked-process-running.json`, `08-revoked-process-survived.json` |
 | UI/API agreement | rendered request ids equal terminal evidence ids; active addresses clear | | screenshots + receipts + `/api/state` |
 | No break-glass substitution | no Admin cancel/kill used as a passing action | | command log |
 
-**Aggregate:** did exact cooperative cancellation produce authoritative evidence both
-normally and after reconstructing the entire web process, did Stop propagate through a
-foreground process await, and did session revocation unwind only the dead turn while the
-independent process survived?
+**Aggregate:** did exact cooperative cancellation produce authoritative evidence
+normally, after reconstructing the entire web process, under shallow process await, and
+deep inside durable sleep (refereeing FIG-1445), and did session revocation unwind only
+the dead turn while the independent process survived?
 
 ---
 
