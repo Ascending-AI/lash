@@ -24,6 +24,8 @@ where
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     attachment_ownership_isolation(make()).await;
+    session_store_factory_attachment_gc_fence_state_machine(make()).await;
+    session_store_factory_fenced_sweep_collects_and_releases(make()).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
@@ -2013,4 +2015,213 @@ fn assert_session_id_was_used_and_deleted(error: crate::StoreError, session_id: 
         error.to_string().contains("was used and deleted"),
         "reuse error must explain that the id was used and deleted: {error}"
     );
+}
+
+/// The attachment GC fence is a durable, clockless CAS state machine over one
+/// digest: `Free -> Condemned -> Deleting -> Free`, with `Condemned -> Free`
+/// whenever a writer takes the digest back.
+///
+/// Every transition is exercised here rather than in per-backend tests, so a
+/// divergence between the in-memory, SQLite, and PostgreSQL implementations of
+/// the same protocol is a conformance failure. Authorities that report
+/// [`AttachmentGcFence::BestEffort`](crate::AttachmentGcFence::BestEffort)
+/// implement no fence and are skipped.
+async fn session_store_factory_attachment_gc_fence_state_machine(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    if crate::AttachmentRootSet::fence(&*factory) == crate::AttachmentGcFence::BestEffort {
+        return;
+    }
+    let request = session_store_request(
+        "attachment-gc-fence-state-machine",
+        "attachment-gc-fence-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create session store");
+    let attachment_id = crate::AttachmentId::new("c".repeat(64));
+    let intent = || crate::AttachmentIntent {
+        attachment_id: attachment_id.clone(),
+        session_id: request.session_id.clone(),
+        canonical_uri: format!("lash-attachment://sha256/{attachment_id}"),
+        intent_at_epoch_ms: 1,
+        owner_kind: None,
+        owner_id: None,
+    };
+    // Nothing is aged out at cutoff 0, so a recorded intent is unambiguously a
+    // root and a forgotten one leaves no row at all.
+    const ROOT_CUTOFF: u64 = 0;
+    let condemn =
+        || crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, ROOT_CUTOFF);
+    let arm = || crate::AttachmentRootSet::arm_attachment_delete(&*factory, &attachment_id);
+
+    // A recorded intent is a root: `Free -> Condemned` refuses.
+    assert!(
+        matches!(
+            crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+                .expect("first fenced write"),
+            crate::AttachmentWriteFence::Granted
+        ),
+        "a write against a free digest must be granted"
+    );
+    assert_eq!(
+        condemn().await.expect("condemn a rooted digest"),
+        crate::AttachmentCondemnation::RootPresent,
+        "an uncommitted intent is a root: the condemn CAS must refuse"
+    );
+
+    // Drop the root and the digest becomes condemnable — once.
+    crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .expect("forget the ref");
+    assert_eq!(
+        condemn().await.expect("condemn"),
+        crate::AttachmentCondemnation::Condemned,
+        "a rootless digest must be condemnable"
+    );
+    assert_eq!(
+        condemn().await.expect("second condemn"),
+        crate::AttachmentCondemnation::AlreadyCondemned,
+        "a peer sweeper's condemnation is skipped, never waited on"
+    );
+
+    // `Condemned -> Free` by writer revoke: the delete can no longer be armed.
+    assert!(
+        matches!(
+            crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+                .expect("write against a condemned digest"),
+            crate::AttachmentWriteFence::Granted
+        ),
+        "a writer must be able to take a condemned digest back"
+    );
+    assert_eq!(
+        arm().await.expect("arm after revocation"),
+        crate::AttachmentDeleteArming::Revoked,
+        "a revoked condemnation must not arm a delete"
+    );
+
+    // `Condemned -> Deleting`: a writer now parks instead of putting bytes into
+    // an in-flight delete, and only the release lets it through.
+    crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .expect("forget the ref again");
+    assert_eq!(
+        condemn().await.expect("re-condemn"),
+        crate::AttachmentCondemnation::Condemned
+    );
+    assert_eq!(
+        arm().await.expect("arm"),
+        crate::AttachmentDeleteArming::Armed
+    );
+    assert_eq!(
+        arm().await.expect("re-arm an already-deleting digest"),
+        crate::AttachmentDeleteArming::Revoked,
+        "arming is `Condemned -> Deleting` only; a digest already `Deleting` is not re-armed"
+    );
+    assert!(
+        matches!(
+            crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+                .expect("write against an armed digest"),
+            crate::AttachmentWriteFence::ReclamationInFlight
+        ),
+        "a writer must park while the physical delete is in flight"
+    );
+    assert!(
+        !crate::AttachmentManifest::holds_ref(&*store, &request.session_id, &attachment_id)
+            .expect("holds_ref"),
+        "a parked writer must record no intent"
+    );
+
+    // `Deleting -> Free`.
+    crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
+        .await
+        .expect("release");
+    assert!(
+        matches!(
+            crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+                .expect("write after the release"),
+            crate::AttachmentWriteFence::Granted
+        ),
+        "a released digest must grant the next writer immediately"
+    );
+}
+
+/// A fenced sweep still collects real garbage, reports itself fenced, leaves no
+/// condemnation behind, and — the fence's whole claim — deletes nothing that a
+/// root existed for.
+async fn session_store_factory_fenced_sweep_collects_and_releases(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "attachment-gc-fenced-sweep",
+        "attachment-gc-fenced-sweep-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create session store");
+    let backend = crate::attachments::InMemoryAttachmentStore::new();
+    let orphan = crate::AttachmentStore::put(
+        &backend,
+        b"conformance-fenced-orphan".to_vec(),
+        lash_sansio::AttachmentCreateMeta::new(
+            lash_sansio::MediaType::parse("application/octet-stream").expect("media type"),
+            None,
+            Some("orphan".to_string()),
+        ),
+    )
+    .await
+    .expect("put orphan blob");
+
+    let report = crate::attachments::reclaim_unreferenced_attachments(
+        &*factory,
+        &backend,
+        crate::AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: crate::EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
+    )
+    .await
+    .expect("sweep");
+
+    assert_eq!(report.reclaimed_count, 1, "the orphan must be collected");
+    assert!(
+        report.condemn_deferred_ids.is_empty(),
+        "an uncontended sweep defers nothing: {:?}",
+        report.condemn_deferred_ids
+    );
+    // Hard failure, not documentation: a fenced authority cannot delete a blob a
+    // root exists for, so a non-empty list means the CAS is not atomic with
+    // intent recording.
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "a {:?} sweep must never delete a referenced blob: {:?}",
+        report.fence,
+        report.deleted_while_referenced
+    );
+    assert!(matches!(
+        crate::AttachmentStore::get(&backend, &orphan.id).await,
+        Err(crate::AttachmentStoreError::NotFound(_))
+    ));
+    if crate::AttachmentRootSet::fence(&*factory) == crate::AttachmentGcFence::BestEffort {
+        return;
+    }
+    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
+    // The digest is `Free` again: the next writer is granted immediately.
+    assert!(matches!(
+        crate::AttachmentManifest::begin_attachment_write(
+            &*store,
+            crate::AttachmentIntent {
+                attachment_id: orphan.id.clone(),
+                session_id: request.session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{}", orphan.id),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+            },
+        )
+        .expect("write after a completed sweep"),
+        crate::AttachmentWriteFence::Granted
+    ));
 }

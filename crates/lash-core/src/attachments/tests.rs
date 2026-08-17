@@ -1259,6 +1259,11 @@ async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
         "the physical delete is only ever issued for an armed digest"
     );
     assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "a fenced sweep must never delete a referenced blob: {:?}",
+        report.deleted_while_referenced
+    );
     assert_eq!(
         fixture.backend.get(&id).await.expect("survives").bytes,
         bytes
@@ -1298,6 +1303,11 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
         .await
         .expect("sweep");
     assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "a fenced sweep must never delete a referenced blob: {:?}",
+        report.deleted_while_referenced
+    );
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(*backend.delete_calls.lock_recover(), 0);
     fixture
@@ -1345,6 +1355,12 @@ async fn a_stuck_intent_retains_the_blob() {
         .expect("sweep");
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(*backend.delete_calls.lock_recover(), 0);
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "a fenced sweep must never delete a referenced blob: {:?}",
+        report.deleted_while_referenced
+    );
+    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
     fixture
         .backend
         .get(&reference.id)

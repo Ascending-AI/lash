@@ -544,9 +544,13 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         let mut condemnations = self.attachment_condemnations.lock_recover();
         match condemnations.get(id) {
             // A writer revoked the condemnation while we were re-stating the
-            // blob: the delete is never issued.
-            None => Ok(crate::AttachmentDeleteArming::Revoked),
-            Some(_) => {
+            // blob: the delete is never issued. A digest already in `Deleting`
+            // answers the same way — arming is `Condemned -> Deleting` only,
+            // matching the SQL backends' `WHERE phase = 'condemned'`.
+            None | Some(super::AttachmentCondemnationPhase::Deleting) => {
+                Ok(crate::AttachmentDeleteArming::Revoked)
+            }
+            Some(super::AttachmentCondemnationPhase::Condemned) => {
                 condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Deleting);
                 Ok(crate::AttachmentDeleteArming::Armed)
             }
