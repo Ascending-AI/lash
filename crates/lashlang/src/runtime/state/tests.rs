@@ -349,6 +349,180 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
 }
 
 #[test]
+fn snapshot_round_trip_preserves_undefined_cell_global() {
+    let mut inner_record = Record::new();
+    inner_record.insert("nested_missing".to_string(), Value::Undefined);
+    let mut globals = Record::new();
+    globals.insert("missing".to_string(), Value::Undefined);
+    globals.insert("nested".to_string(), Value::Record(Arc::new(inner_record)));
+    globals.insert(
+        "list_with_undefined".to_string(),
+        Value::List(vec![Value::Undefined, Value::Number(1.0)].into()),
+    );
+    globals.insert(
+        "tuple_with_undefined".to_string(),
+        Value::Tuple(vec![Value::Undefined, Value::String("a".into())].into()),
+    );
+    let snapshot = Snapshot::new(globals);
+    let bytes = snapshot
+        .to_canonical_bytes()
+        .expect("canonical snapshot encode with undefined global");
+    let decoded = Snapshot::from_canonical_bytes(&bytes)
+        .expect("canonical snapshot decode with undefined global");
+    assert_eq!(decoded.globals().get("missing"), Some(&Value::Undefined));
+    assert_eq!(
+        decoded.globals().get("nested"),
+        Some(&Value::Record(Arc::new(
+            [("nested_missing".to_string(), Value::Undefined)]
+                .into_iter()
+                .collect()
+        )))
+    );
+    assert_eq!(
+        decoded.globals().get("list_with_undefined"),
+        Some(&Value::List(
+            vec![Value::Undefined, Value::Number(1.0)].into()
+        ))
+    );
+    assert_eq!(
+        decoded.globals().get("tuple_with_undefined"),
+        Some(&Value::Tuple(
+            vec![Value::Undefined, Value::String("a".into())].into()
+        ))
+    );
+}
+
+#[test]
+fn canonical_decode_rejects_extra_fields_on_undefined_value() {
+    // A malformed canonical wire where undefined has extra fields
+    let wire = CanonicalSnapshot {
+        version: LASHLANG_SNAPSHOT_VERSION,
+        globals: Some(vec![CanonicalBinding {
+            name: "root".to_string(),
+            value: CanonicalValue::Undefined {},
+        }]),
+        heap: None,
+    };
+    let bytes = rmp_serde::to_vec_named(&wire).expect("canonical wire");
+    // Change map length from 1 to 2 by patching byte 0x81 -> 0x82 and appending another field
+    // Wire structure: 0x82 (map of 2) ... "globals" -> [ { "name": "root", "value": { "kind": "undefined" } } ]
+    // Let's locate the undefined value map 0x81 0xa4 "kind" 0xa9 "undefined"
+    let needle = [
+        0x81, 0xa4, b'k', b'i', b'n', b'd', 0xa9, b'u', b'n', b'd', b'e', b'f', b'i', b'n', b'e',
+        b'd',
+    ];
+    let offset = bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .expect("found undefined wire value");
+    // Replace 0x81 (map of 1) with 0x82 (map of 2) and append an extra key-value pair "extra": 1
+    let mut patched = bytes[..offset].to_vec();
+    patched.push(0x82);
+    patched.extend_from_slice(&needle[1..]);
+    patched.extend_from_slice(&[0xa5, b'e', b'x', b't', b'r', b'a', 0x01]);
+    let suffix_start = offset + needle.len();
+    patched.extend_from_slice(&bytes[suffix_start..]);
+
+    let error = Snapshot::from_canonical_bytes(&patched)
+        .expect_err("undefined with extra fields must be rejected");
+    assert!(
+        matches!(
+            &error,
+            SnapshotDecodeError::NonCanonicalEncoding { location, reason }
+                if location == "globals.root"
+                    && reason.contains("undefined value must contain only its kind")
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn canonical_runtime_value_validator_covers_every_canonical_value_variant() {
+    fn validate_wire_value(value: CanonicalValue) -> Result<Snapshot, SnapshotDecodeError> {
+        let wire = CanonicalSnapshot {
+            version: LASHLANG_SNAPSHOT_VERSION,
+            globals: Some(vec![CanonicalBinding {
+                name: "root".to_string(),
+                value,
+            }]),
+            heap: None,
+        };
+        Snapshot::from_canonical_bytes(&rmp_serde::to_vec_named(&wire).expect("serialize wire"))
+    }
+
+    let variants = vec![
+        CanonicalValue::Null {},
+        CanonicalValue::Undefined {},
+        CanonicalValue::Bool { value: true },
+        CanonicalValue::Number { value: 42.0 },
+        CanonicalValue::String {
+            value: "hello".to_string(),
+        },
+        CanonicalValue::Image {
+            value: ImageValue::new(
+                "sha256:00ff",
+                crate::MediaType::parse("image/png").expect("media type"),
+                "pixel",
+                2,
+                Some(1),
+                Some(1),
+            ),
+        },
+        CanonicalValue::Resource {
+            value: ResourceHandle::new("files", "workspace"),
+        },
+        CanonicalValue::Tuple {
+            items: vec![CanonicalValue::Null {}],
+        },
+        CanonicalValue::List {
+            items: vec![CanonicalValue::Undefined {}],
+        },
+        CanonicalValue::Record {
+            fields: vec![CanonicalBinding {
+                name: "field".to_string(),
+                value: CanonicalValue::Undefined {},
+            }],
+        },
+        CanonicalValue::Projected {
+            value: CanonicalProjectedValue {
+                name: "root".to_string(),
+                type_name: "object".to_string(),
+                projection_ref: Some(CanonicalJsonValue::Null {}),
+            },
+        },
+    ];
+
+    // Compile-time exhaustiveness witness for CanonicalValue variants.
+    // If a new variant is added to CanonicalValue without updating this test,
+    // this match will fail to compile.
+    fn witness_variant_exhaustiveness(variant: &CanonicalValue) {
+        match variant {
+            CanonicalValue::Null {} => {}
+            CanonicalValue::Undefined {} => {}
+            CanonicalValue::Bool { .. } => {}
+            CanonicalValue::Number { .. } => {}
+            CanonicalValue::String { .. } => {}
+            CanonicalValue::Image { .. } => {}
+            CanonicalValue::Resource { .. } => {}
+            CanonicalValue::Ref { .. } => {}
+            CanonicalValue::Tuple { .. } => {}
+            CanonicalValue::List { .. } => {}
+            CanonicalValue::Record { .. } => {}
+            CanonicalValue::Projected { .. } => {}
+        }
+    }
+
+    for variant in variants {
+        witness_variant_exhaustiveness(&variant);
+        let result = validate_wire_value(variant);
+        assert!(
+            result.is_ok(),
+            "validate_runtime_value must accept every canonical value variant: {result:?}"
+        );
+    }
+}
+
+#[test]
 fn canonical_empty_heap_has_exact_golden_bytes() {
     let bytes = Snapshot::default()
         .to_canonical_bytes()
