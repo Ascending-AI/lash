@@ -127,7 +127,7 @@ async fn connect_tolerates_unreachable_server() {
         .call_tool(
             "mcp__down__anything",
             &json!({}),
-            &lash_core::testing::mock_tool_context(),
+            &lash_core::testing::mock_attempt_context(),
         )
         .await;
     assert!(!result.is_success(), "calls fail loudly while disconnected");
@@ -138,7 +138,7 @@ async fn connect_tolerates_unreachable_server() {
         .call_tool(
             "mcp__down__anything",
             &json!({}),
-            &lash_core::testing::mock_tool_context(),
+            &lash_core::testing::mock_attempt_context(),
         )
         .await;
     let output = result
@@ -287,7 +287,7 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         .execute_by_id(
             &native_id,
             &json!({}),
-            &lash_core::testing::mock_tool_context(),
+            &lash_core::testing::mock_attempt_context(),
         )
         .await;
     assert_eq!(native_result.value_for_projection(), json!("native-ok"));
@@ -596,7 +596,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
             pool.call_tool(
                 definition.name(),
                 &json!({}),
-                &lash_core::testing::mock_tool_context(),
+                &lash_core::testing::mock_attempt_context(),
             )
             .await,
         )
@@ -811,7 +811,7 @@ async fn pool_reconnects_after_transport_death() {
     let pool = McpConnectionPool::connect(servers)
         .await
         .expect("connects to the mock");
-    let ctx = lash_core::testing::mock_tool_context();
+    let ctx = lash_core::testing::mock_attempt_context();
     let args = json!({});
 
     let first = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
@@ -918,7 +918,7 @@ async fn call_timeout_is_a_typed_retryable_failure() {
         .call_tool(
             "mcp__slow__hang",
             &json!({}),
-            &lash_core::testing::mock_tool_context(),
+            &lash_core::testing::mock_attempt_context(),
         )
         .await;
     let output = result
@@ -1064,7 +1064,7 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
         .await
         .expect("connects to concurrency mock");
 
-    let ctx = lash_core::testing::mock_tool_context();
+    let ctx = lash_core::testing::mock_attempt_context();
     let args = json!({});
     let (a, b) = tokio::join!(
         pool.call_tool("mcp__svc__ping", &args, &ctx),

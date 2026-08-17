@@ -230,11 +230,17 @@ impl ToolProvider for ApprovalToolProvider {
         (name == APPROVAL_TOOL_NAME).then(|| Arc::new(Self::definition().contract()))
     }
 
+    /// The attempt parks on a human decision, so the runtime pre-derives the
+    /// completion key the body reads from its `AttemptContext`.
+    fn attempt_may_defer(&self, tool_id: &lash::tools::ToolId) -> bool {
+        tool_id == Self::definition().id()
+    }
+
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         if call.name != APPROVAL_TOOL_NAME {
             return ToolResult::err_fmt(format_args!("unknown approval tool `{}`", call.name));
         }
-        let key = match call.context.completion_key().await {
+        let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(error) => return ToolResult::err_fmt(error),
         };

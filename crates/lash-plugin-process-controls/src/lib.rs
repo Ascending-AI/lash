@@ -12,7 +12,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginSessionContext, PluginSpec, SessionPlugin,
     StaticPluginFactory,
 };
-use lash_core::{AttemptToolCall, ToolCall, ToolDefinition, ToolProvider, ToolResult};
+use lash_core::{ToolCall, ToolDefinition, ToolProvider, ToolResult};
 use lash_tool_support::{
     LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt,
 };
@@ -79,14 +79,7 @@ impl StaticToolExecute for SessionProcessAdminTools {
         ))
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        matches!(
-            tool_id.as_str(),
-            "tool:list_process_handles" | "tool:cancel_process"
-        )
-    }
-
-    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptResult {
         if call.name == "list_process_handles" {
             return done_without_intents(
                 execute_process_list_tool_call(call.context, call.args).await,
@@ -317,7 +310,7 @@ mod tests {
             "process-controls-intent-scope",
         );
         let result = tools
-            .execute_attempt(AttemptToolCall {
+            .execute_attempt(ToolCall {
                 name: "cancel_process",
                 args: &serde_json::json!({"process_id": "literal-process"}),
                 context: &context,

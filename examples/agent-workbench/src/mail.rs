@@ -498,17 +498,7 @@ impl ToolProvider for MockMailProvider {
         }
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash::tools::ToolId) -> bool {
-        self.route(
-            tool_id
-                .as_str()
-                .strip_prefix("tool:")
-                .unwrap_or(tool_id.as_str()),
-        )
-        .is_some_and(|(_, operation)| operation == "send")
-    }
-
-    async fn execute_attempt(&self, call: lash::tools::AttemptToolCall<'_>) -> ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash::tools::ToolCall<'_>) -> ToolAttemptResult {
         let Some((slug, operation)) = self.route(call.name) else {
             return done(ToolResult::err_fmt(format_args!(
                 "unknown inbox tool `{}`",
@@ -516,10 +506,9 @@ impl ToolProvider for MockMailProvider {
             )));
         };
         if operation != "send" {
-            return done(ToolResult::err_fmt(format_args!(
-                "inbox tool `{}` does not use the leaf attempt signature",
-                call.name
-            )));
+            // Reads own no declaration; they are pure attempt bodies and run
+            // against the same sealed attempt context.
+            return done(self.execute(call).await);
         }
         let Some(replay_key) = call.context.replay_key() else {
             return done(ToolResult::err_fmt("mail send requires a replay key"));
@@ -610,20 +599,11 @@ mod tests {
         let provider = MockMailProvider::new(world.clone());
         let args = json!({ "title": "Contract", "text": "Please review." });
 
-        assert!(
-            provider.supports_attempt_context(&lash::tools::ToolId::new("tool:inbox__work__send")),
-            "send must claim the leaf attempt signature or it silently keeps the legacy route"
-        );
-        assert!(
-            !provider.supports_attempt_context(&lash::tools::ToolId::new("tool:inbox__work__list")),
-            "only send owes an emission"
-        );
-
         let refused = provider
             .execute(ToolCall {
                 name: "inbox__work__send",
                 args: &args,
-                context: &lash_core::testing::mock_tool_context(),
+                context: &lash_core::testing::mock_attempt_context(),
             })
             .await;
         let ToolResult::Done(output) = refused else {

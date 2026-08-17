@@ -348,7 +348,7 @@ impl DeferredExecutionProvider {
         &self,
         definition: &ToolDefinition,
         args: &Value,
-        context: &lash::tools::ToolContext<'_>,
+        context: &lash::tools::AttemptContext<'_>,
     ) -> ToolResult {
         let call_path = deferred_call_path(definition);
         if context.tool_execution_binding()["call_path"] != json!(call_path) {
@@ -407,7 +407,7 @@ impl ToolProvider for DeferredExecutionProvider {
         &self,
         grant: &ToolExecutionGrant,
         args: &Value,
-        context: &lash::tools::ToolContext<'_>,
+        context: &lash::tools::AttemptContext<'_>,
     ) -> ToolResult {
         let Some(definition) = self.definition_by_id(&grant.manifest.id) else {
             return ToolResult::err_fmt(format_args!(

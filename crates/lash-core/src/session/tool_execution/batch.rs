@@ -231,7 +231,9 @@ impl RuntimeExecutionContext<'_> {
                 launch: crate::runtime::ToolCallLaunch::Done {
                     result: Box::new(completed.completed),
                 },
-                triggers: Vec::new(),
+                // Orchestrating bodies emit trigger occurrences directly, so the
+                // batch still owns their effect outcomes.
+                triggers: self.dispatch.trigger_outcomes.drain(),
             };
         }
 
@@ -438,7 +440,7 @@ impl RuntimeExecutionContext<'_> {
                 .controller()
                 .execute_effect(envelope, local_executor)
                 .await;
-            let outcome = match raw_outcome
+            let mut outcome = match raw_outcome
                 .and_then(crate::RuntimeEffectOutcome::into_tool_batch_effect)
             {
                 Ok(outcome) => outcome,
@@ -461,6 +463,11 @@ impl RuntimeExecutionContext<'_> {
                     };
                 }
             };
+            // The batch effect drained its own trigger buffer into the recorded
+            // outcome, so restoring it here is what makes an inner emission
+            // survive both the local run and its replay: the enclosing effect
+            // boundary drains this buffer in turn.
+            self.restore_tool_trigger_outcomes(std::mem::take(&mut outcome.triggers));
             self.dispatch
                 .recorded_intent_outcomes
                 .record_launches(&outcome.launches);

@@ -1625,7 +1625,7 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
         .execute_by_id(
             &crate::ToolId::from("tool:hidden_after_rotation"),
             &json!({}),
-            &crate::testing::mock_tool_context(),
+            &crate::testing::mock_attempt_context(),
         )
         .await;
     assert!(
@@ -1774,11 +1774,7 @@ impl crate::ToolProvider for CasSurvivorIntentTools {
         panic!("the lease/CAS survivor law must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == cas_survivor_intent_tool().id()
-    }
-
-    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::ToolAttemptResult::done(
             crate::ToolResultDone::ok(serde_json::json!({"intent": "committed"})),

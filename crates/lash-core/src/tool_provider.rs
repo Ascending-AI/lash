@@ -1,3 +1,4 @@
+pub(crate) use completion_support::AttemptCompletionSupport;
 use std::sync::{Arc, Mutex};
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
@@ -11,6 +12,7 @@ use crate::plugin::{
 use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolResult};
 
 mod attachments;
+mod completion_support;
 mod direct_completion;
 mod dispatch;
 pub(crate) mod orchestration;
@@ -110,7 +112,10 @@ pub struct AttemptContext<'run> {
     async_process_id: Option<String>,
     runtime_process_id: Option<String>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
-    direct_completions: crate::DirectCompletionClient<'run>,
+    /// The dispatch-bound direct-completion client. `pub(crate)` so the
+    /// attempt-atomicity laws can reach the *raw* client and prove the binding
+    /// travels with it rather than with the accessor.
+    pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
     /// The recorded attempt this leaf body runs inside. Carried so
     /// attempt-attributed capabilities classify their journal position exactly
     /// as the legacy [`ToolContext`] path does. Boxed because this context is
@@ -125,7 +130,7 @@ pub struct AttemptContext<'run> {
     replay_key: Option<String>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     completion_key: Option<crate::AwaitEventKey>,
-    completion_supported: bool,
+    completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
 }
 
@@ -134,7 +139,7 @@ impl<'run> AttemptContext<'run> {
         context: &ToolContext<'run>,
         execution_scope_id: String,
         completion_key: Option<crate::AwaitEventKey>,
-        completion_supported: bool,
+        completion_support: AttemptCompletionSupport,
     ) -> Self {
         let phase_probe = context
             .runtime_execution_context
@@ -158,7 +163,17 @@ impl<'run> AttemptContext<'run> {
             },
             cancellation_token: context.cancellation_token.clone(),
             async_process_id: context.async_process_id.clone(),
-            runtime_process_id: context.runtime_process_id.clone(),
+            // A body that declares a process-scoped intent needs to name the
+            // process it runs in, and inside a process replay that id arrives
+            // only on the process-event binding the leaf context does not
+            // carry. Resolve it here rather than leaving the leaf blind to its
+            // own enclosing process.
+            runtime_process_id: context.runtime_process_id.clone().or_else(|| {
+                context
+                    .process_events
+                    .as_ref()
+                    .map(|process| process.process_id.clone())
+            }),
             attachment_store: Arc::clone(&context.attachment_store),
             direct_completions: context.direct_completions.clone(),
             parent_invocation: context.parent_invocation.clone().map(Box::new),
@@ -171,18 +186,9 @@ impl<'run> AttemptContext<'run> {
             replay_key: context.replay_key.clone(),
             execution_env_spec: context.execution_env_spec.clone(),
             completion_key,
-            completion_supported,
+            completion_support,
             phase_probe,
         }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
-    pub fn __for_testing(
-        context: &ToolContext<'run>,
-        execution_scope_id: impl Into<String>,
-    ) -> Self {
-        Self::from_tool_context(context, execution_scope_id.into(), None, false)
     }
 
     /// Integrator class 3 identity for the session that owns this recorded attempt.
@@ -288,12 +294,7 @@ impl<'run> AttemptContext<'run> {
     }
     /// Integrator class 3 durable completion key or typed host-capability refusal.
     pub fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        if !self.completion_supported {
-            return Err(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
-                "completion keys require an effect controller with process-loss-safe await-event routing",
-            ));
-        }
+        self.completion_support.ensure_available()?;
         self.completion_key.clone().ok_or_else(|| {
             crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ToolCompletionKeyMissingCallId,
@@ -715,7 +716,6 @@ impl<'run> ToolContext<'run> {
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),
             effect_controller: self.effect_controller.clone(),
-            parent_invocation: self.parent_invocation.clone(),
         }
     }
 
@@ -1274,20 +1274,19 @@ pub struct ToolPrepareCall<'a> {
     pub context: &'a ToolPrepareContext,
 }
 
-/// Per-call inputs handed to [`ToolProvider::execute`].
+/// Per-call inputs handed to [`ToolProvider::execute`] and
+/// [`ToolProvider::execute_attempt`].
+///
+/// Every leaf tool body runs inside one recorded attempt, so the only context
+/// a leaf call can carry is the sealed, controller-free [`AttemptContext`].
+/// Journal-capable work is unreachable from here by construction: declare a
+/// [`crate::ToolIntent`] instead, or move the work into a process step.
 ///
 /// Fields are `pub` because `ToolCall` is a transient borrow; consumers
 /// typically destructure (`let ToolCall { name, args, .. } = call`). The
-/// stable surface lives on [`ToolContext`] (sealed) and the runtime's
+/// stable surface lives on [`AttemptContext`] (sealed) and the runtime's
 /// dispatcher, which constructs `ToolCall` values.
 pub struct ToolCall<'a> {
-    pub name: &'a str,
-    pub args: &'a serde_json::Value,
-    pub context: &'a ToolContext<'a>,
-}
-
-/// Per-call inputs handed to a leaf provider that opts into the controller-free attempt shape.
-pub struct AttemptToolCall<'a> {
     pub name: &'a str,
     pub args: &'a serde_json::Value,
     pub context: &'a AttemptContext<'a>,
@@ -1342,40 +1341,31 @@ pub trait ToolProvider: Send + Sync + 'static {
     /// Execute an owner-bound internal process body.
     ///
     /// This is ADR 0051's protocol and process-engine implementor class. The
-    /// default preserves legacy pure implementations while exposing durable
-    /// process capabilities only to providers that explicitly override this
+    /// default preserves pure implementations by projecting the process body
+    /// down to the attempt-shaped leaf signature; durable process capabilities
+    /// are exposed only to providers that explicitly override this
     /// internal-only route.
     async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolResult {
+        let attempt_context = call.context.__attempt_context();
         self.execute(ToolCall {
             name: call.name,
             args: call.args,
-            context: call.context.__tool_context(),
+            context: &attempt_context,
         })
         .await
-    }
-    /// Whether this tool id uses the leaf attempt signature. Durable leaf
-    /// behavior must opt in; the legacy `ToolContext` fallback has no process
-    /// administration and is retained only for pure provider implementations.
-    fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
-        false
     }
     /// Whether this leaf tool may return deferred completion. The coordinator
     /// reserves a completion key only for tools that declare this capability.
     fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
         false
     }
-    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> crate::ToolAttemptResult {
-        crate::ToolAttemptResult::from_tool_result(ToolResult::failure(crate::ToolFailure {
-            class: crate::ToolFailureClass::Unavailable,
-            code: "tool_attempt_context_not_implemented".to_string(),
-            message: format!(
-                "tool `{}` has not implemented the leaf AttemptContext signature",
-                call.name
-            ),
-            source: crate::ToolFailureSource::Runtime,
-            retry: crate::ToolRetryDisposition::Never,
-            raw: None,
-        }))
+    /// Execute a recorded leaf attempt that may declare typed intents.
+    ///
+    /// Defaults to the pure [`execute`](Self::execute) body: both signatures
+    /// receive the same sealed [`AttemptContext`], and this route adds only the
+    /// ability to return declared intents alongside the result.
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> crate::ToolAttemptResult {
+        crate::ToolAttemptResult::from_tool_result(self.execute(call).await)
     }
     async fn execute_attempt_by_id(
         &self,
@@ -1388,7 +1378,7 @@ pub trait ToolProvider: Send + Sync + 'static {
                 "Unknown tool id: {tool_id}"
             )));
         };
-        self.execute_attempt(AttemptToolCall {
+        self.execute_attempt(ToolCall {
             name: &manifest.name,
             args,
             context,
@@ -1399,7 +1389,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         &self,
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &AttemptContext<'_>,
     ) -> ToolResult {
         let _ = (args, context);
         ToolResult::err_fmt(format_args!(
@@ -1407,22 +1397,23 @@ pub trait ToolProvider: Send + Sync + 'static {
             grant.manifest.id
         ))
     }
+    /// Execute a granted recorded leaf attempt that may declare typed intents.
+    ///
+    /// Defaults to the pure [`execute_granted`](Self::execute_granted) body,
+    /// which receives the same sealed [`AttemptContext`].
     async fn execute_granted_attempt(
         &self,
         grant: &ToolExecutionGrant,
-        _args: &serde_json::Value,
-        _context: &AttemptContext<'_>,
+        args: &serde_json::Value,
+        context: &AttemptContext<'_>,
     ) -> crate::ToolAttemptResult {
-        crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
-            "Granted leaf execution is unsupported for tool id `{}`",
-            grant.manifest.id
-        )))
+        crate::ToolAttemptResult::from_tool_result(self.execute_granted(grant, args, context).await)
     }
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &AttemptContext<'_>,
     ) -> ToolResult {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
             return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));

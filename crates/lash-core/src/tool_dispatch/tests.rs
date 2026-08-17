@@ -151,11 +151,7 @@ impl ToolProvider for OrderedBatchIntentTools {
         panic!("ordered batch intent law uses AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        self.definitions.iter().any(|tool| tool.id() == tool_id)
-    }
-
-    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         if call.name == "intent_batch_first" {
             self.second_attempt_finished.notified().await;
         } else {
@@ -206,11 +202,7 @@ impl ToolProvider for BlockingAttemptIntentTools {
         panic!("pre-result cancellation law uses AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == self.definition.id()
-    }
-
-    async fn execute_attempt(&self, _call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         self.entered.notify_one();
         std::future::pending().await
     }
@@ -230,11 +222,7 @@ impl ToolProvider for FixedAttemptIntentTools {
         panic!("fixed intent law uses AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == self.definition.id()
-    }
-
-    async fn execute_attempt(&self, _call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::ToolAttemptResult::done(
             crate::ToolResultDone::ok(json!({"provider": "recorded"})),
@@ -472,11 +460,7 @@ impl ToolProvider for RetryingIntentTools {
         panic!("retry intent law uses AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == self.definition.id()
-    }
-
-    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
@@ -516,11 +500,7 @@ impl ToolProvider for AttemptIntentTools {
         panic!("the legacy ToolContext entrypoint must not run for an AttemptContext provider")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == self.definition.id()
-    }
-
-    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.context.session_id(), "session");
         assert_eq!(call.context.tool_call_id(), Some("attempt-intents-call"));
@@ -591,7 +571,9 @@ impl ToolProvider for AttemptIntentTools {
                 .completion_key()
                 .expect_err("non-deferable provider receives no completion key")
                 .code,
-            crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime
+            // The provider never declared `attempt_may_defer`, and the refusal
+            // says so rather than blaming the host's effect controller.
+            crate::RuntimeErrorCode::ToolDeferralNotDeclared
         );
         crate::ToolAttemptResult::done(
             crate::ToolResultDone::ok(json!({"provider": "done"})),
@@ -673,6 +655,9 @@ enum PendingProbeMode {
     MissingKey,
     PendingWithKey,
     FailureThenPending,
+    /// Declares a park announcement the runtime cannot append, because this
+    /// dispatch context is not inside a durable process.
+    AnnouncingWithoutProcess,
     Done,
 }
 
@@ -697,7 +682,9 @@ impl ToolProvider for PendingProbeTools {
         tool_id == self.definition.id()
             && matches!(
                 self.mode,
-                PendingProbeMode::PendingWithKey | PendingProbeMode::FailureThenPending
+                PendingProbeMode::PendingWithKey
+                    | PendingProbeMode::FailureThenPending
+                    | PendingProbeMode::AnnouncingWithoutProcess
             )
     }
 
@@ -706,7 +693,7 @@ impl ToolProvider for PendingProbeTools {
         match self.mode {
             PendingProbeMode::MissingKey => ToolResult::pending(crate::PendingCompletion::new()),
             PendingProbeMode::PendingWithKey => {
-                call.context.completion_key().await.expect("completion key");
+                call.context.completion_key().expect("completion key");
                 ToolResult::pending(crate::PendingCompletion::new())
             }
             PendingProbeMode::FailureThenPending if attempt == 1 => ToolResult::retryable_failure(
@@ -716,8 +703,18 @@ impl ToolProvider for PendingProbeTools {
                 Some(0),
             ),
             PendingProbeMode::FailureThenPending => {
-                call.context.completion_key().await.expect("completion key");
+                call.context.completion_key().expect("completion key");
                 ToolResult::pending(crate::PendingCompletion::new())
+            }
+            PendingProbeMode::AnnouncingWithoutProcess => {
+                call.context.completion_key().expect("completion key");
+                ToolResult::pending(crate::PendingCompletion::new().announcing(
+                    crate::PendingAnnouncement::new(
+                        "process.yield",
+                        json!({ "type": "work.input_request.opened" }),
+                        "pending-probe:announcement",
+                    ),
+                ))
             }
             PendingProbeMode::Done => ToolResult::ok(json!({ "done": true })),
         }
@@ -862,6 +859,38 @@ fn test_plugins(provider: Arc<dyn ToolProvider>) -> Arc<PluginSession> {
     ))])
     .build_session("root", None)
     .expect("plugin session")
+}
+
+/// Runs a registered orchestrating tool the way session dispatch does.
+///
+/// The test `batch` tool lives in the orchestration lane — a recorded leaf
+/// attempt receives an `AttemptContext` and cannot fan out — so these laws
+/// enter through the same seam the runtime uses instead of the leaf route.
+async fn dispatch_orchestrating_tool_call(
+    context: &ToolDispatchContext<'_>,
+    tool_name: &str,
+    args: serde_json::Value,
+) -> ToolDispatchOutcome {
+    // The orchestration lane resolves its registration through the tool
+    // registry, which the plain leaf-dispatch fixture leaves unset.
+    let mut context = context.clone();
+    context.tool_registry = Some(context.plugins.tool_registry());
+    let context = &context;
+    let manifest = super::resolve_callable_manifest(context, tool_name)
+        .unwrap_or_else(|| panic!("orchestrating tool `{tool_name}` must be registered"));
+    let prepared = crate::PreparedToolCall::identity(
+        manifest.id,
+        crate::sansio::PendingToolCall {
+            call_id: format!("orchestrating:{tool_name}"),
+            tool_name: tool_name.to_string(),
+            args,
+            replay: None,
+        },
+    );
+    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
+        .prepared_call(&prepared)
+        .build();
+    crate::tool_dispatch::execute_orchestrating_tool(context, prepared, tool_context).await
 }
 
 use crate::testing::MockSessionManager;
@@ -1057,7 +1086,7 @@ impl ToolProvider for ExactDispatchTools {
         &self,
         grant: &crate::ToolExecutionGrant,
         args: &serde_json::Value,
-        context: &crate::ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         self.execute_by_id(&grant.manifest.id, args, context).await
     }
@@ -2183,9 +2212,9 @@ async fn idempotent_retry_policy_uses_journaled_attempts_without_provider_replay
 
 #[tokio::test]
 async fn batch_returns_explicit_errors_without_runtime_execution_context() {
-    let outcome = dispatch_tool_call(
+    let outcome = dispatch_orchestrating_tool_call(
         &dispatch_context(),
-        "batch".to_string(),
+        "batch",
         json!({
             "tool_calls": [
                 {"tool": "alpha", "parameters": {}},
@@ -2217,15 +2246,15 @@ async fn batch_returns_explicit_errors_without_runtime_execution_context() {
             .get("error")
             .and_then(|value| value.get("message"))
             .and_then(|value| value.as_str()),
-        Some("tool batch dispatch is unavailable outside runtime execution")
+        Some("tool batch orchestration is unavailable outside process replay")
     );
 }
 
 #[tokio::test]
 async fn batch_rejects_nested_batch_as_partial_failure() {
-    let outcome = dispatch_tool_call(
+    let outcome = dispatch_orchestrating_tool_call(
         &dispatch_context(),
-        "batch".to_string(),
+        "batch",
         json!({
             "tool_calls": [
                 {"tool": "batch", "parameters": {"tool_calls": []}}
@@ -2276,9 +2305,9 @@ async fn batch_marks_overflow_calls_as_failures() {
 async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
     let barrier = Arc::new(Barrier::new(2));
     let started = Arc::new(AtomicUsize::new(0));
-    let outcome = dispatch_tool_call(
+    let outcome = dispatch_orchestrating_tool_call(
         &parallel_dispatch_context(Arc::clone(&barrier), Arc::clone(&started)),
-        "batch".to_string(),
+        "batch",
         json!({
             "tool_calls": [
                 {"tool": "probe_a", "parameters": {}},
@@ -2384,6 +2413,16 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
         panic!("the non-deferred provider must complete synchronously");
     };
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    // The attempt body runs under `catch_unwind`, so an assertion that panics
+    // inside the provider comes back as a Done failure output. Pin the exact
+    // success payload, or every in-provider law above this line is unenforced.
+    let crate::ToolCallOutcome::Success(value) = &outcome.record.output.outcome else {
+        panic!(
+            "an in-provider assertion panic surfaces here as a failure output: {:?}",
+            outcome.record.output.outcome
+        );
+    };
+    assert_eq!(value.to_json_value()["provider"], json!("done"));
     assert_eq!(
         outcome
             .intent_outcomes
@@ -2430,3 +2469,4 @@ async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
 }
 
 include!("tests/intent_laws.rs");
+include!("tests/pending_park_laws.rs");

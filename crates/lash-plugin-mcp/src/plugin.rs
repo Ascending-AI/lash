@@ -9,7 +9,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
 };
 use lash_core::{
-    ToolCall, ToolContext, ToolContract, ToolId, ToolManifest, ToolProvider, ToolResult,
+    AttemptContext, ToolCall, ToolContract, ToolId, ToolManifest, ToolProvider, ToolResult,
 };
 
 use crate::config::McpServerConfig;
@@ -285,7 +285,7 @@ impl ToolProvider for McpDeferredToolProvider {
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &AttemptContext<'_>,
     ) -> ToolResult {
         if let Err(result) =
             Self::validate_execution_binding(tool_id, context.tool_execution_binding())
@@ -483,7 +483,7 @@ mod tests {
         let tool_id = defs[0].manifest.id.clone();
         let args = json!({ "query": "lash" });
         let missing_binding = deferred
-            .execute_by_id(&tool_id, &args, &lash_core::testing::mock_tool_context())
+            .execute_by_id(&tool_id, &args, &lash_core::testing::mock_attempt_context())
             .await;
         assert!(!missing_binding.is_success());
         assert!(
@@ -495,7 +495,7 @@ mod tests {
             "{missing_binding:?}"
         );
 
-        let wrong_binding_context = lash_core::testing::mock_tool_context_with_execution_binding(
+        let wrong_binding_context = lash_core::testing::mock_attempt_context_with_execution_binding(
             json!({ "kind": "mcp", "server": "docs", "tool_id": "mcp:docs/other" }),
         );
         let wrong_binding = deferred
@@ -503,7 +503,7 @@ mod tests {
             .await;
         assert!(!wrong_binding.is_success());
 
-        let valid_binding_context = lash_core::testing::mock_tool_context_with_execution_binding(
+        let valid_binding_context = lash_core::testing::mock_attempt_context_with_execution_binding(
             json!({ "kind": "mcp", "server": "docs", "tool_id": tool_id.to_string() }),
         );
         let deferred_result = deferred

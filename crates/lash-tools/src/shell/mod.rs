@@ -21,8 +21,8 @@ use lash_core::plugin::{
 };
 use lash_core::runtime::ProcessEventSemanticsSpec;
 use lash_core::{
-    AttemptToolCall, PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest,
-    PromptContribution, SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest, PromptContribution,
+    SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
 };
 
 use lash_tool_support::{
@@ -624,7 +624,7 @@ impl StaticToolExecute for StandardShell {
                 .execute(ToolCall {
                     name: call.name,
                     args: call.args,
-                    context: call.context.__tool_context(),
+                    context: &call.context.__attempt_context(),
                 })
                 .await;
         }
@@ -640,11 +640,7 @@ impl StaticToolExecute for StandardShell {
         .await
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        matches!(tool_id.as_str(), "tool:start_command" | "tool:write_stdin")
-    }
-
-    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptResult {
         match call.name {
             "start_command" => {
                 let params = match self.parse_start_command_params(call.args) {
@@ -654,10 +650,9 @@ impl StaticToolExecute for StandardShell {
                 self.declare_start_command_process(&params, call.context)
             }
             "write_stdin" => self.declare_write_stdin(call.args, call.context),
-            other => tool_result_without_intents(invalid_request_failure(
-                "unknown_shell_leaf_tool",
-                format!("Unknown leaf shell tool: {other}"),
-            )),
+            // Every other shell tool is a pure attempt body with no intents to
+            // declare; it runs against the same sealed attempt context.
+            _ => tool_result_without_intents(self.execute(call).await),
         }
     }
 }
@@ -802,7 +797,7 @@ finish probe.exit_code == 0"#.into(),
         &self,
         name: &str,
         args: &serde_json::Value,
-        context: &lash_core::ToolContext<'_>,
+        context: &lash_core::AttemptContext<'_>,
         cancel: Option<CancellationToken>,
     ) -> ToolResult {
         match name {

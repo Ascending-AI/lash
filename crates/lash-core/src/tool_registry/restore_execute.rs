@@ -328,10 +328,6 @@ impl ToolProvider for ToolRegistry {
             .await
     }
 
-    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
-        self.resolve_execution_source(tool_id)
-            .is_ok_and(|(source, _)| source.supports_attempt_context(tool_id))
-    }
 
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
@@ -356,7 +352,7 @@ impl ToolProvider for ToolRegistry {
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         let (source, manifest) = match self.resolve_execution_source(tool_id) {
             Ok(resolved) => resolved,
@@ -392,7 +388,7 @@ impl ToolProvider for ToolRegistry {
         &self,
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         let source = match self.resolve_granted_execution_source(grant) {
             Ok(source) => source,

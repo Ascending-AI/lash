@@ -70,7 +70,7 @@ impl ReadFileBlockingResult {
         Self::Tool(result)
     }
 
-    async fn into_tool_result(self, context: &lash_core::ToolContext<'_>) -> ToolResult {
+    async fn into_tool_result(self, context: &lash_core::AttemptContext<'_>) -> ToolResult {
         match self {
             Self::Tool(result) => result,
             Self::Attachment(attachment) => store_attachment(context, attachment).await,
@@ -354,7 +354,7 @@ fn read_native_attachment(
 }
 
 async fn store_attachment(
-    context: &lash_core::ToolContext<'_>,
+    context: &lash_core::AttemptContext<'_>,
     attachment: FileAttachmentData,
 ) -> ToolResult {
     let reference = match context
@@ -944,7 +944,7 @@ mod tests {
             .execute(lash_core::ToolCall {
                 name: "read_file",
                 args: &json!({"path": path.to_str().unwrap()}),
-                context: &context,
+                context: &lash_core::testing::mock_attempt_context_from(&context),
             })
             .await;
 

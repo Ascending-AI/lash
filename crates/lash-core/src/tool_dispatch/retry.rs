@@ -47,21 +47,7 @@ pub(crate) async fn execute_once<'run>(
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
 ) -> crate::ToolAttemptResult {
-    let args = &prepared.args;
-    let mut attempt_result = if context.tools.supports_attempt_context(&prepared.tool_id) {
-        execute_with_attempt_context(context, prepared, &tool_context).await
-    } else {
-        crate::ToolAttemptResult::from_tool_result(
-            std::panic::AssertUnwindSafe(context.tools.execute_by_id(
-                &prepared.tool_id,
-                args,
-                &tool_context,
-            ))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(tool_panicked),
-        )
-    };
+    let mut attempt_result = execute_with_attempt_context(context, prepared, &tool_context).await;
     normalize_attempt_result_attachments(context, &prepared.tool_name, &mut attempt_result).await;
     attempt_result
 }
@@ -72,32 +58,18 @@ async fn execute_granted_once<'run>(
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
 ) -> crate::ToolAttemptResult {
-    let mut attempt_result = if context.tools.supports_attempt_context(&prepared.tool_id) {
-        let attempt_context = build_attempt_context(prepared, &tool_context).await;
-        match attempt_context {
-            Ok(attempt_context) => std::panic::AssertUnwindSafe(
-                context
-                    .tools
-                    .execute_granted_attempt(grant, &prepared.args, &attempt_context),
-            )
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|payload| {
-                crate::ToolAttemptResult::from_tool_result(tool_panicked(payload))
-            }),
-            Err(result) => crate::ToolAttemptResult::from_tool_result(result),
-        }
-    } else {
-        crate::ToolAttemptResult::from_tool_result(
-            std::panic::AssertUnwindSafe(context.tools.execute_granted(
-                grant,
-                &prepared.args,
-                &tool_context,
-            ))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(tool_panicked),
-        )
+    let mut attempt_result = match build_attempt_context(context, prepared, &tool_context).await {
+        Ok(attempt_context) => std::panic::AssertUnwindSafe(context.tools.execute_granted_attempt(
+            grant,
+            &prepared.args,
+            &attempt_context,
+        ))
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|payload| {
+            crate::ToolAttemptResult::from_tool_result(tool_panicked(payload))
+        }),
+        Err(result) => crate::ToolAttemptResult::from_tool_result(result),
     };
     normalize_attempt_result_attachments(context, &grant.manifest.name, &mut attempt_result).await;
     attempt_result
@@ -108,7 +80,7 @@ async fn execute_with_attempt_context(
     prepared: &PreparedToolCall,
     tool_context: &ToolContext<'_>,
 ) -> crate::ToolAttemptResult {
-    let attempt_context = match build_attempt_context(prepared, tool_context).await {
+    let attempt_context = match build_attempt_context(context, prepared, tool_context).await {
         Ok(context) => context,
         Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
     };
@@ -123,17 +95,28 @@ async fn execute_with_attempt_context(
 }
 
 async fn build_attempt_context<'run>(
-    _prepared: &PreparedToolCall,
+    context: &ToolDispatchContext<'_>,
+    prepared: &PreparedToolCall,
     tool_context: &ToolContext<'run>,
 ) -> Result<crate::AttemptContext<'run>, ToolResult> {
     let scoped = tool_context.effect_controller.scoped();
     let completion_key = tool_context.completion.load();
-    let completion_supported = completion_key.is_some();
+    // The key is reserved before the body runs, and only for a declared
+    // deferrer on a controller that can route await events across process
+    // loss. Report which of the two is missing rather than blaming the
+    // controller for a provider that never declared the capability.
+    let completion_support = if completion_key.is_some() {
+        crate::tool_provider::AttemptCompletionSupport::Available
+    } else if !context.tools.attempt_may_defer(&prepared.tool_id) {
+        crate::tool_provider::AttemptCompletionSupport::NotDeclared
+    } else {
+        crate::tool_provider::AttemptCompletionSupport::ControllerUnsupported
+    };
     Ok(crate::AttemptContext::from_tool_context(
         tool_context,
         scoped.scope_id().to_string(),
         completion_key,
-        completion_supported,
+        completion_support,
     ))
 }
 

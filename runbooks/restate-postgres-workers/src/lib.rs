@@ -1041,10 +1041,22 @@ struct E2eTools {
 
 type E2eToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult> + Send + 'a>>;
 
+/// Every tool whose body calls `AttemptContext::completion_key()` and parks.
+/// The coordinator only pre-derives a completion key for declared tools, so a
+/// parking tool missing from this list fails its call with
+/// `tool_deferral_not_declared` instead of completing out of band.
+const DEFERRING_TOOL_IDS: &[&str] = &["tool:async_lookup", "tool:durable_input_request"];
+
 #[async_trait::async_trait]
 impl StaticToolExecute for E2eTools {
     async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
         self.execute_selected_tool(call).await
+    }
+
+    /// Both parking tools resolve out of band, so the runtime pre-derives the
+    /// completion key their attempt bodies read.
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        DEFERRING_TOOL_IDS.contains(&tool_id.as_str())
     }
 }
 
@@ -1105,7 +1117,7 @@ impl E2eTools {
             "worker_id": self.worker_id,
             "async": true,
         });
-        let completion_key = match call.context.completion_key().await {
+        let completion_key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return ToolResult::err_fmt(err),
         };
@@ -1326,7 +1338,7 @@ impl E2eTools {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("input?")
             .to_string();
-        let key = match call.context.completion_key().await {
+        let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return ToolResult::err_fmt(err),
         };
@@ -1356,7 +1368,10 @@ impl E2eTools {
             }),
         )
         .await;
-        let process_event = lash_core::ProcessEventAppendRequest::new(
+        // The attempt body cannot append process events. It declares the
+        // announcement and the runtime appends it when the call parks, so the
+        // yield can never advertise a wait that did not happen.
+        let announcement = lash_core::PendingAnnouncement::new(
             "process.yield",
             serde_json::json!({
                 "type": "work.input_request.opened",
@@ -1364,19 +1379,11 @@ impl E2eTools {
                 "request_id": opened["request_id"].clone(),
                 "await_key_id": key.key_id,
             }),
-        )
-        .with_replay_key(format!(
-            "tool:{}:input-request-opened",
-            call_id.as_deref().unwrap_or("unknown")
-        ));
-        if let Err(err) = call
-            .context
-            .process_events()
-            .emit_request(process_event)
-            .await
-        {
-            return ToolResult::err_fmt(err);
-        }
+            format!(
+                "tool:{}:input-request-opened",
+                call_id.as_deref().unwrap_or("unknown")
+            ),
+        );
         if args
             .get("attach_after_resolution")
             .and_then(serde_json::Value::as_bool)
@@ -1407,7 +1414,7 @@ impl E2eTools {
                 }
             }
         }
-        ToolResult::pending(lash_core::PendingCompletion::new())
+        ToolResult::pending(lash_core::PendingCompletion::new().announcing(announcement))
     }
 }
 
@@ -1521,6 +1528,46 @@ pub fn scripted_finish_cell(dialect: lash::rlm::RlmDialect, value: &str) -> Stri
             format!("<typescript>\nfinish({value});\n</typescript>")
         }
         _ => format!("<lashlang>\nfinish {value}\n</lashlang>"),
+    }
+}
+
+#[cfg(test)]
+mod deferral_declaration_tests {
+    use super::*;
+
+    /// Every parking tool body must be declared to `attempt_may_defer`: the
+    /// coordinator pre-derives a completion key only for declared tools, and an
+    /// undeclared parking tool fails its call instead of resolving out of band.
+    #[test]
+    fn every_parking_tool_body_declares_its_deferral() {
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+            .expect("read this crate's own source");
+        let mut parking: Vec<String> = Vec::new();
+        let mut current: Option<String> = None;
+        for line in source.lines() {
+            if let Some(rest) = line.trim().strip_prefix("async fn ")
+                && rest.contains("call: ToolCall")
+            {
+                current = rest.split('(').next().map(str::to_string);
+            }
+            if line.contains("ToolResult::pending(")
+                && let Some(name) = current.as_deref()
+            {
+                parking.push(format!("tool:{name}"));
+            }
+        }
+        assert!(
+            parking.len() >= 2,
+            "the parking-tool scan found {parking:?}; the scan itself has drifted"
+        );
+        for tool_id in parking {
+            assert!(
+                DEFERRING_TOOL_IDS.contains(&tool_id.as_str()),
+                "`{tool_id}` parks but is not declared in DEFERRING_TOOL_IDS, so its \
+                 completion key is never pre-derived and the call fails with \
+                 tool_deferral_not_declared"
+            );
+        }
     }
 }
 

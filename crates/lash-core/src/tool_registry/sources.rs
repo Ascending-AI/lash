@@ -47,7 +47,7 @@ impl ToolSourceExecutor for OrchestratingToolSource {
         &self,
         _tool: &str,
         _args: &serde_json::Value,
-        _context: &ToolContext<'_>,
+        _context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         ToolResult::err_fmt(
             "orchestrating tools require direct OrchestrationContext dispatch",
@@ -259,7 +259,7 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         &self,
         tool: &str,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         let Some(provider_idx) = self.provider_index_for(tool) else {
             return ToolResult::err_fmt(format_args!("Unknown tool: {tool}"));
@@ -273,10 +273,6 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
             .await
     }
 
-    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
-        self.provider_index_for_id(tool_id)
-            .is_some_and(|index| self.providers[index].supports_attempt_context(tool_id))
-    }
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.provider_index_for_id(tool_id)
@@ -303,7 +299,7 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
             return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
@@ -378,7 +374,7 @@ impl ToolSourceExecutor for ToolProviderSource {
         &self,
         tool: &str,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         self.provider
             .execute(ToolCall {
@@ -389,9 +385,6 @@ impl ToolSourceExecutor for ToolProviderSource {
             .await
     }
 
-    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
-        self.provider.supports_attempt_context(tool_id)
-    }
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.provider.attempt_may_defer(tool_id)
@@ -412,7 +405,7 @@ impl ToolSourceExecutor for ToolProviderSource {
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         self.provider
             .execute_by_id(tool_id, args, context)

@@ -878,249 +878,426 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
     );
 }
 
+#[derive(Clone, Default)]
+struct CapturingRuntimeReplayController {
+    llm_calls: Arc<Mutex<usize>>,
+    tool_outcomes: Arc<Mutex<Vec<serde_json::Value>>>,
+    process_starts: Arc<std::sync::atomic::AtomicUsize>,
+    /// Tool the first mocked assistant turn calls; defaults to `trigger_tool`.
+    called_tool: Option<String>,
+    inline: InlineRuntimeEffectController,
+}
+
+impl CapturingRuntimeReplayController {
+    fn calling(tool_name: &str) -> Self {
+        Self {
+            called_tool: Some(tool_name.to_string()),
+            ..Self::default()
+        }
+    }
+
+    fn tool_outcomes(&self) -> Vec<serde_json::Value> {
+        self.tool_outcomes.lock_recover().clone()
+    }
+
+    fn process_starts(&self) -> usize {
+        self.process_starts.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
+    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
+        crate::EffectReplayOwnership::Runtime
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+    ) -> Result<AwaitEventKey, RuntimeError> {
+        self.inline.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &AwaitEventKey,
+        resolution: Resolution,
+    ) -> Result<ResolveOutcome, RuntimeError> {
+        self.inline.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &AwaitEventKey,
+    ) -> Result<Option<Resolution>, RuntimeError> {
+        self.inline.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Resolution, RuntimeError> {
+        self.inline.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        self.inline
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        self.inline
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for CapturingRuntimeReplayController {
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        if matches!(&envelope.command, RuntimeEffectCommand::ToolBatch { .. }) {
+            let outcome = local_executor.execute(envelope).await?;
+            self.tool_outcomes
+                .lock_recover()
+                .push(serde_json::to_value(&outcome).expect("serialize tool outcome"));
+            return Ok(outcome);
+        }
+
+        match envelope.command {
+            RuntimeEffectCommand::PeekAwaitEvent { .. } => {
+                Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
+            }
+            RuntimeEffectCommand::ToolAttempt {
+                call,
+                execution_grant,
+                attempt,
+                max_attempts,
+            } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        RuntimeEffectCommand::ToolAttempt {
+                            call,
+                            execution_grant,
+                            attempt,
+                            max_attempts,
+                        },
+                    ))
+                    .await
+            }
+            RuntimeEffectCommand::LlmCall { .. } => {
+                let mut llm_calls = self.llm_calls.lock_recover();
+                *llm_calls += 1;
+                let parts = if *llm_calls == 1 {
+                    vec![LlmOutputPart::ToolCall {
+                        call_id: "trigger-call".to_string(),
+                        tool_name: self
+                            .called_tool
+                            .clone()
+                            .unwrap_or_else(|| "trigger_tool".to_string()),
+                        input_json: serde_json::json!({}).to_string(),
+                        replay: None,
+                    }]
+                } else {
+                    vec![LlmOutputPart::Text {
+                        text: "finished".to_string(),
+                        response_meta: None,
+                    }]
+                };
+                Ok(RuntimeEffectOutcome::LlmCall {
+                    result: Box::new(Ok(LlmResponse {
+                        full_text: if *llm_calls == 1 {
+                            String::new()
+                        } else {
+                            "finished".to_string()
+                        },
+                        parts,
+                        usage: LlmUsage {
+                            input_tokens: 1,
+                            output_tokens: 1,
+                            cache_read_input_tokens: 0,
+                            cache_write_input_tokens: 0,
+                            reasoning_output_tokens: 0,
+                        },
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    })),
+                    text_streamed: false,
+                    call_record: None,
+                })
+            }
+            RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {
+                result: Ok(crate::CheckpointDelivery::default()),
+                claims: Box::default(),
+            }),
+            RuntimeEffectCommand::Process { command } => {
+                self.process_starts.fetch_add(1, Ordering::SeqCst);
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        RuntimeEffectCommand::Process { command },
+                    ))
+                    .await
+            }
+            other => Err(RuntimeEffectControllerError::foreign(
+                "unexpected_effect",
+                format!("unexpected effect {}", other.kind().as_str()),
+            )),
+        }
+    }
+}
+
+struct TriggerEventTool;
+
+fn trigger_tool_definition() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:trigger_tool",
+        "trigger_tool",
+        "Emit a test trigger occurrence.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+}
+
+/// Emitting a trigger reserves and starts deliveries through the effect
+/// controller, which is orchestration rather than leaf work: a recorded
+/// attempt receives an `AttemptContext` with no route to it. This law is
+/// about the runtime-owned emission itself, so the tool registers in the
+/// orchestration lane and emits inline, twice, standing in for the first
+/// emission and its redrive.
+#[async_trait::async_trait]
+impl crate::tool_provider::orchestration::OrchestratingToolImplementation for TriggerEventTool {
+    fn manifest(&self) -> crate::ToolManifest {
+        trigger_tool_definition().manifest()
+    }
+
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(trigger_tool_definition().contract())
+    }
+
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> crate::ToolResult {
+        let source_type = crate::triggers::trigger_event_type("ui.button", "pressed");
+        let source_key =
+            crate::empty_trigger_source_key(&source_type).expect("empty trigger source key");
+        let idempotency_key = "test-trigger:button-pressed".to_string();
+        let request = || {
+            crate::TriggerOccurrenceRequest::new(
+                source_type.clone(),
+                source_key.clone(),
+                serde_json::json!({ "pressed": true }),
+                idempotency_key.clone(),
+            )
+            .with_source(serde_json::json!({}))
+        };
+        context
+            .triggers()
+            .emit(request())
+            .await
+            .expect("emit tool trigger occurrence");
+        context
+            .triggers()
+            .emit(request())
+            .await
+            .expect("redrive tool trigger occurrence");
+        crate::ToolResult::ok(serde_json::json!({ "emitted": true }))
+    }
+}
+
+fn trigger_orchestrating_tool() -> crate::tool_provider::orchestration::OrchestratingToolDef {
+    let implementation: Arc<
+        dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
+    > = Arc::new(TriggerEventTool);
+    // SAFETY: lash-core owns this test-only trigger contract and its body.
+    unsafe {
+        crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(implementation)
+    }
+}
+
+/// Calls the trigger-emitting orchestrating tool through `call_tool_batch`, so
+/// the occurrence has to survive the inner batch effect boundary before the
+/// outer one records it.
+struct NestedTriggerBatchTool;
+
+fn nested_trigger_batch_tool_definition() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:trigger_batch_tool",
+        "trigger_batch_tool",
+        "Emit a test trigger occurrence through a nested tool batch.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::tool_provider::orchestration::OrchestratingToolImplementation
+    for NestedTriggerBatchTool
+{
+    fn manifest(&self) -> crate::ToolManifest {
+        nested_trigger_batch_tool_definition().manifest()
+    }
+
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(nested_trigger_batch_tool_definition().contract())
+    }
+
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> crate::ToolResult {
+        let replies = context
+            .call_tool_batch(vec![crate::ToolInvocation::new(
+                "trigger_tool",
+                crate::ToolId::from("tool:trigger_tool"),
+                serde_json::json!({}),
+            )])
+            .await;
+        assert_eq!(replies.len(), 1);
+        crate::ToolResult::ok(serde_json::json!({ "nested": replies[0].output.clone() }))
+    }
+}
+
+fn nested_trigger_batch_orchestrating_tool()
+-> crate::tool_provider::orchestration::OrchestratingToolDef {
+    let implementation: Arc<
+        dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
+    > = Arc::new(NestedTriggerBatchTool);
+    // SAFETY: lash-core owns this test-only trigger contract and its body.
+    unsafe {
+        crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(implementation)
+    }
+}
+
+/// A trigger emitted inside a nested tool batch must reach the outer recorded
+/// batch outcome: the inner batch drains its own trigger buffer into its
+/// outcome, and the consumer restores it into the enclosing buffer. Without the
+/// restore the occurrence is dropped before the outer boundary sees it, and the
+/// turn's recorded effects lose an emission that really happened.
+#[tokio::test]
+async fn tool_batch_child_trigger_reaches_the_enclosing_recorded_batch_outcome() {
+    let controller = CapturingRuntimeReplayController::calling("trigger_batch_tool");
+    let mut config = runtime_host_config_with_inline_controller(Arc::new(controller.clone()));
+    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
+        mock_provider(Vec::new()).into_handle(),
+    ));
+    let trigger_store = Arc::new(crate::InMemoryTriggerStore::default());
+    let source_key =
+        crate::empty_trigger_source_key("ui.button.pressed").expect("empty trigger source key");
+    crate::TriggerStore::execute_command(
+        trigger_store.as_ref(),
+        "fig1487-nested-batch-register",
+        crate::TriggerCommand::Register {
+            owner_scope: crate::TriggerOwnerScope::session("root"),
+            actor: crate::ProcessOriginator::session(crate::SessionScope::new("root")),
+            draft: crate::TriggerSubscriptionDraft::for_process(
+                "fig1487/nested-batch",
+                crate::ProcessExecutionEnvRef::new("process-env:fig1487-nested-batch"),
+                "ui.button.pressed",
+                source_key,
+                crate::ProcessInput::Engine {
+                    kind: "fig1487-nested-batch-engine".to_string(),
+                    payload: serde_json::json!({}),
+                },
+                crate::ProcessIdentity::new("fig1487-nested-batch-engine"),
+            )
+            .with_payload_schema(crate::LashSchema::any()),
+        },
+    )
+    .await
+    .expect("register tool trigger")
+    .expect("tool trigger mutation");
+    let trigger =
+        crate::TriggerEvent::new("Button", "ui.button", "pressed", crate::LashSchema::any());
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        vec![Arc::new(StaticPluginFactory::new(
+            "button-triggers",
+            crate::PluginSpec::new()
+                .with_trigger_event(trigger)
+                .with_orchestrating_tool(trigger_orchestrating_tool())
+                .with_orchestrating_tool(nested_trigger_batch_orchestrating_tool()),
+        ))],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        EmbeddedRuntimeHost::new(config)
+            .with_trigger_store(Arc::clone(&trigger_store) as Arc<dyn crate::TriggerStore>),
+    )
+    .await;
+
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("emit trigger through a nested batch"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                ScopedEffectController::shared(
+                    Arc::new(controller.clone()),
+                    ExecutionScope::turn("root", "trigger-batch-tool"),
+                )
+                .expect("capturing execution scope"),
+            )
+            .with_events(&NoopEventSink),
+        )
+        .await
+        .expect("turn");
+
+    assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
+    let tool_outcomes = controller.tool_outcomes();
+    assert_eq!(
+        tool_outcomes.len(),
+        2,
+        "the nested batch and the turn's batch are both recorded"
+    );
+    let outer = tool_outcomes.last().expect("outer batch outcome");
+    assert_eq!(outer["type"], "tool_batch");
+    let outer_triggers = outer["triggers"]
+        .as_array()
+        .expect("outer batch trigger outcomes");
+    assert_eq!(
+        outer_triggers.len(),
+        2,
+        "the nested emissions must reach the enclosing recorded batch outcome"
+    );
+    assert_eq!(
+        outer_triggers[0]["source_type"],
+        serde_json::json!("ui.button.pressed")
+    );
+    assert_eq!(
+        controller.process_starts(),
+        2,
+        "restoring the drained outcomes must not re-emit the occurrence"
+    );
+    assert_eq!(
+        crate::TriggerStore::list_deliveries(trigger_store.as_ref())
+            .await
+            .expect("list tool trigger deliveries")
+            .len(),
+        1,
+        "the repeated occurrence still owns one deterministic delivery"
+    );
+}
+
 #[tokio::test]
 async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appending_session_node()
 {
-    #[derive(Clone, Default)]
-    struct CapturingRuntimeReplayController {
-        llm_calls: Arc<Mutex<usize>>,
-        tool_outcomes: Arc<Mutex<Vec<serde_json::Value>>>,
-        process_starts: Arc<std::sync::atomic::AtomicUsize>,
-        inline: InlineRuntimeEffectController,
-    }
-
-    impl CapturingRuntimeReplayController {
-        fn tool_outcomes(&self) -> Vec<serde_json::Value> {
-            self.tool_outcomes.lock_recover().clone()
-        }
-
-        fn process_starts(&self) -> usize {
-            self.process_starts.load(Ordering::SeqCst)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
-        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-            crate::EffectReplayOwnership::Runtime
-        }
-
-        async fn await_event_key(
-            &self,
-            scope: &ExecutionScope,
-            wait: AwaitEventWaitIdentity,
-        ) -> Result<AwaitEventKey, RuntimeError> {
-            self.inline.await_event_key(scope, wait).await
-        }
-
-        async fn resolve_await_event(
-            &self,
-            key: &AwaitEventKey,
-            resolution: Resolution,
-        ) -> Result<ResolveOutcome, RuntimeError> {
-            self.inline.resolve_await_event(key, resolution).await
-        }
-
-        async fn peek_await_event(
-            &self,
-            key: &AwaitEventKey,
-        ) -> Result<Option<Resolution>, RuntimeError> {
-            self.inline.peek_await_event(key).await
-        }
-
-        async fn await_await_event(
-            &self,
-            key: &AwaitEventKey,
-            cancel: CancellationToken,
-            deadline: Option<std::time::Instant>,
-        ) -> Result<Resolution, RuntimeError> {
-            self.inline.await_await_event(key, cancel, deadline).await
-        }
-
-        async fn revoke_await_events_for_session(
-            &self,
-            session_id: &str,
-        ) -> Result<(), RuntimeError> {
-            self.inline
-                .revoke_await_events_for_session(session_id)
-                .await
-        }
-
-        async fn cancel_await_events_for_session(
-            &self,
-            session_id: &str,
-        ) -> Result<(), RuntimeError> {
-            self.inline
-                .cancel_await_events_for_session(session_id)
-                .await
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl RuntimeEffectController for CapturingRuntimeReplayController {
-        async fn execute_effect(
-            &self,
-            envelope: RuntimeEffectEnvelope,
-            local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-            if matches!(&envelope.command, RuntimeEffectCommand::ToolBatch { .. }) {
-                let outcome = local_executor.execute(envelope).await?;
-                self.tool_outcomes
-                    .lock_recover()
-                    .push(serde_json::to_value(&outcome).expect("serialize tool outcome"));
-                return Ok(outcome);
-            }
-
-            match envelope.command {
-                RuntimeEffectCommand::PeekAwaitEvent { .. } => {
-                    Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
-                }
-                RuntimeEffectCommand::ToolAttempt {
-                    call,
-                    execution_grant,
-                    attempt,
-                    max_attempts,
-                } => {
-                    local_executor
-                        .execute(RuntimeEffectEnvelope::new(
-                            envelope.invocation,
-                            RuntimeEffectCommand::ToolAttempt {
-                                call,
-                                execution_grant,
-                                attempt,
-                                max_attempts,
-                            },
-                        ))
-                        .await
-                }
-                RuntimeEffectCommand::LlmCall { .. } => {
-                    let mut llm_calls = self.llm_calls.lock_recover();
-                    *llm_calls += 1;
-                    let parts = if *llm_calls == 1 {
-                        vec![LlmOutputPart::ToolCall {
-                            call_id: "trigger-call".to_string(),
-                            tool_name: "trigger_tool".to_string(),
-                            input_json: serde_json::json!({}).to_string(),
-                            replay: None,
-                        }]
-                    } else {
-                        vec![LlmOutputPart::Text {
-                            text: "finished".to_string(),
-                            response_meta: None,
-                        }]
-                    };
-                    Ok(RuntimeEffectOutcome::LlmCall {
-                        result: Box::new(Ok(LlmResponse {
-                            full_text: if *llm_calls == 1 {
-                                String::new()
-                            } else {
-                                "finished".to_string()
-                            },
-                            parts,
-                            usage: LlmUsage {
-                                input_tokens: 1,
-                                output_tokens: 1,
-                                cache_read_input_tokens: 0,
-                                cache_write_input_tokens: 0,
-                                reasoning_output_tokens: 0,
-                            },
-                            response_metadata: Default::default(),
-                            ..LlmResponse::default()
-                        })),
-                        text_streamed: false,
-                        call_record: None,
-                    })
-                }
-                RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {
-                    result: Ok(crate::CheckpointDelivery::default()),
-                    claims: Box::default(),
-                }),
-                RuntimeEffectCommand::Process { command } => {
-                    self.process_starts.fetch_add(1, Ordering::SeqCst);
-                    local_executor
-                        .execute(RuntimeEffectEnvelope::new(
-                            envelope.invocation,
-                            RuntimeEffectCommand::Process { command },
-                        ))
-                        .await
-                }
-                other => Err(RuntimeEffectControllerError::foreign(
-                    "unexpected_effect",
-                    format!("unexpected effect {}", other.kind().as_str()),
-                )),
-            }
-        }
-    }
-
-    struct TriggerEventTool;
-
-    fn trigger_tool_definition() -> crate::ToolDefinition {
-        crate::ToolDefinition::raw(
-            "tool:trigger_tool",
-            "trigger_tool",
-            "Emit a test trigger occurrence.",
-            serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-            serde_json::json!({ "type": "object", "additionalProperties": true }),
-        )
-    }
-
-    #[async_trait::async_trait]
-    impl crate::ToolProvider for TriggerEventTool {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-            vec![trigger_tool_definition().manifest()]
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-            (name == "trigger_tool").then(|| Arc::new(trigger_tool_definition().contract()))
-        }
-
-        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
-            let source_type = crate::triggers::trigger_event_type("ui.button", "pressed");
-            let source_key =
-                crate::empty_trigger_source_key(&source_type).expect("empty trigger source key");
-            let idempotency_key = call
-                .context
-                .replay_key()
-                .map(|key| format!("{key}:trigger:button-pressed"))
-                .unwrap_or_else(|| "test-trigger:button-pressed".to_string());
-            call.context
-                .triggers()
-                .emit(
-                    crate::TriggerOccurrenceRequest::new(
-                        source_type,
-                        source_key,
-                        serde_json::json!({ "pressed": true }),
-                        idempotency_key,
-                    )
-                    .with_source(serde_json::json!({})),
-                )
-                .await
-                .expect("emit tool trigger occurrence");
-            call.context
-                .triggers()
-                .emit(
-                    crate::TriggerOccurrenceRequest::new(
-                        crate::triggers::trigger_event_type("ui.button", "pressed"),
-                        crate::empty_trigger_source_key("ui.button.pressed")
-                            .expect("empty trigger source key"),
-                        serde_json::json!({ "pressed": true }),
-                        call.context
-                            .replay_key()
-                            .map(|key| format!("{key}:trigger:button-pressed"))
-                            .unwrap_or_else(|| "test-trigger:button-pressed".to_string()),
-                    )
-                    .with_source(serde_json::json!({})),
-                )
-                .await
-                .expect("redrive tool trigger occurrence");
-            crate::ToolResult::ok(serde_json::json!({ "emitted": true }))
-        }
-    }
-
     let controller = CapturingRuntimeReplayController::default();
     let mut config = runtime_host_config_with_inline_controller(Arc::new(controller.clone()));
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
@@ -1161,9 +1338,11 @@ async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appen
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         vec![Arc::new(StaticPluginFactory::new(
             "button-triggers",
-            crate::PluginSpec::new().with_trigger_event(trigger),
+            crate::PluginSpec::new()
+                .with_trigger_event(trigger)
+                .with_orchestrating_tool(trigger_orchestrating_tool()),
         ))],
-        Arc::new(TriggerEventTool),
+        Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         EmbeddedRuntimeHost::new(config)
             .with_trigger_store(Arc::clone(&trigger_store) as Arc<dyn crate::TriggerStore>),

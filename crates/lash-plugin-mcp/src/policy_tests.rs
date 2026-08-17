@@ -263,7 +263,7 @@ async fn call(pool: &McpConnectionPool) -> ToolResult {
     pool.call_tool(
         "mcp__mock__work",
         &json!({}),
-        &lash_core::testing::mock_tool_context(),
+        &lash_core::testing::mock_attempt_context(),
     )
     .await
 }

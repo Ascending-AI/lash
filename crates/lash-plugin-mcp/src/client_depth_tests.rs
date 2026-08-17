@@ -396,7 +396,7 @@ async fn scripted_server_round_trips_sampling_elicitation_roots_and_change_notif
         .execute(lash_core::ToolCall {
             name: "mcp__depth__exercise_client_depth",
             args: &json!({}),
-            context: &lash_core::testing::mock_tool_context(),
+            context: &lash_core::testing::mock_attempt_context(),
         })
         .await;
     assert!(
@@ -629,7 +629,7 @@ async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolResult
         .execute(lash_core::ToolCall {
             name: "mcp__depth__exercise_client_depth",
             args: &json!({}),
-            context: &lash_core::testing::mock_tool_context(),
+            context: &lash_core::testing::mock_attempt_context(),
         })
         .await
 }

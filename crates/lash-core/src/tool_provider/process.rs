@@ -50,14 +50,34 @@ impl<'run> InternalProcessContext<'run> {
         self.context.cancellation_token()
     }
 
-    /// Borrow the read-only legacy tool projection for an internal executor's
-    /// pure fallback implementation.
+    /// Project this internal process body down to the sealed leaf-attempt
+    /// context, for an internal executor whose fallback is a pure
+    /// [`crate::ToolProvider::execute`] body.
     ///
     /// This is ADR 0051's protocol and process-engine implementor class. The
-    /// returned projection has no process-admin entry point.
+    /// projection is controller-free: the pure fallback gets the same
+    /// journal-incapable surface a recorded leaf attempt gets.
+    ///
+    /// The projection carries no completion key and reports the deferral as
+    /// undeclared on purpose. An internal owner-bound process tool is invoked
+    /// by its process runner, not by the attempt coordinator that reserves
+    /// completion keys, so nothing on this route can park: an internal body
+    /// asking for a key is a mistake, and it is told which declaration is
+    /// missing instead of being handed a key nobody would ever resolve.
     #[doc(hidden)]
-    pub fn __tool_context(&self) -> &super::ToolContext<'run> {
-        &self.context
+    pub fn __attempt_context(&self) -> crate::AttemptContext<'run> {
+        let scope_id = self
+            .context
+            .effect_controller
+            .scoped()
+            .scope_id()
+            .to_string();
+        crate::AttemptContext::from_tool_context(
+            &self.context,
+            scope_id,
+            None,
+            crate::tool_provider::AttemptCompletionSupport::NotDeclared,
+        )
     }
 }
 

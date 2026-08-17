@@ -12,6 +12,40 @@ use super::context::{
 use super::directives::apply_after_tool_directives;
 use super::retry::{execute_granted_leaf_tool_attempt, execute_leaf_tool_attempt};
 
+/// Appends the process event a deferring attempt declared, at the moment the
+/// call parks.
+///
+/// A recorded attempt body cannot append process events — its
+/// [`crate::AttemptContext`] has no route to them — so a tool that must
+/// announce its durable wait declares the event on its
+/// [`crate::PendingCompletion`] instead. The append happens here, after the
+/// completion key is taken and before the call is handed back as pending, so
+/// the announcement cannot exist without the park it announces. A failed
+/// append fails the call rather than parking silently.
+///
+/// The declaration is dropped from the returned policy: it has been executed,
+/// and nothing downstream may replay it out of this seam.
+async fn announce_pending_park(
+    context: &ToolContext<'_>,
+    mut pending: crate::PendingCompletion,
+) -> Result<crate::PendingCompletion, ToolResult> {
+    let Some(announcement) = pending.announcement.take() else {
+        return Ok(pending);
+    };
+    match context
+        .process_events()
+        .emit_request(announcement.into_append_request())
+        .await
+    {
+        Ok(_) => Ok(pending),
+        Err(err) => Err(runtime_failure(
+            ToolFailureClass::Internal,
+            "pending_tool_announcement_failed",
+            format!("declared park announcement could not be appended: {err}"),
+        )),
+    }
+}
+
 /// Runs an authored process-replay tool body without creating a ToolAttempt
 /// frame. Any durable operations the body issues are consequently direct
 /// children of the enclosing process replay and must be awaited by the body.
@@ -252,6 +286,12 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                     ));
                 }
             };
+            let pending = match announce_pending_park(&completion_context, pending).await {
+                Ok(pending) => pending,
+                Err(failure) => {
+                    return launch_done(outcome(tool_name, args, failure, duration_ms));
+                }
+            };
             return ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
                 tool_name,
                 args,
@@ -336,6 +376,12 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
                         ),
                         duration_ms,
                     ));
+                }
+            };
+            let pending = match announce_pending_park(&completion_context, pending).await {
+                Ok(pending) => pending,
+                Err(failure) => {
+                    return launch_done(outcome(tool_name, args, failure, duration_ms));
                 }
             };
             return ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {

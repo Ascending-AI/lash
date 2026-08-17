@@ -263,14 +263,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         panic!("the PostgreSQL process-parent law must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == Self::definition().id()
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::AttemptToolCall<'_>,
-    ) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args

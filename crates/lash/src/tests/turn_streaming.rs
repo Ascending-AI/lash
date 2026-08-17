@@ -208,7 +208,7 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
         &self,
         grant: &lash_core::ToolExecutionGrant,
         args: &serde_json::Value,
-        context: &lash_core::ToolContext<'_>,
+        context: &lash_core::AttemptContext<'_>,
     ) -> lash_core::ToolResult {
         self.execute_by_id(&grant.manifest.id, args, context).await
     }
@@ -642,7 +642,6 @@ impl RuntimeBatchTools {
 impl ToolProvider for RuntimeBatchTools {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
         vec![
-            runtime_batch_tool_definition().manifest(),
             runtime_probe_tool_definition("first").manifest(),
             runtime_probe_tool_definition("formerly_serial").manifest(),
             runtime_probe_tool_definition("last").manifest(),
@@ -651,7 +650,6 @@ impl ToolProvider for RuntimeBatchTools {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
         match name {
-            "runtime_batch" => Some(Arc::new(runtime_batch_tool_definition().contract())),
             "first" => Some(Arc::new(runtime_probe_tool_definition("first").contract())),
             "formerly_serial" => Some(Arc::new(
                 runtime_probe_tool_definition("formerly_serial").contract(),
@@ -663,7 +661,6 @@ impl ToolProvider for RuntimeBatchTools {
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
         match call.name {
-            "runtime_batch" => execute_runtime_batch_tool(call.context, call.args).await,
             "first" | "formerly_serial" | "last" => {
                 let start = std::time::Instant::now();
                 let waited = tokio::time::timeout(
@@ -686,6 +683,46 @@ impl ToolProvider for RuntimeBatchTools {
             other => lash_core::ToolResult::err_fmt(format!("Unknown tool: {other}")),
         }
     }
+}
+
+/// `runtime_batch` fans out to other tools from inside its own body, which is
+/// journal-capable orchestration rather than leaf work. It therefore lives in
+/// the orchestrating lane: a recorded leaf attempt receives an `AttemptContext`
+/// and has no route to nested dispatch.
+struct RuntimeBatchOrchestratingTool;
+
+#[async_trait]
+impl lash_core::facade_support::OrchestratingToolImplementation for RuntimeBatchOrchestratingTool {
+    fn manifest(&self) -> lash_core::ToolManifest {
+        runtime_batch_tool_definition().manifest()
+    }
+
+    fn contract(&self) -> Arc<lash_core::ToolContract> {
+        Arc::new(runtime_batch_tool_definition().contract())
+    }
+
+    async fn execute(
+        &self,
+        args: &serde_json::Value,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
+    ) -> lash_core::ToolResult {
+        execute_runtime_batch_tool(context, args).await
+    }
+}
+
+fn runtime_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
+    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
+        Arc::new(RuntimeBatchOrchestratingTool);
+    // SAFETY: this crate's test module owns the `runtime_batch` contract and body.
+    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
+}
+
+fn runtime_batch_plugin() -> Arc<StaticPluginFactory> {
+    Arc::new(StaticPluginFactory::new(
+        "runtime-batch-tool",
+        lash_core::facade_support::PluginSpec::new()
+            .with_orchestrating_tool(runtime_batch_orchestrating_tool()),
+    ))
 }
 
 fn runtime_batch_tool_definition() -> lash_core::ToolDefinition {
@@ -727,7 +764,7 @@ fn runtime_probe_tool_definition(name: &'static str) -> lash_core::ToolDefinitio
 }
 
 async fn execute_runtime_batch_tool(
-    context: &lash_core::ToolContext<'_>,
+    context: &lash_core::facade_support::OrchestrationContext<'_>,
     args: &serde_json::Value,
 ) -> lash_core::ToolResult {
     let Some(raw_calls) = args.get("tool_calls").and_then(serde_json::Value::as_array) else {
@@ -735,12 +772,11 @@ async fn execute_runtime_batch_tool(
     };
     let mut invocations = Vec::with_capacity(raw_calls.len());
     let mut immediate_results = Vec::new();
-    let dispatch = context.dispatch();
     for (index, item) in raw_calls.iter().enumerate() {
         let Some(tool_name) = item.get("tool").and_then(serde_json::Value::as_str) else {
             return lash_core::ToolResult::err_fmt(format!("Invalid tool_calls[{index}].tool"));
         };
-        let Some(manifest) = dispatch.callable_tool_manifest(tool_name) else {
+        let Some(manifest) = context.callable_tool_manifest(tool_name) else {
             immediate_results.push(serde_json::json!({
                 "index": index,
                 "tool": tool_name,
@@ -761,8 +797,8 @@ async fn execute_runtime_batch_tool(
         ));
     }
 
-    let outcomes = dispatch
-        .batch(
+    let replies = context
+        .call_tool_batch(
             invocations
                 .iter()
                 .map(|(_, invocation)| invocation.clone())
@@ -771,19 +807,18 @@ async fn execute_runtime_batch_tool(
         .await;
     let mut results = invocations
         .into_iter()
-        .zip(outcomes)
-        .map(|((index, invocation), outcome)| {
-            let tool = outcome
+        .zip(replies)
+        .map(|((index, invocation), reply)| {
+            let tool = reply
                 .record
                 .as_ref()
                 .map(|record| record.tool.clone())
                 .unwrap_or_else(|| invocation.tool_id.to_string());
-            let output = outcome.output;
             serde_json::json!({
                 "index": index,
                 "tool": tool,
-                "success": output.is_success(),
-                "value": output.value_for_projection(),
+                "success": reply.output.is_success(),
+                "value": reply.output.value_for_projection(),
             })
         })
         .collect::<Vec<_>>();
@@ -4754,6 +4789,7 @@ fn turn_run_batch_tool_runs_every_call_concurrently_and_preserves_order() -> Res
                 .provider(runtime_batch_provider())
                 .model(mock_model_spec())
                 .tools(tool_provider)
+                .plugin(runtime_batch_plugin())
                 .store_factory(Arc::new(
                     lash_core::facade_support::InMemorySessionStoreFactory::new(),
                 ))
@@ -4825,6 +4861,7 @@ fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()> {
                     .provider(runtime_batch_provider())
                     .model(mock_model_spec())
                     .tools(tool_provider)
+                    .plugin(runtime_batch_plugin())
                     .store_factory(Arc::new(
                         lash_core::facade_support::InMemorySessionStoreFactory::new(),
                     ))

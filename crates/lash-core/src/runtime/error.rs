@@ -205,6 +205,7 @@ pub enum RuntimeErrorCode {
     ToolCatalogResolutionFailed,
     ToolCompletionKeyMissingCallId,
     ToolCompletionKeyProcessLifetime,
+    ToolDeferralNotDeclared,
     TransientCancelWatch,
     TransientTerminalPublication,
     TurnCancelGateDecode,
@@ -393,6 +394,7 @@ impl RuntimeErrorCode {
             Self::ToolCatalogResolutionFailed => "tool_catalog_resolution_failed",
             Self::ToolCompletionKeyMissingCallId => "tool_completion_key_missing_call_id",
             Self::ToolCompletionKeyProcessLifetime => "tool_completion_key_process_lifetime",
+            Self::ToolDeferralNotDeclared => "tool_deferral_not_declared",
             Self::TransientCancelWatch => "transient_cancel_watch",
             Self::TransientTerminalPublication => "transient_terminal_publication",
             Self::TurnCancelGateDecode => "turn_cancel_gate_decode",
@@ -563,6 +565,7 @@ impl RuntimeErrorCode {
                 | Self::ToolCatalogResolutionFailed
                 | Self::ToolCompletionKeyMissingCallId
                 | Self::ToolCompletionKeyProcessLifetime
+                | Self::ToolDeferralNotDeclared
                 | Self::TurnCancelGateDecode
                 | Self::TurnCancelGateEncode
                 | Self::TurnCancelGateInvalidTerminal
@@ -739,6 +742,7 @@ impl RuntimeErrorCode {
             "tool_catalog_resolution_failed" => Self::ToolCatalogResolutionFailed,
             "tool_completion_key_missing_call_id" => Self::ToolCompletionKeyMissingCallId,
             "tool_completion_key_process_lifetime" => Self::ToolCompletionKeyProcessLifetime,
+            "tool_deferral_not_declared" => Self::ToolDeferralNotDeclared,
             "transient_cancel_watch" => Self::TransientCancelWatch,
             "transient_terminal_publication" => Self::TransientTerminalPublication,
             "turn_cancel_gate_decode" => Self::TurnCancelGateDecode,
@@ -1068,6 +1072,7 @@ mod tests {
             | RuntimeErrorCode::ToolCatalogResolutionFailed
             | RuntimeErrorCode::ToolCompletionKeyMissingCallId
             | RuntimeErrorCode::ToolCompletionKeyProcessLifetime
+            | RuntimeErrorCode::ToolDeferralNotDeclared
             | RuntimeErrorCode::TurnCancelGateDecode
             | RuntimeErrorCode::TurnCancelGateEncode
             | RuntimeErrorCode::TurnCancelGateInvalidTerminal
@@ -1246,6 +1251,7 @@ mod tests {
             RuntimeErrorCode::ToolCatalogResolutionFailed,
             RuntimeErrorCode::ToolCompletionKeyMissingCallId,
             RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
+            RuntimeErrorCode::ToolDeferralNotDeclared,
             RuntimeErrorCode::TransientCancelWatch,
             RuntimeErrorCode::TransientTerminalPublication,
             RuntimeErrorCode::TurnCancelGateDecode,

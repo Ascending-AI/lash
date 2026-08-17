@@ -31,11 +31,7 @@ impl crate::ToolProvider for SignalIntentProvider {
         panic!("the signal-intent conformance law must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == signal_intent_tool().id()
-    }
-
-    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.context.session_id(), self.session_id);
         crate::ToolAttemptResult::done(

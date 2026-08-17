@@ -578,7 +578,9 @@ pub fn turn_outcome_from_tool_control(
 }
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_registry::{ToolRegistry, ToolState};
-pub use tool_result::{CancelHint, PendingCompletion, TimeoutBehavior, ToolResult};
+pub use tool_result::{
+    CancelHint, PendingAnnouncement, PendingCompletion, TimeoutBehavior, ToolResult,
+};
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryReservationStatus, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
@@ -1003,10 +1005,10 @@ pub use tool_intent::{
     ToolResultDone, derive_tool_intent_identity,
 };
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall,
-    InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
-    ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, InternalProcessAdmin,
+    InternalProcessContext, InternalProcessToolCall, PreparedToolBatch, PreparedToolBatchCall,
+    PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 
 #[cfg(test)]

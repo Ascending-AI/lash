@@ -14,9 +14,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_core::{
-    AttemptToolCall, InternalProcessToolCall, ToolCall, ToolContract, ToolDefinition, ToolId,
-    ToolManifest, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult,
-    sansio::PendingToolCall,
+    InternalProcessToolCall, ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest,
+    ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolResult, sansio::PendingToolCall,
 };
 
 /// Per-call execution behavior for a [`StaticToolProvider`].
@@ -35,31 +34,36 @@ pub trait StaticToolExecute: Send + Sync + 'static {
     ///
     /// This is ADR 0051's protocol and process-engine implementor class.
     async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolResult {
+        let attempt_context = call.context.__attempt_context();
         self.execute(ToolCall {
             name: call.name,
             args: call.args,
-            context: call.context.__tool_context(),
+            context: &attempt_context,
         })
         .await
     }
 
-    /// Opt one fixed tool id into the sealed leaf-attempt signature.
-    fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
-
-    /// Execute an opted-in fixed tool as an atomic leaf attempt.
-    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
-        let result = ToolResult::err_fmt(format!(
-            "leaf attempt execution is unavailable for tool `{}`",
-            call.name
-        ));
-        match result {
+    /// Execute the fixed tool as a recorded leaf attempt that may declare
+    /// typed intents. Defaults to the pure [`execute`](Self::execute) body,
+    /// which receives the same sealed attempt context.
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptResult {
+        match self.execute(call).await {
             ToolResult::Done(output) => lash_core::ToolAttemptResult::done_without_intents(
                 lash_core::ToolResultDone::from_output(*output),
             ),
             ToolResult::Pending(pending) => lash_core::ToolAttemptResult::pending(pending),
         }
+    }
+
+    /// Declare that a tool may return `Pending` from its recorded attempt.
+    ///
+    /// A recorded attempt reads its completion key from the sealed
+    /// `AttemptContext`, and the runtime only pre-derives that key for a tool
+    /// that declares it here. Defaults to `false`: a tool that parks without
+    /// declaring it observes a typed refusal instead of a key.
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        let _ = tool_id;
+        false
     }
 
     /// Optional argument-preparation hook, mirroring
@@ -162,11 +166,11 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
         self.executor.execute_internal(call).await
     }
 
-    fn supports_attempt_context(&self, tool_id: &ToolId) -> bool {
-        self.executor.supports_attempt_context(tool_id)
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptResult {
+        self.executor.execute_attempt(call).await
     }
 
-    async fn execute_attempt(&self, call: AttemptToolCall<'_>) -> lash_core::ToolAttemptResult {
-        self.executor.execute_attempt(call).await
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        self.executor.attempt_may_defer(tool_id)
     }
 }

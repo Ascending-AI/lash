@@ -18,12 +18,58 @@ pub enum CancelHint {
     CancelExternalWork,
 }
 
-/// Configuration carried by a [`ToolResult::Pending`] result: how long the runtime
-/// waits for the deferred outcome, and what to do if it times out or is cancelled.
+/// One process event a deferring tool declares, which the runtime appends when
+/// the call actually parks.
 ///
-/// Defaults to no deadline, [`TimeoutBehavior::ErrorAsResult`], and
-/// [`CancelHint::CancelExternalWork`]. Build one with [`PendingCompletion::new`] and
-/// the `with_*` adjusters.
+/// A recorded attempt body cannot append process events itself — its
+/// [`AttemptContext`](crate::AttemptContext) has no route to them. A tool that
+/// must announce its durable wait (the await key an external resolver will
+/// deliver against) therefore *declares* the announcement on its
+/// [`PendingCompletion`] and the runtime performs the append at park time. The
+/// event exists if and only if the park happened: there is no point at which
+/// the announcement is durable and the wait is merely hoped for.
+///
+/// The replay key is required rather than optional. The announcement is
+/// re-declared on every redrive of the attempt, so the key is what makes the
+/// append idempotent within the process.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PendingAnnouncement {
+    /// Process event type to append, e.g. `process.yield`.
+    pub event_type: String,
+    /// Event payload. It usually names the await key the resolver will use.
+    pub payload: serde_json::Value,
+    /// Replay key making the append idempotent under redrive.
+    pub replay_key: String,
+}
+
+impl PendingAnnouncement {
+    /// Declares one replay-keyed process event for the runtime to append when
+    /// the deferring call parks.
+    pub fn new(
+        event_type: impl Into<String>,
+        payload: serde_json::Value,
+        replay_key: impl Into<String>,
+    ) -> Self {
+        Self {
+            event_type: event_type.into(),
+            payload,
+            replay_key: replay_key.into(),
+        }
+    }
+
+    pub(crate) fn into_append_request(self) -> crate::ProcessEventAppendRequest {
+        crate::ProcessEventAppendRequest::new(self.event_type, self.payload)
+            .with_replay_key(self.replay_key)
+    }
+}
+
+/// Configuration carried by a [`ToolResult::Pending`] result: how long the runtime
+/// waits for the deferred outcome, what to do if it times out or is cancelled, and
+/// any process event the runtime announces when the call parks.
+///
+/// Defaults to no deadline, [`TimeoutBehavior::ErrorAsResult`],
+/// [`CancelHint::CancelExternalWork`], and no announcement. Build one with
+/// [`PendingCompletion::new`] and the `with_*` adjusters.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PendingCompletion {
     /// Maximum time to wait for the deferred outcome. `None` waits indefinitely (until
@@ -34,6 +80,9 @@ pub struct PendingCompletion {
     pub on_timeout: TimeoutBehavior,
     /// What the runtime signals about out-of-band work if the call is cancelled.
     pub on_cancel: CancelHint,
+    /// Process event the runtime appends when this call parks, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub announcement: Option<PendingAnnouncement>,
 }
 
 impl Default for PendingCompletion {
@@ -42,6 +91,7 @@ impl Default for PendingCompletion {
             deadline: None,
             on_timeout: TimeoutBehavior::ErrorAsResult,
             on_cancel: CancelHint::CancelExternalWork,
+            announcement: None,
         }
     }
 }
@@ -64,6 +114,18 @@ impl PendingCompletion {
     /// result to the model.
     pub fn fail_turn_on_timeout(mut self) -> Self {
         self.on_timeout = TimeoutBehavior::FailTurn;
+        self
+    }
+
+    /// Declares the process event the runtime appends when this call parks.
+    ///
+    /// Use it to announce the durable wait — typically the await key an
+    /// external resolver delivers against — from a recorded attempt that
+    /// cannot append process events itself. The runtime performs the append
+    /// after it has taken the completion key and before the call is parked, so
+    /// the announcement and the wait land together or not at all.
+    pub fn announcing(mut self, announcement: PendingAnnouncement) -> Self {
+        self.announcement = Some(announcement);
         self
     }
 }
@@ -92,7 +154,7 @@ impl PendingCompletion {
 /// ```ignore
 /// async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
 ///     // Take the key first, then hand it to whatever completes the work out-of-band.
-///     let key = match call.context.completion_key().await {
+///     let key = match call.context.completion_key() {
 ///         Ok(key) => key,
 ///         Err(err) => return ToolResult::err_fmt(err),
 ///     };

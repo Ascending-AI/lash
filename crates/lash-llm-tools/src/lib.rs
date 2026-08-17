@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::plugin::{PluginError, PluginFactory, PluginSessionContext};
 use lash_core::{
-    ToolCall, ToolContext, ToolDefinition, ToolProvider, ToolResult,
+    AttemptContext, ToolCall, ToolDefinition, ToolProvider, ToolResult,
     facade_support::DirectJsonSchema, facade_support::DirectMessage,
     facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
     facade_support::DirectRole, facade_support::PluginSpec, facade_support::PluginSpecFactory,
@@ -90,7 +90,7 @@ pub fn llm_query_provider(
 }
 
 impl LlmToolsProvider {
-    async fn llm_query(&self, args: &Value, context: &ToolContext<'_>) -> Result<Value, String> {
+    async fn llm_query(&self, args: &Value, context: &AttemptContext<'_>) -> Result<Value, String> {
         let task = required_string(args, "task")?;
         let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
         let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))
@@ -399,9 +399,9 @@ mod tests {
     #[async_trait]
     impl SessionGraphService for DirectCompletionManager {}
 
-    fn direct_completion_context(
+    fn direct_completion_attempt_context(
         manager: Arc<DirectCompletionManager>,
-    ) -> lash_core::ToolContext<'static> {
+    ) -> lash_core::AttemptContext<'static> {
         let completions = lash_core::facade_support::DirectCompletionClient::from_fn({
             let manager = Arc::clone(&manager);
             move |request, usage_source| {
@@ -421,7 +421,12 @@ mod tests {
                 })
             }
         });
-        lash_core::testing::mock_tool_context_with_host_and_direct_completions(manager, completions)
+        lash_core::testing::mock_attempt_context_from(
+            &lash_core::testing::mock_tool_context_with_host_and_direct_completions(
+                manager,
+                completions,
+            ),
+        )
     }
 
     #[test]
@@ -469,7 +474,7 @@ mod tests {
                     .to_string(),
         });
         let provider = llm_query_provider(None, None, None);
-        let context = direct_completion_context(manager.clone());
+        let context = direct_completion_attempt_context(manager.clone());
 
         let args = json!({
             "task": "extract root cause",
@@ -535,7 +540,7 @@ mod tests {
             Some(lash_core::ReasoningSelection::Effort("low".to_string())),
             None,
         );
-        let context = direct_completion_context(manager.clone());
+        let context = direct_completion_attempt_context(manager.clone());
 
         let args = json!({ "task": "answer directly" });
         let result = provider
@@ -569,7 +574,7 @@ mod tests {
                 .to_string(),
         });
         let provider = llm_query_provider(None, None, None);
-        let context = direct_completion_context(manager);
+        let context = direct_completion_attempt_context(manager);
 
         let args = json!({ "task": "answer from missing evidence" });
         let result = provider

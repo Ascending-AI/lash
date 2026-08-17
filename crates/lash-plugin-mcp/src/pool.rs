@@ -37,7 +37,7 @@ use serde_json::{Value, json};
 use tokio::time::timeout;
 
 use lash_core::{
-    AttachmentCreateMeta, MediaType, ToolCallOutput, ToolContext, ToolDefinition, ToolFailure,
+    AttachmentCreateMeta, AttemptContext, MediaType, ToolCallOutput, ToolDefinition, ToolFailure,
     ToolFailureClass, ToolFailureSource, ToolResult, ToolRetryDisposition, ToolValue,
 };
 use lash_tool_support::ToolDefinitionLashlangExt;
@@ -415,7 +415,7 @@ impl McpConnectionPool {
         &self,
         prefixed_name: &str,
         args: &Value,
-        context: &ToolContext<'_>,
+        context: &AttemptContext<'_>,
     ) -> ToolResult {
         if self.shut_down.load(Ordering::SeqCst) {
             return pool_shut_down_failure();
@@ -1065,7 +1065,7 @@ fn import_tools(
 
 async fn tool_result_from_rmcp(
     result: rmcp::model::CallToolResult,
-    context: &ToolContext<'_>,
+    context: &AttemptContext<'_>,
     binary_content_attachments: bool,
 ) -> ToolResult {
     let is_error = result.is_error.unwrap_or(false);
@@ -1189,7 +1189,7 @@ async fn tool_result_from_rmcp(
 }
 
 async fn store_mcp_attachment(
-    context: &ToolContext<'_>,
+    context: &AttemptContext<'_>,
     encoded: &str,
     mime_type: &str,
     label: &str,

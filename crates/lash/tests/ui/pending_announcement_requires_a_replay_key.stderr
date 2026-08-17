@@ -1,0 +1,5 @@
+error[E0063]: missing field `replay_key` in initializer of `PendingAnnouncement`
+ --> tests/ui/pending_announcement_requires_a_replay_key.rs:5:13
+  |
+5 |     let _ = lash::tools::PendingAnnouncement {
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `replay_key`

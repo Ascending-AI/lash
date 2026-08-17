@@ -8,22 +8,39 @@ struct AttachmentWritingTool;
 
 struct FirstTurnProcessTool;
 
+impl FirstTurnProcessTool {
+    /// Starting a durable process is journal-capable work, so this test tool
+    /// registers in the runtime-owned orchestrating lane.
+    fn orchestrating() -> crate::tool_provider::orchestration::OrchestratingToolDef {
+        let implementation: Arc<
+            dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
+        > = Arc::new(Self);
+        // SAFETY: lash-core owns this test-only tool contract and its body.
+        unsafe {
+            crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(
+                implementation,
+            )
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl crate::ToolProvider for FirstTurnProcessTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        vec![first_turn_process_tool_definition().manifest()]
+impl crate::tool_provider::orchestration::OrchestratingToolImplementation for FirstTurnProcessTool {
+    fn manifest(&self) -> crate::ToolManifest {
+        first_turn_process_tool_definition().manifest()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        (name == "start_first_turn_process")
-            .then(|| Arc::new(first_turn_process_tool_definition().contract()))
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(first_turn_process_tool_definition().contract())
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
-        match call
-            .context
-            .process_admin()
-            .start(crate::ProcessStartRequest::external(
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> crate::ToolResult {
+        match context
+            .start_process(crate::ProcessStartRequest::external(
                 "child-first-turn-process",
                 crate::ProcessOriginator::host(),
                 serde_json::json!({ "source": "first child turn" }),
@@ -51,19 +68,41 @@ struct NestedChildSessionTool {
     parents: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
+impl NestedChildSessionTool {
+    /// Nested managed child turns are journal-capable session work, so this
+    /// test tool registers in the runtime-owned orchestrating lane.
+    fn orchestrating(
+        parents: Arc<std::sync::Mutex<Vec<String>>>,
+    ) -> crate::tool_provider::orchestration::OrchestratingToolDef {
+        let implementation: Arc<
+            dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
+        > = Arc::new(Self { parents });
+        // SAFETY: lash-core owns this test-only tool contract and its body.
+        unsafe {
+            crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(
+                implementation,
+            )
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl crate::ToolProvider for NestedChildSessionTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        vec![nested_child_session_tool_definition().manifest()]
+impl crate::tool_provider::orchestration::OrchestratingToolImplementation
+    for NestedChildSessionTool
+{
+    fn manifest(&self) -> crate::ToolManifest {
+        nested_child_session_tool_definition().manifest()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        (name == "spawn_nested_child")
-            .then(|| Arc::new(nested_child_session_tool_definition().contract()))
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(nested_child_session_tool_definition().contract())
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
-        let context = call.context;
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> crate::ToolResult {
         let parent_id = context.session_id().to_string();
         self.parents.lock_recover().push(parent_id.clone());
         let (child_id, turn_id) = match parent_id.as_str() {
@@ -481,7 +520,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         standard_test_policy(),
         host,
         crate::PersistentRuntimeServices::new(
-            plugin_session_with_tools("root", Arc::new(FirstTurnProcessTool)),
+            plugin_session_with_orchestrating_tool("root", FirstTurnProcessTool::orchestrating()),
             root_store as Arc<dyn crate::store::RuntimePersistence>,
         ),
         RuntimeSessionState {
@@ -635,7 +674,11 @@ async fn forked_child_session_keeps_hidden_live_tool_non_executable_across_rebui
         let tool_id = tool_id.clone();
         async move {
             registry
-                .execute_by_id(&tool_id, &json!({}), &crate::testing::mock_tool_context())
+                .execute_by_id(
+                    &tool_id,
+                    &json!({}),
+                    &crate::testing::mock_attempt_context(),
+                )
                 .await
         }
     };
@@ -766,8 +809,16 @@ async fn parent_turn_receives_live_child_token_usage_events() {
             }),
         },
     ]);
-    let tools: Arc<dyn crate::ToolProvider> = Arc::new(ChildSessionTool);
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let tools: Arc<dyn crate::ToolProvider> = Arc::new(EmptyTools);
+    let mut runtime = runtime_with_plugins_and_tools(
+        vec![Arc::new(StaticPluginFactory::new(
+            "child-session-tool",
+            crate::PluginSpec::new().with_orchestrating_tool(ChildSessionTool::orchestrating()),
+        ))],
+        tools,
+        transport,
+    )
+    .await;
     let sink = RecordingSink::default();
     let turn_events = RecordingTurnEvents::default();
 
@@ -927,10 +978,18 @@ async fn nested_child_turns_use_independent_default_task_stacks() {
         text("parent done"),
     ]);
     let parents = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let tools: Arc<dyn crate::ToolProvider> = Arc::new(NestedChildSessionTool {
-        parents: Arc::clone(&parents),
-    });
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let tools: Arc<dyn crate::ToolProvider> = Arc::new(EmptyTools);
+    let mut runtime = runtime_with_plugins_and_tools(
+        vec![Arc::new(StaticPluginFactory::new(
+            "nested-child-session-tool",
+            crate::PluginSpec::new().with_orchestrating_tool(
+                NestedChildSessionTool::orchestrating(Arc::clone(&parents)),
+            ),
+        ))],
+        tools,
+        transport,
+    )
+    .await;
 
     let turn = runtime
         .stream_turn(
@@ -1002,8 +1061,16 @@ async fn parent_turn_keeps_cached_only_child_usage_live() {
             }),
         },
     ]);
-    let tools: Arc<dyn crate::ToolProvider> = Arc::new(ChildSessionTool);
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let tools: Arc<dyn crate::ToolProvider> = Arc::new(EmptyTools);
+    let mut runtime = runtime_with_plugins_and_tools(
+        vec![Arc::new(StaticPluginFactory::new(
+            "child-session-tool",
+            crate::PluginSpec::new().with_orchestrating_tool(ChildSessionTool::orchestrating()),
+        ))],
+        tools,
+        transport,
+    )
+    .await;
     let sink = RecordingSink::default();
 
     runtime

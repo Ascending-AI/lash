@@ -88,29 +88,38 @@ The structural rule remains:
 
 > A recorded body must not emit commands into an ordinal-addressed journal.
 
-FIG-1294 enforces the leaf boundary by construction only for providers that opt
-in through `supports_attempt_context`. Those providers receive only
-`AttemptContext`; its process/session projections are controller-free reads,
-and the trybuild fixture `attempt_context_has_no_journal_capability.rs` proves
-that the leaf type cannot obtain a controller-backed process scope. The law
+FIG-1294 enforced the leaf boundary by construction for providers that opted in
+through `supports_attempt_context`. FIG-1487 removed the opt-in: every recorded
+attempt body now receives `AttemptContext`, whatever the provider. Its
+process/session projections are controller-free reads, and the trybuild fixture
+`attempt_context_has_no_journal_capability.rs` proves that the leaf type cannot
+obtain a controller-backed process scope. The law
 `sentinel_allows_no_undeclared_crossing_from_inside_an_attempt` proves exactly
-zero controller crossings while such a leaf attempt body is open, and
+zero controller crossings while a leaf attempt body is open, and
 `sentinel_test_only_leak_trips_inside_a_recorded_attempt` proves the detector
 still trips. `ToolContext` no longer exposes process administration, while
 owner-bound internal process bodies receive `InternalProcessContext` and
 authored orchestration receives `OrchestrationContext`.
 
-`supports_attempt_context` deliberately defaults to `false`. A provider that
-has not opted in therefore still receives the full legacy `ToolContext`; its
-surviving journal-capable routes remain guarded on ordinal-addressed tiers.
-`legacy_tool_context_guards_and_journal_free_routes_hold_inside_recorded_attempt`
-proves the three remaining guards (`sessions().start_turn()`,
-`dispatch().batch()`, and `triggers().emit()`) together with the surviving
-journal-free capability inventory inside a real recorded attempt. The law
-`default_false_provider_routes_through_execute_once_without_controller_crossing`
-also enters through `execute_once` with the provider default unchanged, proves
-that `execute_by_id` ran, exercises all three guards, and observes zero
-controller crossings.
+One capability the leaf type does not have needed a declarative replacement: a
+deferring tool that must announce its durable wait — the await key an external
+resolver delivers against — cannot append the process event itself. It declares
+the event on its `PendingCompletion` through `PendingAnnouncement`, and the
+runtime appends it at park time, after the completion key is taken and before
+the call is handed back as pending. The announcement therefore exists if and
+only if the park happened, a failed append fails the call instead of parking
+silently, and the required replay key makes the append idempotent across
+redrives of the attempt. This is a single runtime-executed carve-out on the
+pending return, not a body-side door: `AttemptContext` still has no
+`process_events()`, and `ToolAttemptResult::Pending` still cannot carry general
+intents.
+
+Because no attempt body can hold a `ToolContext`, the three runtime refusals
+that FIG-1294 kept for un-opted providers (`sessions().start_turn()`,
+`dispatch().batch()`, and `triggers().emit()` refusing on ordinal-addressed
+tiers) are unreachable and are deleted. The guarantee is now stronger and
+type-level rather than tier-conditional: the journal-capable methods are simply
+absent from the type a recorded attempt receives.
 
 Layer 2 reclassified the shipped tool routes before that deletion:
 `shell.start`/detach declare `StartProcess`, `shell.write` declares
@@ -118,8 +127,8 @@ Layer 2 reclassified the shipped tool routes before that deletion:
 and protocol-standard `batch` use process-replay orchestration. The five tools
 therefore have one behavior on every tier without a compatibility guard.
 
-FIG-1291 ships the capability-separated authoring model. A provider opts in with
-`supports_attempt_context` and receives the sealed, controller-free
+FIG-1291 ships the capability-separated authoring model, and FIG-1487 makes it
+unconditional: every recorded attempt body receives the sealed, controller-free
 `AttemptContext`. A completed attempt returns `ToolAttemptResult::Done` with a
 `ToolResultDone` and versioned `ToolIntents`; a deferred attempt returns
 `ToolAttemptResult::Pending`, whose type cannot carry intents. Lash records the

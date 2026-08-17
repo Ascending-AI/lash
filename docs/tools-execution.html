@@ -67,20 +67,38 @@ ToolDefinition::raw(
               <p>The tool has launched out-of-band work (a webhook, a human approval, another service) and the real outcome is delivered later against a completion key. The runtime parks the call on a durable wait and resumes it when the key resolves.</p>
             </article>
           </div>
-          <p>Deferred completion has one hard rule: <strong>before returning <code>ToolResult::Pending</code>, the tool must first obtain a completion key</strong> by calling <code>call.context.completion_key().await</code>. That key names the durable wait and is what the external resolver later uses to deliver the result. Returning <code>Pending</code> without having taken a key fails the call with the internal error <code>pending_tool_missing_completion_key</code>.</p>
-          <pre data-lang="rust" data-snippet="plugins_tools#detached-tool"><code>use lash::tools::PendingCompletion;
+          <p>Deferred completion has one hard rule: <strong>before returning <code>ToolResult::Pending</code>, the tool must first obtain a completion key</strong> by calling <code>call.context.completion_key()</code>. That key names the durable wait and is what the external resolver later uses to deliver the result. Returning <code>Pending</code> without having taken a key fails the call with the internal error <code>pending_tool_missing_completion_key</code>.</p>
+          <p>The call is not asynchronous, because the attempt coordinator reserves the key before the body runs — and it only does so for a tool whose provider declares <code>ToolProvider::attempt_may_defer</code> (or <code>StaticToolExecute::attempt_may_defer</code>). A tool that parks without that declaration is refused with <code>tool_deferral_not_declared</code>, which names the missing declaration rather than blaming the host's effect controller.</p>
+          <p>A recorded attempt body cannot append process events, so a tool that must announce its durable wait <em>declares</em> the event on the pending return with <code>PendingAnnouncement</code>: the runtime appends it when the call parks, so the announcement exists if and only if the park happened, and a failed append fails the call with <code>pending_tool_announcement_failed</code>. The replay key is required, because the declaration is re-made on every redrive of the attempt.</p>
+          <pre data-lang="rust" data-snippet="plugins_tools#detached-tool"><code>use lash::tools::{PendingAnnouncement, PendingCompletion};
 
 // Take the completion key BEFORE returning Pending, then hand it to whatever
 // will deliver the result out-of-band — a webhook, a job queue, a human.
-let key = match call.context.completion_key().await {
+// The key exists only for a tool that declares `attempt_may_defer`.
+let key = match call.context.completion_key() {
     Ok(key) =&gt; key,
     Err(err) =&gt; return ToolResult::err_fmt(format_args!("{err}")),
 };
 enqueue_external_work(key);
 
+// A recorded attempt body cannot append process events, so a tool that must
+// announce its durable wait declares the event and lets the runtime append
+// it at park time: the event exists if and only if the park happened. The
+// replay key is required, because the declaration is re-made on every
+// redrive of the attempt.
+let announcement = PendingAnnouncement::new(
+    "process.yield",
+    serde_json::json!({ "type": "work.input_request.opened" }),
+    "docs-snippets:input-request-opened",
+);
+let pending = PendingCompletion::announcing(PendingCompletion::new(), announcement);
+if let Some(summary) = mirror_declared_wait(&amp;pending) {
+    record_mirrored_wait(summary);
+}
+
 // Returning Pending without first taking the key fails the call with
 // `pending_tool_missing_completion_key`.
-ToolResult::pending(PendingCompletion::new())</code></pre>
+ToolResult::pending(pending)</code></pre>
           <p><code>PendingCompletion</code> configures the wait: an optional <code>deadline</code>, an <code>on_timeout</code> behavior (<code>ErrorAsResult</code> feeds a timeout result back to the model; <code>FailTurn</code> fails the whole turn), and an <code>on_cancel</code> hint (<code>CancelExternalWork</code> by default, or <code>Ignore</code> to leave the out-of-band work running). Adjust it with <code>PendingCompletion::new().with_deadline(..)</code> and <code>.fail_turn_on_timeout()</code>. The remote protocol carries tool grants only; execute tools through a normal <code>ToolProvider</code> at the host boundary.</p>
         </div>
 

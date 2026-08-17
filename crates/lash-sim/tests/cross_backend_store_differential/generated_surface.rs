@@ -205,14 +205,7 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
         panic!("the cross-backend intent provider must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == Self::definition().id()
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::AttemptToolCall<'_>,
-    ) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
         assert_eq!(call.context.session_id(), SURFACE_SESSION);
         assert_eq!(call.context.execution_scope_id(), SURFACE_TURN);
         assert_eq!(call.context.tool_call_id(), Some("surface-intent-call"));

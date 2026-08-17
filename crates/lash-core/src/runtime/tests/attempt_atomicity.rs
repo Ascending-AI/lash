@@ -329,14 +329,18 @@ fn tool_context_with_provider<'run>(
         .build()
 }
 
-struct LegacyRoutingProbeProvider {
-    execute_by_id_calls: AtomicUsize,
+/// A provider that implements only the pure `execute` body — no
+/// `execute_attempt` override, and no way to ask for one. The structural law
+/// is that its body still runs against `AttemptContext`, so no journal-capable
+/// route exists for it to reach in the first place.
+struct PureLeafProbeProvider {
+    execute_calls: AtomicUsize,
 }
 
-impl LegacyRoutingProbeProvider {
+impl PureLeafProbeProvider {
     fn new() -> Self {
         Self {
-            execute_by_id_calls: AtomicUsize::new(0),
+            execute_calls: AtomicUsize::new(0),
         }
     }
 
@@ -352,7 +356,7 @@ impl LegacyRoutingProbeProvider {
 }
 
 #[async_trait::async_trait]
-impl crate::ToolProvider for LegacyRoutingProbeProvider {
+impl crate::ToolProvider for PureLeafProbeProvider {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
         vec![Self::definition().manifest()]
     }
@@ -361,68 +365,34 @@ impl crate::ToolProvider for LegacyRoutingProbeProvider {
         (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-        panic!("provider-routing law must enter the execute_by_id override")
-    }
-
-    async fn execute_by_id(
-        &self,
-        tool_id: &crate::ToolId,
-        _args: &serde_json::Value,
-        context: &crate::ToolContext<'_>,
-    ) -> crate::ToolResult {
-        assert_eq!(tool_id, &crate::ToolId::new("tool:attempt_atomicity"));
-        self.execute_by_id_calls.fetch_add(1, Ordering::SeqCst);
-
-        let batch = context
-            .dispatch()
-            .batch(vec![crate::ToolInvocation::new(
-                "legacy-routing-batch",
-                crate::ToolId::new("noop"),
-                serde_json::Value::Null,
-            )])
-            .await;
-        assert_eq!(batch.len(), 1);
-        assert!(
-            batch[0].output.value_for_projection()["message"]
-                .as_str()
-                .is_some_and(
-                    |message| message.contains("unavailable inside an atomic tool attempt")
-                )
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+        self.execute_calls.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(call.name, "attempt_atomicity");
+        // The sealed attempt projection, not the journal-capable `ToolContext`.
+        assert_eq!(call.context.session_id(), SESSION);
+        assert_eq!(call.context.tool_call_id(), Some(CALL_ID));
+        assert_eq!(call.context.execution_scope_id(), TURN);
+        // The projection keeps the leaf-safe reads the legacy inventory
+        // covered: cancellation observation and the sealed prepared payload
+        // both survive the cutover.
+        assert!(call.context.cancellation_token().is_some());
+        assert_eq!(call.context.prepared_payload(), &serde_json::Value::Null);
+        // A tool that never declared `attempt_may_defer` is told exactly that,
+        // instead of being pointed at the host's effect controller.
+        let refusal = call
+            .context
+            .completion_key()
+            .expect_err("an undeclared deferrer has no reserved completion key");
+        assert_eq!(
+            refusal.code,
+            crate::RuntimeErrorCode::ToolDeferralNotDeclared
         );
-
-        let nested_turn = context
-            .sessions()
-            .start_turn(
-                "legacy-routing-child",
-                "legacy-routing-child-turn",
-                crate::TurnInput::text("nested turn"),
-            )
-            .await
-            .expect_err("provider-routed nested turn is guarded");
         assert!(
-            nested_turn
-                .to_string()
-                .contains("unavailable inside an atomic tool attempt")
+            refusal.message.contains("attempt_may_defer"),
+            "the refusal must name the missing declaration: {}",
+            refusal.message
         );
-
-        let trigger = context
-            .triggers()
-            .emit(crate::TriggerOccurrenceRequest::new(
-                "attempt-atomicity.trigger",
-                "attempt-atomicity-source",
-                serde_json::json!({}),
-                "legacy-routing-occurrence",
-            ))
-            .await
-            .expect_err("provider-routed trigger emission is guarded");
-        assert!(
-            trigger
-                .to_string()
-                .contains("unavailable inside an atomic tool attempt")
-        );
-
-        crate::ToolResult::ok(serde_json::json!("legacy execute_by_id ran"))
+        crate::ToolResult::ok(serde_json::json!("pure execute ran"))
     }
 }
 
@@ -501,181 +471,12 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     );
 }
 
-/// Providers that have not opted into `AttemptContext` still receive the
-/// legacy `ToolContext`. Exercise every surviving journal-capable route and its
-/// journal-free capability inventory inside a real recorded attempt so the
-/// ordinal guards remain end-to-end, not merely module-local.
+/// A provider with no `execute_attempt` override still runs its pure `execute`
+/// body inside the recorded attempt, against `AttemptContext`. There is no
+/// per-tool opt-in and no legacy `ToolContext` route left to fall back to, so
+/// the attempt opens and closes with zero controller crossings.
 #[tokio::test]
-async fn legacy_tool_context_guards_and_journal_free_routes_hold_inside_recorded_attempt() {
-    let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed();
-    let ledger = NestedJournalLedger::new();
-    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let scoped = crate::ScopedEffectController::borrowed(
-        &sentinel,
-        crate::ExecutionScope::turn(SESSION, TURN),
-    )
-    .expect("scoped legacy ToolContext sentinel controller");
-    let tool = tool_context(scoped, &fixtures);
-    let child_process_starts = Arc::clone(&fixtures.child_process_starts);
-
-    crate::RuntimeEffectController::execute_effect(
-        &sentinel,
-        crate::RuntimeEffectEnvelope::new(
-            attempt_invocation(),
-            crate::RuntimeEffectCommand::ToolAttempt {
-                call: prepared_tool_call(),
-                execution_grant: None,
-                attempt: 1,
-                max_attempts: 1,
-            },
-        ),
-        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            let batch = tool
-                .dispatch()
-                .batch(vec![crate::ToolInvocation::new(
-                    "legacy-batch",
-                    crate::ToolId::new("noop"),
-                    serde_json::Value::Null,
-                )])
-                .await;
-            assert_eq!(batch.len(), 1);
-            assert!(
-                batch[0].output.value_for_projection()["message"]
-                    .as_str()
-                    .is_some_and(
-                        |message| message.contains("unavailable inside an atomic tool attempt")
-                    )
-            );
-
-            let nested_turn = tool
-                .sessions()
-                .start_turn(
-                    "legacy-child",
-                    "legacy-child-turn",
-                    crate::TurnInput::text("nested turn"),
-                )
-                .await
-                .expect_err("ordinal legacy nested turn is guarded");
-            assert!(
-                nested_turn
-                    .to_string()
-                    .contains("unavailable inside an atomic tool attempt")
-            );
-
-            let trigger = tool
-                .triggers()
-                .emit(crate::TriggerOccurrenceRequest::new(
-                    "attempt-atomicity.trigger",
-                    "attempt-atomicity-source",
-                    serde_json::json!({}),
-                    "legacy-attempt-occurrence",
-                ))
-                .await
-                .expect_err("ordinal legacy trigger emission is guarded");
-            assert!(
-                trigger
-                    .to_string()
-                    .contains("unavailable inside an atomic tool attempt")
-            );
-
-            let sessions = tool.sessions();
-            sessions
-                .snapshot_current()
-                .await
-                .expect("current snapshot read");
-            sessions
-                .snapshot(SESSION)
-                .await
-                .expect("named snapshot read");
-            sessions.model().await.expect("model read");
-            sessions.tool_catalog().await.expect("catalog read");
-            sessions
-                .shared_tool_catalog()
-                .await
-                .expect("shared catalog read");
-            assert!(
-                sessions
-                    .set_tool_membership(&["missing-tool".to_string()], true)
-                    .await
-                    .is_err(),
-                "membership reaches the journal-free registry and refuses the missing tool"
-            );
-
-            tool.attachments()
-                .put(
-                    vec![1, 2, 3, 4],
-                    crate::AttachmentCreateMeta::new(
-                        crate::MediaType::parse("image/png").expect("png media type"),
-                        Some(crate::AttachmentTypeMetadata::image(Some(1), Some(1))),
-                        Some("legacy-attempt.png".to_string()),
-                    ),
-                )
-                .await
-                .expect("attachment write stays inside the attempt body");
-            assert_eq!(
-                tool.direct_completions()
-                    .complete(
-                        crate::DirectRequest::text(DIRECT_MODEL, "legacy direct completion"),
-                        "attempt-atomicity",
-                    )
-                    .await
-                    .expect("direct completion stays local")
-                    .text,
-                DIRECT_TEXT
-            );
-
-            let events = tool.process_events();
-            events
-                .emit("attempt.atomicity.note", serde_json::json!({"n": 1}))
-                .await
-                .expect("registry-authorized event append");
-            events
-                .emit_request(crate::ProcessEventAppendRequest::new(
-                    "attempt.atomicity.awaited",
-                    serde_json::json!({"n": 2}),
-                ))
-                .await
-                .expect("registry-authorized request append");
-            events
-                .wait_event_after("attempt.atomicity.awaited", 0)
-                .await
-                .expect("registry-authorized event wait");
-
-            tool.emit_child_process_started(LIVE_PROCESS, Some("legacy child".to_string()));
-            assert_eq!(child_process_starts.load(Ordering::SeqCst), 1);
-            let _phase = tool.named_phase("legacy-tool-context-sentinel");
-            assert_eq!(tool.session_id(), SESSION);
-            assert_eq!(tool.tool_call_id(), Some(CALL_ID));
-            assert!(tool.cancellation_token().is_some());
-            assert_eq!(tool.prepared_payload(), &serde_json::Value::Null);
-
-            Ok(crate::RuntimeEffectOutcome::ToolAttempt {
-                launch: Box::new(crate::ToolAttemptLaunch::Done {
-                    record: Box::new(crate::ToolCallRecord {
-                        call_id: Some(CALL_ID.to_string()),
-                        tool: "attempt_atomicity".to_string(),
-                        args: serde_json::Value::Null,
-                        output: crate::ToolCallOutput::success(serde_json::json!("ok")),
-                        duration_ms: 0,
-                    }),
-                    intents: crate::ToolIntents::default(),
-                }),
-                triggers: Vec::new(),
-            })
-        }),
-    )
-    .await
-    .expect("legacy ToolContext inventory completes under its guards");
-    assert_eq!(
-        ledger.crossings_inside_attempt(),
-        Vec::<String>::new(),
-        "legacy guards refuse before the controller and journal-free routes stay local"
-    );
-}
-
-#[tokio::test]
-async fn default_false_provider_routes_through_execute_once_without_controller_crossing() {
+async fn pure_execute_provider_routes_through_the_attempt_context_without_controller_crossing() {
     let fixtures = fixtures().await;
     let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
@@ -685,7 +486,7 @@ async fn default_false_provider_routes_through_execute_once_without_controller_c
         crate::ExecutionScope::turn(SESSION, TURN),
     )
     .expect("scoped provider-routing sentinel controller");
-    let provider = Arc::new(LegacyRoutingProbeProvider::new());
+    let provider = Arc::new(PureLeafProbeProvider::new());
     let tool = tool_context_with_provider(
         scoped,
         &fixtures,
@@ -713,7 +514,22 @@ async fn default_false_provider_routes_through_execute_once_without_controller_c
             let result =
                 crate::tool_dispatch::execute_once(dispatch.as_ref(), &prepared_tool_call(), tool)
                     .await;
-            assert!(matches!(result, crate::ToolAttemptResult::Done { .. }));
+            // Assert the provider's sentinel value at the test level, not just
+            // the Done shape. A recorded attempt body runs under
+            // `catch_unwind`, so an assertion that panics *inside* the provider
+            // becomes a `Done` failure output: without pinning the exact
+            // success payload here, every in-provider law above would be
+            // unenforced.
+            let crate::ToolAttemptResult::Done { result, .. } = result else {
+                panic!("pure-execute provider must complete, not park");
+            };
+            assert_eq!(
+                result.into_output().outcome,
+                crate::ToolCallOutcome::Success(crate::ToolValue::from(serde_json::json!(
+                    "pure execute ran"
+                ))),
+                "an in-provider assertion panic surfaces here as a failure output"
+            );
             Ok(crate::RuntimeEffectOutcome::ToolAttempt {
                 launch: Box::new(crate::ToolAttemptLaunch::Done {
                     record: Box::new(crate::ToolCallRecord {
@@ -730,13 +546,13 @@ async fn default_false_provider_routes_through_execute_once_without_controller_c
         }),
     )
     .await
-    .expect("default-false provider completes through execute_once");
+    .expect("pure-execute provider completes through the attempt route");
 
-    assert_eq!(provider.execute_by_id_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         ledger.crossings_inside_attempt(),
         Vec::<String>::new(),
-        "all three legacy routes refuse before crossing the controller"
+        "the sealed attempt context has no controller-crossing route to offer"
     );
 }
 
@@ -1507,7 +1323,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
 /// dispatch applies to the client itself can keep the call off the journal.
 #[derive(Default)]
 struct RawClientDirectProvider {
-    execute_by_id_calls: AtomicUsize,
+    execute_calls: AtomicUsize,
 }
 
 impl RawClientDirectProvider {
@@ -1532,17 +1348,9 @@ impl crate::ToolProvider for RawClientDirectProvider {
         (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-        panic!("raw-client direct law must enter the execute_by_id override")
-    }
-
-    async fn execute_by_id(
-        &self,
-        _tool_id: &crate::ToolId,
-        _args: &serde_json::Value,
-        context: &crate::ToolContext<'_>,
-    ) -> crate::ToolResult {
-        self.execute_by_id_calls.fetch_add(1, Ordering::SeqCst);
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+        self.execute_calls.fetch_add(1, Ordering::SeqCst);
+        let context = call.context;
         let completion = context
             .direct_completions
             .direct_completion(
@@ -1624,7 +1432,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
     .await
     .expect("execution-context attempt completes");
 
-    assert_eq!(provider.execute_by_id_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         ledger.crossings_inside_attempt(),
         Vec::<String>::new(),
@@ -1662,7 +1470,7 @@ async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
         launch,
         crate::tool_dispatch::ToolCallLaunch::Done(_)
     ));
-    assert_eq!(provider.execute_by_id_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.execute_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         ledger.crossings_inside_attempt(),
         Vec::<String>::new(),

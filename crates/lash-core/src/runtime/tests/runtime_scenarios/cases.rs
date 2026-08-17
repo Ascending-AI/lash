@@ -512,11 +512,7 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
         panic!("the runtime scenario provider must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &crate::ToolId) -> bool {
-        tool_id == runtime_scenario_intent_tool().id()
-    }
-
-    async fn execute_attempt(&self, call: crate::AttemptToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let session_id = call.context.session_id().to_string();
         crate::ToolAttemptResult::done(
