@@ -249,6 +249,7 @@ fn tool_context<'run>(
         scoped,
         fixtures,
         Arc::new(crate::testing::EmptyToolProvider),
+        Vec::new(),
     )
 }
 
@@ -256,6 +257,7 @@ fn tool_context_with_provider<'run>(
     scoped: crate::ScopedEffectController<'run>,
     fixtures: &Fixtures,
     tools: Arc<dyn crate::ToolProvider>,
+    catalog: Vec<crate::ToolDefinition>,
 ) -> crate::ToolContext<'run> {
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(4);
     let plugins = crate::plugin::PluginHost::new(Vec::new())
@@ -276,7 +278,7 @@ fn tool_context_with_provider<'run>(
         plugins,
         tools,
         tool_registry: None,
-        tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
+        tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(catalog)),
         sessions: fixtures.host.clone(),
         session_lifecycle: fixtures.host.clone(),
         session_graph: fixtures.host.clone(),
@@ -688,6 +690,7 @@ async fn default_false_provider_routes_through_execute_once_without_controller_c
         scoped,
         &fixtures,
         Arc::clone(&provider) as Arc<dyn crate::ToolProvider>,
+        Vec::new(),
     );
 
     crate::RuntimeEffectController::execute_effect(
@@ -1495,5 +1498,174 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
         ledger.crossings_inside_attempt(),
         Vec::<String>::new(),
         "an attempt-scoped client journals no direct entry from inside the attempt"
+    );
+}
+
+/// A provider that reaches for the *raw* direct-completion client the attempt
+/// dispatch handed its context and calls the plain entry point. That entry
+/// point takes no parent invocation, so only the binding the production attempt
+/// dispatch applies to the client itself can keep the call off the journal.
+#[derive(Default)]
+struct RawClientDirectProvider {
+    execute_by_id_calls: AtomicUsize,
+}
+
+impl RawClientDirectProvider {
+    fn definition() -> crate::ToolDefinition {
+        crate::ToolDefinition::raw(
+            "tool:attempt_atomicity",
+            "attempt_atomicity",
+            "",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({"type": "string"}),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for RawClientDirectProvider {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+        panic!("raw-client direct law must enter the execute_by_id override")
+    }
+
+    async fn execute_by_id(
+        &self,
+        _tool_id: &crate::ToolId,
+        _args: &serde_json::Value,
+        context: &crate::ToolContext<'_>,
+    ) -> crate::ToolResult {
+        self.execute_by_id_calls.fetch_add(1, Ordering::SeqCst);
+        let completion = context
+            .direct_completions
+            .direct_completion(
+                crate::DirectRequest::text(DIRECT_MODEL, "raw client direct completion"),
+                "attempt-atomicity",
+            )
+            .await
+            .expect("raw-client direct completion");
+        assert_eq!(completion.text, DIRECT_TEXT);
+        crate::ToolResult::ok(serde_json::json!("raw client ran"))
+    }
+}
+
+fn raw_client_probe<'run>(
+    sentinel: &'run AttemptAtomicitySentinel<'run>,
+    fixtures: &Fixtures,
+    provider: &Arc<RawClientDirectProvider>,
+) -> crate::ToolContext<'run> {
+    let scoped = crate::ScopedEffectController::borrowed(
+        sentinel,
+        crate::ExecutionScope::turn(SESSION, TURN),
+    )
+    .expect("scoped raw-client sentinel controller");
+    tool_context_with_provider(
+        scoped,
+        fixtures,
+        Arc::clone(provider) as Arc<dyn crate::ToolProvider>,
+        vec![RawClientDirectProvider::definition()],
+    )
+}
+
+/// The execution-context attempt path (`RuntimeExecutionContext::
+/// execute_prepared_tool_attempt_effect`) must bind the direct client it derives
+/// for the attempt, not just the tool context's parent invocation.
+#[tokio::test]
+async fn execution_context_attempt_dispatch_binds_the_direct_client() {
+    let fixtures = fixtures().await;
+    let tier = ControllerOwnedTier::ordinal_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let provider = Arc::new(RawClientDirectProvider::default());
+    let tool = raw_client_probe(&sentinel, &fixtures, &provider);
+    let dispatch = Arc::clone(
+        tool.runtime_dispatch
+            .as_ref()
+            .expect("tool context carries runtime dispatch"),
+    );
+    let execution_context = crate::RuntimeExecutionContext::new(
+        SESSION.to_string(),
+        dispatch,
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        Arc::new(crate::SessionAttachmentStore::in_memory()),
+        Arc::new(crate::ChronologicalProjection::default()),
+        None,
+        crate::TurnContext::default(),
+    );
+
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        attempt_effect_envelope(),
+        crate::RuntimeEffectLocalExecutor::testing(move |envelope| async move {
+            let outcome = execution_context
+                .execute_prepared_tool_attempt_effect(
+                    prepared_tool_call(),
+                    None,
+                    1,
+                    1,
+                    envelope.invocation,
+                    None,
+                    None,
+                )
+                .await?;
+            Ok(crate::RuntimeEffectOutcome::ToolAttempt {
+                launch: Box::new(outcome.launch),
+                triggers: outcome.triggers,
+            })
+        }),
+    )
+    .await
+    .expect("execution-context attempt completes");
+
+    assert_eq!(provider.execute_by_id_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        ledger.crossings_inside_attempt(),
+        Vec::<String>::new(),
+        "the attempt dispatch must bind its direct client, whatever entry point the leaf uses"
+    );
+}
+
+/// The prepared-attempt local runner (`RuntimeEffectLocalExecutor::
+/// prepared_tool_attempt`) derives its own attempt dispatch, and must bind the
+/// direct client the same way. Driven through the production coordinator so the
+/// controller opens the recorded attempt itself.
+#[tokio::test]
+async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
+    let fixtures = fixtures().await;
+    let tier = ControllerOwnedTier::ordinal_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let provider = Arc::new(RawClientDirectProvider::default());
+    let tool = raw_client_probe(&sentinel, &fixtures, &provider);
+    let dispatch = Arc::clone(
+        tool.runtime_dispatch
+            .as_ref()
+            .expect("tool context carries runtime dispatch"),
+    );
+
+    let launch = crate::tool_dispatch::coordinate_prepared_tool_call_launch_with_execution_context(
+        dispatch.as_ref(),
+        prepared_tool_call(),
+        None,
+        tool,
+    )
+    .await;
+
+    assert!(matches!(
+        launch,
+        crate::tool_dispatch::ToolCallLaunch::Done(_)
+    ));
+    assert_eq!(provider.execute_by_id_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        ledger.crossings_inside_attempt(),
+        Vec::<String>::new(),
+        "the prepared-attempt runner must bind its direct client before entering the leaf"
     );
 }

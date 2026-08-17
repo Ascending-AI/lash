@@ -169,6 +169,11 @@ impl<'run> DirectCompletionClient<'run> {
     /// The request id must be unique for each logical direct call. Reusing it
     /// in the same session, turn, and usage source deliberately replays the
     /// first result even when the rest of the request differs.
+    ///
+    /// Replay is a property of the journal, so it does not apply inside a
+    /// recorded tool attempt: a client bound to an open `ToolAttempt` executes
+    /// locally and never presents its replay key, and the enclosing attempt
+    /// entry is what redrive replays instead.
     pub async fn direct_llm_completion(
         &self,
         request: crate::LlmRequest,
