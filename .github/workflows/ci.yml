@@ -13,6 +13,10 @@ on:
   # from another workflow, and unrelated to the removed pass-2 bump chain.
   workflow_dispatch:
   pull_request:
+  # The merge queue delivers a queued PR's required checks on its own event, from
+  # its own `gh-readonly-queue/...` ref. Without this trigger a queue entry gets
+  # no checks at all and the queue stalls.
+  merge_group:
   push:
     branches:
       - main
@@ -31,6 +35,12 @@ on:
 # without its own successful main CI run, so a cancelled main run would strand
 # that commit as unreleasable. A dispatch on main therefore queues behind a live
 # main push run rather than killing it.
+#
+# A `merge_group` run has no `head_ref`, so it groups by its own
+# `gh-readonly-queue/main/pr-<n>-<sha>` ref name, which is unique per queue
+# entry: two queue builds never share a group and never cancel each other. Their
+# cancellation belongs to the queue, which drops an entry's run when it dequeues
+# it, so `cancel-in-progress` stays false for the event.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}
@@ -829,8 +839,10 @@ jobs:
     # main. A cache written by a pull-request run is scoped to that PR's merge
     # ref and can only be restored by re-runs of the same pull request, so on a
     # PR this spends the longest job on the board building a cache no other
-    # workflow can read. Cache warming belongs on main.
-    if: github.event_name != 'pull_request'
+    # workflow can read. The same is true of a merge-queue entry's
+    # `gh-readonly-queue/...` ref, and there it would also be the longest job
+    # gating queue throughput. Cache warming belongs on main.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Check out repository

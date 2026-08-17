@@ -1372,6 +1372,35 @@ derive_mutation_jobs() {{
             workflow,
         )
 
+    def test_required_checks_are_delivered_to_merge_queue_entries(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        # A merge-queue entry runs from its own gh-readonly-queue ref and gets no
+        # checks at all unless the workflow subscribes to `merge_group`; without
+        # this the queue stalls on checks that never report.
+        self.assertIn("  merge_group:\n", workflow)
+
+        # Cache warming is not a queue gate: a cache written from a queue ref is
+        # scoped to that ref and discarded with it, so warming it there would
+        # only add the longest job on the board to every queue entry.
+        release_cache = workflow_job_block(workflow, "linux-release-cache")
+        self.assertIn(
+            "if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'",
+            release_cache,
+        )
+
+    def test_the_transcript_gate_can_read_a_queued_pull_request(self) -> None:
+        gate = (ROOT / "scripts" / "check-transcript-diff.py").read_text(
+            encoding="utf-8"
+        )
+
+        # In the queue there is no pull request in the payload and the ref is
+        # nobody's head branch, so the by-head lookup finds nothing. The queue
+        # ref names the PR; the gate has to use it or it fails a justified change
+        # at the last gate before merge.
+        self.assertIn("gh-readonly-queue/[^/]+/pr-(?P<number>\\d+)-[0-9a-f]+", gate)
+        self.assertIn("def queried_pull_request_body_by_number(", gate)
+
     def test_shared_debug_cache_has_one_backend(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 

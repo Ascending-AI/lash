@@ -212,6 +212,41 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
         self.assertIn("head=owner%3Atopic", seen[0])
         self.assertIn("state=open", seen[0])
 
+    def test_a_queued_run_asks_for_the_pull_request_the_queue_named(self) -> None:
+        # A merge-queue ref is nobody's head branch, so the by-head query finds
+        # nothing and would fail a change its PR justifies. The ref carries the
+        # PR number; the gate asks for that PR by number instead.
+        seen: list[str] = []
+
+        def record(request, timeout=None):  # noqa: ANN001, ARG001
+            seen.append(request.full_url)
+            return self.json_response({"body": "Transcript: durable rev bump."})
+
+        with (
+            mock.patch.dict(
+                MODULE.os.environ,
+                {
+                    "GITHUB_TOKEN": "token",
+                    "GITHUB_REPOSITORY": "owner/repo",
+                    "GITHUB_REF_NAME": "gh-readonly-queue/main/pr-417-0f1e2d3c4b5a",
+                    "GITHUB_HEAD_REF": "",
+                },
+            ),
+            mock.patch.object(MODULE.urllib.request, "urlopen", side_effect=record),
+        ):
+            body = MODULE.queried_pull_request_body()
+
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].endswith("/repos/owner/repo/pulls/417"))
+        self.assertEqual(body, "Transcript: durable rev bump.")
+
+    def test_an_ordinary_branch_is_never_read_as_a_queue_ref(self) -> None:
+        with mock.patch.dict(
+            MODULE.os.environ,
+            {"GITHUB_REF_NAME": "topic", "GITHUB_HEAD_REF": ""},
+        ):
+            self.assertIsNone(MODULE.queued_pull_request_number())
+
     def test_a_dispatched_run_still_fails_without_a_justification(self) -> None:
         # The fallback must not become a way through: an open PR whose body
         # says nothing is the same answer as no PR.
