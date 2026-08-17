@@ -19,9 +19,14 @@ pub(crate) const ATTACHMENT_FENCE_LOCK_NAMESPACE: i32 = 715_422;
 /// why a transition running bare on the pool instead of under the per-digest
 /// advisory key can slip through it unnoticed. Widening it makes the race
 /// deterministic for
-/// [`arming_a_delete_and_a_concurrent_writer_never_both_win`](crate::tests). The
-/// fenced implementation is unaffected: a concurrent `arm` waits on the key
-/// regardless of how long the window is.
+/// [`arming_a_delete_and_a_concurrent_writer_never_both_win`](crate::tests).
+///
+/// The fence's correctness is *width-indifferent*, which is the point: a
+/// concurrent `arm` waits on the per-digest key however long the window is, so
+/// widening it cannot make a correct implementation fail — it can only expose an
+/// incorrect one sooner. This knob therefore changes when the law observes a
+/// defect, never whether one exists. It compiles only under `cfg(test)`; the
+/// shipped writer reads no such value.
 #[cfg(test)]
 pub(crate) static FENCE_WRITER_WINDOW_DELAY_MS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
