@@ -270,6 +270,97 @@ impl Fig779TimerGuardRepro for Fig779TimerGuardReproImpl {
     }
 }
 
+/// FIG-1464 repro payload: an effect result the Restate journal can never
+/// accept. Serializing it fails the same way a non-finite number or an
+/// oversized/invalid journal payload does, which is the SDK-level `ctx.run`
+/// failure shape observed in the workbench replay-panic loop.
+#[derive(Debug)]
+struct Fig1464UnjournalableEffectResult;
+
+impl Serialize for Fig1464UnjournalableEffectResult {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom(
+            "fig1464 effect result cannot be journaled",
+        ))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Fig1464UnjournalableEffectResult {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Err(serde::de::Error::custom(
+            "fig1464 effect result is never journaled",
+        ))
+    }
+}
+
+#[derive(Debug, Serialize, serde::Deserialize)]
+struct Fig1464RunGuardReproInput {
+    effect_name: String,
+}
+
+/// FIG-1464 repro fixture: the journaled-effect (`ctx.run`) leg of the durable
+/// controller seam, driven through the one geometry that turns an SDK-level run
+/// failure into a process abort — a second poll after the SDK recorded its
+/// terminal attempt state.
+#[restate_sdk::workflow]
+trait Fig1464RunGuardRepro {
+    async fn repoll_failed_run(input: Json<Fig1464RunGuardReproInput>) -> HandlerResult<Json<()>>;
+
+    async fn journaled_run(input: Json<Fig1464RunGuardReproInput>) -> HandlerResult<Json<u32>>;
+}
+
+struct Fig1464RunGuardReproImpl;
+
+impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
+    /// The production geometry: a journaled effect whose `ctx.run` fails at the
+    /// SDK level. `InterceptErrorFuture` records the handler-state failure,
+    /// wakes synchronously and returns `Pending`; the SDK future has produced
+    /// its terminal outcome for the attempt and must never be re-entered. Every
+    /// poller above this seam (the turn event pump, the effect races) can poll
+    /// the enclosing future again, so the seam - not its callers - has to fuse.
+    async fn repoll_failed_run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig1464RunGuardReproInput>,
+    ) -> HandlerResult<Json<()>> {
+        let mut run =
+            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
+                Fig1464UnjournalableEffectResult
+            });
+        std::future::poll_fn(|cx| {
+            assert!(
+                matches!(run.as_mut().poll(cx), Poll::Pending),
+                "a failed journaled run must record its handler state and park"
+            );
+            let _ = run.as_mut().poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+        Ok(Json(()))
+    }
+
+    /// The same seam on the happy path: fusing a terminal attempt state must
+    /// not swallow a journaled result.
+    async fn journaled_run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig1464RunGuardReproInput>,
+    ) -> HandlerResult<Json<u32>> {
+        let Json(value) =
+            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
+                41_u32
+            })
+            .await?;
+        Ok(Json(value + 1))
+    }
+}
+
 struct Fig779DurableCancelTransport {
     registry: Arc<dyn ProcessRegistry>,
     process_id: String,
@@ -2129,6 +2220,78 @@ async fn fig779_real_restate_timer_repoll_stays_pending_without_panic() {
         ],
         "the fused timer must preserve the SDK suspension"
     );
+}
+
+/// FIG-1464: the workbench replay-panic loop. A journaled effect whose
+/// `ctx.run` fails at the SDK level leaves an already-`Ready` run future behind
+/// `InterceptErrorFuture`'s recorded-failure park. Re-entering it aborts the
+/// handler task, so the attempt ends with no output and no `End`, Restate
+/// redrives it, and the deterministic replay panics again - the turn can never
+/// terminate. The seam must fuse the run future instead.
+#[tokio::test]
+async fn fig1464_failed_journaled_run_repoll_stays_pending_without_panic() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig1464RunGuardReproImpl.serve())
+        .build();
+    let output = invoke_endpoint(
+        &endpoint,
+        "Fig1464RunGuardRepro",
+        "repoll_failed_run",
+        "fig1464-repoll-failed-run",
+        &Fig1464RunGuardReproInput {
+            effect_name: "lash:fig1464-unjournalable-effect".to_string(),
+        },
+    )
+    .await
+    .expect("re-polling a failed journaled run must not panic");
+
+    let message_types = restate_message_types(&output).expect("decode failed-run response frames");
+    assert!(
+        !message_types.contains(&RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE)
+            && !message_types.contains(&RESTATE_END_MESSAGE_TYPE),
+        "a failed journaled run must not land a fabricated output: {message_types:?}"
+    );
+    assert!(
+        restate_error_message(&output)
+            .is_some_and(|message| message.contains("cannot be journaled")),
+        "the attempt must end on the recorded run failure, not a panic"
+    );
+}
+
+/// FIG-1464 contrast: fusing the terminal attempt state must not swallow a
+/// journaled run that really did produce a result.
+#[tokio::test]
+async fn fig1464_journaled_run_still_returns_its_recorded_result() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig1464RunGuardReproImpl.serve())
+        .build();
+    let key = "fig1464-journaled-run";
+    let input = Fig1464RunGuardReproInput {
+        effect_name: "lash:fig1464-journaled-effect".to_string(),
+    };
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig1464RunGuardRepro",
+        "journaled_run",
+        key,
+        &input,
+    )
+    .await
+    .expect("the journaled run must park on its proposed completion");
+    assert!(
+        restate_message_types(&suspended)
+            .expect("decode journaled run frames")
+            .contains(&RESTATE_RUN_COMMAND_MESSAGE_TYPE),
+        "the effect must be journaled as a RunCommand"
+    );
+
+    let body = encode_run_replay(key, &input, &suspended, serde_json::json!(41))
+        .expect("encode completed journaled run replay");
+    let output = invoke_endpoint_body(&endpoint, "Fig1464RunGuardRepro", "journaled_run", body)
+        .await
+        .expect("the completed journaled run must return its recorded result");
+
+    assert_eq!(restate_output_json::<u32>(&output), Some(42));
 }
 
 /// FIG-779 contrast: an already-completed timer replays straight to `Ready`, so
