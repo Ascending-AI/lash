@@ -87,6 +87,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let Some((Value::String(kind), args)) = values.split_first() else {
             return Err(js_stdlib_error("missing heap constructor discriminator"));
         };
+        // The discriminator is always a compiler-emitted literal, so the minted
+        // brands are reachable here — the dialect's `new` allowlist is what
+        // keeps `new EffectError(...)` out of guest source.
         if let Some(error_kind) = ErrorKind::from_name(kind) {
             let (errors, message_index) = if error_kind == ErrorKind::AggregateError {
                 let Some(errors) = args.first() else {

@@ -189,8 +189,16 @@ fn agent_stdlib_regressions_match_ecmascript() {
         finished(r#"finish(JSON.stringify(JSON.parse('{"b":1,"a":2}')));"#),
         Value::String(r#"{"b":1,"a":2}"#.into())
     );
+    // A catchable runtime fault is delivered as an ordinary JavaScript error
+    // branded `RuntimeError`, with its typed payload on `cause`.
     assert_eq!(
-        finished("try { null.toString(); } catch (error) { finish(error.code); }"),
+        finished(
+            "try { null.toString(); } catch (error) { finish(error instanceof Error ? error.name : String(error)); }"
+        ),
+        Value::String("RuntimeError".into())
+    );
+    assert_eq!(
+        finished("try { null.toString(); } catch (error) { finish(error.cause.code); }"),
         Value::String("ValidationFailed".into())
     );
 }

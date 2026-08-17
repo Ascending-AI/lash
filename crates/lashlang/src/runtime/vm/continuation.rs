@@ -16,7 +16,10 @@ pub use types::{
 
 use super::exceptions::PendingErrorOrigin;
 
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 7;
+// v8 carries the substrate-minted `EffectError`/`RuntimeError` error brands. A
+// heap error's `error_kind` serializes by name here too, so a v7 reader fails
+// to decode the new names instead of reporting a version boundary.
+pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {

@@ -128,22 +128,69 @@ code has no way to bypass a cleanup.
 ### Errors
 
 The dialect adopts the substrate's three-layer catchability taxonomy unchanged.
-Tool and effect failures throw `Error`-shaped built-ins; ordinary runtime errors
-are catchable per specification; instruction, deadline, memory and frame-depth
+Tool and effect failures throw real `Error` objects; ordinary runtime errors are
+catchable per specification; instruction, deadline, memory and frame-depth
 exhaustion are uncatchable terminals; and host cancellation is uncatchable in
 v1. Catchability is a single exhaustive match on the error variant, so a new
 variant does not compile until it declares its class.
 
-An `allSettled` rejection record carries the same `Error`-shaped value as an
-ordinary awaited tool failure — `{ name: "EffectError", message, code }` — and
-that is where a contract limit surfaces. `ExecutionHostError` carries a message
-and nothing else, so the finest identity available for a leaf that is never
-unwrapped is the host's own text; the record reports the generic
-`ResourceOperationFailed` rather than claiming an unwrap error's code, which
-would be simply wrong for a leaf nothing unwrapped. Giving rejections a
-discriminable code requires a code channel on the effect-host contract that
-every host would have to populate. That is named here as an accepted v1 limit
-rather than faked at the dialect.
+**A delivered rejection is an `Error`, not a record shaped like one.** A caught
+tool or effect failure satisfies `error instanceof Error`, renders as
+`EffectError: <host text>` under `String(error)`, and carries the host's own text
+as `message`; a catchable runtime fault is the same value branded
+`RuntimeError`. The typed payload — `code` and `details` — rides on `cause`, the
+one ECMA-documented slot an error carries for exactly this. The brand is what a
+JavaScript library would write as `class EffectError extends Error`: the value
+model has no prototype to subclass and no own slot to write `name` into, so
+`name` is a property of the error object itself and `instanceof` answers `Error`
+and nothing narrower. Only the substrate mints those two brands —
+`new EffectError(...)` is not in the dialect. This was FIG-1477: the delivered
+record failed `instanceof Error`, stringified as `[object Object]`, and sent a
+frontier model's standard try/catch discrimination down its fallback branch.
+
+An `Error` is therefore also the one JavaScript exotic that crosses the host
+boundary, detaching into `{ name, message, cause?, errors? }`. It has no live
+mutation surface (assigning to an error is a `TypeError`) and no internal slot
+the guest cannot already read, so nothing is destroyed or exposed by detaching
+it, and a caught rejection is returnable whenever its `cause` is data — which is
+how a cell reports a tool failure. A `cause` holding another exotic (a `Map`, a
+`Date`) still refuses at the child export. `Map`, `Set`, `Date`, `RegExp`, `URL`
+and `URLSearchParams` refuse outright.
+
+The detachment is the host boundary's own operation, closer to `structuredClone`
+than to anything the guest can write: inside a cell an error's properties are not
+own data, so `Object.keys(error)` is `[]`, `JSON.stringify(error)` is `{}`, and
+`{ ...error }` copies nothing — exactly as in ECMA. The conversion is also
+one-way. Only a host handing back the identical exported value hits the boundary
+cache and resolves to the same error object; a host that rebuilds the record —
+anything that round-trips through JSON — hands back a plain record, and the guest
+sees `instanceof Error` false and an ordinary mutable object. Nothing re-brands a
+record as an error.
+
+An `allSettled` rejection reason is that same `Error`, and that is where a
+contract limit surfaces. `ExecutionHostError` carries a message and nothing
+else, so the finest identity available for a leaf that is never unwrapped is the
+host's own text; the reason reports the generic `ResourceOperationFailed` rather
+than claiming an unwrap error's code, which would be simply wrong for a leaf
+nothing unwrapped. Giving rejections a discriminable code requires a code
+channel on the effect-host contract that every host would have to populate. That
+is named here as an accepted v1 limit rather than faked at the dialect.
+
+Lashlang is untouched: without reference semantics it has no way to construct a
+JavaScript error object, so its `catch` clause keeps the flat
+`{ name, message, code, details }` record it has always been handed. (The heap
+itself is shared machinery, not a per-dialect one: the error-family branch that
+answers an assignment to an exotic with a heap `TypeError` sits above this
+choice and is reachable wherever such a receiver exists.) One seam decides which
+shape is delivered — the VM's error routing — and it reads the
+reference-semantics flag, the same predicate that gates every other JavaScript
+heap constructor: the question being asked is "can this run allocate a
+JavaScript error object at all". In production that flag is set from
+`program.dialect == Typescript` and nothing else, so the two questions do
+coincide; the pairing is a convention the runtime does not enforce, and this
+rule is deliberately written against the heap-ownership meaning rather than
+against the dialect, which is what the aggregate rule records at lowering
+instead.
 
 ### Promise aggregates settle on journaled order
 

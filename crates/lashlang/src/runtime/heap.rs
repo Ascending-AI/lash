@@ -618,6 +618,15 @@ impl Heap {
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
+            // An Error detaches into the record the guest reads off it, one
+            // way: only a host handing back the identical exported `Arc`
+            // resolves to this object again; a rebuilt record stays a plain
+            // record, since nothing re-brands a record as an error (ADR 0062).
+            HeapObject::Error(error) => {
+                javascript_exotics::error_boundary_record(&error, |child| {
+                    export_child(self, child, active)
+                })?
+            }
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
@@ -625,11 +634,10 @@ impl Heap {
             | HeapObject::Map(_)
             | HeapObject::Set(_)
             | HeapObject::Date(_)
-            | HeapObject::Error(_)
             | HeapObject::Url(_)
             | HeapObject::UrlSearchParams(_)) => {
-                // Exotic values have no detached `Value` shape: detaching
-                // would destroy identity or expose internal slots.
+                // The remaining exotics have no detached `Value` shape:
+                // detaching would destroy identity or expose internal slots.
                 return Err(javascript_exotics::host_boundary_error(&object));
             }
         };
@@ -826,6 +834,11 @@ impl Heap {
                     .collect::<Result<Vec<_>, _>>()?
                     .into(),
             ),
+            HeapObject::Error(error) => {
+                javascript_exotics::error_boundary_record(error, |child| {
+                    self.export_inner(child, active, depth + 1)
+                })?
+            }
             HeapObject::Closure { .. } => {
                 return Err(RuntimeError::FunctionValueAtHostBoundary);
             }
@@ -833,7 +846,6 @@ impl Heap {
             | HeapObject::Map(_)
             | HeapObject::Set(_)
             | HeapObject::Date(_)
-            | HeapObject::Error(_)
             | HeapObject::Url(_)
             | HeapObject::UrlSearchParams(_) => {
                 return Err(javascript_exotics::host_boundary_error(self.get(*id)?));

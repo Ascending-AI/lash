@@ -846,10 +846,139 @@ fn promise_all_settled_preserves_javascript_result_shape() {
             { "status": "rejected", "reason": {
                 "name": "EffectError",
                 "message": "boom",
-                "code": "ResourceOperationFailed",
-                "details": { "kind": "effect", "operation": "resource_batch" }
+                "cause": {
+                    "code": "ResourceOperationFailed",
+                    "details": { "kind": "effect", "operation": "resource_batch" }
+                }
             } }
         ])))
+    );
+}
+
+/// A rejected `allSettled` leaf's reason is the same idiomatic error the awaited
+/// form throws, so the discrimination a model writes against it works there too.
+#[test]
+fn promise_all_settled_rejection_reason_is_an_idiomatic_error() {
+    let environment = two_leaf_web_environment();
+    let linked = lash_typescript::link(
+        "const results = await Promise.allSettled([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]);
+         const reason = results[1].reason;
+         finish([reason instanceof Error, String(reason), reason.name, reason.cause.code]);",
+        &environment,
+    )
+    .expect("Promise.allSettled tool calls should link");
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &SettledHost,
+    ))
+    .expect("settled aggregate should execute");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+            true,
+            "EffectError: boom",
+            "EffectError",
+            "ResourceOperationFailed"
+        ])))
+    );
+}
+
+/// A host whose only tool operation fails, so a cell can catch the rejection the
+/// substrate delivers for an ordinary awaited tool call.
+struct RejectingToolHost;
+
+impl ExecutionHost for RejectingToolHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperation(_) => Err(ExecutionHostError::new("boom")),
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
+            _ => Err(ExecutionHostError::new("unexpected rejection ability")),
+        }
+    }
+}
+
+/// Runs a cell whose awaited tool call fails and finishes `probe`, evaluated
+/// with the caught rejection bound to `error`.
+fn caught_rejection(probe: &str) -> Value {
+    let environment = two_leaf_web_environment();
+    let source = format!(
+        "try {{ await web.fetch({{ url: 'a' }}); finish('the tool call did not fail'); }}
+         catch (error) {{ finish({probe}); }}"
+    );
+    let linked = lash_typescript::link(&source, &environment).expect("probe should link");
+    match futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &RejectingToolHost,
+    ))
+    .expect("a failing tool call is catchable")
+    {
+        ExecutionOutcome::Finished(value) => value,
+        other => panic!("expected finish, got {other:?}"),
+    }
+}
+
+/// FIG-1477's first observed failure: the delivered rejection was a plain
+/// record, so the `instanceof Error` guard every model writes took the wrong
+/// branch.
+#[test]
+fn a_tool_rejection_is_an_instance_of_error() {
+    assert_eq!(
+        caught_rejection("error instanceof Error"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        caught_rejection("[error instanceof TypeError, error instanceof RangeError]"),
+        lashlang::from_json(serde_json::json!([false, false])),
+        "the brand is an Error and nothing narrower"
+    );
+}
+
+/// FIG-1477's second observed failure: `String(error)` rendered
+/// `[object Object]`, so a model logging or reporting the rejection lost the
+/// host's own text.
+#[test]
+fn a_tool_rejection_stringifies_informatively() {
+    let Value::String(rendered) = caught_rejection("String(error)") else {
+        panic!("String(error) is a string");
+    };
+    assert!(
+        rendered.starts_with("EffectError: "),
+        "String(error) names the brand: {rendered}"
+    );
+    assert!(
+        rendered.contains("boom"),
+        "String(error) carries the host's own text: {rendered}"
+    );
+}
+
+/// FIG-1477's third observed failure: the standard try/catch discrimination —
+/// read `message` off an `Error`, fall back to `String` otherwise — produced the
+/// fallback branch and a wrong judged answer.
+#[test]
+fn a_tool_rejection_answers_the_standard_discrimination_pattern() {
+    let Value::String(rendered) = caught_rejection(
+        "error instanceof Error ? error.message : `not an error: ${String(error)}`",
+    ) else {
+        panic!("the discrimination probe finishes a string");
+    };
+    assert!(
+        rendered.contains("boom"),
+        "the Error branch reports the message: {rendered}"
+    );
+    assert_eq!(
+        caught_rejection(
+            "[error.name, typeof error.message, error.cause.code, error.cause.details.kind]"
+        ),
+        lashlang::from_json(serde_json::json!([
+            "EffectError",
+            "string",
+            "UnwrappedModuleOperationFailed",
+            "effect"
+        ])),
+        "the typed payload stays reachable on the documented `cause` property"
     );
 }
 
@@ -1424,14 +1553,14 @@ fn lashlang_aggregates_still_select_in_input_order() {
 }
 
 /// Settlement order is consumed inside a single `perform` and never persisted.
-/// Snapshot v6 is independently required by the durable RegExp match-array
-/// kind; the aggregate rule still does not move the VM ABI.
+/// Snapshot v7 is independently required by the substrate-minted error brands;
+/// the aggregate rule still does not move the VM ABI.
 #[test]
 fn settlement_order_does_not_reach_the_continuation_format() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        6,
-        "snapshot v6 carries the durable RegExp match-array kind"
+        7,
+        "snapshot v7 carries the substrate-minted error brands"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
