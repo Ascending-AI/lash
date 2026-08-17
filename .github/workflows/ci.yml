@@ -1011,8 +1011,14 @@ jobs:
         if: matrix.browser
         run: uv run --with playwright==1.62.0 playwright install --with-deps chromium
 
+      # taiki-e/install-action resolves tools from vendored manifests instead of
+      # the GitHub releases API; merge-queue trains fan out enough jobs that the
+      # API-listing path (extractions/setup-just) hit rate limits and ejected
+      # whole trains.
       - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: just
 
       # Each recipe owns its dependencies and any container lifecycle, so the
       # matrix legs run independently without cross-job coordination.
