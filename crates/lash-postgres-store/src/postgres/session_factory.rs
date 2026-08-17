@@ -566,8 +566,9 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
                     {process_dead}
                )"
         );
+        let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         sqlx::query(&delete_sql)
-            .bind(intent_grace_cutoff_epoch_ms as i64)
+            .bind(cutoff)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -587,9 +588,10 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         id: &lash_core::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash_core::StoreError> {
+        let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         let row = sqlx::query(&self.live_attachment_ref_sql())
             .bind(id.as_str())
-            .bind(intent_grace_cutoff_epoch_ms as i64)
+            .bind(cutoff)
             .fetch_optional(&self.pool)
             .await
             .map_err(store_sqlx_error)?;
@@ -610,9 +612,10 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         // the root predicate below and that writer's manifest insert cannot
         // interleave.
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+        let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         let rooted = sqlx::query(&self.live_attachment_ref_sql())
             .bind(id.as_str())
-            .bind(intent_grace_cutoff_epoch_ms as i64)
+            .bind(cutoff)
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?

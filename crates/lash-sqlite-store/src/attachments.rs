@@ -366,7 +366,7 @@ impl Store {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<lash_core::AttachmentCondemnation, StoreError> {
         let attachment_id = attachment_id.as_str().to_string();
-        let cutoff = intent_grace_cutoff_epoch_ms as i64;
+        let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         let live_ref_sql = live_ref_exists_sql(self.process_registry_attached);
         self.conn
             .write_flow(move |tx| {
@@ -634,7 +634,7 @@ impl AttachmentManifest for Store {
         older_than_epoch_ms: u64,
     ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
         block_on_store(async {
-            let older_than = older_than_epoch_ms as i64;
+            let older_than = crate::clamp_epoch_ms(older_than_epoch_ms);
             self.conn
                 .call(move |conn| {
                     let mut stmt = conn.prepare(
@@ -692,7 +692,7 @@ impl AttachmentManifest for Store {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), StoreError> {
         block_on_store(async {
-            let cutoff = intent_grace_cutoff_epoch_ms as i64;
+            let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
             let process_registry_attached = self.process_registry_attached;
             self.conn
                 .write(move |tx| {
@@ -747,7 +747,7 @@ impl AttachmentManifest for Store {
     ) -> Result<bool, StoreError> {
         block_on_store(async {
             let attachment_id = attachment_id.as_str().to_string();
-            let cutoff = intent_grace_cutoff_epoch_ms as i64;
+            let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
             let sql = live_ref_exists_sql(self.process_registry_attached);
             self.conn
                 .call(move |conn| {

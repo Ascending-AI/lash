@@ -7,7 +7,7 @@
 
 use super::*;
 
-const RECONCILE_SQL_SAFE_MAX: u64 = i64::MAX as u64;
+const RECONCILE_SQL_SAFE_MAX: u64 = u64::MAX;
 
 /// Production handles required by the runtime-persistence state machine.
 ///

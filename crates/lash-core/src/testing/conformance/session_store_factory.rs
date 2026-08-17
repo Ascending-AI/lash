@@ -24,6 +24,7 @@ where
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     attachment_ownership_isolation(make()).await;
+    session_store_factory_attachment_large_cutoff_conformance(make()).await;
     session_store_factory_attachment_gc_fence_state_machine(make()).await;
     session_store_factory_fenced_sweep_collects_and_releases(make()).await;
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
@@ -2224,4 +2225,164 @@ async fn session_store_factory_fenced_sweep_collects_and_releases(
         .expect("write after a completed sweep"),
         crate::AttachmentWriteFence::Granted
     ));
+}
+
+/// Attachment cutoff parameter conformance across large cutoff values (e.g. `u64::MAX`, `(i64::MAX as u64) + 1`).
+///
+/// Verifies that:
+/// 1. `list_uncommitted(cutoff)` lists uncommitted intents when `cutoff >= intent_at_epoch_ms`.
+/// 2. `has_live_attachment_ref(id, cutoff)` reports `false` for uncommitted aged intents with dead/no owners, and `true` for committed refs.
+/// 3. `condemn_attachment(id, cutoff)` allows condemnation of uncommitted aged intents with dead/no owners when `cutoff >= intent_at_epoch_ms`.
+/// 4. `live_attachment_refs(cutoff)` forgets uncommitted aged intents and retains committed refs.
+async fn session_store_factory_attachment_large_cutoff_conformance(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        "attachment-large-cutoff-session",
+        "attachment-large-cutoff-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create session store");
+
+    let aged_uncommitted_id = crate::AttachmentId::new("1".repeat(64));
+    let committed_id = crate::AttachmentId::new("2".repeat(64));
+    let cond_target_id = crate::AttachmentId::new("3".repeat(64));
+
+    // Record uncommitted intents at timestamp 1000 with no owner (so they age out immediately when cutoff >= 1000).
+    assert!(matches!(
+        crate::AttachmentManifest::begin_attachment_write(
+            &*store,
+            crate::AttachmentIntent {
+                attachment_id: aged_uncommitted_id.clone(),
+                session_id: request.session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{aged_uncommitted_id}"),
+                intent_at_epoch_ms: 1_000,
+                owner_kind: None,
+                owner_id: None,
+            },
+        )
+        .expect("record aged_uncommitted intent"),
+        crate::AttachmentWriteFence::Granted
+    ));
+
+    assert!(matches!(
+        crate::AttachmentManifest::begin_attachment_write(
+            &*store,
+            crate::AttachmentIntent {
+                attachment_id: committed_id.clone(),
+                session_id: request.session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{committed_id}"),
+                intent_at_epoch_ms: 1_000,
+                owner_kind: None,
+                owner_id: None,
+            },
+        )
+        .expect("record committed intent"),
+        crate::AttachmentWriteFence::Granted
+    ));
+    // Commit the ref for committed_id.
+    crate::AttachmentManifest::commit_refs(
+        &*store,
+        &request.session_id,
+        std::slice::from_ref(&committed_id),
+    )
+    .expect("commit ref");
+
+    assert!(matches!(
+        crate::AttachmentManifest::begin_attachment_write(
+            &*store,
+            crate::AttachmentIntent {
+                attachment_id: cond_target_id.clone(),
+                session_id: request.session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{cond_target_id}"),
+                intent_at_epoch_ms: 1_000,
+                owner_kind: None,
+                owner_id: None,
+            },
+        )
+        .expect("record cond_target intent"),
+        crate::AttachmentWriteFence::Granted
+    ));
+
+    // Test with cutoffs that exceed i64::MAX (e.g., u64::MAX, (i64::MAX as u64) + 1).
+    for large_cutoff in [u64::MAX, (i64::MAX as u64) + 1] {
+        // 1. list_uncommitted must find all uncommitted intents whose intent_at_epoch_ms <= large_cutoff
+        let uncommitted = crate::AttachmentManifest::list_uncommitted(&*store, large_cutoff)
+            .expect("list_uncommitted with large cutoff");
+        let uncommitted_ids = uncommitted
+            .iter()
+            .map(|entry| entry.attachment_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            uncommitted_ids.contains(&aged_uncommitted_id),
+            "list_uncommitted with large cutoff {large_cutoff} must list uncommitted intent, got: {:?}",
+            uncommitted_ids
+        );
+        assert!(
+            uncommitted_ids.contains(&cond_target_id),
+            "list_uncommitted with large cutoff {large_cutoff} must list cond_target intent, got: {:?}",
+            uncommitted_ids
+        );
+        assert!(
+            !uncommitted_ids.contains(&committed_id),
+            "committed ref must not appear in list_uncommitted"
+        );
+
+        // 2. has_live_attachment_ref:
+        // aged_uncommitted_id is uncommitted and ownerless, so at large_cutoff it has no live ref.
+        let has_aged = crate::AttachmentRootSet::has_live_attachment_ref(
+            &*factory,
+            &aged_uncommitted_id,
+            large_cutoff,
+        )
+        .await
+        .expect("has_live_attachment_ref aged_uncommitted");
+        assert!(
+            !has_aged,
+            "aged uncommitted intent must not be reported as a live ref at cutoff {large_cutoff}"
+        );
+
+        // committed_id is committed, so it is a live ref.
+        let has_committed = crate::AttachmentRootSet::has_live_attachment_ref(
+            &*factory,
+            &committed_id,
+            large_cutoff,
+        )
+        .await
+        .expect("has_live_attachment_ref committed");
+        assert!(
+            has_committed,
+            "committed attachment must be reported as a live ref at cutoff {large_cutoff}"
+        );
+    }
+
+    // 3. condemn_attachment with large cutoff:
+    if crate::AttachmentRootSet::fence(&*factory) != crate::AttachmentGcFence::BestEffort {
+        let cond_res =
+            crate::AttachmentRootSet::condemn_attachment(&*factory, &cond_target_id, u64::MAX)
+                .await
+                .expect("condemn_attachment with u64::MAX");
+        assert_eq!(
+            cond_res,
+            crate::AttachmentCondemnation::Condemned,
+            "condemn_attachment at u64::MAX must succeed for uncommitted ownerless intent"
+        );
+    }
+
+    // 4. live_attachment_refs with large cutoff:
+    // It should forget aged_uncommitted_id and return only committed_id (and not aged_uncommitted_id).
+    let live = crate::AttachmentRootSet::live_attachment_refs(&*factory, u64::MAX)
+        .await
+        .expect("live_attachment_refs with u64::MAX");
+    assert!(
+        live.contains(&committed_id),
+        "committed ref must be present in live_attachment_refs"
+    );
+    assert!(
+        !live.contains(&aged_uncommitted_id),
+        "aged uncommitted intent must be forgotten and not present in live_attachment_refs"
+    );
 }

@@ -202,6 +202,22 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
         },
         ProcessListFilter {
             status: ProcessStatusFilter::Any,
+            created_at_start_ms: Some((i64::MAX as u64) + 1),
+            ..ProcessListFilter::default()
+        },
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            created_at_end_ms: Some((i64::MAX as u64) + 1),
+            ..ProcessListFilter::default()
+        },
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            created_at_start_ms: Some(0),
+            created_at_end_ms: Some(u64::MAX),
+            ..ProcessListFilter::default()
+        },
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
             created_at_start_ms: Some(target.created_at_ms),
             created_at_end_ms: Some(target.created_at_ms),
             ..ProcessListFilter::default()

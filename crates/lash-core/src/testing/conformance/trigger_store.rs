@@ -25,6 +25,7 @@ where
     owner_namespaces_are_exact_and_session_cleanup_is_scoped(make()).await;
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
+    occurrence_time_bounds_match_the_rust_predicate(make()).await;
     null_source_occurrence_replay_is_idempotent(make()).await;
     first_ingress_and_replay_share_canonical_subscription_order(make()).await;
 }
@@ -841,6 +842,80 @@ async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
         1,
         "session cleanup must not delete host resources"
     );
+}
+
+/// Occurrence time-bound filters must agree with
+/// [`TriggerOccurrenceFilter::matches`](crate::TriggerOccurrenceFilter::matches)
+/// for every `u64` bound, including bounds above `i64::MAX`.
+///
+/// SQL backends store `occurred_at_ms` in a signed 64-bit column; a raw
+/// `as i64` cast of a huge bound wraps to a negative value and inverts the
+/// comparison, so a host filtering with `u64::MAX` would get the complement of
+/// the in-memory answer instead of the same answer.
+async fn occurrence_time_bounds_match_the_rust_predicate(store: Arc<dyn crate::TriggerStore>) {
+    for (index, source_key) in ["bounds-source-a", "bounds-source-b"].iter().enumerate() {
+        store
+            .ingest_occurrence(button_occurrence(
+                *source_key,
+                format!("bounds-occurrence-{index}"),
+            ))
+            .await
+            .expect("ingest occurrence");
+    }
+    let all = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("list every occurrence");
+    assert!(
+        all.len() >= 2,
+        "fixture must record occurrences so an inverted bound is observable"
+    );
+    let above_i64_max = (i64::MAX as u64) + 1;
+    for filter in [
+        crate::TriggerOccurrenceFilter {
+            occurred_at_start_ms: Some(u64::MAX),
+            ..crate::TriggerOccurrenceFilter::default()
+        },
+        crate::TriggerOccurrenceFilter {
+            occurred_at_start_ms: Some(above_i64_max),
+            ..crate::TriggerOccurrenceFilter::default()
+        },
+        crate::TriggerOccurrenceFilter {
+            occurred_at_end_ms: Some(u64::MAX),
+            ..crate::TriggerOccurrenceFilter::default()
+        },
+        crate::TriggerOccurrenceFilter {
+            occurred_at_end_ms: Some(above_i64_max),
+            ..crate::TriggerOccurrenceFilter::default()
+        },
+        crate::TriggerOccurrenceFilter {
+            occurred_at_start_ms: Some(0),
+            occurred_at_end_ms: Some(u64::MAX),
+            ..crate::TriggerOccurrenceFilter::default()
+        },
+        crate::TriggerOccurrenceFilter {
+            source_key: Some("bounds-source-a".to_string()),
+            occurred_at_end_ms: Some(u64::MAX),
+            ..crate::TriggerOccurrenceFilter::default()
+        },
+    ] {
+        let expected = all
+            .iter()
+            .filter(|record| filter.matches(record))
+            .map(|record| record.occurrence_id.clone())
+            .collect::<Vec<_>>();
+        let actual = store
+            .list_occurrences(filter.clone())
+            .await
+            .expect("list filtered occurrences")
+            .into_iter()
+            .map(|record| record.occurrence_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual, expected,
+            "occurrence pushdown must match the Rust predicate for {filter:?}"
+        );
+    }
 }
 
 async fn occurrence_and_reservations_are_atomic_and_idempotent(

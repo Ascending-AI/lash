@@ -186,6 +186,7 @@ impl AttachmentManifest for PostgresSessionStore {
         older_than_epoch_ms: u64,
     ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
         let pool = self.pool.clone();
+        let older_than = clamp_epoch_ms(older_than_epoch_ms);
         block_on_detached(async move {
             let rows = sqlx::query(
                 "SELECT attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
@@ -194,7 +195,7 @@ impl AttachmentManifest for PostgresSessionStore {
                  WHERE committed_at_ms IS NULL AND intent_at_ms <= $1
                  ORDER BY attachment_id ASC",
             )
-            .bind(older_than_epoch_ms as i64)
+            .bind(older_than)
             .fetch_all(&pool)
             .await
             .map_err(store_sqlx_error)?;

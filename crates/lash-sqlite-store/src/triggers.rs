@@ -580,11 +580,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     }
                     if let Some(start_ms) = filter.occurred_at_start_ms {
                         sql.push_str(" AND occurred_at_ms >= ?");
-                        values.push((start_ms as i64).into());
+                        values.push(crate::clamp_epoch_ms(start_ms).into());
                     }
                     if let Some(end_ms) = filter.occurred_at_end_ms {
                         sql.push_str(" AND occurred_at_ms < ?");
-                        values.push((end_ms as i64).into());
+                        values.push(crate::clamp_epoch_ms(end_ms).into());
                     }
                     sql.push_str(" ORDER BY occurred_at_ms ASC, occurrence_id ASC");
                     let mut stmt = conn.prepare(&sql).map_err(process_sqlite_error)?;

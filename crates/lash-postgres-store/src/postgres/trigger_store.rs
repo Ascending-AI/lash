@@ -360,12 +360,12 @@ impl TriggerStore for PostgresTriggerStore {
         if let Some(start_ms) = filter.occurred_at_start_ms {
             query
                 .push(" AND occurred_at_ms >= ")
-                .push_bind(start_ms as i64);
+                .push_bind(clamp_epoch_ms(start_ms));
         }
         if let Some(end_ms) = filter.occurred_at_end_ms {
             query
                 .push(" AND occurred_at_ms < ")
-                .push_bind(end_ms as i64);
+                .push_bind(clamp_epoch_ms(end_ms));
         }
         query.push(" ORDER BY occurred_at_ms ASC, occurrence_id ASC");
         let rows = query
