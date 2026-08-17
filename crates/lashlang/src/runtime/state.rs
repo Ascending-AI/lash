@@ -328,12 +328,6 @@ impl Snapshot {
         validate_snapshot_messagepack(bytes)?;
         let wire: CanonicalSnapshot = rmp_serde::from_slice(bytes)
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
-        if wire.version != LASHLANG_SNAPSHOT_VERSION {
-            return Err(SnapshotDecodeError::VersionMismatch {
-                expected: LASHLANG_SNAPSHOT_VERSION,
-                found: wire.version,
-            });
-        }
         let snapshot: Self = wire.try_into()?;
         let canonical = snapshot
             .to_canonical_bytes()
@@ -803,6 +797,7 @@ fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError
         globals_result,
         Err(SnapshotDecodeError::ValueDepthLimitExceeded { .. })
             | Err(SnapshotDecodeError::NonCanonicalEncoding { .. })
+            | Err(SnapshotDecodeError::VersionMismatch { .. })
     ) {
         return globals_result;
     }
@@ -854,7 +849,20 @@ fn validate_snapshot_globals(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
         ));
     }
     expect_key(bytes, &mut cursor, "version", "snapshot")?;
-    skip_messagepack_value(bytes, &mut cursor)?;
+    let marker = take_byte(bytes, &mut cursor)?;
+    let version = take_canonical_integer(bytes, &mut cursor, "snapshot.version", marker)?;
+    let version = u32::try_from(version).map_err(|_| {
+        non_canonical(
+            "snapshot.version",
+            "snapshot version must be a non-negative 32-bit integer",
+        )
+    })?;
+    if version != LASHLANG_SNAPSHOT_VERSION {
+        return Err(SnapshotDecodeError::VersionMismatch {
+            expected: LASHLANG_SNAPSHOT_VERSION,
+            found: version,
+        });
+    }
     let representation = take_canonical_string(bytes, &mut cursor, "snapshot")?;
     if representation == "heap" {
         // The heap form carries its values as a flat object table, so the
