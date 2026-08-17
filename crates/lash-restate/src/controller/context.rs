@@ -452,7 +452,15 @@ macro_rules! impl_restate_controller_context {
                             Some(policy) => restate_sdk::context::RunFuture::retry_policy(run, policy),
                             None => run,
                         };
-                        run.await
+                        // An SDK-level run failure is terminal for this attempt:
+                        // the SDK records the handler state, wakes
+                        // synchronously and returns `Pending` so its outer
+                        // `HandlerStateAwareFuture` can consume that state. The
+                        // already-resolved run future must never be re-entered,
+                        // and pollers above this seam (the turn event pump, the
+                        // effect races) can poll their enclosing future again,
+                        // so fuse it here rather than trusting every caller.
+                        guard_restate_context_future(run).await
                     })
                 }
 

@@ -3522,6 +3522,60 @@ async fn restate_handler_controller_journals_typed_trigger_execution() {
     );
 }
 
+/// FIG-1464 poison path: an effect outcome the durable journal will refuse
+/// would fail every redrive of the enclosing turn identically, leaving the turn
+/// uncommitted forever. The seam decides that verdict itself and gives up with a
+/// typed terminal failure the host can observe, while still journaling the
+/// effect exactly once so replay reproduces the same give-up.
+#[tokio::test]
+async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_terminal_failure() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    );
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::new("restate-poison-session"),
+            "restate-poison-list",
+            RuntimeEffectKind::Trigger,
+            "restate-poison-list",
+        ),
+        RuntimeEffectCommand::Trigger {
+            command: Box::new(lash_core::TriggerCommand::List {
+                owner_scope: lash_core::TriggerOwnerScope::session("restate-poison-session"),
+                filter: lash_core::TriggerSubscriptionFilter::default(),
+            }),
+        },
+    );
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::new())
+        as Arc<dyn lash_core::TriggerStore>;
+
+    let error = controller
+        .execute_effect(envelope, RuntimeEffectLocalExecutor::triggers(store))
+        .await
+        .expect_err("an unjournalable effect outcome must not be recorded as a result");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
+    assert!(
+        error.code.is_terminal(),
+        "the give-up must not be re-attempted"
+    );
+    assert!(
+        error.message.contains("durable journal budget"),
+        "the typed failure must name why the effect gave up: {}",
+        error.message
+    );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        ["lash:restate-poison-list"],
+        "the give-up is journaled once, so replay reproduces it"
+    );
+}
+
 #[tokio::test]
 async fn journaled_cancel_peeks_replay_while_live_watcher_observes_later_cancel() {
     let context = Arc::new(ReplayableRecordingContext::default());

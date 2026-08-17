@@ -28,7 +28,7 @@ use lash_core::{
 use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
 use restate_sdk::serde::Json;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 
 use crate::durable_wait::{
     RestateAwaitEventRaceOutcome, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
@@ -51,6 +51,7 @@ pub struct RestateEffectControllerOptions {
     run_retry_policy: Option<RunRetryPolicy>,
     segment_duration_cap: Option<Duration>,
     segment_effect_budget: u64,
+    journaled_effect_byte_budget: Option<u64>,
 }
 
 impl Default for RestateEffectControllerOptions {
@@ -59,6 +60,7 @@ impl Default for RestateEffectControllerOptions {
             run_retry_policy: None,
             segment_duration_cap: None,
             segment_effect_budget: 10_000,
+            journaled_effect_byte_budget: None,
         }
     }
 }
@@ -93,6 +95,18 @@ impl RestateEffectControllerOptions {
         self.segment_effect_budget = effects.max(1);
         self
     }
+
+    /// Refuse to journal a recorded effect whose payload exceeds `bytes`.
+    ///
+    /// An effect outcome the engine will not accept fails the same way on every
+    /// redrive, which leaves the turn uncommitted forever. Deciding the same
+    /// verdict here instead turns that poison into a terminal effect failure the
+    /// host can see. Set this at or below the deployment's Restate journal-entry
+    /// limit; unset, only outcomes that cannot be serialized at all are refused.
+    pub fn journaled_effect_byte_budget(mut self, bytes: u64) -> Self {
+        self.journaled_effect_byte_budget = Some(bytes);
+        self
+    }
 }
 
 impl fmt::Debug for RestateEffectControllerOptions {
@@ -101,6 +115,10 @@ impl fmt::Debug for RestateEffectControllerOptions {
             .field("run_retry_policy", &self.run_retry_policy)
             .field("segment_duration_cap", &self.segment_duration_cap)
             .field("segment_effect_budget", &self.segment_effect_budget)
+            .field(
+                "journaled_effect_byte_budget",
+                &self.journaled_effect_byte_budget,
+            )
             .finish()
     }
 }
@@ -368,30 +386,109 @@ where
         ScopedEffectController::borrowed(self, scope)
     }
 
-    async fn record_effect<'run, T>(
+    async fn record_effect<'run>(
         &'run self,
         metadata: &RuntimeInvocation,
         // Keep the full journaled-effect executor behind one allocation. The
         // Restate SDK stores this future in its ctx.run state machine, so
         // accepting it inline here makes every composed turn carry the whole
         // executor frame through the durable adapter.
-        future: Pin<Box<dyn Future<Output = T> + Send + 'run>>,
-    ) -> Result<T, RestateEffectError>
+        future: Pin<Box<dyn Future<Output = RecordedRuntimeEffect> + Send + 'run>>,
+    ) -> Result<RecordedRuntimeEffect, RestateEffectError>
     where
         'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
     {
         let effect_name = restate_effect_name(metadata);
         let run_retry_policy = self.options.run_retry_policy.clone();
+        let payload_budget = self.options.journaled_effect_byte_budget;
+        let poisoned_effect_name = effect_name.clone();
         let Json(value) = self
             .context
-            .run_json_send(effect_name.clone(), run_retry_policy, future)
+            .run_json_send(
+                effect_name.clone(),
+                run_retry_policy,
+                Box::pin(async move {
+                    journalable_recorded_effect(&poisoned_effect_name, payload_budget, future.await)
+                }),
+            )
             .await
             .map_err(|source| RestateEffectError::Terminal {
                 effect: effect_name,
                 terminal: source,
             })?;
         Ok(value)
+    }
+}
+
+/// Measure a recorded effect's journal payload without allocating it, and stop
+/// serializing as soon as it cannot be journaled.
+struct JournalPayloadMeter {
+    written: u64,
+    budget: Option<u64>,
+    exceeded: bool,
+}
+
+impl std::io::Write for JournalPayloadMeter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.written = self.written.saturating_add(buf.len() as u64);
+        if let Some(budget) = self.budget
+            && self.written > budget
+        {
+            self.exceeded = true;
+            return Err(std::io::Error::other(
+                "recorded effect exceeded its durable journal payload budget",
+            ));
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Give up on an effect outcome the durable journal can never accept.
+///
+/// The Restate SDK serializes a recorded effect while the journal command is
+/// being proposed, so an outcome that cannot be journaled fails the whole
+/// attempt with no journal progress - and, because that verdict is a pure
+/// function of the recorded value, it fails the same way on every redrive, so
+/// the turn never terminates. Substituting a typed poison outcome keeps the
+/// give-up inside the effect the host is already waiting on: the substitution
+/// is replay-deterministic, its envelope is two canonical strings and therefore
+/// always journalable, and the host observes
+/// [`RuntimeErrorCode::RestateJournaledEffectPoisoned`] as a terminal effect
+/// failure instead of an uncommitted turn.
+fn journalable_recorded_effect(
+    effect: &str,
+    payload_budget: Option<u64>,
+    recorded: RecordedRuntimeEffect,
+) -> RecordedRuntimeEffect {
+    let mut meter = JournalPayloadMeter {
+        written: 0,
+        budget: payload_budget,
+        exceeded: false,
+    };
+    let Err(error) = serde_json::to_writer(&mut meter, &recorded) else {
+        return recorded;
+    };
+    let reason = if meter.exceeded {
+        let budget = payload_budget.unwrap_or_default();
+        format!("its payload exceeded the {budget}-byte durable journal budget")
+    } else {
+        format!("its payload cannot be serialized: {error}")
+    };
+    tracing::error!(
+        %effect,
+        %reason,
+        "journaled effect outcome cannot be recorded; giving up with a terminal poison outcome"
+    );
+    RecordedRuntimeEffect {
+        envelope: recorded.envelope,
+        outcome: Err(RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RestateJournaledEffectPoisoned,
+            format!("journaled effect `{effect}` gave up because {reason}"),
+        )),
     }
 }
 

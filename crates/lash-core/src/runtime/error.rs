@@ -117,6 +117,10 @@ pub enum RuntimeErrorCode {
     RestateEffectController,
     RestateEffectHashMismatch,
     RestateEffectHostRequiresHandlerScope,
+    /// A journaled Restate effect produced an outcome the durable journal can
+    /// never accept, so the effect gave up with a terminal failure instead of
+    /// failing every redrive of the enclosing turn.
+    RestateJournaledEffectPoisoned,
     RestateProcessAwait,
     RestateProcessAwaitAfterTurnCancel,
     RestateProcessTurnCancelContextMissing,
@@ -298,6 +302,7 @@ impl RuntimeErrorCode {
             Self::RestateAwaitEventSessionUpdate => "restate_await_event_session_update",
             Self::RestateEffectController => "restate_effect_controller",
             Self::RestateEffectHashMismatch => "restate_effect_hash_mismatch",
+            Self::RestateJournaledEffectPoisoned => "restate_journaled_effect_poisoned",
             Self::RestateEffectHostRequiresHandlerScope => {
                 "restate_effect_host_requires_handler_scope"
             }
@@ -492,6 +497,7 @@ impl RuntimeErrorCode {
                 | Self::ProcessSignalWaitTimeout
                 | Self::RestateEffectHashMismatch
                 | Self::RestateEffectHostRequiresHandlerScope
+                | Self::RestateJournaledEffectPoisoned
                 | Self::RestateProcessAwait
                 | Self::RestateProcessAwaitAfterTurnCancel
                 | Self::RestateProcessTurnCancelContextMissing
@@ -639,6 +645,7 @@ impl RuntimeErrorCode {
             "restate_effect_host_requires_handler_scope" => {
                 Self::RestateEffectHostRequiresHandlerScope
             }
+            "restate_journaled_effect_poisoned" => Self::RestateJournaledEffectPoisoned,
             "restate_process_await" => Self::RestateProcessAwait,
             "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,
             "restate_process_turn_cancel_context_missing" => {
@@ -989,6 +996,7 @@ mod tests {
             | RuntimeErrorCode::ProcessSignalWaitTimeout
             | RuntimeErrorCode::RestateEffectHashMismatch
             | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
+            | RuntimeErrorCode::RestateJournaledEffectPoisoned
             | RuntimeErrorCode::RestateProcessAwait
             | RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
             | RuntimeErrorCode::RestateProcessTurnCancelContextMissing
@@ -1150,6 +1158,7 @@ mod tests {
             RuntimeErrorCode::RestateEffectController,
             RuntimeErrorCode::RestateEffectHashMismatch,
             RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
+            RuntimeErrorCode::RestateJournaledEffectPoisoned,
             RuntimeErrorCode::RestateProcessAwait,
             RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
             RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
