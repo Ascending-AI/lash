@@ -636,6 +636,15 @@ mod tests {
     use lash_core::plugin::ToolCatalogContext;
     use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
 
+    /// Both shipped dialects, the way a session registers them.
+    fn test_dialect_registry() -> crate::dialect::RlmDialectRegistry {
+        crate::dialect::RlmDialectRegistry::new([
+            std::sync::Arc::new(crate::dialect::lashlang_test_dialect())
+                as std::sync::Arc<dyn crate::dialect::RlmDialect>,
+            std::sync::Arc::new(crate::dialect::typescript_test_dialect()),
+        ])
+    }
+
     #[test]
     fn identity_and_cell_tags_are_typescript() {
         let dialect = TypescriptDialect::new(
@@ -1141,6 +1150,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
+        let dialects = test_dialect_registry();
         let mut admitted = Vec::new();
         let mut refused = Vec::new();
         for (modules, operation) in &candidates {
@@ -1162,14 +1172,17 @@ mod tests {
                 modules.clone(),
                 operation.as_str(),
             ));
-            let registration = crate::tool_catalog::rlm_tool_catalog(ToolCatalogContext {
-                session_id: "session".to_string(),
-                tools: vec![tool.manifest()],
-                resolve_contract: None,
-                tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
-                extensions: Default::default(),
-            });
+            let registration = crate::tool_catalog::rlm_tool_catalog(
+                ToolCatalogContext {
+                    session_id: "session".to_string(),
+                    tools: vec![tool.manifest()],
+                    resolve_contract: None,
+                    tool_access: lash_core::SessionToolAccess::default(),
+                    subagent: None,
+                    extensions: Default::default(),
+                },
+                &dialects,
+            );
             match registration {
                 Ok(_) => admitted.push((tool, modules.clone(), operation.clone(), call_path)),
                 Err(error) => {

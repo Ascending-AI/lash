@@ -554,14 +554,17 @@ mod tests {
             )
             .with_lashlang_binding(LashlangToolBinding::new([module], "run"));
 
-            let err = rlm_tool_catalog(ToolCatalogContext {
-                session_id: "session".to_string(),
-                tools: vec![unaddressable.manifest()],
-                resolve_contract: None,
-                tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
-                extensions: Default::default(),
-            })
+            let err = rlm_tool_catalog(
+                ToolCatalogContext {
+                    session_id: "session".to_string(),
+                    tools: vec![unaddressable.manifest()],
+                    resolve_contract: None,
+                    tool_access: lash_core::SessionToolAccess::default(),
+                    subagent: None,
+                    extensions: Default::default(),
+                },
+                &test_dialect_registry(),
+            )
             .expect_err("an unaddressable TypeScript call path must fail registration");
 
             assert!(
