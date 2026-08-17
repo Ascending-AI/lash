@@ -209,6 +209,33 @@ pub(crate) trait RlmDialect: Send + Sync {
         )
     }
 
+    /// What to tell a model that opened a line with this dialect's tag in a
+    /// position the cell grammar refuses.
+    ///
+    /// The rule itself is the whole content, because the failure this replaces
+    /// was a reply that got no rule at all: a misplaced fence was read as prose,
+    /// the driver answered "please finish", and the model — correctly seeing
+    /// nothing wrong with its own code — re-sent it until the turn's budget died
+    /// (FIG-1475). Written from the dialect's own tags and noun, so the
+    /// correction is in the reader's words.
+    ///
+    /// It names the *canonical* shape only, and deliberately says nothing about
+    /// the one-line shape the scanner also reads. Every prompt fragment teaches
+    /// standalone tag lines; a correction that advertised a second accepted
+    /// shape would contradict them, and this copy exists to remove a
+    /// contradiction rather than add one. A reply already in the one-line shape
+    /// never reaches this copy — it executes.
+    fn malformed_cell_fence_retry_copy(&self) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let tags = self.cell_tags();
+        format!(
+            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line.",
+            noun = vocabulary.cell_noun,
+            open = tags.open,
+            close = tags.close,
+        )
+    }
+
     fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String;
 
     fn code_stream_kind(&self) -> &'static str;

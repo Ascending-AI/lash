@@ -1433,6 +1433,308 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
     );
 }
 
+// === FIG-1475: one-line cells, named fence rules, and repeated replies ===
+//
+// The measured shape (finale3 row `workbench-continue-as/typescript`,
+// reproduced twice): a reply that was a single `<typescript>…</typescript>`
+// line. Extraction refused it, the whole reply counted as prose, the
+// `FinishRequired` driver answered "please finish" — which corrects nothing —
+// and a frontier model re-sent the identical reply until the turn's no-progress
+// budget died. Twelve billed provider calls, one dead turn, no signal.
+
+/// Answer the completion checkpoint a finishing turn asks for, and return the
+/// effects that follow it — where `Done` lives.
+fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) -> Vec<Effect> {
+    let (checkpoint_id, _) = find_checkpoint(effects).expect("completion checkpoint");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: sansio::CheckpointDelivery::default(),
+    });
+    drain_effects(machine)
+}
+
+fn finish_required_options() -> lash_core::ProtocolTurnOptions {
+    lash_core::ProtocolTurnOptions::typed(RlmCreateExtras {
+        dialect: None,
+        termination: RlmTermination::FinishRequired { schema: None },
+        final_answer_format: None,
+    })
+    .expect("valid rlm turn options")
+}
+
+/// A one-line cell executes.
+///
+/// Red before the fix: `first_cell_span` required the open tag to be alone on
+/// its line, so this reply yielded no cell and nothing ran.
+#[test]
+fn a_one_line_cell_executes_in_both_dialects() {
+    for (dialect, reply, code) in [
+        (
+            "lashlang",
+            "<lashlang>finish \"ok\"</lashlang>",
+            "finish \"ok\"",
+        ),
+        (
+            "typescript",
+            "<typescript>finish(\"ok\");</typescript>",
+            "finish(\"ok\");",
+        ),
+    ] {
+        let mut machine = TurnMachine::new(
+            test_config_with_dialect(dialect),
+            vec![user_message("respond")],
+            Arc::new(Vec::new()),
+            0,
+        );
+        let effects = drain_effects(&mut machine);
+        let llm_id = *find_llm_call(&effects).expect("llm call");
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(rlm_response(vec![text_part(reply)])),
+        });
+
+        let effects = drain_effects(&mut machine);
+        let executed = effects.iter().find_map(|effect| match effect {
+            Effect::ExecCode { code, .. } => Some(code.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            executed.as_deref(),
+            Some(code),
+            "{dialect}: a one-line cell must execute its source"
+        );
+    }
+}
+
+/// Prose that only *mentions* both tags on one line is still prose.
+///
+/// The widened grammar must not turn a sentence about cells into a cell: the
+/// line has to start with the open tag and end with the close tag.
+#[test]
+fn a_one_line_tag_mention_still_finishes_as_prose() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("respond")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    let reply = "Write code between <lashlang> and </lashlang> tags, like this one did.";
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(reply)])),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. })),
+        "a tag mention is not executable source"
+    );
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
+                if content == reply
+        )),
+        "the whole line is delivered as the answer: {effects:#?}"
+    );
+    let effects = complete_through_checkpoint(&mut machine, &effects);
+    assert!(
+        find_done(&effects).is_some(),
+        "and the turn finishes on it rather than asking again"
+    );
+}
+
+/// Prose *about* the tags is an answer, not a fence to correct.
+///
+/// A line that opens with the tag is indistinguishable from an attempted cell,
+/// so the fence correction is asked for only where a cell is required. On a
+/// `Natural` turn this reply is exactly what the user wanted; answering it with
+/// grammar guidance would bury the answer and spend the turn's attempts.
+#[test]
+fn a_natural_turn_answering_about_the_tags_is_not_corrected() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("what are the tags?")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(
+            "<lashlang> and </lashlang> are the tags you asked about.",
+        )])),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let effects = complete_through_checkpoint(&mut machine, &effects);
+    assert!(
+        find_done(&effects).is_some(),
+        "the turn finishes on its answer"
+    );
+    assert_eq!(
+        single_llm_extraction_payload(&machine)["decision"],
+        "finish_prose",
+        "prose about the tags finishes; it is not a refused fence"
+    );
+}
+
+/// A fence the grammar refuses is answered by naming the rule.
+///
+/// Red before the fix: this reply produced no cell, so it fell through to the
+/// finish reminder, which says nothing about fences. The model has no way to
+/// learn what to change, which is what made the loop repeat.
+#[test]
+fn a_malformed_fence_is_answered_by_naming_the_rule() {
+    for (dialect, reply, open, close) in [
+        (
+            "lashlang",
+            "<lashlang>finish \"ok\"\n</lashlang>",
+            "<lashlang>",
+            "</lashlang>",
+        ),
+        (
+            "typescript",
+            "<typescript >\nfinish(\"ok\");\n</typescript>",
+            "<typescript>",
+            "</typescript>",
+        ),
+    ] {
+        let mut config = test_config_with_dialect(dialect);
+        config.termination = finish_required_options();
+        let mut machine = TurnMachine::new(
+            config,
+            vec![user_message("respond")],
+            Arc::new(Vec::new()),
+            0,
+        );
+        let effects = drain_effects(&mut machine);
+        let llm_id = *find_llm_call(&effects).expect("llm call");
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(rlm_response(vec![text_part(reply)])),
+        });
+
+        let effects = drain_effects(&mut machine);
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::ExecCode { .. })),
+            "{dialect}: a refused fence executes nothing"
+        );
+        let told = machine.messages().iter().any(|message| {
+            message.parts.iter().any(|part| {
+                part.content.contains("grammar could not read")
+                    && part.content.contains("stand alone on its own line")
+                    && part.content.contains("stand alone on a later line")
+                    && part.content.contains(open)
+                    && part.content.contains(close)
+            })
+        });
+        assert!(
+            told,
+            "{dialect}: the retry must name the fence rule: {:#?}",
+            machine.messages()
+        );
+        let decision = machine
+            .events()
+            .iter()
+            .filter_map(|record| match record {
+                lash_core::SessionHistoryRecord::Protocol(event) => {
+                    match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+                        Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                            if diagnostic.phase == "llm_extraction" =>
+                        {
+                            diagnostic.payload["decision"].as_str().map(str::to_string)
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .next_back();
+        assert_eq!(
+            decision.as_deref(),
+            Some("retry_malformed_cell_fence"),
+            "{dialect}: the diagnostic names the fence, not a finish request"
+        );
+    }
+}
+
+/// An identical reply is *evidence*, not a stop condition.
+///
+/// The measured FIG-1475 turn spent twelve provider calls on twelve identical
+/// replies, and that bound is the host's: the no-progress budget it configured.
+/// Lash records a fingerprint of each reply so a host can see the repetition —
+/// a provider sending the same bytes twice is legitimate output, and lash draws
+/// no conclusion from it.
+#[test]
+fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
+    let mut machine = TurnMachine::new(
+        config_with_no_progress_budget(6),
+        vec![user_message("do the thing")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let stalled = drive_stalling_turn(&mut machine, "<lashlang>\nfinish \"ok\"", None, 32);
+
+    assert_eq!(
+        stalled.llm_calls, 6,
+        "a repeat is bounded by the host's budget and nothing else"
+    );
+    assert!(
+        stalled.stop_message().is_some(),
+        "and stops for the budget's reason: {:#?}",
+        stalled.messages
+    );
+    let fingerprints: Vec<String> = machine
+        .events()
+        .iter()
+        .filter_map(|record| match record {
+            lash_core::SessionHistoryRecord::Protocol(event) => {
+                match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+                    Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                        if diagnostic.phase == "llm_extraction" =>
+                    {
+                        diagnostic.payload["reply_fingerprint"]
+                            .as_str()
+                            .map(str::to_string)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fingerprints.len(), 6, "every attempt names its reply");
+    assert!(
+        fingerprints.windows(2).all(|pair| pair[0] == pair[1]),
+        "identical replies fingerprint identically: {fingerprints:?}"
+    );
+    assert!(
+        !machine.events().iter().any(|record| matches!(
+            record,
+            lash_core::SessionHistoryRecord::Protocol(event)
+                if matches!(
+                    lash_protocol_rlm::decode_rlm_protocol_event(event),
+                    Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                        if diagnostic.phase == "repeated_reply"
+                )
+        )),
+        "lash stops no turn for repeating itself"
+    );
+}
+
 /// Leg 1 of the retry-hygiene triple, driven through the real machine.
 ///
 /// Within one iteration a failing cell keeps whatever it printed before it
