@@ -1,3 +1,4 @@
+use crate::{Diagnostic, DiagnosticCode};
 use lashlang::{TypeExpr, TypeField, json_schema_to_type_expr};
 use serde_json::Value;
 
@@ -232,17 +233,21 @@ pub fn render_tool_signature(
     let output = output_schema.map_or(TypeExpr::Any, json_schema_to_type_expr);
     let segments = name.split('.').collect::<Vec<_>>();
     let (operation, modules) = segments.split_last().expect("split never yields nothing");
+    // Only the root of a call path is written in expression position; a cell
+    // spells every segment after it as a property name, where ECMAScript accepts
+    // reserved words. A path whose root is a word no cell can write cannot be
+    // advertised honestly at all — registration refuses those, see
+    // [`ensure_tool_call_path_addressable`].
     if segments.len() > 1
-        && segments
-            .iter()
-            .all(|segment| is_identifier(segment) && !is_reserved_word(segment))
+        && segments.iter().all(|segment| is_identifier(segment))
+        && !is_expression_reserved_word(modules[0])
     {
         let signature = format!(
             "(input: {}): Promise<{}>",
             render_type(&input),
             render_type(&output)
         );
-        {
+        if segments.iter().all(|segment| !is_reserved_word(segment)) {
             let mut declaration = format!("function {operation}{signature};");
             // Only the outermost wrapper may carry `declare`: a nested one is
             // already inside an ambient context, and `declare namespace a {
@@ -252,6 +257,21 @@ pub fn render_tool_signature(
                 declaration = format!("namespace {module} {{ {declaration} }}");
             }
             format!("declare {declaration}")
+        } else {
+            // A namespace or function *name* is a declaration position, which
+            // admits no reserved word, so `inbox.delete` had no namespace
+            // spelling and was advertised as the mangled `__lash_tool_<hex>`
+            // identifier — a callable no binding provides, which rejected with
+            // `TS_UNKNOWN_BINDING` for itself while the dotted path the catalog
+            // never mentioned worked (FIG-1444). Declaring the tail as nested
+            // properties of the root moves every reserved name into the position
+            // a cell actually writes it in, so the declaration spells the call.
+            let (root, inner) = modules.split_first().expect("checked len above");
+            let mut declaration = format!("{operation}{signature}");
+            for module in inner.iter().rev() {
+                declaration = format!("{module}: {{ {declaration} }}");
+            }
+            format!("declare const {root}: {{ {declaration} }};")
         }
     } else {
         format!(
@@ -272,26 +292,36 @@ pub fn render_tool_signature(
 /// honored by construction and cannot drift from the lowerer. Registration calls
 /// it so a tool whose path the dialect resolves to anything other than a tool
 /// call is refused rather than advertised as a callable nothing (FIG-1444).
-pub fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), crate::Diagnostic> {
+pub fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), Diagnostic> {
     let segments = call_path.split('.').collect::<Vec<_>>();
     let (operation, modules) = segments.split_last().expect("split never yields nothing");
     if modules.is_empty() {
-        return Err(crate::Diagnostic::new(
-            crate::DiagnosticCode::UnknownBinding,
+        return Err(Diagnostic::new(
+            DiagnosticCode::UnknownBinding,
             format!(
                 "tool call path `{call_path}` has no module path, so a TypeScript cell has no receiver to call it on"
             ),
             None,
         ));
     }
-    let program = crate::parse(&format!("finish(await {call_path}({{}}));"))?;
-    if addresses_tool(&program.main, modules, operation) {
-        return Ok(());
-    }
-    Err(crate::Diagnostic::refusal(
-        crate::DiagnosticCode::MethodUnsupported,
+    // The inner diagnostic answers a different question than the caller asked:
+    // `Math.floor` fails the probe as `TS_AWAIT_UNSUPPORTED`, which reads as an
+    // instruction to drop the `await` rather than as "this path names an
+    // ECMAScript global, so no tool can live under it". Lead with the reason the
+    // path is unadvertisable and carry the inner diagnostic as the detail.
+    let detail = match crate::parse(&format!("finish(await {call_path}({{}}));")) {
+        Ok(program) if addresses_tool(&program.main, modules, operation) => return Ok(()),
+        Ok(_) => "the dialect resolves that call itself instead of dispatching a tool".to_string(),
+        Err(inner) => format!(
+            "that cell is refused as {}: {}",
+            inner.code.as_str(),
+            inner.message
+        ),
+    };
+    Err(Diagnostic::refusal(
+        DiagnosticCode::MethodUnsupported,
         format!(
-            "tool call path `{call_path}` does not lower to a tool call in a TypeScript cell, so advertising it would promise a callable no binding provides"
+            "tool call path `{call_path}` does not dispatch a tool in a TypeScript cell, so advertising it would promise a callable no binding provides: writing `await {call_path}(input)` names a word no cell can write in expression position, an ECMAScript global namespace, or a method the dialect claims for itself — {detail}"
         ),
         None,
     ))
@@ -575,5 +605,20 @@ mod tests {
             signature,
             "declare function __lash_tool_7365617263682d646f6373(input: { limit?: number; query: string }): Promise<Array<string>>;"
         );
+    }
+
+    /// The expression-position table is a *subset* of the declaration-position
+    /// one. A word only ECMAScript forbids would otherwise be rendered as a
+    /// namespace name TypeScript rejects, and a word missing from the wider
+    /// table would be advertised as a `const` whose name no cell can write.
+    #[test]
+    fn expression_reserved_words_are_a_subset_of_reserved_words() {
+        for word in EXPRESSION_RESERVED_WORDS {
+            assert!(
+                is_reserved_word(word),
+                "`{word}` is reserved in expression position but not in declaration position"
+            );
+        }
+        assert!(EXPRESSION_RESERVED_WORDS.len() < RESERVED_WORDS.len());
     }
 }

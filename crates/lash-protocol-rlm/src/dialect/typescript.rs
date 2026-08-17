@@ -1079,6 +1079,7 @@ mod tests {
                 assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
             });
     }
+
     /// Every identifier the rendered catalog advertises must link to a binding.
     ///
     /// The instance defect — a reserved-word operation advertised only as
@@ -1279,7 +1280,7 @@ mod tests {
             let mut rest = tail;
             loop {
                 let member = rest
-                    .find(|character| matches!(character, ':' | '('))
+                    .find([':', '('])
                     .unwrap_or_else(|| panic!("unrecognized const member: {declaration}"));
                 let (name, tail) = rest.split_at(member);
                 segments.push(name.trim().trim_matches('"').to_string());
