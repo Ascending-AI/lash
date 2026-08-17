@@ -3,6 +3,17 @@ use crate::runtime::{javascript_to_number, javascript_to_string};
 
 pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
 
+/// The brand an error object carries: the `name` it reports, and — for the ECMA
+/// kinds — the one constructor besides `Error` that `instanceof` answers true
+/// for.
+///
+/// The first eight are ECMA constructors a guest can call. [`Self::EffectError`]
+/// and [`Self::RuntimeError`] are brands only the substrate mints, and no
+/// constructor names them, so they answer `instanceof Error` and nothing
+/// narrower. They are the shape a JavaScript library would write as
+/// `class EffectError extends Error`, which this value model expresses as a
+/// brand because a dense record has no prototype to subclass and no own slot to
+/// write `name` into.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) enum ErrorKind {
@@ -14,6 +25,8 @@ pub(crate) enum ErrorKind {
     URIError,
     EvalError,
     AggregateError,
+    EffectError,
+    RuntimeError,
 }
 
 impl ErrorKind {
@@ -27,9 +40,17 @@ impl ErrorKind {
             Self::URIError => "URIError",
             Self::EvalError => "EvalError",
             Self::AggregateError => "AggregateError",
+            Self::EffectError => "EffectError",
+            Self::RuntimeError => "RuntimeError",
         }
     }
 
+    /// Resolves a brand from a name.
+    ///
+    /// Every caller reads a compiler-emitted discriminator or a live error
+    /// object's own brand, never guest text: `new EffectError(...)` is refused
+    /// by the dialect's `new` allowlist, which is where every constructor the
+    /// dialect withholds is withheld.
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "Error" => Self::Error,
@@ -40,6 +61,8 @@ impl ErrorKind {
             "URIError" => Self::URIError,
             "EvalError" => Self::EvalError,
             "AggregateError" => Self::AggregateError,
+            "EffectError" => Self::EffectError,
+            "RuntimeError" => Self::RuntimeError,
             _ => return None,
         })
     }
@@ -803,6 +826,37 @@ pub(super) fn host_boundary_error(object: &HeapObject) -> RuntimeError {
     RuntimeError::JavaScriptExoticAtHostBoundary {
         kind: object.kind_name().to_string(),
     }
+}
+
+/// The detached shape of an error object: exactly the properties the guest reads
+/// off it.
+///
+/// An Error is the one exotic that crosses a host boundary. It has no live
+/// mutation surface — assigning to an error is a `TypeError` — and no internal
+/// slot the guest cannot already read, so nothing is destroyed or exposed by
+/// detaching it, and a caught rejection is returnable whenever its `cause` is
+/// data, which is how a cell reports a tool failure. A `cause` holding another
+/// exotic still refuses at the child export, as it must. Both export walks share
+/// this one assembly so the shape a host sees cannot drift between them; each
+/// supplies its own child export, which is the only thing the two walks disagree
+/// about.
+pub(super) fn error_boundary_record(
+    error: &ErrorObject,
+    mut export_child: impl FnMut(&Value) -> Result<Value, RuntimeError>,
+) -> Result<Value, RuntimeError> {
+    let mut output = record_with_capacity(4);
+    output.insert("name".to_string(), Value::String(error.kind.name().into()));
+    output.insert(
+        "message".to_string(),
+        Value::String(error.message.as_str().into()),
+    );
+    if let Some(cause) = &error.cause {
+        output.insert("cause".to_string(), export_child(cause)?);
+    }
+    if let Some(errors) = &error.errors {
+        output.insert("errors".to_string(), export_child(errors)?);
+    }
+    Ok(Value::Record(std::sync::Arc::new(output)))
 }
 
 pub(crate) fn same_value_zero(left: &Value, right: &Value) -> bool {

@@ -334,33 +334,49 @@ pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
                 ])),
                 else_block: Box::new(LashExpr::Record(vec![
                     ("status".into(), LashExpr::String("rejected".into())),
+                    // A rejected leaf's reason is the same idiomatic Error the
+                    // awaited form throws: `instanceof Error`, `name` of
+                    // `EffectError`, the host's own text as `message`, and the
+                    // typed payload on `cause`. The brand is a
+                    // compiler-emitted discriminator, which is why the dialect
+                    // can mint it while `new EffectError(...)` stays refused.
                     (
                         "reason".into(),
-                        LashExpr::Record(vec![
-                            ("name".into(), LashExpr::String("EffectError".into())),
-                            ("message".into(), field("error")),
-                            // An allSettled leaf is never unwrapped, so it
-                            // cannot have failed the way an unwrap does. The
-                            // message carries the host's own text, which is the
-                            // only identity the effect-host contract exposes
-                            // today; a finer code needs a code channel on
-                            // ExecutionHostError, which every host would have
-                            // to populate.
-                            (
-                                "code".into(),
-                                LashExpr::String("ResourceOperationFailed".into()),
-                            ),
-                            (
-                                "details".into(),
-                                LashExpr::Record(vec![
-                                    ("kind".into(), LashExpr::String("effect".into())),
-                                    (
-                                        "operation".into(),
-                                        LashExpr::String("resource_batch".into()),
-                                    ),
-                                ]),
-                            ),
-                        ]),
+                        LashExpr::BuiltinCall {
+                            name: "__typescript_heap_new".into(),
+                            args: vec![
+                                LashExpr::String("EffectError".into()),
+                                field("error"),
+                                LashExpr::Record(vec![(
+                                    "cause".into(),
+                                    LashExpr::Record(vec![
+                                        // An allSettled leaf is never
+                                        // unwrapped, so it cannot have failed
+                                        // the way an unwrap does. The message
+                                        // carries the host's own text, which is
+                                        // the only identity the effect-host
+                                        // contract exposes today; a finer code
+                                        // needs a code channel on
+                                        // ExecutionHostError, which every host
+                                        // would have to populate.
+                                        (
+                                            "code".into(),
+                                            LashExpr::String("ResourceOperationFailed".into()),
+                                        ),
+                                        (
+                                            "details".into(),
+                                            LashExpr::Record(vec![
+                                                ("kind".into(), LashExpr::String("effect".into())),
+                                                (
+                                                    "operation".into(),
+                                                    LashExpr::String("resource_batch".into()),
+                                                ),
+                                            ]),
+                                        ),
+                                    ]),
+                                )]),
+                            ],
+                        },
                     ),
                 ])),
             }),

@@ -322,15 +322,32 @@ impl<H: ExecutionHost> Vm<'_, H> {
             details.insert("operation".to_string(), Value::String(operation.into()));
         }
 
+        let brand = if error.is_effect_failure() {
+            ErrorKind::EffectError
+        } else {
+            ErrorKind::RuntimeError
+        };
+        if self.reference_semantics {
+            // The dialect's catch clause has to hold an idiomatic JavaScript
+            // error: `instanceof Error`, an informative `String(error)`, and a
+            // `message` a model can read. That is an Error object of the guest's
+            // own value model, not a record shaped like one, so the typed
+            // payload rides on `cause` — the one ECMA-documented slot an error
+            // carries for exactly this.
+            let mut cause = record_with_capacity(2);
+            cause.insert("code".to_string(), Value::String(error.code().into()));
+            cause.insert("details".to_string(), Value::Record(Arc::new(details)));
+            return self.heap.allocate_error(
+                brand,
+                error.to_string(),
+                Some(Value::Record(Arc::new(cause))),
+                None,
+            );
+        }
+        // Lashlang has neither a JavaScript heap nor Error objects, so its
+        // catch clause keeps the flat record it has always been handed.
         let mut record = record_with_capacity(4);
-        record.insert(
-            "name".to_string(),
-            Value::String(if error.is_effect_failure() {
-                "EffectError".into()
-            } else {
-                "RuntimeError".into()
-            }),
-        );
+        record.insert("name".to_string(), Value::String(brand.name().into()));
         record.insert(
             "message".to_string(),
             Value::String(error.to_string().into()),

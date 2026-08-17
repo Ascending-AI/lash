@@ -341,9 +341,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x49, 0x17, 0x7a, 0x18, 0xcb, 0x4a, 0x20, 0x1b, 0x2e, 0x90, 0x2d, 0x69, 0xba, 0x5c,
-            0x25, 0xa8, 0xb9, 0x25, 0x3c, 0x04, 0x84, 0x4e, 0x0a, 0x32, 0xf4, 0xf1, 0xd6, 0x31,
-            0x89, 0x71, 0x4f, 0x87,
+            0x1e, 0xee, 0x25, 0xca, 0xe4, 0x1c, 0x2f, 0xe9, 0x46, 0x5f, 0x33, 0x6f, 0x61, 0xc7,
+            0xf0, 0xa9, 0x7f, 0x9b, 0x10, 0xca, 0xa1, 0xe9, 0x31, 0x49, 0x36, 0xc6, 0xb4, 0xca,
+            0x2d, 0xae, 0x6d, 0xe2,
         ]
     );
 }
@@ -531,7 +531,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e06a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e07a7676c6f62616c7390");
 }
 
 #[test]
@@ -634,6 +634,62 @@ fn a_snapshot_one_version_behind_is_refused_by_the_fence() {
             expected: LASHLANG_SNAPSHOT_VERSION,
             found: LASHLANG_SNAPSHOT_VERSION - 1,
         }
+    );
+}
+
+/// A minted error brand ships on the wire *by name*, which is why adding one is
+/// a format bump and not an additive change.
+///
+/// `error_kind` is serialized as its variant name, so a reader that predates a
+/// brand meets an unknown variant while deserializing — strictly before it can
+/// compare `version` — and would report a corrupt snapshot instead of a version
+/// boundary. Pinning the literal name on the wire keeps that reasoning checkable:
+/// if a future brand is added without moving `LASHLANG_SNAPSHOT_VERSION`, this is
+/// the test that says why it must.
+#[test]
+fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
+    let mut heap = Heap::default();
+    let cause = heap
+        .allocate_record(
+            [(
+                "code".to_string(),
+                Value::String("ResourceOperationFailed".into()),
+            )]
+            .into_iter()
+            .collect(),
+        )
+        .expect("cause record");
+    let error = heap
+        .allocate_error(
+            ErrorKind::EffectError,
+            "boom".to_string(),
+            Some(cause),
+            None,
+        )
+        .expect("EffectError");
+    let mut roots = Record::new();
+    roots.insert("rejection".to_string(), error);
+    let snapshot = Snapshot {
+        globals: Record::new(),
+        runtime_globals: roots,
+        heap,
+        reference_semantics: true,
+    };
+
+    let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
+    assert!(
+        bytes
+            .windows("EffectError".len())
+            .any(|window| window == b"EffectError"),
+        "the brand travels as its own name, so an older reader cannot decode it"
+    );
+    let restored = Snapshot::from_canonical_bytes(&bytes).expect("decode snapshot");
+    assert_eq!(
+        restored
+            .to_canonical_bytes()
+            .expect("re-encode the snapshot"),
+        bytes,
+        "the brand survives the decode as itself, byte for byte"
     );
 }
 

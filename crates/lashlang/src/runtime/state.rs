@@ -16,7 +16,12 @@ mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 6;
+// v7 carries the substrate-minted `EffectError`/`RuntimeError` error brands.
+// `error_kind` serializes by name, so a v6 reader meets an unknown variant
+// while deserializing — before it ever reads `version` — and would report a
+// corrupt snapshot rather than a version boundary. The bump is what makes the
+// refusal honest.
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 7;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the

@@ -908,7 +908,7 @@ async fn error_family_observables_are_node_shaped_and_durable() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn every_error_kind_has_exact_own_and_error_ancestry() {
+async fn every_error_brand_has_error_ancestry_and_each_ecma_kind_its_own() {
     let kinds = [
         "Error",
         "TypeError",
@@ -956,6 +956,25 @@ async fn every_error_kind_has_exact_own_and_error_ancestry() {
             });
         }
     }
+    // The two brands the substrate mints for delivered rejections have no
+    // constructor in the dialect, so `Error` is the only ancestry they can be
+    // asked about — and nothing narrower may answer true.
+    for (index, brand) in ["EffectError", "RuntimeError"].into_iter().enumerate() {
+        let name = format!("brand_{index}");
+        expressions.push(ts_assign(
+            &name,
+            heap_new(brand, vec![Expr::String("one".into())]),
+        ));
+        for constructor in ["Error", "TypeError"] {
+            checks.push(private_builtin(
+                "__typescript_heap_instanceof",
+                vec![
+                    Expr::Variable(name.as_str().into()),
+                    Expr::String(constructor.into()),
+                ],
+            ));
+        }
+    }
     expressions.push(Expr::Finish(Box::new(Expr::List(checks))));
     let ExecutionOutcome::Finished(Value::List(values)) =
         run_typescript_ast_across_every_effect(Program::block(expressions)).await
@@ -964,6 +983,16 @@ async fn every_error_kind_has_exact_own_and_error_ancestry() {
     };
     assert!(values[..16].iter().all(|value| *value == Value::Bool(true)));
     assert_eq!(values[16], Value::Number(2.0));
+    assert_eq!(
+        &values[17..21],
+        &[
+            Value::Bool(true),
+            Value::Bool(false),
+            Value::Bool(true),
+            Value::Bool(false)
+        ],
+        "a minted brand answers `instanceof Error` and nothing narrower"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -294,8 +294,6 @@ fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
         heap.allocate_map(Vec::new()).expect("Map"),
         heap.allocate_set(Vec::new()).expect("Set"),
         heap.allocate_date(0.0).expect("Date"),
-        heap.allocate_error(ErrorKind::Error, String::new(), None, None)
-            .expect("Error"),
     ];
     for value in values {
         assert!(matches!(
@@ -303,6 +301,34 @@ fn exotic_host_boundary_errors_are_not_reported_as_function_values() {
             Err(RuntimeError::JavaScriptExoticAtHostBoundary { .. })
         ));
     }
+}
+
+/// An Error is the one exotic that detaches, because its whole state is the
+/// record the guest reads off it. Refusing it would make a caught rejection
+/// unreturnable, which is the shape a cell reports a tool failure in.
+#[test]
+fn an_error_detaches_into_the_record_the_guest_reads() {
+    let mut heap = Heap::default();
+    let cause = Value::Record(std::sync::Arc::new(Record::from_iter([(
+        "code".to_string(),
+        Value::String("ResourceOperationFailed".into()),
+    )])));
+    let error = heap
+        .allocate_error(
+            ErrorKind::EffectError,
+            "boom".to_string(),
+            Some(cause.clone()),
+            None,
+        )
+        .expect("Error");
+    assert_eq!(
+        heap.export_for_instruction(&error).expect("Error exports"),
+        Value::Record(std::sync::Arc::new(Record::from_iter([
+            ("name".to_string(), Value::String("EffectError".into())),
+            ("message".to_string(), Value::String("boom".into())),
+            ("cause".to_string(), cause),
+        ])))
+    );
 }
 
 /// The budget's per-slot charge is the real slot size, not a guess that
