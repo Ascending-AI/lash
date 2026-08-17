@@ -102,6 +102,24 @@ impl RestateEffectControllerOptions {
     /// verdict here instead turns that poison into a terminal effect failure the
     /// host can see. Set this at or below the deployment's Restate journal-entry
     /// limit; unset, only outcomes that cannot be serialized at all are refused.
+    ///
+    /// # Enabling or disabling this is a drain-only config change
+    ///
+    /// Effects that must run outside the run closure - a durable process command
+    /// and a tool batch - journal their budget verdict in a slot of their own
+    /// ahead of the effect, so that a redrive honours the recorded give-up
+    /// instead of running the effect again. That slot exists only while a budget
+    /// is configured, so turning the budget on or off changes the journal's slot
+    /// sequence: drain in-flight invocations across such a change. An invocation
+    /// that spans the toggle replays against a sequence it was not recorded
+    /// with, which Restate reports as a journal mismatch - a loud terminal
+    /// failure for that invocation, never a silent re-execution or a wrong
+    /// result.
+    ///
+    /// Changing the *value* is safe at any time, in either direction: the
+    /// verdict is decided from the budget in force when it was journaled and
+    /// replays from the journal, so the slot sequence never depends on the
+    /// number.
     pub fn journaled_effect_byte_budget(mut self, bytes: u64) -> Self {
         self.journaled_effect_byte_budget = Some(bytes);
         self
