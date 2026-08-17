@@ -3,7 +3,7 @@ use lash_core::{
     HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part,
     PersistedTurnState, PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState,
     SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState,
+    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
     facade_support::shared_parts,
 };
 use lash_sqlite_store::{
@@ -772,6 +772,88 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
+    let root = unique_temp_dir("unbound-vacuum");
+    let factory = SqliteSessionStoreFactory::new(&root);
+
+    // 1. Live session with cancelled pending input
+    let live_req = SessionStoreCreateRequest {
+        session_id: "unbound-vacuum-live".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let live_store = factory
+        .create_store(&live_req)
+        .await
+        .expect("create live store");
+    let cancelled = live_store
+        .enqueue_pending_turn_input(
+            lash_core::PendingTurnInputDraft::new(
+                "unbound-vacuum-live",
+                lash_core::TurnInputIngress::NextTurn,
+                lash_core::TurnInput::text("input"),
+            )
+            .with_source_key("test-key"),
+        )
+        .await
+        .expect("enqueue");
+    live_store
+        .cancel_pending_turn_input("unbound-vacuum-live", &cancelled.input_id)
+        .await
+        .expect("cancel");
+
+    // 2. Deleted session with unpinned tombstoned node
+    let del_req = SessionStoreCreateRequest {
+        session_id: "unbound-vacuum-del".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let del_store = factory
+        .create_store(&del_req)
+        .await
+        .expect("create del store");
+    let mut state = factory_state(&del_store, "unbound-vacuum-del", 0).await;
+    state.ensure_agent_frame_initialized();
+    let leaf = state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("leaf node id");
+    del_store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit");
+    factory.pin(&leaf).await.expect("pin");
+    factory
+        .delete_session(&del_req.session_id)
+        .await
+        .expect("delete");
+    factory.unpin(&leaf).await.expect("unpin");
+
+    // Open an unbound store handle over the catalog path
+    let unbound = Store::open(&factory.catalog_path())
+        .await
+        .expect("open unbound store");
+    let err = unbound
+        .vacuum()
+        .await
+        .expect_err("unbound vacuum must return typed error");
+    assert!(
+        matches!(err, StoreError::SessionNotBound),
+        "expected SessionNotBound, got {err:?}"
+    );
+
+    // Verify catalog rows were NOT deleted by unbound vacuum
+    let live_report = live_store.vacuum().await.expect("vacuum live store");
+    assert_eq!(live_report.removed_node_count, 0);
+    assert_eq!(live_report.removed_pending_turn_input_tombstone_count, 1);
+
+    let del_report = del_store.vacuum().await.expect("vacuum del store");
+    assert_eq!(del_report.removed_node_count, 1);
+    assert_eq!(del_report.removed_pending_turn_input_tombstone_count, 0);
 }
 
 fn unique_temp_dir(name: &str) -> std::path::PathBuf {

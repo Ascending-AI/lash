@@ -2812,40 +2812,28 @@ impl StoreMaintenance for Store {
     async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
         // `deleted_sessions` is deliberately exempt: it is permanent identity
         // evidence and must survive every retention-pruning pass.
-        let session_id = self.session_id.get().cloned();
+        let session_id = self
+            .session_id
+            .get()
+            .cloned()
+            .ok_or(StoreError::SessionNotBound)?;
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self
             .conn
             .write(move |tx| {
-                let removed_node_count = if let Some(session_id) = session_id.as_deref() {
-                    tx.execute(
-                        "DELETE FROM graph_nodes
-                         WHERE session_id = ?1 AND tombstoned = 1",
-                        params![session_id],
-                    )?
-                } else {
-                    tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])?
-                };
-                let removed_pending_turn_input_tombstone_count =
-                    if let Some(session_id) = session_id.as_deref() {
-                        tx.execute(
-                            "DELETE FROM pending_turn_inputs
-                             WHERE session_id = ?1 AND state IN (?2, ?3)",
-                            params![
-                                session_id,
-                                lash_core::TurnInputState::Cancelled.as_str(),
-                                lash_core::TurnInputState::Completed.as_str()
-                            ],
-                        )?
-                    } else {
-                        tx.execute(
-                            "DELETE FROM pending_turn_inputs
-                             WHERE state IN (?1, ?2)",
-                            params![
-                                lash_core::TurnInputState::Cancelled.as_str(),
-                                lash_core::TurnInputState::Completed.as_str()
-                            ],
-                        )?
-                    };
+                let removed_node_count = tx.execute(
+                    "DELETE FROM graph_nodes
+                     WHERE session_id = ?1 AND tombstoned = 1",
+                    params![session_id],
+                )?;
+                let removed_pending_turn_input_tombstone_count = tx.execute(
+                    "DELETE FROM pending_turn_inputs
+                     WHERE session_id = ?1 AND state IN (?2, ?3)",
+                    params![
+                        session_id,
+                        lash_core::TurnInputState::Cancelled.as_str(),
+                        lash_core::TurnInputState::Completed.as_str()
+                    ],
+                )?;
                 Ok((
                     removed_node_count,
                     removed_pending_turn_input_tombstone_count,

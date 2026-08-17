@@ -19,6 +19,17 @@ impl InMemorySessionStore {
         &self,
         commit: &crate::RuntimeCommit,
     ) -> Result<(), crate::StoreError> {
+        let mut bound = self.bound_session_id.lock_recover();
+        if let Some(existing) = bound.as_ref() {
+            if existing != &commit.session_id {
+                return Err(crate::StoreError::SessionBindingMismatch {
+                    bound_session_id: existing.clone(),
+                    attempted_session_id: commit.session_id.clone(),
+                });
+            }
+        } else {
+            *bound = Some(commit.session_id.clone());
+        }
         let mut session_meta = self.session_meta.lock_recover();
         session_meta.get_or_insert_with(|| crate::SessionMeta {
             session_id: commit.session_id.clone(),
@@ -39,6 +50,17 @@ impl InMemorySessionStore {
             return Err(crate::StoreError::SessionDeleted {
                 session_id: meta.session_id,
             });
+        }
+        let mut bound = self.bound_session_id.lock_recover();
+        if let Some(existing) = bound.as_ref() {
+            if existing != &meta.session_id {
+                return Err(crate::StoreError::SessionBindingMismatch {
+                    bound_session_id: existing.clone(),
+                    attempted_session_id: meta.session_id.clone(),
+                });
+            }
+        } else {
+            *bound = Some(meta.session_id.clone());
         }
         let mut durable = self.session_meta.lock_recover();
         if let Some(existing) = durable.as_ref()

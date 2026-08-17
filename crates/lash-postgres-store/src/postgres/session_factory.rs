@@ -759,7 +759,8 @@ pub(crate) async fn delete_session_tx(
     for node_id in unreachable_candidates {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
     }
-    sqlx::query("DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE")
+    sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
+        .bind(session_id)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -891,7 +892,7 @@ pub(crate) async fn delete_process_sessions_tx(
         .collect::<Vec<_>>();
     sqlx::query(
         "WITH deleted_graph_nodes AS (
-             DELETE FROM lash_graph_nodes WHERE tombstoned = TRUE
+             DELETE FROM lash_graph_nodes WHERE session_id = ANY($1) AND tombstoned = TRUE
              RETURNING node_id
          ),
          deleted_attachment_manifest AS (

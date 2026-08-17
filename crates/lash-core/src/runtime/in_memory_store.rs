@@ -128,6 +128,7 @@ pub struct InMemorySessionStore {
     /// must remain host-code-free: read clocks and invoke any other dynamic
     /// host surface before acquiring this lock, then carry inert values in.
     write_transaction: Arc<Mutex<()>>,
+    pub(crate) bound_session_id: Mutex<Option<String>>,
     pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
     pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
     pub(crate) session_graph: Mutex<crate::SessionGraph>,
@@ -252,6 +253,7 @@ impl InMemorySessionStore {
         Self {
             clock,
             write_transaction,
+            bound_session_id: Mutex::new(None),
             session_head_meta: Mutex::new(None),
             session_meta: Mutex::new(None),
             session_graph: Mutex::new(crate::SessionGraph::default()),
@@ -1386,6 +1388,17 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             return Err(crate::StoreError::SessionDeleted {
                 session_id: binding.session_id.clone(),
             });
+        }
+        let mut bound = self.bound_session_id.lock_recover();
+        if let Some(existing) = bound.as_ref() {
+            if existing != &binding.session_id {
+                return Err(crate::StoreError::SessionBindingMismatch {
+                    bound_session_id: existing.clone(),
+                    attempted_session_id: binding.session_id.clone(),
+                });
+            }
+        } else {
+            *bound = Some(binding.session_id.clone());
         }
         let mut durable = self.session_meta.lock_recover();
         if let Some(meta) = durable.as_ref() {

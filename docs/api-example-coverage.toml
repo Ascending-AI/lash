@@ -17815,6 +17815,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers identify the session whose token-guarded renewal was refused."
 
 [[api]]
+symbol = "lash::persistence::StoreError::SessionNotBound"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::SessionNotBound"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers refuse a session-scoped maintenance call on a handle that carries no session binding, rather than widening it to a catalog-wide sweep; session-store-factory conformance asserts the named refusal in crates/lash-core/src/testing/conformance/session_store_factory_vacuum.rs. Bundled examples always obtain store handles from a factory, which binds the session."
+
+[[api]]
 symbol = "lash::persistence::StoreError::SessionResolutionAmbiguous"
 kind = "variant"
 availability = "default+all-features"

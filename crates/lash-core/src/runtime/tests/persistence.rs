@@ -146,9 +146,14 @@ async fn recording_store_satisfies_runtime_persistence_conformance() {
     let clock = Arc::new(crate::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     crate::testing::conformance::runtime_persistence(
-        move |_| {
-            std::sync::Arc::new(RecordingStore::with_clock(store_clock.clone()))
-                as std::sync::Arc<dyn crate::RuntimePersistence>
+        move |session_id| {
+            let store = RecordingStore::with_clock(store_clock.clone());
+            *store.bound_session_id.lock_recover() = Some(session_id.to_string());
+            *store.session_meta.lock_recover() = Some(crate::SessionMeta {
+                session_id: session_id.to_string(),
+                relation: crate::SessionRelation::Root,
+            });
+            std::sync::Arc::new(store) as std::sync::Arc<dyn crate::RuntimePersistence>
         },
         crate::testing::conformance::RuntimePersistenceLeaseTiming::controlled({
             let clock = Arc::clone(&clock);

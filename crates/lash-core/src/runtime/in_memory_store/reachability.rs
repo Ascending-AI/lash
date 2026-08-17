@@ -66,8 +66,11 @@ impl InMemorySessionStore {
         &self,
         session_id: &str,
     ) -> Result<(), crate::StoreError> {
+        // The whole read-modify-write below runs inside the factory's write
+        // transaction (see `InMemorySessionStoreFactory::delete_session`), so
+        // these snapshots cannot be raced by another writer.
         let mut heads = self.global_session_heads.lock_recover().clone();
-        let graph = self.global_session_graph.lock_recover().clone();
+        let mut graph = self.global_session_graph.lock_recover().clone();
         let mut owners = self.global_node_owners.lock_recover().clone();
         let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
         let anchors = self
@@ -113,18 +116,34 @@ impl InMemorySessionStore {
             );
         }
 
-        let reclaimed = tombstoned.clone();
-        let nodes = graph
-            .nodes
+        // Delete-time reclaim, scoped to the session being deleted: physically
+        // drop the tombstoned rows this session owns, exactly as the SQLite and
+        // Postgres backends do (`DELETE FROM graph_nodes WHERE session_id = ?
+        // AND tombstoned`). Rows tombstoned for other sessions stay resident so
+        // this delete never reclaims catalog-wide.
+        let reclaimed = tombstoned
             .iter()
-            .filter(|node| !reclaimed.contains(&node.node_id))
+            .filter(|node_id| {
+                owners
+                    .get(*node_id)
+                    .is_some_and(|owner| owner.as_str() == session_id)
+            })
             .cloned()
-            .collect();
-        owners.retain(|node_id, _| !reclaimed.contains(node_id));
-        tombstoned.clear();
+            .collect::<HashSet<_>>();
+        if !reclaimed.is_empty() {
+            let nodes = graph
+                .nodes
+                .iter()
+                .filter(|node| !reclaimed.contains(&node.node_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            graph = crate::SessionGraph::from_nodes(nodes, None)?;
+            owners.retain(|node_id, _| !reclaimed.contains(node_id));
+            tombstoned.retain(|node_id| !reclaimed.contains(node_id));
+        }
 
         *self.global_session_heads.lock_recover() = heads;
-        *self.global_session_graph.lock_recover() = crate::SessionGraph::from_nodes(nodes, None)?;
+        *self.global_session_graph.lock_recover() = graph;
         *self.global_node_owners.lock_recover() = owners;
         *self.tombstoned_node_ids.lock_recover() = tombstoned;
         *self.session_graph.lock_recover() = crate::SessionGraph::default();

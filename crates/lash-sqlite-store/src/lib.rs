@@ -338,12 +338,10 @@ impl Store {
     }
 
     fn selected_session_id(&self) -> Result<String, StoreError> {
-        self.session_id.get().cloned().ok_or_else(|| {
-            StoreError::Backend(
-                "SQLite durable-core store is not bound to a session; use SqliteSessionStoreFactory"
-                    .to_string(),
-            )
-        })
+        self.session_id
+            .get()
+            .cloned()
+            .ok_or(StoreError::SessionNotBound)
     }
 
     async fn resolve_session_id_for_read(&self) -> Result<Option<String>, StoreError> {
@@ -981,8 +979,11 @@ async fn delete_session_from_catalog(
             for node_id in unreachable_candidates {
                 persistence::retire_unreachable_ancestry_conn(tx, &node_id)?;
             }
-            tx.execute("DELETE FROM graph_nodes WHERE tombstoned = 1", [])
-                .map_err(sqlite_error)?;
+            tx.execute(
+                "DELETE FROM graph_nodes WHERE session_id = ?1 AND tombstoned = 1",
+                params![session_id],
+            )
+            .map_err(sqlite_error)?;
             tx.execute(
                 "DELETE FROM fork_lineage WHERE session_id = ?1",
                 params![session_id],

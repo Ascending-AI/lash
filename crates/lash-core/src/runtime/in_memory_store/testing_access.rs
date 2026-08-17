@@ -335,7 +335,23 @@ impl super::InMemorySessionStoreFactory {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, QueuedWorkStore};
+    use crate::store::StoreMaintenance;
+    use crate::{
+        DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, QueuedWorkStore, StoreError,
+    };
+
+    #[tokio::test]
+    async fn in_memory_unbound_vacuum_returns_typed_error() {
+        let store = super::InMemorySessionStore::default();
+        let err = store
+            .vacuum()
+            .await
+            .expect_err("unbound vacuum must return SessionNotBound");
+        assert!(
+            matches!(err, StoreError::SessionNotBound),
+            "expected SessionNotBound, got {err:?}"
+        );
+    }
 
     #[tokio::test]
     async fn queued_work_diagnostic_is_unfiltered_without_session_meta() {

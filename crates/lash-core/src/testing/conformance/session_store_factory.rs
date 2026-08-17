@@ -1,13 +1,26 @@
 //! [`SessionStoreFactory`](crate::SessionStoreFactory) conformance: create,
 //! reopen, delete, and session metadata.
 
+use super::session_store_factory_vacuum::{
+    session_store_factory_unbound_vacuum_is_typed_error,
+    session_store_factory_vacuum_agrees_on_unpin_before_delete,
+    session_store_factory_vacuum_is_scoped_to_bound_session,
+    session_store_factory_vacuums_organic_retained_tombstone,
+};
 use super::*;
 
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
-pub async fn session_store_factory<F>(make: F)
-where
+///
+/// `unbound_store` is a store handle the backend built without a session
+/// binding, which the suite uses to police the session-scoped `vacuum`
+/// contract. Backends whose store handle cannot exist without a session id
+/// pass `None`.
+pub async fn session_store_factory<F>(
+    unbound_store: Option<Arc<dyn crate::store::StoreMaintenance>>,
+    make: F,
+) where
     F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
 {
     let first = make();
@@ -29,6 +42,9 @@ where
     session_store_factory_rejects_cross_session_graph_parents(make()).await;
     session_store_factory_fork_semantics(make()).await;
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
+    session_store_factory_vacuum_is_scoped_to_bound_session(make()).await;
+    session_store_factory_vacuum_agrees_on_unpin_before_delete(make()).await;
+    session_store_factory_unbound_vacuum_is_typed_error(unbound_store).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
 }
@@ -1790,83 +1806,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .await
         .expect_err("forking must reject a previously deleted target session id");
     assert_session_id_was_used_and_deleted(fork_reuse_error, &source_request.session_id);
-}
-
-async fn session_store_factory_vacuums_organic_retained_tombstone(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-) {
-    let request = session_store_request(
-        "retained-tombstone-source",
-        "tombstone-model",
-        crate::SessionRelation::Root,
-    );
-    let source = factory
-        .create_store(&request)
-        .await
-        .expect("create retained-tombstone source");
-    let mut state = crate::RuntimeSessionState {
-        session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
-    };
-    state.ensure_agent_frame_initialized();
-    let leaf_node_id = state
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("retained-tombstone leaf");
-    source
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("commit retained-tombstone source");
-    factory
-        .pin(&leaf_node_id)
-        .await
-        .expect("pin retained-tombstone leaf");
-    factory
-        .delete_session(&request.session_id)
-        .await
-        .expect("delete retained-tombstone source");
-    factory
-        .unpin(&leaf_node_id)
-        .await
-        .expect("unpin deleted source leaf to zero");
-
-    assert!(
-        source
-            .load_node(&leaf_node_id)
-            .await
-            .expect("read retained tombstone")
-            .is_none(),
-        "decrement-to-zero tombstones must be hidden before vacuum"
-    );
-    let fork_error = factory
-        .fork_at(&crate::ForkSessionRequest {
-            session_id: "retained-tombstone-fork".to_string(),
-            node_id: leaf_node_id.clone(),
-            relation: crate::SessionRelation::Root,
-            policy: request.policy,
-        })
-        .await
-        .expect_err("a retained tombstone must not be forkable");
-    assert!(matches!(
-        fork_error,
-        crate::StoreError::ForkPointNotRetained { node_id } if node_id == leaf_node_id
-    ));
-
-    let report = source.vacuum().await.expect("vacuum retained tombstone");
-    assert_eq!(
-        report.removed_node_count, 1,
-        "vacuum must physically remove the organically created tombstone"
-    );
-    assert_eq!(
-        source
-            .vacuum()
-            .await
-            .expect("repeat retained-tombstone vacuum")
-            .removed_node_count,
-        0,
-        "vacuum must consume each retained tombstone exactly once"
-    );
 }
 
 async fn session_store_factory_delete_removes_store_and_is_idempotent(

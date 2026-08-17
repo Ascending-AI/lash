@@ -80,6 +80,9 @@ pub enum StoreError {
         bound_session_id: String,
         attempted_session_id: String,
     },
+    /// A session-scoped operation was attempted on a store handle that is not bound to a session.
+    #[error("store handle is not bound to a session")]
+    SessionNotBound,
     /// An unbound read found multiple candidate sessions and cannot choose one safely.
     #[error(
         "unbound store cannot resolve one session from {session_count} candidates; bind an explicit session"
@@ -445,6 +448,7 @@ impl StoreError {
             }
             Self::QueuedWorkRowExceedsContextWindow { .. } => "QueuedWorkRowExceedsContextWindow",
             Self::SessionBindingMismatch { .. } => "SessionBindingMismatch",
+            Self::SessionNotBound => "SessionNotBound",
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
             Self::InvalidSessionId { .. } => "InvalidSessionId",
