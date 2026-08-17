@@ -32,6 +32,10 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 40: `RemoteRuntimeEffectKind` gains `AssistantResponseHooks`, the
+// second phase of the staged LLM-call effect boundary (FIG-1276). A version 39
+// peer has no such variant and fails to decode any effect projection carrying
+// it, so the handshake must reject it rather than let it choke mid-stream.
 // Bumped to 39: `RemoteToolIntentKind` gains `EmitTrigger`, the fifth durable
 // tool-intent declaration. A version 38 peer has no name for that kind, so it
 // would refuse or misread a recorded declaration instead of emitting the
@@ -84,7 +88,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 39;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 40;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

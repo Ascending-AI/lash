@@ -24,6 +24,10 @@ pub(super) struct RecordingEffectController {
     durable_workflow_controller: bool,
     replay_by_key: bool,
     execute_llm_locally: bool,
+    /// Model a host crash in the window between the journaled raw provider
+    /// completion (phase 1) and hook post-processing (phase 2).
+    crash_before_first_response_hooks: bool,
+    response_hook_crash_fired: Arc<std::sync::atomic::AtomicBool>,
     pub(super) replay_outcomes:
         Arc<Mutex<std::collections::BTreeMap<String, RuntimeEffectOutcome>>>,
     direct_gate: Option<
@@ -62,6 +66,14 @@ impl RecordingEffectController {
 
     pub(super) fn with_local_llm_execution(mut self) -> Self {
         self.execute_llm_locally = true;
+        self
+    }
+
+    /// Fail the first assistant-response-hooks effect without executing it, so
+    /// a test can stand where a crashed host would: phase 1 durable, phase 2
+    /// never committed.
+    pub(super) fn with_crash_before_first_response_hooks(mut self) -> Self {
+        self.crash_before_first_response_hooks = true;
         self
     }
 
@@ -204,6 +216,17 @@ impl RuntimeEffectController for RecordingEffectController {
             .lock_recover()
             .push(serde_json::to_string(&envelope).expect("serialize effect envelope"));
         self.record(&envelope.invocation);
+        if matches!(
+            envelope.command,
+            RuntimeEffectCommand::AssistantResponseHooks { .. }
+        ) && self.crash_before_first_response_hooks
+            && !self.response_hook_crash_fired.swap(true, Ordering::SeqCst)
+        {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalTaskClosed,
+                "simulated host crash between the journaled completion and hook post-processing",
+            ));
+        }
         let outcome = match envelope.command {
             RuntimeEffectCommand::LlmCall { request } => {
                 if self.execute_llm_locally {
@@ -302,6 +325,14 @@ impl RuntimeEffectController for RecordingEffectController {
                     .execute(RuntimeEffectEnvelope::new(
                         envelope.invocation,
                         RuntimeEffectCommand::ToolBatch { batch },
+                    ))
+                    .await
+            }
+            RuntimeEffectCommand::AssistantResponseHooks { response } => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        RuntimeEffectCommand::AssistantResponseHooks { response },
                     ))
                     .await
             }

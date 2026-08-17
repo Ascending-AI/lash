@@ -207,6 +207,8 @@ impl OutputRegistrations<'_> {
         self.reg.add_assistant_stream_hook(hook);
     }
 
+    /// Registers an assistant-response hook. The hook must be idempotent: see
+    /// [`AssistantResponseHook`] for the at-least-once contract it runs under.
     pub fn response(self, hook: AssistantResponseHook) {
         self.reg.add_assistant_response_hook(hook);
     }

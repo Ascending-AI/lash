@@ -171,6 +171,24 @@ impl RuntimeTurnDriver<'_> {
             .await;
             self.llm_calls.push(call_record);
         }
+        // Phase 2 of the staged boundary runs only once the paid attempt is
+        // journaled and on the ledger, so a failing derivation can never take
+        // the record of what we bought down with it.
+        let result = match result {
+            Ok(raw) if self.session.plugins().has_assistant_response_hooks() => {
+                match self
+                    .invoke_assistant_response_hooks_effect(machine, id, raw, event_tx, cancel)
+                    .await
+                {
+                    Ok(response) => Ok(response),
+                    Err(err) => {
+                        self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                        return Ok(());
+                    }
+                }
+            }
+            result => result,
+        };
         let loud_provider_panic = result.as_ref().err().and_then(|error| {
             (error.code.as_deref() == Some("provider_panicked")).then(|| error.message.clone())
         });

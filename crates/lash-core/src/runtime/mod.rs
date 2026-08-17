@@ -293,19 +293,19 @@ pub(crate) use causal::tool_retry_sleep_invocation;
 pub use clock::{Clock, SystemClock};
 pub(crate) use effect::RuntimeEffectControllerHandle;
 pub use effect::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
-    CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet, EffectHost,
+    AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
+    BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
     InlineEffectHost, InlineRuntimeEffectController, LlmAttachmentSpec, LlmRequestSpec,
     ProcessCommand, ProcessEffectOutcome, ProcessOutcomeObserver, ProcessTurnCancellation,
-    Resolution, ResolveOutcome, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
-    RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
-    validate_replayed_effect_envelope,
+    Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAwaitEventOptions,
+    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,
+    RuntimeEffectReplayTrace, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay,
+    RuntimeReplayAttribution, RuntimeScope, RuntimeSleepOptions, RuntimeSubject,
+    ScopedEffectController, SegmentProgress, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolBatchEffectOutcome, ToolCallLaunch, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};

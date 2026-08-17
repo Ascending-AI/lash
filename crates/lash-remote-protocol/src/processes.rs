@@ -965,6 +965,7 @@ impl RemoteRuntimeSubject {
 #[serde(rename_all = "snake_case")]
 pub enum RemoteRuntimeEffectKind {
     LlmCall,
+    AssistantResponseHooks,
     Direct,
     ToolAttempt,
     ToolBatch,

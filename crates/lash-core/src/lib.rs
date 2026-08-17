@@ -902,12 +902,13 @@ pub use store::{TurnId, WorkClaim, WorkCompletion};
 // surface; the rest of the runtime block above stays crate-internal.
 
 pub use runtime::{
-    CheckpointClaimSet, LlmRequestSpec, ProcessCommand, ProcessEffectOutcome,
-    ProcessEventSemanticsSpec, ProcessOutcomeObserver, RuntimeCheckpointComponents,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeScope, RuntimeSessionState, ToolAttemptLaunch,
+    AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
+    ProcessEffectOutcome, ProcessEventSemanticsSpec, ProcessOutcomeObserver,
+    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState,
+    ToolAttemptLaunch,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 
