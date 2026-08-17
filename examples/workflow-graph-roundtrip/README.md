@@ -37,7 +37,7 @@ The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) i
 source of truth for the CI split:
 
 - **Deterministic CI:** `Test docs + build cache` compiles all workspace targets,
-  `Test shard ${{ matrix.shard }}/3` runs workspace tests, and `Lint` runs `Check workflow
+  `Test shard ${{ matrix.shard }}/4` runs workspace tests, and `Lint` runs `Check workflow
   graph model`.
 - **Full-host CI:** Partial. `Functional E2E (workflow-graph-roundtrip)` runs
   `workflow-graph-integration-verify` for the frontend production build, backend tests,

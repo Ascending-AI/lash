@@ -74,9 +74,9 @@ cargo test -p agent-workbench --all-targets
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
 source of truth for the CI split:
 
-- **Deterministic CI:** `Test docs + build cache` runs the all-target workspace check and
-  the package-scoped workbench check, and `Test shard ${{ matrix.shard }}/3` runs workspace
-  tests.
+- **Deterministic CI:** `Test docs + build cache` runs the all-target workspace check,
+  `Package feature checks` runs the package-scoped workbench check, and
+  `Test shard ${{ matrix.shard }}/4` runs workspace tests.
 - **Full-host CI:** `Functional E2E (agent-workbench)` runs
   `agent-workbench-restate-e2e` with Restate and Postgres live tests; it does not judge
   the browser journeys.

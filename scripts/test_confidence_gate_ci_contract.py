@@ -1220,17 +1220,17 @@ derive_mutation_jobs() {{
 
     def test_provider_conformance_is_explicitly_featured_in_ci(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        test_doc = workflow_job_block(workflow, "test-doc")
+        feature_checks = workflow_job_block(workflow, "package-feature-checks")
 
         for provider in ("openai", "anthropic", "google"):
             self.assertIn(
                 f"cargo test -p lash-provider-{provider} --features testing --locked conformance",
-                test_doc,
+                feature_checks,
             )
 
     def test_lash_runtime_default_tests_are_pinned_to_the_feature_boundary_lane(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        test_doc = workflow_job_block(workflow, "test-doc")
+        boundary_job = workflow_job_block(workflow, "runtime-feature-boundary")
         push_gate = PUSH_GATE.read_text(encoding="utf-8")
         feature_boundary = shell_function_body(
             push_gate, "run_runtime_feature_boundary_check"
@@ -1246,7 +1246,7 @@ derive_mutation_jobs() {{
         )
 
         for snippet in (command, count_command, count_floor):
-            self.assertIn(snippet, test_doc)
+            self.assertIn(snippet, boundary_job)
             self.assertIn(snippet, feature_boundary)
 
     def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
@@ -1324,9 +1324,62 @@ derive_mutation_jobs() {{
         self.assertNotIn("  test:\n", workflow)
         self.assertIn("  test-doc:\n", workflow)
         self.assertIn("  test-shard:\n", workflow)
-        self.assertIn("--partition count:${{ matrix.shard }}/3", workflow)
+        self.assertIn("--partition count:${{ matrix.shard }}/4", workflow)
+        self.assertIn("shard: [1, 2, 3, 4]", workflow)
+        self.assertIn("Test shard ${{ matrix.shard }}/4", workflow)
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
         self.assertIn("--no-fail-fast", workflow)
+
+        # test-doc is the cache writer and the doctest gate, nothing else. Gates
+        # that neither warm nor consume that superset are sibling jobs, not
+        # serial steps behind twelve minutes of compilation.
+        test_doc = workflow_job_block(workflow, "test-doc")
+        self.assertIn("cargo check --workspace --all-targets --locked", test_doc)
+        self.assertIn("cargo test --doc --workspace --locked", test_doc)
+        for foreign in (
+            "python3 scripts/check_api_example_coverage.py",
+            "python3 scripts/lint_docs.py",
+            "cargo check -p agent-service --features restate --all-targets --locked",
+            "cargo check -p lash-runtime --no-default-features --locked",
+        ):
+            self.assertNotIn(foreign, test_doc)
+        for job_id in (
+            "repo-gates",
+            "api-coverage",
+            "package-feature-checks",
+            "runtime-feature-boundary",
+        ):
+            self.assertIn(f"  {job_id}:\n", workflow)
+
+    def test_one_ci_run_per_head_branch_whatever_the_trigger(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        # A `pull_request` run carries refs/pull/<n>/merge and a manual recovery
+        # dispatch of the same commit carries refs/heads/<branch>: keying the
+        # concurrency group on `github.ref` put them in different groups and ran
+        # the whole board twice over one tree. The group is the head branch, so
+        # the dispatch supersedes the pull-request run.
+        self.assertIn(
+            "group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}",
+            workflow,
+        )
+        # Main pushes are never cancelled — release.yml will not release a commit
+        # without its own green main CI run — so a dispatch on main queues behind
+        # a live main run instead of stranding that commit as unreleasable.
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name == 'pull_request' || "
+            "(github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}",
+            workflow,
+        )
+
+    def test_shared_debug_cache_has_one_backend(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        # The writer saves through useblacksmith/rust-cache. A reader restoring
+        # through a different action reads a different backend and logs
+        # `No cache found` on every run, which is what every test shard did.
+        self.assertIn("shared-key: linux-debug", workflow)
+        self.assertNotIn("uses: Swatinem/rust-cache", workflow)
 
     def test_heavy_compile_jobs_route_through_sccache(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -1335,6 +1388,10 @@ derive_mutation_jobs() {{
         for job_id in (
             "test-doc",
             "test-shard",
+            "repo-gates",
+            "api-coverage",
+            "package-feature-checks",
+            "runtime-feature-boundary",
             "lint",
             "confidence-fast",
             "linux-release-cache",
