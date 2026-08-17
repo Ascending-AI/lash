@@ -493,6 +493,93 @@ finish result
     );
 }
 
+/// `agents.spawn`'s own doc block, read off a prompt a real session was served.
+///
+/// The token that spells the nested-shape clause is resolved by the RLM doc
+/// renderer, one crate away from where this schema is authored. Every other
+/// assertion about it lives in that crate against a synthetic fixture, which
+/// cannot show that *this* schema's token is the spelling the renderer knows: a
+/// renamed token, a moved substitution, or a doc row the renderer stopped
+/// resolving would each leave `{{type_literal_hint}}` sitting in a served
+/// prompt. So this drives a real spawn in both dialects and reads the served
+/// prompt of the session that ran in each — a TypeScript parent's child is a
+/// TypeScript session, which is the reader the leak was measured on.
+#[tokio::test]
+async fn spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt() {
+    let parent_response = r#"<lashlang>
+result = await agents.spawn({
+  capability: "default",
+  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  seed: { chunk: ["a", "b"] },
+  output: Type { len: int }
+})?
+finish result
+</lashlang>"#;
+
+    let (_outcome, typescript) = run_seed_probe_with_parent_dialect(
+        parent_response,
+        TurnInput::text("spawn a child from a typescript parent"),
+        lash_rlm_types::RlmDialect::Typescript,
+    )
+    .await;
+    assert!(
+        typescript.contains("## TypeScript execution"),
+        "this reader must really be a TypeScript session:\n{typescript}"
+    );
+    assert!(
+        typescript.contains("Optional typed result shape"),
+        "the served prompt must carry the spawn_agent doc:\n{typescript}"
+    );
+    assert!(
+        !typescript.contains("Type { ... }` literal"),
+        "a TypeScript session cannot write a type literal and must not be told to:\n{typescript}"
+    );
+
+    let (_outcome, lashlang) = run_seed_probe_with_parent_dialect(
+        parent_response,
+        TurnInput::text("spawn a child from a lashlang parent"),
+        lash_rlm_types::RlmDialect::Lashlang,
+    )
+    .await;
+    assert!(
+        lashlang.contains("Optional typed result shape"),
+        "the served prompt must carry the spawn_agent doc:\n{lashlang}"
+    );
+    assert!(
+        lashlang.contains("or pass a `Type { ... }` literal for nested shapes"),
+        "a Lashlang session keeps the type-literal clause:\n{lashlang}"
+    );
+
+    // The token itself never reaches a model in either dialect. Scoped to the
+    // rendered tool-doc section, which is the surface the registration guard
+    // governs — the dialect's own builtin docs legitimately spell `{{` as the
+    // escape for a literal brace in `format`.
+    for (dialect, prompt) in [("lashlang", &lashlang), ("typescript", &typescript)] {
+        let docs = tool_doc_section(prompt);
+        assert!(
+            docs.contains("Optional typed result shape"),
+            "the {dialect} tool-doc section must be the slice under test:\n{docs}"
+        );
+        assert!(
+            !docs.contains("{{"),
+            "unresolved prose token in the {dialect} tool docs:\n{docs}"
+        );
+    }
+}
+
+/// The rendered tool-doc section of an RLM prompt, i.e. every string the
+/// registration-time prose guard is responsible for.
+fn tool_doc_section(prompt: &str) -> &str {
+    let start = prompt
+        .find("\n### Tools\n")
+        .unwrap_or_else(|| panic!("prompt has no tool-doc section:\n{prompt}"));
+    let rest = &prompt[start..];
+    match rest.find("\n## ") {
+        Some(end) => &rest[..end],
+        None => rest,
+    }
+}
+
 /// The other direction, so the test above cannot pass by the prompt being
 /// TypeScript for everyone.
 #[tokio::test]
@@ -844,13 +931,15 @@ async fn run_seed_probe_with_parent_dialect(
     input: TurnInput,
     parent_dialect: lash_rlm_types::RlmDialect,
 ) -> (lash_core::facade_support::TurnOutcome, String) {
-    run_seed_probe_inner_dispatch(
+    let probe = run_seed_probe_inner_dispatch(
         parent_response.to_string(),
         input,
         None,
         Some(parent_dialect),
     )
-    .await
+    .await;
+    let child_prompt = probe.child_prompt().to_string();
+    (probe.outcome, child_prompt)
 }
 
 async fn run_seed_probe_with_graph_store(
@@ -858,7 +947,10 @@ async fn run_seed_probe_with_graph_store(
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
 ) -> (lash_core::facade_support::TurnOutcome, String) {
-    run_seed_probe_inner_dispatch(parent_response.to_string(), input, graph_store, None).await
+    let probe =
+        run_seed_probe_inner_dispatch(parent_response.to_string(), input, graph_store, None).await;
+    let child_prompt = probe.child_prompt().to_string();
+    (probe.outcome, child_prompt)
 }
 
 async fn run_seed_probe_inner_dispatch(
@@ -866,7 +958,7 @@ async fn run_seed_probe_inner_dispatch(
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
     parent_dialect: Option<lash_rlm_types::RlmDialect>,
-) -> (lash_core::facade_support::TurnOutcome, String) {
+) -> SeedProbe {
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("subagent-seed-probe".to_string())
@@ -894,7 +986,7 @@ async fn run_seed_probe_inner(
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
     parent_dialect: Option<lash_rlm_types::RlmDialect>,
-) -> (lash_core::facade_support::TurnOutcome, String) {
+) -> SeedProbe {
     let captured_child_prompt: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let state = Arc::new(SeedProbeState {
         parent_response,
@@ -1074,11 +1166,26 @@ async fn run_seed_probe_inner(
     .await
     .expect("turn");
 
-    let prompt = captured_child_prompt
-        .lock_recover()
-        .clone()
-        .unwrap_or_else(|| panic!("child prompt was not captured; outcome={:?}", turn.outcome));
-    (turn.outcome, prompt)
+    let prompt = captured_child_prompt.lock_recover().clone();
+    SeedProbe {
+        outcome: turn.outcome,
+        child_prompt: prompt,
+    }
+}
+
+/// What one probe run observed: the turn's outcome plus the prompt the child was
+/// actually served.
+struct SeedProbe {
+    outcome: lash_core::facade_support::TurnOutcome,
+    child_prompt: Option<String>,
+}
+
+impl SeedProbe {
+    fn child_prompt(&self) -> &str {
+        self.child_prompt
+            .as_deref()
+            .unwrap_or_else(|| panic!("child prompt was not captured; outcome={:?}", self.outcome))
+    }
 }
 
 fn request_text(request: &LlmRequest) -> String {

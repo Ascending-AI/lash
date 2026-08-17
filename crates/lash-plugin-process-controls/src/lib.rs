@@ -150,7 +150,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
                 },
                 "definition": {
                     "type": "object",
-                    "description": "A Lashlang process definition value, for example `on_button`."
+                    "description": "A process definition value, for example `on_button`."
                 }
             },
             "additionalProperties": false

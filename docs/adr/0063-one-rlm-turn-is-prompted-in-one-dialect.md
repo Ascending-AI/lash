@@ -63,6 +63,31 @@ dialect, in both directions, and one executable walker enforces it.**
    write, and the execution fence never fires because extraction never yields a
    cell to fence.
 
+6. **Model-facing tool prose is dialect-neutral, and registration enforces it.**
+   A tool's description and its JSON-Schema `description` strings are authored in
+   the crate that owns the tool — `lash-subagents`, `lash-plugin-process-controls`,
+   any host plugin — and rendered verbatim into the prompt's doc block, so no
+   vocabulary sits between the author and the model and the walker (which sweeps
+   only fragments *this crate* renders) cannot see them. Three `lashlang` strings
+   reached judged TypeScript sessions this way, through `agents.spawn` and
+   `processes.list`. The RLM catalog contribution therefore refuses to register a
+   member whose prose contains **any** registered dialect's identity — its
+   language name or id, its cell tags, its finish form. Neutrality, not
+   foreignness, is the rule: one authored string is served to sessions of every
+   dialect, so naming even the active one is wrong. Prose that genuinely needs a
+   dialect word writes a token (`dialect::TOOL_PROSE_TOKENS`, resolved against
+   the session's vocabulary by `rlm_prompt_tool_docs`), and an unrecognized token
+   is a registration error because it would otherwise reach the model raw. The
+   same measurement caught prose a *lower* crate composes: the deferred-tool
+   advertisement (`lash_lashlang_runtime::catalogue_preview`) advertised
+   `await tools.search({ query: "..." })?` to TypeScript sessions. A crate with
+   no dialect writes no code: the sentence names the argument in prose, and the
+   walker now renders that contribution as one of its fragments. A
+   nested typed shape is the case that forced this: `Type { ... }` is a Lashlang
+   surface the TypeScript lowerer cannot produce, so the clause describing it is
+   not merely foreign-sounding to a TypeScript reader, it is false — the token
+   renders it in one dialect and drops it in the other.
+
 ### The carve-out list
 
 | Identifier | Why it may cross dialects | Disposition |
@@ -79,7 +104,12 @@ dialect, in both directions, and one executable walker enforces it.**
 - The `__` namespace is reserved for substrate bindings across the lowerer and
   the host catalog. A host module that a model is meant to call must not use it.
 - A future dialect adds one vocabulary and one marker list; nothing else in the
-  assembly changes.
+  assembly changes. The tool-prose guard reads its markers off the dialect
+  itself, so registering the new dialect widens it by construction.
+- A plugin that wants to describe one dialect's syntax in a tool description
+  cannot. Either the sentence is true in every dialect, or the dialect-specific
+  half moves into the vocabulary behind a token. This is the intended cost, and
+  it is the only reason a `{{…}}` token appears in an authored schema.
 - The carve-out list is a debt register, not a permission. Each row names what
   would have to change for the entry to disappear.
 - The **trace record's `language` field is the source's dialect**, not the

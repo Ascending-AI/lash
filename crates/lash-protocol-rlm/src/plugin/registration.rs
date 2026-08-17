@@ -21,6 +21,10 @@ pub(super) fn register_rlm_protocol_plugin(
     dialect: Arc<dyn RlmDialect>,
     last_prompt_usage: SharedPromptUsage,
 ) -> Result<(), PluginError> {
+    // The catalog contribution carries the whole registry, not just the active
+    // dialect: model-facing tool prose is authored once and served to every
+    // dialect, so the neutrality guard has to know all of their words.
+    let catalog_dialects = dialect_registry.clone();
     let runtime_state = Arc::new(
         RlmRuntimeState::new(dialect_registry, Arc::clone(&dialect))
             .map_err(|err| PluginError::Session(err.to_string()))?,
@@ -46,8 +50,9 @@ pub(super) fn register_rlm_protocol_plugin(
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
             vocabulary: dialect.prompt_vocabulary(),
         }))?;
-    reg.tool_catalog()
-        .contribute(Arc::new(crate::tool_catalog::rlm_tool_catalog));
+    reg.tool_catalog().contribute(Arc::new(move |ctx| {
+        crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialects)
+    }));
     reg.tool_calls().before(Arc::new(|ctx| {
         Box::pin(async move { normalize_projected_tool_args(ctx) })
     }));

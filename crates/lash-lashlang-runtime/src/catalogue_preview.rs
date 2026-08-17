@@ -127,10 +127,18 @@ pub fn catalogue_preview_contribution_for_entries_with_options(
 
     let search_call = options.search_call_path.trim().to_string();
     let search_tool_name = options.search_tool_name.trim().to_string();
+    // No code snippet here. This crate has no dialect: the advertisement is
+    // contributed to the execution section of whatever session holds the
+    // catalogue, and the Lashlang spelling this sentence used to carry
+    // (`await {search_call}({ query: "..." })?`) put the try-operator — a
+    // TypeScript syntax error — in front of every judged TypeScript session
+    // with a deferred catalogue. The search tool's own doc block already shows
+    // an example, respelled by the session's dialect (ADR 0063); naming the
+    // argument in prose says the same thing in every dialect.
     let mut rendered = format!(
         "The capabilities below are callable directly by their module path; the listing is usually enough to call them. \
-         Use `{search_call}(...)` only if you need more detail than shown, or to find a capability not listed here — \
-         `await {search_call}({{ query: \"...\" }})?`, then call the returned module path. \
+         Call `{search_call}(...)` with a `query` argument only if you need more detail than shown, or to find a \
+         capability not listed here, then call the returned module path. \
          Results use the same compact contract shape as resident capabilities: call path, signature, description, and capped examples."
     );
 

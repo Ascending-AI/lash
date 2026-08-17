@@ -1737,8 +1737,14 @@ mod tests {
 
         assert!(description.contains("exit_code"));
         assert!(description.contains("Nonzero exit codes are returned as ordinary result data"));
-        assert!(description.contains("await shell.exec(...)?"));
-        assert!(description.contains("does not abort just because the process exited nonzero"));
+        assert!(description.contains("does not abort your code"));
+        // The same sentence used to say "in Lashlang, `await shell.exec(...)?`
+        // does not abort": Lashlang's name and its try-operator, in a
+        // description a TypeScript session reads verbatim (ADR 0063). The RLM
+        // catalog now refuses to register prose that names a dialect, so the
+        // wording is pinned here as dialect-neutral rather than merely present.
+        assert!(!description.to_lowercase().contains("lashlang"), "{description}");
+        assert!(!description.contains(")?"), "{description}");
         assert!(description.contains("Timed-out commands are killed and returned as a tool failure"));
     }
 

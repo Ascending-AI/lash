@@ -197,12 +197,12 @@ pub(crate) fn spawn_agent_input_schema(capability_names: &[String]) -> Value {
             "output": {
                 "type": "object",
                 "additionalProperties": true,
-                "description": "Optional typed result shape. Use string descriptors for record fields, e.g. `{ queries: \"list[str]\" }`, or pass a Lashlang `Type { ... }` literal for nested shapes."
+                "description": "Optional typed result shape. Use string descriptors for record fields, e.g. `{ queries: \"list[str]\" }`{{type_literal_hint}}."
             },
             "seed": {
                 "type": "object",
                 "additionalProperties": true,
-                "description": "Optional record of state to seed into the child. Each entry's kind is preserved automatically: if its lashlang source root is a host-projected binding (e.g. `seed: { problem: input.prompt }`), the child receives it as a read-only projected binding; otherwise it lands as a regular RLM global. Computed values default to global. Children inherit nothing else from the parent — pass everything they need explicitly."
+                "description": "Optional record of state to seed into the child. Each entry's kind is preserved automatically: if its source root is a host-projected binding (e.g. `seed: { problem: input.prompt }`), the child receives it as a read-only projected binding; otherwise it lands as a regular RLM global. Computed values default to global. Children inherit nothing else from the parent — pass everything they need explicitly."
             }
         },
         "required": required,
