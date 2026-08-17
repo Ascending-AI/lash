@@ -252,11 +252,13 @@ pub mod persistence {
         commit_runtime_state_verified, load_persisted_session_state,
     };
     pub use lash_core::{
-        AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore, AttachmentStoreError,
-        AttachmentStorePersistence, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,
-        StoredBlobRef, facade_support::AttachmentReclamationReport,
-        facade_support::InMemoryAttachmentStore, facade_support::InMemoryProcessExecutionEnvStore,
-        facade_support::SessionAttachmentStore, facade_support::reclaim_unreferenced_attachments,
+        AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,
+        AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
+        AttachmentWriteFence, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,
+        StoredBlobRef, facade_support::AttachmentGcFence,
+        facade_support::AttachmentReclamationReport, facade_support::InMemoryAttachmentStore,
+        facade_support::InMemoryProcessExecutionEnvStore, facade_support::SessionAttachmentStore,
+        facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
         BlobRef, GcReport, LeaseClaimNonce, LeaseOwnerIdentity, PersistedSessionConfig,

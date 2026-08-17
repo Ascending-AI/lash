@@ -44,22 +44,12 @@ impl InMemorySessionStore {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn attachment_manifest_entries(&self) -> Vec<crate::AttachmentManifestEntry> {
-        self.attachment_manifest
-            .lock_recover()
-            .values()
-            .cloned()
-            .collect()
-    }
-}
-
-impl crate::AttachmentManifest for InMemorySessionStore {
-    fn record_intent(
+    /// Insert or refresh one manifest intent row. The caller holds the store's
+    /// write transaction.
+    fn record_intent_in_transaction(
         &self,
         intent: crate::AttachmentIntent,
     ) -> Result<(), crate::store::StoreError> {
-        let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&intent.session_id)?;
         let key = (intent.session_id.clone(), intent.attachment_id.clone());
         let mut manifest = self.attachment_manifest.lock_recover();
@@ -88,6 +78,53 @@ impl crate::AttachmentManifest for InMemorySessionStore {
             }
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attachment_manifest_entries(&self) -> Vec<crate::AttachmentManifestEntry> {
+        self.attachment_manifest
+            .lock_recover()
+            .values()
+            .cloned()
+            .collect()
+    }
+}
+
+impl crate::AttachmentManifest for InMemorySessionStore {
+    fn record_intent(
+        &self,
+        intent: crate::AttachmentIntent,
+    ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        self.record_intent_in_transaction(intent)
+    }
+
+    /// The writer half of the GC fence. The factory-global condemnation state
+    /// and the manifest row are mutated under the store's one transaction lock —
+    /// the same boundary the sweeper's condemn CAS takes — so revoke-and-record
+    /// is atomic against it.
+    fn begin_attachment_write(
+        &self,
+        intent: crate::AttachmentIntent,
+    ) -> Result<crate::AttachmentWriteFence, crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        {
+            let mut condemnations = self.attachment_condemnations.lock_recover();
+            match condemnations.get(&intent.attachment_id) {
+                // The delete is already in flight: record nothing, so the bytes
+                // this writer is about to put cannot be swallowed by it.
+                Some(super::AttachmentCondemnationPhase::Deleting) => {
+                    return Ok(crate::AttachmentWriteFence::ReclamationInFlight);
+                }
+                // Take the digest back before the sweeper can arm its delete.
+                Some(super::AttachmentCondemnationPhase::Condemned) => {
+                    condemnations.remove(&intent.attachment_id);
+                }
+                None => {}
+            }
+        }
+        self.record_intent_in_transaction(intent)
+            .map(|()| crate::AttachmentWriteFence::Granted)
     }
 
     fn commit_refs(

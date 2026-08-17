@@ -230,13 +230,12 @@ async fn explicit_factory_root_set_keeps_committed_blob() {
     backend.get(&id).await.expect("committed blob survives");
 }
 
-/// Deliberately faulty snapshot projection over a factory that really does
-/// hold a committed ref. The first targeted probe also misses, modelling a
-/// ref landing in the delete window; the post-delete probe delegates to the
-/// factory's explicit targeted implementation and must raise the alarm.
+/// Deliberately faulty snapshot projection over a factory that really does hold
+/// a committed ref, and whose targeted probe misses too. Every read-shaped guard
+/// is therefore blind; only the factory's condemn CAS — the authority the
+/// writer's intent lives in — can still see the root.
 struct EmptySnapshotFactoryRoots<'a> {
     factory: &'a crate::InMemorySessionStoreFactory,
-    targeted_probe_count: Mutex<u8>,
 }
 
 #[async_trait::async_trait]
@@ -250,29 +249,46 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
 
     async fn has_live_attachment_ref(
         &self,
+        _id: &AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, crate::StoreError> {
+        Ok(false)
+    }
+
+    fn fence(&self) -> crate::AttachmentGcFence {
+        AttachmentRootSet::fence(self.factory)
+    }
+
+    async fn condemn_attachment(
+        &self,
         id: &AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
-        let probe = {
-            let mut count = self.targeted_probe_count.lock_recover();
-            *count += 1;
-            *count
-        };
-        if probe == 1 {
-            return Ok(false);
-        }
-        AttachmentRootSet::has_live_attachment_ref(self.factory, id, intent_grace_cutoff_epoch_ms)
-            .await
+    ) -> Result<crate::AttachmentCondemnation, crate::StoreError> {
+        AttachmentRootSet::condemn_attachment(self.factory, id, intent_grace_cutoff_epoch_ms).await
+    }
+
+    async fn arm_attachment_delete(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<crate::AttachmentDeleteArming, crate::StoreError> {
+        AttachmentRootSet::arm_attachment_delete(self.factory, id).await
+    }
+
+    async fn release_attachment_condemnation(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        AttachmentRootSet::release_attachment_condemnation(self.factory, id).await
     }
 }
 
+/// Survival proof: the condemn CAS is a *conditional mutation* in the authority
+/// that owns the roots, not another read. A snapshot and a targeted probe that
+/// both miss a committed ref no longer cost the blob its bytes.
 #[tokio::test]
-async fn explicit_targeted_probe_alarms_when_empty_snapshot_deletes_live_blob() {
+async fn condemn_cas_spares_a_live_blob_every_read_shaped_guard_missed() {
     let (factory, backend, id) = committed_factory_attachment().await;
-    let roots = EmptySnapshotFactoryRoots {
-        factory: &factory,
-        targeted_probe_count: Mutex::new(0),
-    };
+    let roots = EmptySnapshotFactoryRoots { factory: &factory };
 
     let report = reclaim_unreferenced_attachments(
         &roots,
@@ -285,8 +301,16 @@ async fn explicit_targeted_probe_alarms_when_empty_snapshot_deletes_live_blob() 
     .await
     .expect("sweep with deliberately empty snapshot");
 
-    assert_eq!(report.reclaimed_count, 1);
-    assert_eq!(report.deleted_while_referenced, vec![id]);
+    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
+    assert_eq!(
+        report.reclaimed_count, 0,
+        "the condemn CAS must refuse a digest whose committed ref the reads missed"
+    );
+    assert!(report.deleted_while_referenced.is_empty());
+    backend
+        .get(&id)
+        .await
+        .expect("the committed blob survives a blind snapshot and a blind probe");
 }
 
 #[tokio::test]
@@ -865,8 +889,14 @@ async fn gc_pre_delete_root_recheck_spares_reappeared_ref() {
     );
 }
 
+// An unfenced/legacy root authority — one that implements neither the
+// condemnation transitions nor the writer's fenced intent insert — cannot close
+// the delete window. The operation must say so rather than imply a guarantee:
+// it reports `BestEffort`, and a ref that appears in the window is recorded as
+// detection telemetry (the bytes are gone; lash cannot restore them, which is
+// why such deployments belong on a backend with recoverable deletion).
 #[tokio::test]
-async fn gc_post_delete_root_recheck_alarms_on_window_ref() {
+async fn unfenced_root_authority_reports_best_effort_and_detects_the_window_loss() {
     let now = now_epoch_ms();
     const GRACE_MS: u64 = 60 * 60 * 1000;
     let id = AttachmentId::new("window-ref");
@@ -875,8 +905,8 @@ async fn gc_post_delete_root_recheck_alarms_on_window_ref() {
         mtime: now.saturating_sub(GRACE_MS * 2),
         deleted: Mutex::new(false),
     };
-    // (b) sees no ref (delete proceeds); (d) sees a ref that appeared in the
-    // (b)->(c) window: detected and alarmed.
+    // The pre-delete probe sees no ref (delete proceeds); the post-delete probe
+    // sees a ref that appeared in the window.
     let root_set = ScriptedRootSet {
         answers: Mutex::new([false, true].into_iter().collect()),
     };
@@ -890,13 +920,452 @@ async fn gc_post_delete_root_recheck_alarms_on_window_ref() {
     )
     .await
     .expect("sweep");
+    assert_eq!(
+        report.fence,
+        crate::AttachmentGcFence::BestEffort,
+        "an authority with no condemnation CAS must report itself best-effort"
+    );
     assert_eq!(report.reclaimed_count, 1, "the blob is deleted");
     assert!(*backend.deleted.lock_recover(), "delete happened");
     assert_eq!(
         report.deleted_while_referenced,
         vec![id],
-        "a ref appearing in the delete window is recorded for the operator alarm"
+        "the unfenced path detects the window loss it cannot prevent"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The GC fence: a real writer against a real fenced root authority.
+//
+// The in-memory factory owns both halves the fence needs — the manifest the
+// writer records intents in and the per-digest condemnation state the sweep
+// CASes — so these exercise the same protocol a durable deployment runs, with
+// the sweep's own backend calls as the interleaving points.
+// ---------------------------------------------------------------------------
+
+type WindowHook =
+    Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+
+/// Join handle for a facade `put` started from inside a sweep window.
+type WindowWriterHandle = tokio::task::JoinHandle<Result<AttachmentRef, String>>;
+/// Slot a window hook drops its writer's handle into for the test to await.
+type WindowWriterSlot = Arc<Mutex<Option<WindowWriterHandle>>>;
+
+/// Backend wrapper that runs a hook the first time the sweep calls `head` (the
+/// digest is condemned but no delete is issued) or `delete` (the delete is in
+/// flight) — the two instants a concurrent same-content write can land in.
+struct WindowHookedStore {
+    inner: Arc<InMemoryAttachmentStore>,
+    on_head: Mutex<Option<WindowHook>>,
+    on_delete: Mutex<Option<WindowHook>>,
+    delete_calls: Mutex<usize>,
+}
+
+impl WindowHookedStore {
+    fn new(inner: Arc<InMemoryAttachmentStore>) -> Self {
+        Self {
+            inner,
+            on_head: Mutex::new(None),
+            on_delete: Mutex::new(None),
+            delete_calls: Mutex::new(0),
+        }
+    }
+
+    async fn fire(hook: &Mutex<Option<WindowHook>>) {
+        let taken = hook.lock_recover().take();
+        if let Some(hook) = taken {
+            hook().await;
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AttachmentStore for WindowHookedStore {
+    async fn put(
+        &self,
+        bytes: Vec<u8>,
+        meta: AttachmentCreateMeta,
+    ) -> Result<AttachmentRef, AttachmentStoreError> {
+        self.inner.put(bytes, meta).await
+    }
+    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id).await
+    }
+    async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+        *self.delete_calls.lock_recover() += 1;
+        Self::fire(&self.on_delete).await;
+        self.inner.delete(id).await
+    }
+    async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
+        self.inner.list().await
+    }
+    async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
+        Self::fire(&self.on_head).await;
+        self.inner.head(id).await
+    }
+}
+
+struct FencedFixture {
+    factory: crate::InMemorySessionStoreFactory,
+    store: Arc<dyn crate::RuntimePersistence>,
+    backend: Arc<InMemoryAttachmentStore>,
+    session: Arc<SessionAttachmentStore>,
+    session_id: String,
+    /// Every fence outcome the facade observed, in order.
+    fence_attempts:
+        Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<AttachmentWriteFence>>>,
+}
+
+async fn fenced_fixture(session_id: &str) -> FencedFixture {
+    let factory = crate::InMemorySessionStoreFactory::new();
+    let request = crate::SessionStoreCreateRequest {
+        session_id: session_id.to_string(),
+        relation: crate::SessionRelation::Root,
+        policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    };
+    let store = crate::SessionStoreFactory::create_store(&factory, &request)
+        .await
+        .expect("create attachment-aware store");
+    let backend = Arc::new(InMemoryAttachmentStore::new());
+    let (attempts, fence_attempts) = tokio::sync::mpsc::unbounded_channel();
+    let session = Arc::new(SessionAttachmentStore::new(
+        Arc::clone(&backend) as Arc<dyn AttachmentStore>,
+        Arc::new(SignalingManifest {
+            inner: Arc::new(PersistenceManifestAdapter(Arc::clone(&store))),
+            attempts,
+        }),
+        session_id.to_string(),
+    ));
+    FencedFixture {
+        factory,
+        store,
+        backend,
+        session,
+        session_id: session_id.to_string(),
+        fence_attempts: Arc::new(tokio::sync::Mutex::new(fence_attempts)),
+    }
+}
+
+fn collecting_policy() -> AttachmentReclamationPolicy {
+    AttachmentReclamationPolicy {
+        grace_period_ms: 0,
+        empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
+    }
+}
+
+/// Spawn a facade `put` from inside a sweep hook and hand control back only when
+/// the writer has actually reached the point the window is about to test: it
+/// waits for the writer's first fence outcome, and — when that outcome is a
+/// grant — for the bytes to land. No sleeps, no scheduling luck.
+fn window_writer(
+    session: Arc<SessionAttachmentStore>,
+    bytes: Vec<u8>,
+    attempts: Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<AttachmentWriteFence>>>,
+    handle_slot: WindowWriterSlot,
+) -> WindowHook {
+    Arc::new(move || {
+        let session = Arc::clone(&session);
+        let bytes = bytes.clone();
+        let attempts = Arc::clone(&attempts);
+        let handle_slot = Arc::clone(&handle_slot);
+        Box::pin(async move {
+            let (put_done, put_done_rx) = tokio::sync::oneshot::channel();
+            let handle = crate::task::spawn(async move {
+                let outcome = session
+                    .put(bytes, meta())
+                    .await
+                    .map_err(|err| err.to_string());
+                let _ = put_done.send(());
+                outcome
+            });
+            *handle_slot.lock_recover() = Some(handle);
+            let mut attempts = attempts.lock().await;
+            match attempts.recv().await {
+                // The writer is inside the window with an intent recorded: give
+                // its bytes time to land before the window closes.
+                Some(AttachmentWriteFence::Granted) => {
+                    let _ = put_done_rx.await;
+                }
+                // The writer is parked on the fence. Nothing more will happen
+                // until this window closes, which is the point.
+                Some(AttachmentWriteFence::ReclamationInFlight) | None => {}
+            }
+        })
+    })
+}
+
+/// Manifest wrapper that reports each fence acquisition the facade makes, so a
+/// window hook can wait for the writer instead of racing it.
+struct SignalingManifest {
+    inner: Arc<dyn AttachmentManifest>,
+    attempts: tokio::sync::mpsc::UnboundedSender<AttachmentWriteFence>,
+}
+
+impl AttachmentManifest for SignalingManifest {
+    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), crate::StoreError> {
+        self.inner.record_intent(intent)
+    }
+
+    fn begin_attachment_write(
+        &self,
+        intent: AttachmentIntent,
+    ) -> Result<AttachmentWriteFence, crate::StoreError> {
+        let fence = self.inner.begin_attachment_write(intent)?;
+        let _ = self.attempts.send(fence);
+        Ok(fence)
+    }
+
+    fn commit_refs(
+        &self,
+        session_id: &str,
+        attachment_ids: &[AttachmentId],
+    ) -> Result<(), crate::StoreError> {
+        self.inner.commit_refs(session_id, attachment_ids)
+    }
+
+    fn list_uncommitted(
+        &self,
+        older_than_epoch_ms: u64,
+    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
+        self.inner.list_uncommitted(older_than_epoch_ms)
+    }
+
+    fn forget(
+        &self,
+        session_id: &str,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.forget(session_id, attachment_id)
+    }
+
+    fn holds_ref(
+        &self,
+        session_id: &str,
+        attachment_id: &AttachmentId,
+    ) -> Result<bool, crate::StoreError> {
+        self.inner.holds_ref(session_id, attachment_id)
+    }
+
+    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
+        self.inner.list_all_refs()
+    }
+}
+
+/// SURVIVAL PROOF (the delete window). A session writes the same content while
+/// the sweep's physical delete is already in flight — the exact interleaving the
+/// pre-fence sweep reported as `deleted_while_referenced` after the bytes were
+/// gone. The writer cannot record an intent for an armed digest, so it parks,
+/// and the release that follows the delete lets it record and re-put: the
+/// content is present when the sweep returns.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn same_content_put_inside_the_delete_window_survives() {
+    let fixture = fenced_fixture("delete-window-writer").await;
+    let bytes = vec![7, 1, 7];
+    let id = content_id(&bytes);
+    // Genuine garbage: identical bytes with no live root, so the sweep is right
+    // to collect them.
+    fixture
+        .backend
+        .put(bytes.clone(), meta())
+        .await
+        .expect("seed the unreferenced blob");
+
+    let handle_slot = Arc::new(Mutex::new(None));
+    let backend = WindowHookedStore::new(Arc::clone(&fixture.backend));
+    *backend.on_delete.lock_recover() = Some(window_writer(
+        Arc::clone(&fixture.session),
+        bytes.clone(),
+        Arc::clone(&fixture.fence_attempts),
+        Arc::clone(&handle_slot),
+    ));
+
+    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
+        .await
+        .expect("sweep");
+
+    let writer = handle_slot
+        .lock_recover()
+        .take()
+        .expect("the window writer was started");
+    let reference = writer
+        .await
+        .expect("writer task")
+        .expect("the write completes rather than failing on the fence");
+    assert_eq!(reference.id, id);
+    assert_eq!(
+        fixture
+            .backend
+            .get(&id)
+            .await
+            .expect("the write that landed in the delete window survives")
+            .bytes,
+        bytes
+    );
+    assert!(
+        crate::AttachmentManifest::holds_ref(&*fixture.store, &fixture.session_id, &id)
+            .expect("manifest probe"),
+        "the surviving bytes are rooted by the writer's intent"
+    );
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "no root exists for an armed digest, so the detector must stay silent"
+    );
+    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
+}
+
+/// CONTENTION (the condemned window). The sweep has condemned the digest but not
+/// yet armed the delete when a writer takes it back. The arm CAS loses, so no
+/// delete is issued at all and the digest is deferred to the next sweep — the
+/// sweep never waits for the writer and the writer never waits for the sweep.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
+    let fixture = fenced_fixture("condemned-window-writer").await;
+    let bytes = vec![2, 7, 1, 8];
+    let id = content_id(&bytes);
+    fixture
+        .backend
+        .put(bytes.clone(), meta())
+        .await
+        .expect("seed the unreferenced blob");
+
+    let handle_slot = Arc::new(Mutex::new(None));
+    let backend = WindowHookedStore::new(Arc::clone(&fixture.backend));
+    *backend.on_head.lock_recover() = Some(window_writer(
+        Arc::clone(&fixture.session),
+        bytes.clone(),
+        Arc::clone(&fixture.fence_attempts),
+        Arc::clone(&handle_slot),
+    ));
+
+    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
+        .await
+        .expect("sweep");
+
+    let writer = handle_slot
+        .lock_recover()
+        .take()
+        .expect("the window writer was started");
+    writer
+        .await
+        .expect("writer task")
+        .expect("a writer in the condemned window is granted immediately");
+    assert_eq!(
+        report.reclaimed_count, 0,
+        "a revoked condemnation must not produce a delete"
+    );
+    assert_eq!(
+        *backend.delete_calls.lock_recover(),
+        0,
+        "the physical delete is only ever issued for an armed digest"
+    );
+    assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "a fenced sweep must never delete a referenced blob: {:?}",
+        report.deleted_while_referenced
+    );
+    assert_eq!(
+        fixture.backend.get(&id).await.expect("survives").bytes,
+        bytes
+    );
+}
+
+/// SKIP-ON-CONTENTION between sweepers: a digest another sweeper already holds
+/// is deferred, not waited on, and no delete is issued for it.
+#[tokio::test]
+async fn a_peer_sweepers_condemnation_defers_the_digest() {
+    let fixture = fenced_fixture("peer-sweeper").await;
+    let bytes = vec![3, 3, 3];
+    let id = content_id(&bytes);
+    fixture
+        .backend
+        .put(bytes.clone(), meta())
+        .await
+        .expect("seed the unreferenced blob");
+
+    // A peer sweeper's condemnation.
+    assert_eq!(
+        AttachmentRootSet::condemn_attachment(&fixture.factory, &id, 0)
+            .await
+            .expect("first condemn"),
+        crate::AttachmentCondemnation::Condemned
+    );
+    assert_eq!(
+        AttachmentRootSet::condemn_attachment(&fixture.factory, &id, 0)
+            .await
+            .expect("second condemn"),
+        crate::AttachmentCondemnation::AlreadyCondemned,
+        "a condemned digest is never contended for"
+    );
+
+    let backend = WindowHookedStore::new(Arc::clone(&fixture.backend));
+    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
+        .await
+        .expect("sweep");
+    assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "a fenced sweep must never delete a referenced blob: {:?}",
+        report.deleted_while_referenced
+    );
+    assert_eq!(report.reclaimed_count, 0);
+    assert_eq!(*backend.delete_calls.lock_recover(), 0);
+    fixture
+        .backend
+        .get(&id)
+        .await
+        .expect("a deferred digest keeps its bytes");
+
+    // The host-owned lever clears a condemnation a dead sweeper left behind; the
+    // next sweep then collects the digest normally.
+    AttachmentRootSet::release_attachment_condemnation(&fixture.factory, &id)
+        .await
+        .expect("release");
+    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
+        .await
+        .expect("second sweep");
+    assert_eq!(report.reclaimed_count, 1);
+    assert!(report.condemn_deferred_ids.is_empty());
+}
+
+/// A stuck intent is a root: a turn-owned intent whose turn never commits keeps
+/// the blob, and the condemn CAS is what refuses — no age, no clock.
+#[tokio::test]
+async fn a_stuck_intent_retains_the_blob() {
+    let fixture = fenced_fixture("stuck-intent").await;
+    let binding = fixture.session.bind_turn_scoped("turn-that-never-commits");
+    let reference = fixture
+        .session
+        .put(vec![4, 4], meta())
+        .await
+        .expect("put under a turn owner");
+    drop(binding);
+
+    assert_eq!(
+        AttachmentRootSet::condemn_attachment(&fixture.factory, &reference.id, u64::MAX)
+            .await
+            .expect("condemn"),
+        crate::AttachmentCondemnation::RootPresent,
+        "an uncommitted intent whose owner was never superseded is a live root"
+    );
+
+    let backend = WindowHookedStore::new(Arc::clone(&fixture.backend));
+    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
+        .await
+        .expect("sweep");
+    assert_eq!(report.reclaimed_count, 0);
+    assert_eq!(*backend.delete_calls.lock_recover(), 0);
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "a fenced sweep must never delete a referenced blob: {:?}",
+        report.deleted_while_referenced
+    );
+    assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
+    fixture
+        .backend
+        .get(&reference.id)
+        .await
+        .expect("the blob a stuck intent roots survives");
 }
 
 #[tokio::test]

@@ -104,6 +104,20 @@ pub type RawQueuedWorkForTesting = (
     Option<u64>,
 );
 
+/// Factory-global attachment condemnation state keyed by digest. See
+/// [`crate::AttachmentCondemnation`] for the state machine.
+pub(crate) type SharedAttachmentCondemnations =
+    Arc<Mutex<HashMap<crate::AttachmentId, AttachmentCondemnationPhase>>>;
+
+/// The two condemned phases. Absence from the map is the `Free` state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AttachmentCondemnationPhase {
+    /// Claimed by a sweeper, no physical delete issued yet: a writer revokes it.
+    Condemned,
+    /// The physical delete is in flight: a writer must wait for the release.
+    Deleting,
+}
+
 pub struct InMemorySessionStore {
     clock: Arc<dyn crate::Clock>,
     /// Serializes every operation whose correctness depends on observing the
@@ -142,6 +156,10 @@ pub struct InMemorySessionStore {
     pending_turn_input_next_seq: Mutex<u64>,
     attachment_manifest:
         Mutex<HashMap<(String, crate::AttachmentId), crate::AttachmentManifestEntry>>,
+    /// Per-digest attachment GC condemnation state, shared with every store the
+    /// same factory owns because the digest is factory-global: the writer's
+    /// intent insert and the sweeper's condemn CAS must meet here.
+    pub(crate) attachment_condemnations: SharedAttachmentCondemnations,
     #[cfg(test)]
     claim_after_lease_validation_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(test)]
@@ -214,6 +232,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashSet::new())),
+            Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
@@ -228,6 +247,7 @@ impl InMemorySessionStore {
         checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
         deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+        attachment_condemnations: SharedAttachmentCondemnations,
     ) -> Self {
         Self {
             clock,
@@ -253,6 +273,7 @@ impl InMemorySessionStore {
             pending_turn_inputs: Mutex::new(Vec::new()),
             pending_turn_input_next_seq: Mutex::new(0),
             attachment_manifest: Mutex::new(HashMap::new()),
+            attachment_condemnations,
             #[cfg(test)]
             claim_after_lease_validation_hook: Mutex::new(None),
             #[cfg(test)]

@@ -481,6 +481,49 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     }
 }
 
+impl PostgresSessionStoreFactory {
+    /// The read-only delete-time root predicate for one digest, parameterised
+    /// `$1 = attachment_id`, `$2 = intent_grace_cutoff_ms`. A ref is live unless
+    /// it is eligible for the same conditional forget reconciliation applies.
+    /// The targeted probe and the condemn CAS share it so the fence and the
+    /// probe cannot drift apart.
+    fn live_attachment_ref_sql(&self) -> String {
+        let process_dead = if self.process_registry_shared {
+            "OR (
+                manifest.owner_kind = 'process'
+                AND NOT EXISTS (
+                    SELECT 1 FROM lash_processes AS process
+                    WHERE process.process_id = manifest.owner_id
+                )
+            )"
+        } else {
+            ""
+        };
+        format!(
+            "SELECT 1 FROM lash_attachment_manifest AS manifest
+             WHERE manifest.attachment_id = $1
+               AND NOT (
+                    manifest.committed_at_ms IS NULL
+                    AND manifest.intent_at_ms <= $2
+                    AND (
+                        manifest.owner_kind IS NULL
+                        OR (
+                            manifest.owner_kind = 'turn'
+                            AND EXISTS (
+                                SELECT 1 FROM lash_runtime_turn_commits AS turn_commit
+                                WHERE turn_commit.session_id = manifest.session_id
+                                  AND turn_commit.turn_id <> manifest.owner_id
+                                  AND turn_commit.committed_at_ms > manifest.intent_at_ms
+                            )
+                        )
+                        {process_dead}
+                    )
+               )
+             LIMIT 1"
+        )
+    }
+}
+
 #[async_trait::async_trait]
 impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
     async fn live_attachment_refs(
@@ -544,49 +587,103 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         id: &lash_core::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, lash_core::StoreError> {
-        // Read-only delete-time probe using the same age + owner-death predicate
-        // as reconciliation. A ref is live unless it is eligible for that
-        // conditional forget.
-        let process_dead = if self.process_registry_shared {
-            "OR (
-                manifest.owner_kind = 'process'
-                AND NOT EXISTS (
-                    SELECT 1 FROM lash_processes AS process
-                    WHERE process.process_id = manifest.owner_id
-                )
-            )"
-        } else {
-            ""
-        };
-        let select_sql = format!(
-            "SELECT 1 FROM lash_attachment_manifest AS manifest
-             WHERE manifest.attachment_id = $1
-               AND NOT (
-                    manifest.committed_at_ms IS NULL
-                    AND manifest.intent_at_ms <= $2
-                    AND (
-                        manifest.owner_kind IS NULL
-                        OR (
-                            manifest.owner_kind = 'turn'
-                            AND EXISTS (
-                                SELECT 1 FROM lash_runtime_turn_commits AS turn_commit
-                                WHERE turn_commit.session_id = manifest.session_id
-                                  AND turn_commit.turn_id <> manifest.owner_id
-                                  AND turn_commit.committed_at_ms > manifest.intent_at_ms
-                            )
-                        )
-                        {process_dead}
-                    )
-               )
-             LIMIT 1"
-        );
-        let row = sqlx::query(&select_sql)
+        let row = sqlx::query(&self.live_attachment_ref_sql())
             .bind(id.as_str())
             .bind(intent_grace_cutoff_epoch_ms as i64)
             .fetch_optional(&self.pool)
             .await
             .map_err(store_sqlx_error)?;
         Ok(row.is_some())
+    }
+
+    fn fence(&self) -> lash_core::AttachmentGcFence {
+        lash_core::AttachmentGcFence::Fenced
+    }
+
+    async fn condemn_attachment(
+        &self,
+        id: &lash_core::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<lash_core::AttachmentCondemnation, lash_core::StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        // The same per-digest lock a writer's `begin_attachment_write` takes:
+        // the root predicate below and that writer's manifest insert cannot
+        // interleave.
+        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+        let rooted = sqlx::query(&self.live_attachment_ref_sql())
+            .bind(id.as_str())
+            .bind(intent_grace_cutoff_epoch_ms as i64)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .is_some();
+        if rooted {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core::AttachmentCondemnation::RootPresent);
+        }
+        let inserted = sqlx::query(
+            "INSERT INTO lash_attachment_condemnations (attachment_id, phase)
+             VALUES ($1, 'condemned')
+             ON CONFLICT (attachment_id) DO NOTHING",
+        )
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(if inserted == 1 {
+            lash_core::AttachmentCondemnation::Condemned
+        } else {
+            // A peer sweeper owns this digest. Skip on contention.
+            lash_core::AttachmentCondemnation::AlreadyCondemned
+        })
+    }
+
+    async fn arm_attachment_delete(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<lash_core::AttachmentDeleteArming, lash_core::StoreError> {
+        // Under the same per-digest advisory key the writer half takes, and in a
+        // transaction: a bare pooled UPDATE could commit *inside* a writer's
+        // open `begin_attachment_write` — after it read `condemned` and before
+        // it deleted the row — leaving the writer to erase a `deleting` row and
+        // put bytes into an in-flight delete.
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+        let armed = sqlx::query(
+            "UPDATE lash_attachment_condemnations SET phase = 'deleting'
+             WHERE attachment_id = $1 AND phase = 'condemned'",
+        )
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(if armed == 1 {
+            lash_core::AttachmentDeleteArming::Armed
+        } else {
+            // A writer revoked the condemnation: the delete is never issued.
+            lash_core::AttachmentDeleteArming::Revoked
+        })
+    }
+
+    async fn release_attachment_condemnation(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        // Same key, same reason: the release must not interleave with a writer's
+        // open condemnation read.
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(())
     }
 }
 

@@ -231,9 +231,9 @@ PostgreSQL tables. The operations runbook reset consequently clears
 `lash_process_wake_deliveries`, `lash_wake_allocation_floors`, and
 `lash_wake_redelivery_fences`.
 
-Figments coordination is one Lash revision. SQLite durable-core schema 36 includes
+Figments coordination is one Lash revision. SQLite durable-core schema 37 includes
 the keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover. PostgreSQL schema 51 includes those cutovers,
+immutable graph-generation cutover. PostgreSQL schema 52 includes those cutovers,
 the indexed recovery worklist, and the session-metadata payload cutover.
 Process-registry schema 24 adds atomic pending process-parent teardown to the v3
 process-environment reference cutover; trigger schema 5 carries its existing

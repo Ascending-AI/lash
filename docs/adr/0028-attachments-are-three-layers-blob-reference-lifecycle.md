@@ -78,25 +78,61 @@ content id lands after the root snapshot — every backend's `put` refreshes the
 blob's modification time on a dedup hit (the file store rewrites/utimes, S3 PUTs
 unconditionally, the in-memory store restamps) precisely so this re-check sees it.
 
-**The delete window and its residual.** The freshness re-check keys off the blob's
-mtime, which a clock-skewed or coarse-timestamp backend can under-report, so after
-it the sweep does a second, authoritative guard: a *targeted root re-check* for the
-single candidate id (`AttachmentRootSet::has_live_attachment_ref` — Postgres and
-SQLite each use one indexed `SELECT`, while in-memory uses a
-map lookup), skipping any blob a session re-referenced since the snapshot. This
-probe is reliable precisely because of the layer-2 write-ahead ordering: the facade
-records the manifest intent *before* the backend `put`, so a root exists no later
-than the bytes it protects. A residual window remains between that probe and the
-physical `delete` — bounded to the single-digit milliseconds of one root-set query
-plus one backend delete, and it cannot be closed further without a cross-store
-transaction the blob backend and the reference store do not share. When a ref lands
-in exactly that window the bytes are already unrecoverable, but the property that
-saves correctness is *put-always-writes*: every backend `put` physically rewrites
-absent content (verified per backend), so the referencing session's next `put`
-self-heals the blob. The sweep does one more single-id root check immediately
-*after* the delete; if a ref appeared, it records the id in the reclamation report's
-`deleted_while_referenced` field and logs at error level, so this rare, self-healing
-event is surfaced to the operator rather than lost silently.
+**The delete window is fenced, not raced (FIG-1259).** A re-check is still a
+read: between deciding a digest is unreferenced and physically deleting it, a
+session can record an intent and write the same content, and no amount of
+re-reading closes that. The sweep closes it with a clockless CAS state machine in
+the lash-owned root authority — the same durable store the manifest lives in, so
+the two sides meet inside one transaction rather than across two reads.
+
+Per digest the state is `Free`, `Condemned`, or `Deleting`, and every transition
+is a conditional mutation with no timestamp anywhere in it. The writer's `put`
+goes through `AttachmentManifest::begin_attachment_write`, which records the
+write-ahead intent *and* resolves the condemnation in one mutation: it revokes a
+`Condemned` digest and takes it back, and against a `Deleting` digest it records
+nothing and retries, because bytes written into an in-flight delete are lost
+bytes. The sweep condemns before deleting
+(`AttachmentRootSet::condemn_attachment`, refused if any root or intent exists),
+arms the delete (`arm_attachment_delete`, refused if a writer revoked), issues
+the physical delete only for an armed digest, and releases. Whoever loses a CAS
+yields: a writer parks and re-puts after the release, and a sweep that meets a
+peer's condemnation defers the digest to the next sweep. Nothing waits on a
+lease or a TTL, and no SQL/blob-store atomicity is needed, because the
+authority's state machine — not the backend — decides whether bytes may die. A
+parked writer does pace its re-acquires with a bounded backoff rather than
+spinning, since a physical delete against remote storage takes real time; that
+delay is politeness between CAS attempts, and it is the *only* place time
+appears. No transition, and above all no reclamation, is ever authorized by
+elapsed time.
+Clearing a condemnation left behind by a sweeper that died mid-delete is host
+policy under ADR 0014, exposed as
+`AttachmentRootSet::release_attachment_condemnation`; lash expires nothing on a
+timer.
+
+The freshness re-check survives as what it always was, a cheap pre-filter, and it
+now runs while the digest is condemned, which is exactly the window a writer can
+still revoke.
+
+Answering `Fenced` is a claim about five methods across two traits —
+`AttachmentManifest::begin_attachment_write` plus the root set's `fence`,
+`condemn_attachment`, `arm_attachment_delete`, and
+`release_attachment_condemnation` — and a partial implementation is worse than
+none, because it silences the warning while keeping the loss. The sweep
+downgrades its own report to `BestEffort` when a self-declared fenced authority
+cannot condemn, but it cannot detect a missing writer half; that one is on the
+implementer.
+
+A root authority that implements neither half reports
+`AttachmentGcFence::BestEffort` and runs the legacy path: a targeted root
+re-check before the delete and the same probe after it, with any late root
+recorded in the report's `deleted_while_referenced` field and logged at error
+level. That is *detection telemetry* for a window it cannot prevent, not a
+remedy — such deployments should point the backend at recoverable deletion
+(object-store versioning or a quarantine prefix) so the reported coordinates lead
+to bytes that can be restored. Under a fenced authority the same field is a fence
+alarm: it must stay empty, and a non-empty list means the transitions are not
+atomic with intent recording, or two authorities are pointed at one backend.
+
 The grace period is a post-terminal retention choice and need not bound turn or
 replay duration. `commit_refs` only updates existing intent rows and never
 re-inserts them, so adoption cannot resurrect a ref whose proven-dead owner was

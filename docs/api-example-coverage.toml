@@ -76513,3 +76513,216 @@ disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:39#let resolved_attempts = policy.no_progress_budget.max_attempts();"
 assertion = "examples/agent-workbench/src/main_sections/tests/no_progress_budget.rs:40#assert_eq!(resolved_attempts, Some(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS));"
 reason = "The resolved session policy is observed carrying the workbench's own bound, which is the value the turn driver enforces."
+
+[[api]]
+symbol = "lash::persistence::AttachmentReclamationReport::condemn_deferred_ids"
+kind = "field"
+availability = "default+all-features"
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentReclamationReport::condemn_deferred_ids to the agent-workbench attachment maintenance example and surface the sweep's fence disposition to operators."
+
+[[api]]
+symbol = "lash::persistence::AttachmentReclamationReport::fence"
+kind = "field"
+availability = "default+all-features"
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentReclamationReport::fence to the agent-workbench attachment maintenance example and surface the sweep's fence disposition to operators."
+
+[[api]]
+symbol = "lash::persistence::AttachmentRootSet::arm_attachment_delete"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentRootSet::arm_attachment_delete"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of a custom durable root authority, who supply the Condemned -> Deleting CAS. Callers never invoke it; reclaim_unreferenced_attachments drives it on the host's behalf."
+
+[[api]]
+symbol = "lash::persistence::AttachmentRootSet::condemn_attachment"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentRootSet::condemn_attachment"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of a custom durable root authority, who supply the Free -> Condemned CAS. Callers never invoke it; reclaim_unreferenced_attachments drives it on the host's behalf."
+
+[[api]]
+symbol = "lash::persistence::AttachmentRootSet::fence"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentRootSet::fence"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of a custom durable root authority, who answer this to declare whether their store implements all five fence methods. Bundled examples use repository stores, which already answer it."
+
+[[api]]
+symbol = "lash::persistence::AttachmentRootSet::release_attachment_condemnation"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentRootSet::release_attachment_condemnation"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of a custom durable root authority, plus operators clearing a condemnation abandoned by a sweeper that died mid-delete. Bundled examples run no such recovery."
+
+[[api]]
+symbol = "lash::persistence::AttachmentStoreError::ReclamationInFlight"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentStoreError::ReclamationInFlight"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentStoreError::ReclamationInFlight to the agent-workbench attachment example and assert the retry path a host takes when a put lands on a digest whose reclamation is already armed."
+
+[[api]]
+symbol = "lash::persistence::AttachmentStoreError::ReclamationInFlight::attachment_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentStoreError::ReclamationInFlight::attachment_id"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentStoreError::ReclamationInFlight::attachment_id to the agent-workbench attachment example and assert the reported digest identifies the put the host must retry."
+
+[[api]]
+symbol = "lash::persistence::AttachmentStoreError::ReclamationInFlight::attempts"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentStoreError::ReclamationInFlight::attempts"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentStoreError::ReclamationInFlight::attempts to the agent-workbench attachment example and assert the reported re-acquire count a host logs before escalating a stuck condemnation."
+
+[[api]]
+symbol = "lash::persistence::AttachmentCondemnation"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentCondemnation"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of AttachmentRootSet::condemn_attachment, whose return type this is. Bundled examples use repository stores and never name it."
+
+[[api]]
+symbol = "lash::persistence::AttachmentCondemnation::AlreadyCondemned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentCondemnation::AlreadyCondemned"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of condemn_attachment, who return this when a peer sweeper already holds the digest and the sweep must skip on contention."
+
+[[api]]
+symbol = "lash::persistence::AttachmentCondemnation::Condemned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentCondemnation::Condemned"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of condemn_attachment, who return this when their CAS won a rootless digest."
+
+[[api]]
+symbol = "lash::persistence::AttachmentCondemnation::RootPresent"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentCondemnation::RootPresent"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of condemn_attachment, who return this when their root predicate refused the digest."
+
+[[api]]
+symbol = "lash::persistence::AttachmentCondemnation::Unsupported"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentCondemnation::Unsupported"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of an unfenced root authority, which the default implementation answers on their behalf so the sweep reports itself best-effort."
+
+[[api]]
+symbol = "lash::persistence::AttachmentDeleteArming"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentDeleteArming"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of AttachmentRootSet::arm_attachment_delete, whose return type this is. Bundled examples use repository stores and never name it."
+
+[[api]]
+symbol = "lash::persistence::AttachmentDeleteArming::Armed"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentDeleteArming::Armed"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of arm_attachment_delete, who return this to authorize the one physical delete for a digest they still hold condemned."
+
+[[api]]
+symbol = "lash::persistence::AttachmentDeleteArming::Revoked"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentDeleteArming::Revoked"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of arm_attachment_delete, who return this when the condemnation no longer stands and the delete must never be issued."
+
+[[api]]
+symbol = "lash::persistence::AttachmentGcFence"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentGcFence"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentGcFence to the agent-workbench attachment maintenance example alongside AttachmentReclamationReport::fence, whose value it types."
+
+[[api]]
+symbol = "lash::persistence::AttachmentGcFence::BestEffort"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentGcFence::BestEffort"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentGcFence::BestEffort to the agent-workbench attachment maintenance example and assert an unfenced root authority reports its sweep best-effort."
+
+[[api]]
+symbol = "lash::persistence::AttachmentGcFence::Fenced"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentGcFence::Fenced"]
+area = "attachments"
+disposition = "unused-add"
+reason = "Add lash::persistence::AttachmentGcFence::Fenced to the agent-workbench attachment maintenance example and assert a repository store's sweep reports its deletes as fenced."
+
+[[api]]
+symbol = "lash_core::AttachmentManifest::begin_attachment_write"
+kind = "function"
+availability = "default+all-features"
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of a custom attachment manifest, who supply the writer half of the fence. Application code reaches it only through SessionAttachmentStore::put."
+
+[[api]]
+symbol = "lash::persistence::AttachmentWriteFence"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentWriteFence"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of AttachmentManifest::begin_attachment_write, whose return type this is. Application code sees its effect as a granted or retried SessionAttachmentStore::put."
+
+[[api]]
+symbol = "lash::persistence::AttachmentWriteFence::Granted"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentWriteFence::Granted"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of begin_attachment_write, who return this once the intent is durable and any condemnation is revoked."
+
+[[api]]
+symbol = "lash::persistence::AttachmentWriteFence::ReclamationInFlight"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AttachmentWriteFence::ReclamationInFlight"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: implementers of begin_attachment_write, who return this instead of recording an intent while a physical delete is armed for the digest."

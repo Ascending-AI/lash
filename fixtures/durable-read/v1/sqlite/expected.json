@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 16,
+  "fixture_schema_version": 18,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
@@ -26,7 +26,8 @@
           "context_window_tokens": 1
         }
       },
-      "turn_budget": "unbounded"
+      "turn_budget": "unbounded",
+      "prompt": {}
     },
     "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
     "graph": {
@@ -150,7 +151,8 @@
           "context_window_tokens": 1
         }
       },
-      "turn_budget": "unbounded"
+      "turn_budget": "unbounded",
+      "prompt": {}
     },
     "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
     "graph": {
@@ -498,6 +500,7 @@
     "signature": "d51d23a53aa1f947e9f7177e1babef81c26d0b9ed4597ad36412880e82eca528"
   },
   "wake_delivery": {
+    "version": 1,
     "wake_id": "wake:v1:sha256:d82c45cf6ce199889e0e844cf214478e5e4dec79119ae37a4bb81dbd00d6f228",
     "target_session_id": "durable-read-fixture",
     "process_id": "durable-read-wake-process",

@@ -18,6 +18,10 @@ pub struct InMemorySessionStoreFactory {
     pub(super) checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
     pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     pub(super) deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+    /// Factory-global attachment GC condemnation state: the digest is global to
+    /// the factory, so every store it creates shares this map and the writer's
+    /// intent insert meets the sweeper's condemn CAS in one place.
+    pub(super) attachment_condemnations: super::SharedAttachmentCondemnations,
 }
 
 impl InMemorySessionStoreFactory {
@@ -38,6 +42,7 @@ impl InMemorySessionStoreFactory {
             checkpoint_component_blobs: Arc::new(Mutex::new(HashMap::new())),
             tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
             deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
+            attachment_condemnations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -99,6 +104,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     Arc::clone(&self.checkpoint_component_blobs),
                     Arc::clone(&self.tombstoned_node_ids),
                     Arc::clone(&self.deleted_session_ids),
+                    Arc::clone(&self.attachment_condemnations),
                 ));
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
@@ -431,6 +437,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.checkpoint_component_blobs),
             Arc::clone(&self.tombstoned_node_ids),
             Arc::clone(&self.deleted_session_ids),
+            Arc::clone(&self.attachment_condemnations),
         ));
         *store.session_graph.lock_recover() = resident_graph.clone();
         *store.checkpoint.lock_recover() = Some(checkpoint);
@@ -488,6 +495,74 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             refs.extend(crate::AttachmentManifest::list_all_refs(&*store)?);
         }
         Ok(refs)
+    }
+
+    fn fence(&self) -> crate::AttachmentGcFence {
+        crate::AttachmentGcFence::Fenced
+    }
+
+    async fn condemn_attachment(
+        &self,
+        id: &crate::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<crate::AttachmentCondemnation, crate::store::StoreError> {
+        let stores = {
+            self.stores
+                .lock_recover()
+                .values()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // The stores of one factory share this transaction lock, and it is the
+        // same lock `begin_attachment_write` takes: the root predicate and the
+        // condemnation insert are therefore one conditional mutation against
+        // every concurrent writer.
+        let _transaction = self.write_transaction.lock_recover();
+        for store in stores {
+            if crate::AttachmentManifest::has_live_ref_for_id(
+                &*store,
+                id,
+                intent_grace_cutoff_epoch_ms,
+            )? {
+                return Ok(crate::AttachmentCondemnation::RootPresent);
+            }
+        }
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        if condemnations.contains_key(id) {
+            // Another sweeper owns this digest. Skip on contention.
+            return Ok(crate::AttachmentCondemnation::AlreadyCondemned);
+        }
+        condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Condemned);
+        Ok(crate::AttachmentCondemnation::Condemned)
+    }
+
+    async fn arm_attachment_delete(
+        &self,
+        id: &crate::AttachmentId,
+    ) -> Result<crate::AttachmentDeleteArming, crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        match condemnations.get(id) {
+            // A writer revoked the condemnation while we were re-stating the
+            // blob: the delete is never issued. A digest already in `Deleting`
+            // answers the same way — arming is `Condemned -> Deleting` only,
+            // matching the SQL backends' `WHERE phase = 'condemned'`.
+            None | Some(super::AttachmentCondemnationPhase::Deleting) => {
+                Ok(crate::AttachmentDeleteArming::Revoked)
+            }
+            Some(super::AttachmentCondemnationPhase::Condemned) => {
+                condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Deleting);
+                Ok(crate::AttachmentDeleteArming::Armed)
+            }
+        }
+    }
+
+    async fn release_attachment_condemnation(
+        &self,
+        id: &crate::AttachmentId,
+    ) -> Result<(), crate::store::StoreError> {
+        self.attachment_condemnations.lock_recover().remove(id);
+        Ok(())
     }
 
     async fn has_live_attachment_ref(

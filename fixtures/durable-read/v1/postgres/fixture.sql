@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.14 (Debian 16.14-1.pgdg13+1)
+-- Dumped from database version 16.15
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -27,6 +27,17 @@ CREATE SCHEMA lash_durable_read_fixture;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: lash_attachment_condemnations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
+    attachment_id text NOT NULL,
+    phase text NOT NULL,
+    CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text])))
+);
+
 
 --
 -- Name: lash_attachment_manifest; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
@@ -698,6 +709,12 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_usage_deltas ALTER COLUMN seq SE
 
 
 --
+-- Data for Name: lash_attachment_condemnations; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_attachment_manifest; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -869,16 +886,16 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"vers
 -- Data for Name: lash_runtime_turn_commits; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"append-session-nodes","scope":{"operation_id":"session:durable-read-fixture:boundary:durable-read-current-append","type":"runtime_operation"}}', '82b2691ba5d63089886dc1f376e67077ee86fb5249ee749dfeffc56b632bfdc8', '{"head_revision":1,"checkpoint_ref":"ae62c3c799a20bffc7a658902d16647546ba09abc77ed54ea76c38b8c909249f","manifest":{"schema_version":2,"turn_state":{"turn_index":0,"token_usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_write_input_tokens":0,"reasoning_output_tokens":0},"protocol_turn_options":{"schema_version":1,"payload":{}}}},"committed_leaf_node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","realized_node_timestamps":[{"node_id":"frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","timestamp":"2023-11-14T22:13:20+00:00"}]}', 1700000000000, '0c1bfb2609965714df841751355e4060ab2ada9631a1ae90f81785aac931ae2e', 2, NULL, 1);
-INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-legacy-commit","type":"runtime_operation"}}', '2b3014396be143e2e82007ad8b19f02ff7beb3c6fd992b8c2a5b54ff8a81f0b3', '{"head_revision":2,"checkpoint_ref":"5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68","manifest":{"schema_version":2,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"b9187311a43c21099d0489147774b854c2eb60b83b11a5321c77de172fb404c6","encoding_version":2},"plugin_snapshot":{"blob_ref":"a2da855fd72740bde2949b614e5b12dc7fae0b14191c7d6832fbce213141b942","encoding_version":2},"tool_state":{"blob_ref":"121392d01ce7a57a0cc9867127576041609d889a7a4c21ec18dbfd2572f9f8ca","encoding_version":2}},"plugin_snapshot_revision":4},"committed_leaf_node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","realized_node_timestamps":[],"committed_usage_delta_identities":[{"operation_storage_key":"{\"key\":\"commit\",\"scope\":{\"operation_id\":\"durable-read-legacy-commit\",\"type\":\"runtime_operation\"}}","entry_ordinal":0,"payload_encoding_version":2,"payload_hash":"ebdcf60d363dd343af59872a3ae811b0a6c007ed748633c7a74a6376d8437711"}]}', 1700000000000, NULL, NULL, NULL, NULL);
-INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-wake-settlement","type":"runtime_operation"}}', 'aa6e99aae512d271114dd0c562db918a854d19e750fc21f38fbcb546b16d6708', '{"head_revision":3,"checkpoint_ref":"5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68","manifest":{"schema_version":2,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"b9187311a43c21099d0489147774b854c2eb60b83b11a5321c77de172fb404c6","encoding_version":2},"plugin_snapshot":{"blob_ref":"a2da855fd72740bde2949b614e5b12dc7fae0b14191c7d6832fbce213141b942","encoding_version":2},"tool_state":{"blob_ref":"121392d01ce7a57a0cc9867127576041609d889a7a4c21ec18dbfd2572f9f8ca","encoding_version":2}},"plugin_snapshot_revision":4},"committed_leaf_node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","realized_node_timestamps":[]}', 1700000000000, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"append-session-nodes","scope":{"operation_id":"session:durable-read-fixture:boundary:durable-read-current-append","type":"runtime_operation"}}', '2c40b976f91fea5adff39719438ea7e17dbd3cd8629894f0a50fdbce5b253514', '{"head_revision":1,"checkpoint_ref":"ae62c3c799a20bffc7a658902d16647546ba09abc77ed54ea76c38b8c909249f","manifest":{"schema_version":2,"turn_state":{"turn_index":0,"token_usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_write_input_tokens":0,"reasoning_output_tokens":0},"protocol_turn_options":{"schema_version":1,"payload":{}}}},"committed_leaf_node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","realized_node_timestamps":[{"node_id":"frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","timestamp":"2023-11-14T22:13:20+00:00"}]}', 1700000000000, '0c1bfb2609965714df841751355e4060ab2ada9631a1ae90f81785aac931ae2e', 2, NULL, 1);
+INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-legacy-commit","type":"runtime_operation"}}', '65ed1f6cb24d04646705c9aabc7bbdbcc247f5f5a5807f228505852ce38da73f', '{"head_revision":2,"checkpoint_ref":"5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68","manifest":{"schema_version":2,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"b9187311a43c21099d0489147774b854c2eb60b83b11a5321c77de172fb404c6","encoding_version":2},"plugin_snapshot":{"blob_ref":"a2da855fd72740bde2949b614e5b12dc7fae0b14191c7d6832fbce213141b942","encoding_version":2},"tool_state":{"blob_ref":"121392d01ce7a57a0cc9867127576041609d889a7a4c21ec18dbfd2572f9f8ca","encoding_version":2}},"plugin_snapshot_revision":4},"committed_leaf_node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","realized_node_timestamps":[],"committed_usage_delta_identities":[{"operation_storage_key":"{\"key\":\"commit\",\"scope\":{\"operation_id\":\"durable-read-legacy-commit\",\"type\":\"runtime_operation\"}}","entry_ordinal":0,"payload_encoding_version":2,"payload_hash":"ebdcf60d363dd343af59872a3ae811b0a6c007ed748633c7a74a6376d8437711"}]}', 1700000000000, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-wake-settlement","type":"runtime_operation"}}', 'df50f78bf0be0bba07965d4f42b309777f9a5fb0904613f884b77a37b6fc5311', '{"head_revision":3,"checkpoint_ref":"5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68","manifest":{"schema_version":2,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"b9187311a43c21099d0489147774b854c2eb60b83b11a5321c77de172fb404c6","encoding_version":2},"plugin_snapshot":{"blob_ref":"a2da855fd72740bde2949b614e5b12dc7fae0b14191c7d6832fbce213141b942","encoding_version":2},"tool_state":{"blob_ref":"121392d01ce7a57a0cc9867127576041609d889a7a4c21ec18dbfd2572f9f8ca","encoding_version":2}},"plugin_snapshot_revision":4},"committed_leaf_node_id":"n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9","realized_node_timestamps":[]}', 1700000000000, NULL, NULL, NULL, NULL);
 
 
 --
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 51);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 52);
 
 
 --
@@ -917,7 +934,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 -- Data for Name: lash_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"schema_version":3,"session_id":"durable-read-fixture","config":{"provider_id":"","model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"turn_budget":"unbounded"},"current_frame_node_id":"frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f"}', '5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
+INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"schema_version":3,"session_id":"durable-read-fixture","config":{"provider_id":"","model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"turn_budget":"unbounded","prompt":{}},"current_frame_node_id":"frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f"}', '5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
 
 
 --
@@ -1001,6 +1018,14 @@ SELECT pg_catalog.setval('lash_durable_read_fixture.lash_queued_work_batches_enq
 --
 
 SELECT pg_catalog.setval('lash_durable_read_fixture.lash_usage_deltas_seq_seq', 1, true);
+
+
+--
+-- Name: lash_attachment_condemnations lash_attachment_condemnations_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_attachment_condemnations
+    ADD CONSTRAINT lash_attachment_condemnations_pkey PRIMARY KEY (attachment_id);
 
 
 --

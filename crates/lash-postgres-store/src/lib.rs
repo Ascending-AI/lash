@@ -182,7 +182,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 51 adds durable runtime-owned tool-intent first-submission rows and
 // process-parent teardown retention. Lash-managed version-50 stores take the
 // explicit 50 -> 51 creation-only migration at open.
-const SCHEMA_VERSION: i32 = 51;
+// Version 52 adds the attachment GC fence's per-digest condemnation table.
+// Lash-managed version-51 stores take the explicit 51 -> 52 creation-only
+// migration at open.
+const SCHEMA_VERSION: i32 = 52;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -441,11 +444,12 @@ impl PostgresStorage {
     /// `lash_schema_versions`.
     ///
     /// The component schema is normally a reject-and-recreate boundary. This
-    /// build has one explicit exception: Lash-managed `Enforce` mode can apply
-    /// the creation-only migration from the published component-50 shape to 51
-    /// after an exact source-shape preflight. A component-50 stamp over
-    /// version-51 artifacts is ledger/schema divergence and is refused with an
-    /// inspect-and-recreate remedy; other mismatches are rejected at open.
+    /// build has two explicit exceptions: Lash-managed `Enforce` mode can apply
+    /// the creation-only migrations from the published component-50 or
+    /// component-51 shapes to 52 after an exact source-shape preflight. An older
+    /// stamp over newer artifacts is ledger/schema divergence and is refused
+    /// with an inspect-and-recreate remedy; other mismatches are rejected at
+    /// open.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
@@ -1357,6 +1361,141 @@ mod tests {
             .delete_session(&session_id)
             .await
             .expect("delete checkpoint counter session");
+    }
+
+    /// Arming a delete and a writer taking the digest back are the two halves of
+    /// the same CAS: run concurrently against PostgreSQL, at most one of them
+    /// may win.
+    ///
+    /// This is the law that catches a transition running bare on the pool
+    /// instead of inside a transaction under the per-digest advisory key. With
+    /// `arm_attachment_delete` unfenced, its `UPDATE` can commit *inside* the
+    /// writer's open transaction — after the writer read `condemned` and before
+    /// it deleted the row — so the writer erases a `deleting` row, is granted,
+    /// and puts bytes into a delete that is already in flight. The post-delete
+    /// probe is no defence against that: it only fires once the bytes are gone.
+    ///
+    /// Multi-threaded on purpose: the manifest surface is synchronous, so the
+    /// writer blocks a thread on a detached runtime while the pool's IO driver
+    /// and the sweeper half keep running on others.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
+        let Some(database_url) = postgres_test_support::database_url() else {
+            eprintln!("skipping Postgres attachment fence race proof: database URL is not set");
+            return;
+        };
+        let _database_lock =
+            postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+        let storage = PostgresStorage::connect(&database_url)
+            .await
+            .expect("connect attachment fence database");
+        let session_id = format!("postgres-attachment-fence-race:{}", std::process::id());
+        let store = std::sync::Arc::new(storage.session_store(&session_id));
+        let factory = storage.session_store_factory();
+        let attachment_id =
+            lash_core::AttachmentId::new(format!("fence-race-{}", std::process::id()));
+        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
+            .bind(attachment_id.as_str())
+            .execute(storage.pool())
+            .await
+            .expect("clear condemnation fixture");
+        let intent = {
+            let session_id = session_id.clone();
+            let attachment_id = attachment_id.clone();
+            move || lash_core::AttachmentIntent {
+                attachment_id: attachment_id.clone(),
+                session_id: session_id.clone(),
+                canonical_uri: format!("lash-attachment://sha256/{attachment_id}"),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+            }
+        };
+
+        // Widen the writer's read-then-revoke window so the interleaving an
+        // unfenced `arm` corrupts is reached on every odd round instead of once
+        // in a blue moon. The fence does not care how wide the window is: a
+        // concurrent `arm` waits on the per-digest advisory key either way.
+        crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS
+            .store(20, std::sync::atomic::Ordering::Relaxed);
+
+        // Both orderings, every round: the fixed code holds for all of them.
+        for round in 0..12 {
+            assert_eq!(
+                lash_core::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, 0)
+                    .await
+                    .expect("condemn"),
+                lash_core::AttachmentCondemnation::Condemned,
+                "round {round}: the digest must start each round rootless and free"
+            );
+
+            let writer = tokio::task::spawn_blocking({
+                let store = std::sync::Arc::clone(&store);
+                let intent = intent.clone();
+                move || lash_core::AttachmentManifest::begin_attachment_write(&*store, intent())
+            });
+            if round % 2 == 1 {
+                // Alternate the stagger so both orderings are exercised: on odd
+                // rounds the writer reaches its condemnation read first (the
+                // interleaving an unfenced `arm` corrupts), on even rounds the
+                // sweeper arms first. The pacing widens a window; it decides no
+                // outcome, and the invariant below holds for either ordering.
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let armed =
+                lash_core::AttachmentRootSet::arm_attachment_delete(&factory, &attachment_id)
+                    .await
+                    .expect("arm");
+            let fence = writer.await.expect("join writer").expect("fenced write");
+
+            let holds_ref =
+                lash_core::AttachmentManifest::holds_ref(&*store, &session_id, &attachment_id)
+                    .expect("holds_ref");
+            match (armed, fence) {
+                // The sweeper won: the delete is armed and the writer parked
+                // without recording anything, so no bytes can land inside it.
+                (
+                    lash_core::AttachmentDeleteArming::Armed,
+                    lash_core::AttachmentWriteFence::ReclamationInFlight,
+                ) => {
+                    assert!(
+                        !holds_ref,
+                        "round {round}: a parked writer records no intent"
+                    );
+                }
+                // The writer won: it took the digest back before the delete was
+                // armed, and the sweeper issues no delete at all.
+                (
+                    lash_core::AttachmentDeleteArming::Revoked,
+                    lash_core::AttachmentWriteFence::Granted,
+                ) => {
+                    assert!(
+                        holds_ref,
+                        "round {round}: a granted writer records its intent"
+                    );
+                }
+                (armed, fence) => panic!(
+                    "round {round}: arming and the writer must never both win \
+                     (arm = {armed:?}, writer = {fence:?}); bytes would land inside an \
+                     in-flight delete"
+                ),
+            }
+
+            lash_core::AttachmentRootSet::release_attachment_condemnation(&factory, &attachment_id)
+                .await
+                .expect("release");
+            if holds_ref {
+                lash_core::AttachmentManifest::forget(&*store, &session_id, &attachment_id)
+                    .expect("forget the ref");
+            }
+        }
+
+        crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        factory
+            .delete_session(&session_id)
+            .await
+            .expect("delete fence session");
     }
 
     #[tokio::test]
