@@ -48,13 +48,48 @@ class Guard:
 # its next open, and a database that already has the index stays readable by a
 # binary whose schema omits it. Both directions are therefore compatible on one
 # file, which is why a guarded surface may declare `elide` and let an
-# index-only addition ship without a version bump. `UNIQUE` is deliberately not
-# matched: a unique index is a constraint, `IF NOT EXISTS` will not re-create a
-# differently-shaped one, and it must keep demanding a bump.
+# index-only addition ship without a version bump.
+#
+# Elision applies only to statements that introduce NEW index names relative to
+# the base revision. A statement whose index name already exists on the base side
+# is a modification, not an addition: it is not elided, so altering an existing
+# index's definition (such as its column list) demands a version bump. Existing
+# index statements on the base side are also kept in the base signature, so
+# removing an index deliberately demands a version bump. `UNIQUE` is deliberately
+# not matched: a unique index is a constraint, `IF NOT EXISTS` will not
+# re-create a differently-shaped one, and it must keep demanding a bump.
 IDEMPOTENT_SQL_INDEX = re.compile(
-    r"\s*CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\b.*?;", re.DOTALL | re.IGNORECASE
+    r"\s*CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+([^\s(]+)\s+ON\b.*?;",
+    re.DOTALL | re.IGNORECASE,
 )
-ELISIONS = {"sql_idempotent_index": lambda value: IDEMPOTENT_SQL_INDEX.sub("", value)}
+
+
+def normalize_sql_index_name(name: str) -> str:
+    return name.strip('"`[]').lower()
+
+
+def extract_idempotent_sql_index_names(text: str) -> set[str]:
+    return {
+        normalize_sql_index_name(match.group(1))
+        for match in IDEMPOTENT_SQL_INDEX.finditer(text)
+    }
+
+
+def elide_new_sql_indexes(head_value: str, base_value: str = "") -> str:
+    base_indexes = extract_idempotent_sql_index_names(base_value)
+
+    def replacer(match: re.Match[str]) -> str:
+        name = normalize_sql_index_name(match.group(1))
+        if name not in base_indexes:
+            return ""
+        return match.group(0)
+
+    return IDEMPOTENT_SQL_INDEX.sub(replacer, head_value)
+
+
+ELISIONS = {
+    "sql_idempotent_index": elide_new_sql_indexes,
+}
 
 
 @dataclass(frozen=True)
@@ -605,9 +640,17 @@ def guard_signature(
     guard: Guard,
     *,
     enforce_presence: bool,
+    base_signature: tuple[tuple[str, str], ...] | None = None,
 ) -> tuple[tuple[str, str], ...]:
     paths = view.matching_paths(revision, guard.paths)
-    elide = ELISIONS[guard.elide] if guard.elide else (lambda value: value)
+    base_by_key = dict(base_signature) if base_signature is not None else {}
+    elide_fn = ELISIONS.get(guard.elide) if guard.elide else None
+
+    def apply_elision(key: str, val: str) -> str:
+        if elide_fn is not None and base_signature is not None:
+            return elide_fn(val, base_by_key.get(key, ""))
+        return val
+
     signature: list[tuple[str, str]] = []
     found_symbols: set[str] = set()
     covered_shapes: set[str] = set()
@@ -617,7 +660,7 @@ def guard_signature(
         if content is None:
             continue
         if guard.kind == "file":
-            signature.append((path, elide(content)))
+            signature.append((path, apply_elision(path, content)))
             covered_markers.update(
                 marker for marker in guard.must_cover if marker in content
             )
@@ -625,13 +668,15 @@ def guard_signature(
             items = named_rust_items(content, guard.symbols)
             found_symbols.update(items)
             signature.extend(
-                (f"{path}:{name}", elide(value)) for name, value in items.items()
+                (f"{path}:{name}", apply_elision(f"{path}:{name}", value))
+                for name, value in items.items()
             )
         else:
             items = serde_shapes(content)
             covered_shapes.update(name.partition("#")[0] for name in items)
             signature.extend(
-                (f"{path}:{name}", elide(value)) for name, value in items.items()
+                (f"{path}:{name}", apply_elision(f"{path}:{name}", value))
+                for name, value in items.items()
             )
 
     if guard.kind == "rust_items" and enforce_presence:
@@ -716,7 +761,11 @@ def check_surfaces(
                     view, base_revision, guard, enforce_presence=False
                 )
                 head_signature = guard_signature(
-                    view, head_revision, guard, enforce_presence=True
+                    view,
+                    head_revision,
+                    guard,
+                    enforce_presence=True,
+                    base_signature=base_signature,
                 )
             except CheckError as error:
                 errors.append(
