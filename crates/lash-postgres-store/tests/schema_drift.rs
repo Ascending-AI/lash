@@ -1313,11 +1313,11 @@ async fn main_component_52_store_upgrades_cleanly_to_53() {
 /// A component-52 stamp that already carries one of the 53 indexes is divergence,
 /// not a migration source.
 ///
-/// The 52 -> 53 statements are bare `CREATE INDEX`, so a partially-applied
-/// generation would fail the DDL mid-transaction on a retry. The `pg_class` probe
-/// over `introduced_relations` is the only guard that turns that into a typed
-/// refusal naming the artifact, so it is proven with exactly one of the pair
-/// present.
+/// The 52 -> 53 statements are `CREATE INDEX IF NOT EXISTS`, so a retry over a
+/// partially-applied generation would silently no-op rather than fail. The
+/// `pg_class` probe over `introduced_relations` is the only guard that turns
+/// that half-applied shape into a typed refusal naming the artifact, so it is
+/// proven with exactly one of the pair present.
 #[tokio::test]
 async fn component_52_stamp_with_one_new_index_is_refused_as_divergence() {
     let Some(database_url) = database_url() else {
