@@ -69625,6 +69625,14 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::runtime::host::RuntimeHostConfig::process_engines` hands `ProcessEngineRegistry` to hosts (process-engine and work-driver implementers). Consumer class: the deterministic simulation harness -- this function is exercised in-repo at crates/lash-sim/src/runtime_boundaries.rs:75, crates/lash-sim/src/runtime_boundaries.rs:109, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
+symbol = "lash_core::runtime::process::engine::ProcessEngineRegistry::require"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::runtime::host::RuntimeHostConfig::process_engines` hands `ProcessEngineRegistry` to hosts (process-engine and work-driver implementers). Consumer class: core runtime internals and the `lash` facade's own host front door, which must resolve an engine kind the same way the session-manager start routes do -- this function is exercised in-repo at crates/lash-core/src/runtime/session_manager/process_runners/control.rs:500, crates/lash-core/src/runtime/session_manager/process_runners/runner.rs:63, crates/lash/src/tool_intent_ingress.rs:893, and no example reaches it, which is what keeps the row unused."
+
+[[api]]
 symbol = "lash_core::runtime::process::engine::ProcessEngineRegistry::with_engine"
 kind = "function"
 availability = "default+all-features"

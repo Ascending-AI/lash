@@ -772,7 +772,7 @@ impl ToolIntentIngress {
                 request.id = identity.replay_key.clone();
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
-                let registration = request.into_registration(None);
+                let registration = self.admit_engine_start(request.into_registration(None))?;
                 lash_core::ProcessCommand::Start {
                     registration,
                     observers,
@@ -860,6 +860,57 @@ impl ToolIntentIngress {
             .emit_recorded(request, scoped.controller())
             .await
             .map_err(Into::into)
+    }
+
+    /// Run the catalog-free part of the engine-admission gate (see
+    /// `ProcessEngineRegistry::require`) over a host-submitted start: refuse an
+    /// engine kind this host never registered, and stamp the engine identity on
+    /// the row. Nothing here reads mutable state, so it is safe to repeat when a
+    /// redrive re-submits the same identity.
+    ///
+    /// The gate's payload-validation part is deliberately not run here. It
+    /// judges a payload against the *starting session's* resolved tool catalog,
+    /// and ingress is a front door for a session this process is not running —
+    /// the catalog it could build is the host's declared surface, not that
+    /// session's. Validating against the wrong surface would risk a durable
+    /// refusal for a start the session can in fact run, which is worse than
+    /// deferring to `ProcessEngine::run`: run re-resolves the engine and
+    /// re-reads its inputs, so an invalid payload still cannot execute — it
+    /// fails retryably instead of being refused forever.
+    fn admit_engine_start(
+        &self,
+        registration: lash_core::ProcessRegistration,
+    ) -> crate::Result<lash_core::ProcessRegistration> {
+        let lash_core::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
+            return Ok(registration);
+        };
+        // `LashCore::env.core` deliberately carries no engines: every runtime
+        // construction site installs the plugin-contributed ones onto a clean
+        // clone (see `LashCoreBuilder::build`). Resolve the same way a session
+        // open does, or a plugin-contributed kind would be refused here as
+        // unregistered.
+        let engines = self.resolved_process_engines()?;
+        let engine = engines.require(kind)?;
+        let identity = engine.identity(payload);
+        Ok(registration.with_identity(identity))
+    }
+
+    /// The engine registry a session opened on this core would see: this core's
+    /// directly-wired engines plus the plugin-contributed ones.
+    fn resolved_process_engines(
+        &self,
+    ) -> crate::Result<lash_core::facade_support::ProcessEngineRegistry> {
+        let plugin_host = crate::core::build_plugin_host(
+            self.core.protocol_factory.as_ref(),
+            self.core.plugin_factories.as_ref(),
+            Vec::new(),
+        )?;
+        Ok(plugin_host
+            .install_process_engine_contributions(
+                self.core.env.core.clone(),
+                self.core.process_lifecycle_available,
+            )?
+            .process_engines)
     }
 
     fn process_registry(&self) -> crate::Result<std::sync::Arc<dyn lash_core::ProcessRegistry>> {

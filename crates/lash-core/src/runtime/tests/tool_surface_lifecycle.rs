@@ -1323,3 +1323,308 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing()
         "{message}"
     );
 }
+
+/// Engine that admits exactly one payload shape, so a start that skips
+/// [`crate::ProcessEngine::validate_start`] is observable.
+struct PayloadGatedEngine;
+
+const PAYLOAD_GATED_ENGINE_KIND: &str = "fig1488-payload-gated";
+
+#[async_trait::async_trait]
+impl crate::ProcessEngine for PayloadGatedEngine {
+    fn kind(&self) -> &'static str {
+        PAYLOAD_GATED_ENGINE_KIND
+    }
+
+    async fn validate_start(
+        &self,
+        _context: crate::ProcessEngineValidationContext<'_>,
+        payload: &serde_json::Value,
+        _env_spec: Option<&crate::ProcessExecutionEnvSpec>,
+    ) -> Result<(), crate::PluginError> {
+        if payload.get("program").and_then(serde_json::Value::as_str) == Some("known") {
+            return Ok(());
+        }
+        Err(crate::PluginError::Session(format!(
+            "unknown {PAYLOAD_GATED_ENGINE_KIND} program"
+        )))
+    }
+
+    async fn run(
+        &self,
+        _context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        Ok(crate::ProcessAwaitOutput::Success {
+            value: json!({"ran": true}),
+            control: None,
+        }
+        .into())
+    }
+
+    fn identity(&self, payload: &serde_json::Value) -> crate::ProcessIdentity {
+        crate::ProcessIdentity::new(PAYLOAD_GATED_ENGINE_KIND)
+            .with_label(payload.get("program").and_then(serde_json::Value::as_str))
+            .with_definition(Some(payload.clone()))
+    }
+}
+
+/// Shared fixture: a runtime whose only process engine is
+/// [`PayloadGatedEngine`], plus the registry the started rows land in.
+async fn payload_gated_engine_runtime(
+    session_id: &str,
+) -> (Arc<crate::TestLocalProcessRegistry>, LashRuntime) {
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let core = test_host_config()
+        .core
+        .with_process_engine(Arc::new(PayloadGatedEngine));
+    let env = crate::RuntimeEnvironment::builder(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+    .with_runtime_host_config(core)
+    .with_process_registry(registry.clone())
+    .build();
+    let runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(session_id),
+        None,
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("runtime with a payload-gated process engine");
+    (registry, runtime)
+}
+
+fn payload_gated_scope(session_id: &str) -> crate::ProcessOpScope<'_> {
+    crate::ProcessOpScope::new(named_turn_scope(
+        session_id,
+        &uuid::Uuid::new_v4().to_string(),
+    ))
+}
+
+fn payload_gated_request(
+    session_id: &str,
+    process_id: &str,
+    kind: &str,
+    payload: serde_json::Value,
+) -> crate::ProcessStartRequest {
+    crate::ProcessStartRequest::new(
+        process_id,
+        crate::ProcessInput::Engine {
+            kind: kind.to_string(),
+            payload,
+        },
+        crate::RecoveryDisposition::Rerunnable,
+        crate::ProcessOriginator::session(crate::SessionScope::new(session_id)),
+    )
+    .with_env_spec(crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        standard_test_policy(),
+    ))
+    .with_observers([session_id])
+}
+
+async fn started_row_identity(
+    registry: &Arc<crate::TestLocalProcessRegistry>,
+    process_id: &str,
+) -> crate::ProcessIdentity {
+    crate::ProcessRegistry::get_process(registry.as_ref(), process_id)
+        .await
+        .expect("read started row")
+        .expect("started row exists")
+        .identity
+}
+
+async fn no_rows_registered(registry: &Arc<crate::TestLocalProcessRegistry>, process_ids: &[&str]) {
+    for process_id in process_ids {
+        assert!(
+            crate::ProcessRegistry::get_process(registry.as_ref(), process_id)
+                .await
+                .expect("read refused row")
+                .is_none(),
+            "a refused start must journal and register nothing: {process_id}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_gate() {
+    let session_id = "recorded-intent-engine-session";
+    let (registry, runtime) = payload_gated_engine_runtime(session_id).await;
+    let service = runtime
+        .runtime_session_services()
+        .expect("runtime session services")
+        .model_tool_process_service();
+    let request = |process_id: &str, payload: serde_json::Value| {
+        payload_gated_request(session_id, process_id, PAYLOAD_GATED_ENGINE_KIND, payload)
+    };
+    let invalid_payload = json!({"program": "smuggled"});
+
+    // A leaf tool's recorded StartProcess declaration must be refused exactly
+    // as the direct request-shaped start is, before anything is journaled.
+    let direct_refusal = service
+        .start_from_request(
+            session_id,
+            request("direct-invalid", invalid_payload.clone()),
+            payload_gated_scope(session_id),
+        )
+        .await
+        .expect_err("a direct start must not admit an unvalidated engine payload");
+    let recorded_refusal = service
+        .start_from_recorded_intent(
+            session_id,
+            request("recorded-invalid", invalid_payload.clone()),
+            payload_gated_scope(session_id),
+        )
+        .await
+        .expect_err("a recorded-intent start must not admit an unvalidated engine payload");
+    for refusal in [&direct_refusal, &recorded_refusal] {
+        assert!(
+            matches!(refusal, crate::PluginError::Session(message)
+                if message == &format!("unknown {PAYLOAD_GATED_ENGINE_KIND} program")),
+            "both start paths owe the engine's own typed refusal: {refusal}"
+        );
+    }
+    assert_eq!(
+        std::mem::discriminant(&direct_refusal),
+        std::mem::discriminant(&recorded_refusal),
+        "the refusal shape must be identical across both start paths"
+    );
+    no_rows_registered(&registry, &["direct-invalid", "recorded-invalid"]).await;
+
+    // A valid recorded-intent start carries the engine identity stamp a direct
+    // start would.
+    let valid_payload = json!({"program": "known"});
+    let direct = service
+        .start_from_request(
+            session_id,
+            request("direct-valid", valid_payload.clone()),
+            payload_gated_scope(session_id),
+        )
+        .await
+        .expect("valid direct engine start");
+    let recorded = service
+        .start_from_recorded_intent(
+            session_id,
+            request("recorded-valid", valid_payload.clone()),
+            payload_gated_scope(session_id),
+        )
+        .await
+        .expect("valid recorded-intent engine start");
+    let expected = PayloadGatedEngine.identity(&valid_payload);
+    assert_eq!(started_row_identity(&registry, &direct.id).await, expected);
+    assert_eq!(
+        started_row_identity(&registry, &recorded.id).await,
+        expected,
+        "the recorded-intent start must carry the same engine identity stamp"
+    );
+}
+
+#[tokio::test]
+async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct_start() {
+    let session_id = "recorded-intent-unregistered-kind-session";
+    let (registry, runtime) = payload_gated_engine_runtime(session_id).await;
+    let service = runtime
+        .runtime_session_services()
+        .expect("runtime session services")
+        .model_tool_process_service();
+    let request = |process_id: &str| {
+        payload_gated_request(
+            session_id,
+            process_id,
+            "fig1488-never-registered",
+            json!({"program": "known"}),
+        )
+    };
+    for (route, error) in [
+        (
+            "direct",
+            service
+                .start_from_request(
+                    session_id,
+                    request("direct-unregistered"),
+                    payload_gated_scope(session_id),
+                )
+                .await
+                .expect_err("a direct start must not admit an unregistered engine kind"),
+        ),
+        (
+            "recorded",
+            service
+                .start_from_recorded_intent(
+                    session_id,
+                    request("recorded-unregistered"),
+                    payload_gated_scope(session_id),
+                )
+                .await
+                .expect_err("a recorded-intent start must not admit an unregistered engine kind"),
+        ),
+    ] {
+        assert!(
+            matches!(&error, crate::PluginError::Session(message)
+                if message == "process engine `fig1488-never-registered` is not configured"),
+            "{route} start owes the engine registry's typed miss: {error}"
+        );
+    }
+    no_rows_registered(&registry, &["direct-unregistered", "recorded-unregistered"]).await;
+}
+
+#[tokio::test]
+async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
+    let session_id = "recorded-intent-no-env-session";
+    let (registry, runtime) = payload_gated_engine_runtime(session_id).await;
+    let service = runtime
+        .runtime_session_services()
+        .expect("runtime session services")
+        .model_tool_process_service();
+    let valid_payload = json!({"program": "known"});
+    let no_env = |process_id: &str| {
+        let mut request = payload_gated_request(
+            session_id,
+            process_id,
+            PAYLOAD_GATED_ENGINE_KIND,
+            valid_payload.clone(),
+        );
+        request.env_spec = None;
+        request
+    };
+
+    // The routes deliberately differ, because a recorded start may only be
+    // validated against the env its own record carries. The direct route
+    // captures the live session env before the gate, so dropping the request's
+    // env spec changes nothing; the recorded route has nothing to validate
+    // against and refuses with the pre-existing typed error. That refusal is not
+    // new: before the gate moved ahead of the journal, the same message came out
+    // of `validate_process_registration` downstream — only one wrapping layer
+    // deeper, because it surfaced from registration validation rather than from
+    // the engine gate.
+    let direct_no_env = service
+        .start_from_request(
+            session_id,
+            no_env("direct-no-env"),
+            payload_gated_scope(session_id),
+        )
+        .await
+        .expect("a direct start captures the live session env for itself");
+    assert_eq!(
+        started_row_identity(&registry, &direct_no_env.id).await,
+        PayloadGatedEngine.identity(&valid_payload)
+    );
+    let recorded_no_env = service
+        .start_from_recorded_intent(
+            session_id,
+            no_env("recorded-no-env"),
+            payload_gated_scope(session_id),
+        )
+        .await
+        .expect_err("a recorded start carries its own env or none at all");
+    assert!(
+        matches!(&recorded_no_env, crate::PluginError::Session(message)
+            if message == "process `recorded-no-env` requires a captured execution env"),
+        "the no-env recorded refusal keeps the pre-existing typed shape: {recorded_no_env}"
+    );
+    no_rows_registered(&registry, &["recorded-no-env"]).await;
+}
