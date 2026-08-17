@@ -385,6 +385,21 @@ impl Store {
     }
 }
 
+/// Clamps an epoch-milliseconds bound to the `i64` range of the SQL time columns.
+///
+/// Every stored `*_at_ms` column is an `i64`, so a `u64` bound above `i64::MAX`
+/// is outside the representable range. Saturating keeps SQL comparisons ordered
+/// the way the in-memory predicates order them; a raw `as i64` cast wraps
+/// (`u64::MAX as i64 == -1`) and inverts every comparison, so a host-supplied
+/// huge cutoff would silently select the opposite row set from the in-memory
+/// backend.
+///
+/// Bounds are compared against stored `i64` timestamps, so saturating is exact
+/// for every timestamp below `i64::MAX`.
+fn clamp_epoch_ms(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
 fn process_sqlite_error(err: rusqlite::Error) -> lash_core::PluginError {
     lash_core::PluginError::Session(err.to_string())
 }

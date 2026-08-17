@@ -1042,13 +1042,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .bind(definition)
         .bind(filter.caused_by_occurrence_id.as_deref())
         .bind(filter.caused_by_subscription_id.as_deref())
-        .bind(filter.created_at_start_ms.map(|value| value as i64))
-        .bind(
-            filter
-                .created_at_end_ms
-                .filter(|value| *value <= i64::MAX as u64)
-                .map(|value| value as i64),
-        )
+        .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
+        .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
         .fetch_all(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?;

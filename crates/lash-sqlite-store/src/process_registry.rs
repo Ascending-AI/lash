@@ -913,11 +913,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 definition,
                                 filter.caused_by_occurrence_id,
                                 filter.caused_by_subscription_id,
-                                filter.created_at_start_ms.map(|value| value as i64),
-                                filter
-                                    .created_at_end_ms
-                                    .filter(|value| *value <= i64::MAX as u64)
-                                    .map(|value| value as i64),
+                                filter.created_at_start_ms.map(crate::clamp_epoch_ms),
+                                filter.created_at_end_ms.map(crate::clamp_epoch_ms),
                             ],
                             |row| row.get::<_, String>(0),
                         )
