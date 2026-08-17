@@ -68,6 +68,7 @@ pub enum RuntimeErrorCode {
     AwaitEventUnknownOrRevoked,
     AwaitEventUnsupported,
     CancelStartGateUnavailable,
+    EffectGroupUnsupported,
     EffectJournalRetirementUnsupported,
     InvalidAwaitEventSessionId,
     InvalidAwaitEventWaitIdentity,
@@ -259,6 +260,7 @@ impl RuntimeErrorCode {
             Self::AwaitEventUnknownOrRevoked => "await_event_unknown_or_revoked",
             Self::AwaitEventUnsupported => "await_event_unsupported",
             Self::CancelStartGateUnavailable => "cancel_start_gate_unavailable",
+            Self::EffectGroupUnsupported => "effect_group_unsupported",
             Self::EffectJournalRetirementUnsupported => "effect_journal_retirement_unsupported",
             Self::InvalidAwaitEventSessionId => "invalid_await_event_session_id",
             Self::InvalidAwaitEventWaitIdentity => "invalid_await_event_wait_identity",
@@ -465,6 +467,7 @@ impl RuntimeErrorCode {
                 | Self::AwaitEventKeySign
                 | Self::AwaitEventUnknownOrRevoked
                 | Self::AwaitEventUnsupported
+                | Self::EffectGroupUnsupported
                 | Self::EffectJournalRetirementUnsupported
                 | Self::InvalidAwaitEventSessionId
                 | Self::InvalidAwaitEventWaitIdentity
@@ -597,6 +600,7 @@ impl RuntimeErrorCode {
             "await_event_unknown_or_revoked" => Self::AwaitEventUnknownOrRevoked,
             "await_event_unsupported" => Self::AwaitEventUnsupported,
             "cancel_start_gate_unavailable" => Self::CancelStartGateUnavailable,
+            "effect_group_unsupported" => Self::EffectGroupUnsupported,
             "effect_journal_retirement_unsupported" => Self::EffectJournalRetirementUnsupported,
             "invalid_await_event_session_id" => Self::InvalidAwaitEventSessionId,
             "invalid_await_event_wait_identity" => Self::InvalidAwaitEventWaitIdentity,
@@ -962,6 +966,7 @@ mod tests {
             | RuntimeErrorCode::AwaitEventKeySign
             | RuntimeErrorCode::AwaitEventUnknownOrRevoked
             | RuntimeErrorCode::AwaitEventUnsupported
+            | RuntimeErrorCode::EffectGroupUnsupported
             | RuntimeErrorCode::EffectJournalRetirementUnsupported
             | RuntimeErrorCode::InvalidAwaitEventSessionId
             | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
@@ -1110,6 +1115,7 @@ mod tests {
             RuntimeErrorCode::AwaitEventUnknownOrRevoked,
             RuntimeErrorCode::AwaitEventUnsupported,
             RuntimeErrorCode::CancelStartGateUnavailable,
+            RuntimeErrorCode::EffectGroupUnsupported,
             RuntimeErrorCode::EffectJournalRetirementUnsupported,
             RuntimeErrorCode::InvalidAwaitEventSessionId,
             RuntimeErrorCode::InvalidAwaitEventWaitIdentity,

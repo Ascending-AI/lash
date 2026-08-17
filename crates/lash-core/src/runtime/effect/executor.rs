@@ -783,6 +783,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         let RuntimeEffectEnvelope {
             invocation,
             command,
+            group,
         } = envelope;
         match command {
             RuntimeEffectCommand::Trigger { command } => {
@@ -792,6 +793,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 self.execute(RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 })
                 .await
             }

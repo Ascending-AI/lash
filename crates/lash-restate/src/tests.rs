@@ -4154,6 +4154,7 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
         let execution = restate_effect_execution(RuntimeEffectEnvelope {
             invocation: runtime_invocation(kind, "classification"),
             command,
+            group: None,
         });
         let actual = match execution {
             RestateEffectExecution::DirectProcess { .. } => "direct_process",

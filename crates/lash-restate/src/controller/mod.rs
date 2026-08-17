@@ -920,6 +920,7 @@ async fn execute_restate_journaled_effect(
     let RuntimeEffectEnvelope {
         invocation,
         command,
+        group,
     } = envelope;
     match command {
         RuntimeEffectCommand::Trigger { command } => {
@@ -930,6 +931,7 @@ async fn execute_restate_journaled_effect(
                 .execute(RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 })
                 .await
         }
@@ -1363,6 +1365,7 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
     let RuntimeEffectEnvelope {
         invocation,
         command,
+        group,
     } = envelope;
     match command {
         RuntimeEffectCommand::Process { command }
@@ -1385,6 +1388,7 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
                 envelope: RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 },
             }
         }
@@ -1392,6 +1396,7 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,
+                group,
             },
         },
         RuntimeEffectCommand::Sleep { duration_ms } => RestateEffectExecution::Timer {
@@ -1416,6 +1421,7 @@ pub(crate) fn restate_effect_execution(envelope: RuntimeEffectEnvelope) -> Resta
                 envelope: RuntimeEffectEnvelope {
                     invocation,
                     command,
+                    group,
                 },
             }
         }

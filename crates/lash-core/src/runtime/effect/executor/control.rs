@@ -9,6 +9,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
+use super::super::group::{
+    EffectGroupHandle, GroupSettlement, LoserDisposition, RuntimeEffectGroup,
+};
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor};
 
 // =============================================================================
@@ -974,6 +977,98 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>;
+
+    /// Whether this controller implements durable child completion and
+    /// first-settlement wake (FIG-1416).
+    ///
+    /// Deliberately a different question from
+    /// [`supports_concurrent_effects`](Self::supports_concurrent_effects), which
+    /// asks "may one coordinator issue overlapping *unstructured*
+    /// `execute_effect` calls?". This asks "can this host run a *structured
+    /// group* of children durably and tell me, durably, which settled first?".
+    /// A single-journal-context engine answers no to the first and yes to the
+    /// second — Restate does.
+    ///
+    /// This is checked once at deployment validation rather than per call: the
+    /// group path is the only tool-batch path, so a controller answering `false`
+    /// has no batch path at all, and a host wiring one should learn that at
+    /// startup instead of mid-turn on the first `Promise.all`. It gates
+    /// *admission*, not dispatch.
+    ///
+    /// A host may answer `true` only if it can also supply `'static` executors
+    /// for the children: a child must be able to outlive its caller to honor
+    /// [`LoserDisposition::RunToCompletion`], and
+    /// [`EffectHost::scoped_static`] is explicitly not universally available.
+    /// The two capabilities are one question and must not drift apart.
+    fn supports_effect_groups(&self) -> bool {
+        false
+    }
+
+    /// Open — or replay — a group of independently journaled child effects.
+    ///
+    /// Returns once the group is durably recorded, **not** when a child settles.
+    ///
+    /// `executors` is a per-child *factory* rather than a borrowed executor
+    /// precisely because children must outlive the caller's future under
+    /// [`LoserDisposition::RunToCompletion`] — the borrow-scoped
+    /// `RuntimeEffectLocalExecutor<'_>` taken by
+    /// [`execute_effect`](Self::execute_effect) carries the one lifetime this
+    /// contract exists to break.
+    ///
+    /// The default errors loudly rather than mis-executing a group, matching
+    /// [`AwaitEventResolver::cancel_await_events_for_session`]: an out-of-tree
+    /// controller that has not implemented groups fails closed with a named
+    /// error.
+    async fn open_effect_group(
+        &self,
+        _group: RuntimeEffectGroup,
+        _executors: Arc<dyn Fn(usize) -> RuntimeEffectLocalExecutor<'static> + Send + Sync>,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::EffectGroupUnsupported,
+            "this effect controller does not implement durable effect groups",
+        ))
+    }
+
+    /// Await the next settlement in the group's durable settlement order.
+    ///
+    /// The obligation, stated engine-portably: **settlement `n` of a group is a
+    /// durable fact, and every replay observes the same child at position `n`.**
+    /// A host must not re-derive position `n` by racing live children once `n`
+    /// has been decided. How the fact is stored is the host's business — a SQL
+    /// row, a Restate journal entry, a Temporal history event.
+    ///
+    /// Settlements are served by *rank* — the child holding the
+    /// `(consumed + 1)`-th smallest sequence — never by literal sequence
+    /// equality, because sequences are monotonic without being gapless.
+    async fn await_next_settlement(
+        &self,
+        _handle: &EffectGroupHandle,
+        _cancel: CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::EffectGroupUnsupported,
+            "this effect controller does not implement durable effect groups",
+        ))
+    }
+
+    /// Release the caller's interest in the group.
+    ///
+    /// Under [`LoserDisposition::RunToCompletion`] the remaining children keep
+    /// running under host ownership and journal their own settlements; the host
+    /// owns their redrive. Under [`LoserDisposition::Cancel`] the host cancels
+    /// them and journals each cancellation as that child's terminal. Either way
+    /// the caller may not observe further settlements.
+    async fn close_effect_group(
+        &self,
+        _handle: EffectGroupHandle,
+        _disposition: LoserDisposition,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::EffectGroupUnsupported,
+            "this effect controller does not implement durable effect groups",
+        ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -16,6 +16,7 @@ use crate::{
 };
 
 use super::executor::RuntimeEffectControllerError;
+use super::group::{EffectGroupMembership, GroupWakePolicy};
 
 const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 
@@ -273,6 +274,15 @@ pub enum RuntimeSubject {
 pub struct RuntimeEffectEnvelope {
     pub invocation: RuntimeInvocation,
     pub command: RuntimeEffectCommand,
+    /// This effect's membership in a durable effect group, when it is a group
+    /// child (FIG-1416).
+    ///
+    /// Optional and **omitted when absent**, so an ungrouped effect's canonical
+    /// encoding stays byte-identical to what it was before groups existed and
+    /// no pre-existing recorded `envelope_hash` is invalidated. Boxed to keep
+    /// the envelope inside its measured size budget below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<Box<EffectGroupMembership>>,
 }
 
 // Measured 600 B on rustc 1.97.0, x86_64-unknown-linux-gnu after the
@@ -298,7 +308,30 @@ impl RuntimeEffectEnvelope {
         Ok(Self {
             invocation,
             command,
+            group: None,
         })
+    }
+
+    /// Marks this envelope as child `position` of the group `group_key` under
+    /// `wake`, for effect-host implementors building a
+    /// [`RuntimeEffectGroup`](super::group::RuntimeEffectGroup).
+    ///
+    /// The membership folds into [`stable_hash`](Self::stable_hash), so a replay
+    /// whose wake rule or position drifted is refused by the existing
+    /// envelope-hash fence rather than executed under the new rule.
+    #[must_use]
+    pub fn in_effect_group(
+        mut self,
+        group_key: impl Into<String>,
+        position: usize,
+        wake: GroupWakePolicy,
+    ) -> Self {
+        self.group = Some(Box::new(EffectGroupMembership {
+            group_key: group_key.into(),
+            position,
+            wake,
+        }));
+        self
     }
 
     /// Hashes the canonical envelope for effect-host implementors so replay comparison is stable

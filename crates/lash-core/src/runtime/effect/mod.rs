@@ -3,6 +3,7 @@ mod await_events;
 pub mod effect_replay_driver;
 mod envelope;
 pub(crate) mod executor;
+mod group;
 mod inline_host;
 mod outcome;
 pub mod promise_semantics;
@@ -23,6 +24,10 @@ pub use executor::{
     ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
     ScopedEffectController, SegmentProgress,
+};
+pub use group::{
+    EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserDisposition,
+    RuntimeEffectGroup,
 };
 pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;
