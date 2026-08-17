@@ -1404,6 +1404,56 @@ mod tests {
             .expect("the current format version validates");
     }
 
+    /// When an older build reads continuation bytes produced by a newer build that
+    /// carries enum variants unknown to the older build (e.g. newly minted error brands),
+    /// the version mismatch must be caught before serde attempts to deserialize
+    /// variant names into unknown enum values.
+    #[test]
+    fn a_continuation_one_format_version_ahead_with_unknown_variant_is_refused_as_version_mismatch()
+    {
+        let mut heap = Heap::default();
+        let error = heap
+            .allocate_error(ErrorKind::EffectError, "boom".to_string(), None, None)
+            .expect("EffectError");
+        let mut continuation = empty_continuation(heap);
+        continuation.slots = vec![Some(error)];
+        continuation.projected_slots = vec![false];
+        let bytes = serde_json::to_vec(&continuation).expect("serialize continuation");
+        let mut future_bytes = bytes.clone();
+        let effect_error_pos = future_bytes
+            .windows(b"EffectError".len())
+            .position(|window| window == b"EffectError")
+            .expect("find EffectError");
+        future_bytes[effect_error_pos..effect_error_pos + b"EffectError".len()]
+            .copy_from_slice(b"FutureError");
+        let format_version_needle = b"\"format_version\":";
+        let version_pos = future_bytes
+            .windows(format_version_needle.len())
+            .position(|window| window == format_version_needle)
+            .expect("find format_version");
+        let version_val_pos = version_pos + format_version_needle.len();
+        assert_eq!(
+            future_bytes[version_val_pos],
+            b'0' + VM_CONTINUATION_FORMAT_VERSION as u8
+        );
+        future_bytes[version_val_pos] = b'0' + (VM_CONTINUATION_FORMAT_VERSION + 1) as u8;
+
+        let decode_error = serde_json::from_slice::<VmContinuation>(&future_bytes).expect_err(
+            "newer version with unknown variant must be refused with FormatVersionMismatch",
+        );
+        let error_msg = decode_error.to_string();
+        let next_version = VM_CONTINUATION_FORMAT_VERSION + 1;
+        assert!(
+            error_msg.contains(&next_version.to_string())
+                && error_msg.contains(&VM_CONTINUATION_FORMAT_VERSION.to_string()),
+            "the decode error must name both versions: {decode_error}"
+        );
+        assert!(
+            !error_msg.contains("unknown variant"),
+            "the decode error must not be misreported as an unknown variant: {decode_error}"
+        );
+    }
+
     #[test]
     fn continuation_heap_round_trip_is_canonical_and_rejects_cycles() {
         // A cyclic object used to validate "by identity" and resume. Under the

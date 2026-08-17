@@ -557,3 +557,23 @@ async fn a_rejected_concat_leaves_the_accumulator_untouched() {
         "a rejected extension must leave the state byte-identical"
     );
 }
+
+#[test]
+fn a_continuation_with_integer_out_of_range_format_version_is_refused_as_version_mismatch() {
+    let mut raw: serde_json::Value =
+        serde_json::from_str(AUTHORED_CONTINUATION).expect("parse authored continuation");
+    raw["format_version"] = serde_json::json!(4_294_967_296_u64);
+
+    let decode_error = serde_json::from_value::<VmContinuation>(raw)
+        .expect_err("out-of-range format version must be refused as version mismatch");
+    let error_msg = decode_error.to_string();
+    assert!(
+        error_msg.contains("4294967296")
+            && error_msg.contains(&VM_CONTINUATION_FORMAT_VERSION.to_string()),
+        "the decode error must name both versions: {decode_error}"
+    );
+    assert!(
+        !error_msg.contains("expected u32"),
+        "the decode error must be an explicit refusal, not a generic serde type error: {decode_error}"
+    );
+}

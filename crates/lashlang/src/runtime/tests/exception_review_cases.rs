@@ -390,13 +390,12 @@ async fn a_v2_shaped_continuation_fails_closed() {
     .await;
 
     let mut shaped = serde_json::to_value(&live).expect("wire");
-    shaped["format_version"] = serde_json::json!(2);
     let object = shaped.as_object_mut().expect("object");
     object.remove("handler_stack");
     object.remove("finally_stack");
     let error = serde_json::from_value::<VmContinuation>(shaped)
         .expect_err("a v2-shaped continuation must be rejected");
-    assert!(error.to_string().contains("handler_stack"), "{error}");
+    assert_eq!(error.to_string(), "missing field `handler_stack`");
 
     let mut versioned = serde_json::to_value(&live).expect("wire");
     versioned["format_version"] = serde_json::json!(2);
