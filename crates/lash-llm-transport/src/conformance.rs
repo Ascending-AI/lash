@@ -930,30 +930,46 @@ fn assert_replay_round_trip(
 }
 
 /// A fixture's declared wire shape must be the same bytes the replayed part
-/// carries: either the payload string itself, or the JSON document that string
-/// encodes. This keeps the declaration honest about shape without letting it
-/// drift into asserting a payload the part never carried.
+/// carries, and the payload's own encoding decides which shape is legitimate:
+///
+/// * A payload that encodes a JSON document (an object or array — the Chat
+///   Completions `reasoning.encrypted` detail) MUST be declared as that
+///   document. Declaring `Value::String(payload)` instead would re-admit the
+///   very corruption this guard exists to catch: the builder ships the document
+///   double-encoded as JSON text and the fixture blesses it.
+/// * Any other payload is opaque bytes the dialect carries as text, so it MUST
+///   be declared as exactly that string. Provider signatures qualify — raw
+///   newlines and bare ids are not valid JSON, so they never parse.
+///
+/// Either way the declaration cannot drift into asserting a payload the part
+/// never carried, and it cannot silently pick the wrong shape.
 fn assert_declared_shape_carries_payload(
     who: &str,
     scenario: Scenario,
     index: usize,
     expectation: &ReplayItemExpectation,
 ) {
-    match &expectation.replayed_wire_value {
-        Value::String(declared) => assert_eq!(
+    let encoded_document = serde_json::from_str::<Value>(&expectation.payload)
+        .ok()
+        .filter(|encoded| !encoded.is_string());
+    match (&expectation.replayed_wire_value, encoded_document) {
+        (Value::String(_), Some(document)) => panic!(
+            "[{who}] {scenario:?}: item {index}'s replay payload encodes the JSON document \
+             {document}, so the fixture must declare that document as the replayed wire shape; \
+             declaring a JSON string double-encodes it and would bless a builder that ships the \
+             document as its own serialization"
+        ),
+        (Value::String(declared), None) => assert_eq!(
             declared, &expectation.payload,
             "[{who}] {scenario:?}: item {index}'s declared wire string must be the replay payload \
              itself"
         ),
-        document => {
-            let encoded = serde_json::from_str::<Value>(&expectation.payload).ok();
-            assert_eq!(
-                encoded.as_ref(),
-                Some(document),
-                "[{who}] {scenario:?}: item {index} declares a JSON document wire shape, so its \
-                 replay payload must be exactly the bytes that document encodes"
-            );
-        }
+        (document, encoded_document) => assert_eq!(
+            encoded_document.as_ref(),
+            Some(document),
+            "[{who}] {scenario:?}: item {index} declares a JSON document wire shape, so its replay \
+             payload must be exactly the bytes that document encodes"
+        ),
     }
 }
 
@@ -1045,5 +1061,75 @@ fn as_text(part: &LlmOutputPart) -> Option<&str> {
     match part {
         LlmOutputPart::Text { text, .. } => Some(text.as_str()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod fixture_shape_guard_tests {
+    use super::{
+        ReplayItemExpectation, Scenario, assert_declared_shape_carries_payload,
+        strong_replay_payload,
+    };
+    use serde_json::json;
+
+    fn check(expectation: &ReplayItemExpectation) {
+        assert_declared_shape_carries_payload(
+            "guard-test",
+            Scenario::ToolCallReplayRoundTrip,
+            0,
+            expectation,
+        );
+    }
+
+    /// The double-wrong case: a builder that ships a replayed document as its
+    /// own JSON-string serialization, blessed by a fixture that declares the
+    /// string. Anchoring the guard to the payload alone accepted it, because a
+    /// JSON-text payload satisfies both the string and the document branch.
+    #[test]
+    #[should_panic(expected = "must declare that document as the replayed wire shape")]
+    fn declaring_a_document_payload_as_a_json_string_is_rejected() {
+        let detail = json!({"type": "reasoning.encrypted", "id": "call_0", "data": "opaque"});
+        check(&ReplayItemExpectation::new(
+            detail.to_string(),
+            "/messages/0/reasoning_details/0",
+            json!(detail.to_string()),
+        ));
+    }
+
+    #[test]
+    fn declaring_the_document_itself_is_accepted() {
+        let detail = json!({"type": "reasoning.encrypted", "id": "call_0", "data": "opaque"});
+        check(&ReplayItemExpectation::new(
+            detail.to_string(),
+            "/messages/0/reasoning_details/0",
+            detail.clone(),
+        ));
+    }
+
+    /// Opaque replay bytes are not JSON, so the string declaration stays legal:
+    /// provider signatures carry raw newlines and item ids are bare words.
+    #[test]
+    fn opaque_byte_payloads_stay_declarable_as_strings() {
+        let signature = strong_replay_payload("guard/signature-0");
+        check(&ReplayItemExpectation::new(
+            signature.clone(),
+            "/messages/0/content/0/signature",
+            json!(signature),
+        ));
+        check(&ReplayItemExpectation::new(
+            "fc_conformance_0",
+            "/input/0/id",
+            json!("fc_conformance_0"),
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "declared wire string must be the replay payload itself")]
+    fn declaring_a_different_string_than_the_payload_is_rejected() {
+        check(&ReplayItemExpectation::new(
+            strong_replay_payload("guard/signature-0"),
+            "/messages/0/content/0/signature",
+            json!("something else"),
+        ));
     }
 }
