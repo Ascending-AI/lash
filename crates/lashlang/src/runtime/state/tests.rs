@@ -637,6 +637,54 @@ fn a_snapshot_one_version_behind_is_refused_by_the_fence() {
     );
 }
 
+/// When an older build reads snapshot bytes produced by a newer build that
+/// carries enum variants unknown to the older build (e.g. newly minted error brands),
+/// the version mismatch must be caught during the raw-byte validation pass before
+/// serde attempts to deserialize variant names into unknown enum values.
+#[test]
+fn a_snapshot_one_version_ahead_with_unknown_variant_is_refused_as_version_mismatch() {
+    let mut heap = Heap::default();
+    let error = heap
+        .allocate_error(ErrorKind::EffectError, "boom".to_string(), None, None)
+        .expect("EffectError");
+    let mut roots = Record::new();
+    roots.insert("rejection".to_string(), error);
+    let snapshot = Snapshot {
+        globals: Record::new(),
+        runtime_globals: roots,
+        heap,
+        reference_semantics: true,
+    };
+    let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
+    let mut future_bytes = bytes.clone();
+    let effect_error_pos = future_bytes
+        .windows(b"EffectError".len())
+        .position(|window| window == b"EffectError")
+        .expect("find EffectError");
+    future_bytes[effect_error_pos..effect_error_pos + b"EffectError".len()]
+        .copy_from_slice(b"FutureError");
+    let version_pos = future_bytes
+        .windows(b"version".len())
+        .position(|window| window == b"version")
+        .expect("find version");
+    let version_val_pos = version_pos + b"version".len();
+    assert_eq!(
+        future_bytes[version_val_pos],
+        LASHLANG_SNAPSHOT_VERSION as u8
+    );
+    future_bytes[version_val_pos] = (LASHLANG_SNAPSHOT_VERSION + 1) as u8;
+
+    let error = Snapshot::from_canonical_bytes(&future_bytes)
+        .expect_err("newer version with unknown variant must be refused with VersionMismatch");
+    assert_eq!(
+        error,
+        SnapshotDecodeError::VersionMismatch {
+            expected: LASHLANG_SNAPSHOT_VERSION,
+            found: LASHLANG_SNAPSHOT_VERSION + 1,
+        }
+    );
+}
+
 /// A minted error brand ships on the wire *by name*, which is why adding one is
 /// a format bump and not an additive change.
 ///
