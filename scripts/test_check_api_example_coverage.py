@@ -4,13 +4,46 @@ import unittest
 
 from check_api_example_coverage import (
     ApiItem,
+    EXAMPLE_TEST_TIER_RATCHET,
+    _IMPORTED_TYPES,
+    _SCOPE_BLOCKS,
+    _SOURCE_LINES,
+    _ANCHOR_SCOPES,
+    _RESOLVED_RECEIVERS,
+    _LITERAL_STACKS,
+    _TYPE_FACTS,
+    anchor_crate,
+    anchor_scope,
+    anchor_tier,
     api_items,
+    binds_receiver,
+    cfg_gates_test,
+    declared_test_modules,
     doc_hidden,
+    example_test_tier_errors,
+    internal_consumer_errors,
+    relocation_key,
+    removal_verdict_errors,
+    scope_blocks,
+    test_module_paths,
+    test_path,
+    test_regions,
+    tier_breakdown,
     impossible_facade_migration,
     item_errors,
     lash_core_surface,
     machine_local_path,
+    declaration_anchor_defect,
+    declaring_crates,
+    import_anchor_defect,
+    member_anchor_defect,
+    member_containers,
+    member_leaf_owners,
+    member_owners,
+    prose_citation_defect,
+    qualifies_member,
     missing_repository_path,
+    module_directory,
     perfunctory_exercise,
     primary_path,
     stale_disposition_reason,
@@ -49,7 +82,7 @@ def fixture():
     return {
         "root": 0,
         "index": {
-            "0": item("lash_core", "public", {"module": {"items": [1, 20]}}, 0),
+            "0": item("lash_core", "public", {"module": {"items": [1, 20, 30]}}, 0),
             # ── root export ──
             "1": item(
                 "Handle",
@@ -82,6 +115,15 @@ def fixture():
             # ── public module nothing reachable mentions ──
             "20": item("internals", "public", {"module": {"items": [21]}}, 20),
             "21": item("Unreached", "public", {"struct": {"kind": "unit", "impls": []}}, 21),
+            # ── doc-hidden support module: the internal cross-crate API ──
+            "30": item(
+                "support",
+                "public",
+                {"module": {"items": [31]}},
+                30,
+                attrs=["#[doc(hidden)]"],
+            ),
+            "31": item("Bridged", "public", {"struct": {"kind": "unit", "impls": []}}, 31),
         },
         "paths": {
             # `Handle` is exported as `lash_core::Handle` but defined in `h`, so
@@ -89,22 +131,30 @@ def fixture():
             "2": {"path": ["lash_core", "h", "Handle"], "kind": "struct"},
             "6": {"path": ["lash_core", "private_mod", "Handed"], "kind": "struct"},
             "10": {"path": ["lash_core", "private_mod", "Hidden"], "kind": "struct"},
+            "31": {"path": ["lash_core", "bridge", "Bridged"], "kind": "struct"},
         },
     }
 
 
 class DocHiddenTests(unittest.TestCase):
-    def test_recognizes_both_recorded_attribute_shapes(self):
+    def test_recognizes_every_recorded_attribute_shape(self):
         self.assertTrue(doc_hidden({"attrs": ["#[doc(hidden)]"]}))
         self.assertTrue(doc_hidden({"attrs": ["#[doc( hidden )]"]}))
         self.assertTrue(doc_hidden({"attrs": [{"doc_hidden": None}]}))
         self.assertFalse(doc_hidden({"attrs": ["#[doc = \"hidden costs\"]"]}))
         self.assertFalse(doc_hidden({}))
 
+    def test_recognizes_the_unparsed_wrapper_this_rustdoc_emits(self):
+        # The shape that made the gated-module guard answer "no" to every item,
+        # including facade_support itself: the attribute is a *value*, not a key.
+        self.assertTrue(doc_hidden({"attrs": [{"other": "#[doc(hidden)]"}]}))
+        self.assertFalse(doc_hidden({"attrs": [{"other": "#[inline]"}]}))
+        self.assertFalse(doc_hidden({"attrs": [{"other": None}]}))
+
 
 class CoreSurfaceTests(unittest.TestCase):
     def setUp(self):
-        self.surface = lash_core_surface(fixture(), False)
+        self.surface = lash_core_surface(fixture(), False, {"support"})
 
     def test_names_the_root_export_and_its_members(self):
         self.assertIn(("lash_core::Handle", "struct"), self.surface)
@@ -117,9 +167,31 @@ class CoreSurfaceTests(unittest.TestCase):
         self.assertIn(("lash_core::private_mod::Handed::slot", "field"), self.surface)
         self.assertIn(("lash_core::private_mod::Handed::callable", "function"), self.surface)
 
-    def test_excludes_doc_hidden_members_and_what_only_they_expose(self):
-        self.assertNotIn(("lash_core::Handle::hidden_handed", "function"), self.surface)
-        self.assertNotIn(("lash_core::private_mod::Hidden", "struct"), self.surface)
+    def test_includes_doc_hidden_members_and_what_they_expose(self):
+        # FIG-1223: hidden is a documentation choice, not a ledger exemption. A
+        # doc-hidden member and the type only it hands out both carry rows.
+        self.assertIn(("lash_core::Handle::hidden_handed", "function"), self.surface)
+        self.assertIn(("lash_core::private_mod::Hidden", "struct"), self.surface)
+
+    def test_walks_a_gated_doc_hidden_support_module(self):
+        self.assertIn(("lash_core::support::Bridged", "struct"), self.surface)
+        self.assertEqual(
+            self.surface[("lash_core::support::Bridged", "struct")],
+            "lash_core::bridge::Bridged",
+        )
+
+    def test_rejects_a_doc_hidden_root_module_missing_from_the_gated_list(self):
+        # The amnesty channel: 304 paths that no row answered for, because one
+        # attribute took them out of the gate entirely.
+        with self.assertRaises(AssertionError) as raised:
+            lash_core_surface(fixture(), False)
+        self.assertIn("support", str(raised.exception))
+        self.assertIn("gated_core_modules", str(raised.exception))
+
+    def test_rejects_a_gated_module_the_crate_no_longer_exports(self):
+        with self.assertRaises(AssertionError) as raised:
+            lash_core_surface(fixture(), False, {"support", "retired_support"})
+        self.assertIn("retired_support", str(raised.exception))
 
     def test_excludes_unreached_public_module_internals(self):
         self.assertEqual(
@@ -737,6 +809,1000 @@ class FacadeMigrationTests(unittest.TestCase):
             "crates/lash-core/src/runtime/effect/envelope.rs:435."
         )
         self.assertIsNone(self.migration(reason))
+
+
+class TestRegionTests(unittest.TestCase):
+    """Where an example's host code stops and its tests begin."""
+
+    SOURCE = [
+        "fn host() {}",              # 1
+        "#[cfg(test)]",              # 2
+        "mod tests {",               # 3
+        "    fn probe() {",          # 4
+        "    }",                     # 5
+        "}",                         # 6
+        "fn more_host() {}",         # 7
+        "#[cfg(any(test, feature = \"testing\"))]",  # 8
+        "mod fixtures {",            # 9
+        "}",                         # 10
+    ]
+
+    def test_spans_a_test_module_by_brace_depth(self):
+        self.assertEqual(test_regions(self.SOURCE), [(2, 6), (8, 10)])
+
+    def test_leaves_host_code_outside_every_region(self):
+        regions = test_regions(self.SOURCE)
+        self.assertFalse(any(start <= 1 <= end for start, end in regions))
+        self.assertFalse(any(start <= 7 <= end for start, end in regions))
+
+
+class OutOfLineTestModuleTests(unittest.TestCase):
+    """`#[cfg(test)] mod x;` puts the gate on the declaration, not on the file."""
+
+    SOURCE = [
+        "use crate::thing::Thing;",
+        "",
+        "#[cfg(test)]",
+        "mod support;",
+        "",
+        "#[cfg(test)]",
+        "#[allow(clippy::unwrap_used)]",
+        "pub(crate) mod probes;",
+        "",
+        "mod shipped;",
+        "",
+        "#[cfg(feature = \"testing\")]",
+        "mod fixtures;",
+        "",
+        "#[cfg(test)]",
+        "mod inline {",
+        "    mod nested;",
+        "}",
+    ]
+
+    def test_reads_every_cfg_predicate_that_gates_on_tests(self):
+        self.assertTrue(cfg_gates_test("#[cfg(test)]"))
+        self.assertTrue(cfg_gates_test('#[cfg(all(test, feature = "testing"))]'))
+        self.assertTrue(cfg_gates_test('#[cfg(any(test, feature = "sim"))]'))
+        self.assertTrue(cfg_gates_test('#[cfg(all(any(test, miri), unix))]'))
+        # A prefix match read `all(test, ...)` as shipped code, which is how a
+        # provider's conformance route counted as another crate's src/.
+        self.assertFalse(cfg_gates_test("#[cfg(not(test))]"))
+        self.assertFalse(cfg_gates_test("#[cfg(all(not(test), unix))]"))
+        self.assertFalse(cfg_gates_test('#[cfg(feature = "testing")]'))
+        self.assertFalse(cfg_gates_test("fn test_helper() {}"))
+
+    def test_reads_the_modules_a_test_gate_declares(self):
+        self.assertEqual(
+            declared_test_modules(self.SOURCE), [("support", None), ("probes", None)]
+        )
+
+    def test_leaves_shipped_and_feature_gated_declarations_alone(self):
+        declared = [name for name, _ in declared_test_modules(self.SOURCE)]
+        self.assertNotIn("shipped", declared)
+        self.assertNotIn("fixtures", declared)
+
+    def test_reads_a_gate_and_declaration_written_on_one_line(self):
+        self.assertEqual(
+            declared_test_modules(["#[cfg(test)] mod inline_probe;"]),
+            [("inline_probe", None)],
+        )
+
+    def test_reads_a_path_attribute_as_the_modules_real_location(self):
+        self.assertEqual(
+            declared_test_modules(
+                [
+                    "#[cfg(test)]",
+                    '#[path = "core_conversions_tests.rs"]',
+                    "mod core_conversions_tests;",
+                ]
+            ),
+            [("core_conversions_tests", "core_conversions_tests.rs")],
+        )
+
+    def test_forgets_a_path_attribute_that_belonged_to_shipped_code(self):
+        declared = declared_test_modules(
+            ['#[path = "generated/shipped.rs"]', "mod shipped;", "#[cfg(test)]", "mod probes;"]
+        )
+        self.assertEqual(declared, [("probes", None)])
+
+    def test_tiers_the_three_files_that_read_as_shipped_source(self):
+        # Each is test code only by its declaration, and each was `crate-src`
+        # before this rule: an `all(test, ...)` gate and two `#[path]` modules.
+        for path in (
+            "crates/lash-provider-google/src/conformance_route.rs",
+            "crates/lash-remote-protocol/src/core_conversions_tests.rs",
+            "crates/lash-postgres-store/src/postgres/checkpoint_depth_tests.rs",
+        ):
+            self.assertTrue(test_path(path), path)
+            self.assertEqual(anchor_tier(f"{path}:12#let _ = x;"), "workspace-tests", path)
+
+    def test_resolves_a_declaration_to_the_directory_it_owns(self):
+        self.assertEqual(module_directory("crates/c/src/a/b.rs"), "crates/c/src/a/b")
+        self.assertEqual(module_directory("crates/c/src/a/mod.rs"), "crates/c/src/a")
+        self.assertEqual(module_directory("crates/c/src/lib.rs"), "crates/c/src")
+
+    def test_finds_repository_files_that_are_test_code_only_by_declaration(self):
+        files, directories = test_module_paths()
+        self.assertTrue(files, "no #[cfg(test)] mod declarations found at all")
+        positional = {"test", "tests", "bench", "benches"}
+        undeclared = [
+            path
+            for path in files
+            if not set(path.split("/")) & {"tests", "benches"}
+            and path.split("/")[-1].removesuffix(".rs") not in positional
+        ]
+        self.assertTrue(
+            undeclared,
+            "every declared test module was already test code by its path, so "
+            "this rule would be untested",
+        )
+        for path in undeclared:
+            self.assertTrue(test_path(path), path)
+            self.assertIn(
+                anchor_tier(f"{path}:1#x"), {"workspace-tests", "example-test"}, path
+            )
+
+    def test_carries_a_test_modules_own_submodules_with_it(self):
+        _, directories = test_module_paths()
+        self.assertTrue(all(directory.endswith("/") for directory in directories))
+        self.assertTrue(test_path(f"{next(iter(directories))}deeper/inner.rs"))
+
+
+class MemberAnchorTests(unittest.TestCase):
+    """A member's leaf name is not evidence; the owning type is.
+
+    `SchemaDialect::as_str` was "proved" by `serde_json`'s `value.as_str()`, two
+    unrelated members by the same `row.get(3)`, and a variant's field by a
+    `tungstenite` import alias -- all under a substring match (FIG-1223).
+    """
+
+    FILE = "crates/lash-fixture/src/consumer.rs"
+    SOURCE = [
+        "use serde_json::Value;",                                    # 1
+        "use lash_core::facade_support::SchemaDialect;",              # 2
+        "",                                                          # 3
+        "fn coincidence(value: &Value) -> Option<&str> {",            # 4
+        "    value.as_str()",                                        # 5
+        "}",                                                         # 6
+        "",                                                          # 7
+        "fn honest(dialect: SchemaDialect) -> &'static str {",        # 8
+        "    dialect.as_str()",                                      # 9
+        "}",                                                         # 10
+        "",                                                          # 11
+        "impl SchemaDialect for Local {",                            # 12
+        "    fn as_str(&self) -> &'static str {",                    # 13
+        "        \"local\"",                                         # 14
+        "    }",                                                     # 15
+        "}",                                                         # 16
+        "",                                                          # 17
+        "fn crowded(a: SchemaDialect, b: WireDialect) -> usize {",    # 18
+        "    a.as_str().len() + b.as_str().len()",                   # 19
+        "}",                                                         # 20
+        "",                                                          # 21
+        "fn qualified() -> &'static str {",                          # 22
+        "    SchemaDialect::as_str(&SchemaDialect::Json)",           # 23
+        "}",                                                         # 24
+        "",                                                          # 25
+        "fn unbound(input: &Value, dialect: Dialectish) -> usize {",  # 26
+        "    let _ = SchemaDialect::Json;",                          # 27
+        "    input.as_str().map(str::len).unwrap_or(0)",              # 28
+        "}",                                                         # 29
+    ]
+
+    SYMBOL = "lash::schema::SchemaDialect::as_str"
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _RESOLVED_RECEIVERS.clear()
+        _IMPORTED_TYPES.pop(self.FILE, None)
+        _LITERAL_STACKS.pop(self.FILE, None)
+        self.addCleanup(_LITERAL_STACKS.pop, self.FILE, None)
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+        self.addCleanup(_IMPORTED_TYPES.pop, self.FILE, None)
+
+    def anchor(self, line):
+        return f"{self.FILE}:{line}#{self.SOURCE[line - 1].strip()}"
+
+    def defect(self, line, symbol=None, rivals=frozenset()):
+        return member_anchor_defect(
+            symbol or self.SYMBOL, [], "function", set(rivals), self.anchor(line)
+        )
+
+    def test_accepts_a_line_that_qualifies_the_member_by_its_owner(self):
+        self.assertIsNone(self.defect(23, rivals={"WireDialect"}))
+
+    def test_rejects_an_import_of_the_owning_type_as_member_evidence(self):
+        # Importing the type says nothing about the member; that is the whole
+        # gap a substring match could not see.
+        self.assertIsNotNone(self.defect(2))
+
+    def test_accepts_a_receiver_whose_type_the_function_establishes(self):
+        self.assertIsNone(self.defect(9))
+
+    def test_rejects_an_unrelated_same_leaf_call(self):
+        defect = self.defect(5)
+        self.assertIsNotNone(defect)
+        self.assertIn("rather than SchemaDialect", defect)
+
+    def test_accepts_a_crowded_line_when_the_receiver_is_bound(self):
+        # Two same-leaf receivers on one line, each bound by the signature: the
+        # binding is what disambiguates them.
+        self.assertIsNone(self.defect(19, rivals={"WireDialect"}))
+
+    def test_rejects_an_unbound_receiver_with_a_rival_in_scope(self):
+        defect = self.defect(28, rivals={"WireDialect"})
+        self.assertIsNotNone(defect)
+        self.assertIn("reaches the member through `input`", defect)
+
+    def test_reads_a_trait_impl_header_as_part_of_the_scope(self):
+        self.assertIsNone(self.defect(13))
+
+    def test_rejects_an_anchor_whose_file_cannot_be_read(self):
+        defect = member_anchor_defect(
+            self.SYMBOL, [], "function", set(), "crates/gone/src/lib.rs:4#x.as_str()"
+        )
+        self.assertIn("does not resolve", defect or "")
+
+    def test_holds_no_opinion_about_a_type_level_item(self):
+        self.assertIsNone(
+            member_anchor_defect("lash::schema::SchemaDialect", [], "struct", set(), self.anchor(5))
+        )
+
+    def test_requires_the_type_a_nested_members_owner_belongs_to(self):
+        # A variant name is as generic as a member name, so `Message::0` was
+        # "proved" by an import aliasing tungstenite's `Message`.
+        nested = "lash::schema::SchemaDialect::Local::as_str"
+        defect = self.defect(5, symbol=nested)
+        self.assertIn("rather than Local", defect or "")
+        self.assertIsNone(self.defect(13, symbol=nested))
+
+    def test_names_a_nested_members_containing_type_but_never_a_module(self):
+        self.assertEqual(
+            member_containers(
+                "lash_core::facade_support::BorrowedChronologicalPayload::Message::0",
+                [],
+                "field",
+            ),
+            {"BorrowedChronologicalPayload"},
+        )
+        self.assertEqual(
+            member_containers("lash::persistence::RuntimeCommit::budget", [], "function"),
+            set(),
+        )
+
+    def test_reads_the_receivers_binding_before_trusting_a_rival(self):
+        scope = "\n".join(self.SOURCE[7:10])
+        self.assertTrue(binds_receiver(scope, "dialect", {"SchemaDialect"}))
+        self.assertFalse(
+            binds_receiver("\n".join(self.SOURCE[3:6]), "value", {"SchemaDialect"})
+        )
+
+    def test_counts_an_imported_external_type_as_a_rival(self):
+        # The motivating coincidence is not Lash API at all: serde_json's
+        # `Value::as_str` satisfied a substring match for `SchemaDialect::as_str`.
+        defect = self.defect(19, symbol="lash::schema::Local::as_str")
+        self.assertIsNotNone(defect)
+
+    def test_applies_the_rival_check_even_when_the_line_mentions_the_owner(self):
+        # Mentioning is not qualifying: this line names `Text` and settles nothing.
+        self.assertTrue(qualifies_member("Text", "text", "RemoteInputItem::Text { text: t }"))
+        self.assertFalse(qualifies_member("Text", "text", "let text = Text::render();"))
+
+    def test_scopes_a_line_to_its_innermost_function(self):
+        blocks = scope_blocks(self.SOURCE)
+        self.assertIn((3, 5, "fn"), blocks)
+        self.assertIn((11, 15, "impl"), blocks)
+        scope = anchor_scope(self.FILE, 5)
+        self.assertIn("value.as_str()", scope)
+        self.assertNotIn("dialect.as_str()", scope)
+
+    def test_owners_come_from_every_path_the_item_has(self):
+        self.assertEqual(
+            member_owners(
+                "lash::Turn::id", ["lash_core::facade_support::TurnRecord::id"], "field"
+            ),
+            {"Turn", "TurnRecord"},
+        )
+        self.assertEqual(member_owners("lash::Turn", [], "struct"), set())
+
+    def test_collects_the_rivals_a_leaf_has_across_the_ledger(self):
+        owners = member_leaf_owners(
+            [
+                {"symbol": "lash::Turn::id", "kind": "field"},
+                {"symbol": "lash::Session::id", "kind": "field", "aliases": ["lash_core::Sess::id"]},
+                {"symbol": "lash::Widget", "kind": "struct"},
+            ]
+        )
+        self.assertEqual(owners["id"], {"Turn", "Session", "Sess"})
+        self.assertNotIn("Widget", owners)
+
+
+class ReceiverResolutionTests(unittest.TestCase):
+    """A receiver has to resolve to the owning type, named rival or not.
+
+    The rival check could only reject what it could name, so a receiver typed by
+    the prelude, by a file-local type, or by a path-qualified type nobody
+    imported passed unchallenged -- and 11 member anchors rested on that branch.
+    A receiver the reader cannot follow to the owning type is a defect on its
+    own (FIG-1223).
+    """
+
+    FILE = "crates/lash-fixture/src/receiver.rs"
+    SOURCE = [
+        "type PostgresEffectReplay = EffectReplayDriver<Persistence, Backend>;",  # 1
+        "",                                                                      # 2
+        "struct TurnInput {",                                                    # 3
+        "    turn_context: TurnContext,",                                        # 4
+        "}",                                                                     # 5
+        "",                                                                      # 6
+        "struct Turn {",                                                         # 7
+        "    input: TurnInput,",                                                  # 8
+        "}",                                                                     # 9
+        "",                                                                      # 10
+        "impl TurnContextFacadeOps for TurnContext {",                            # 11
+        "    fn clear_prompt_slot(&self, slot: Slot) {}",                        # 12
+        "}",                                                                     # 13
+        "",                                                                      # 14
+        "impl Turn {",                                                            # 15
+        "    fn drop_slot(&self, slot: Slot) {",                                  # 16
+        "        self.input.turn_context.clear_prompt_slot(slot);",               # 17
+        "    }",                                                                  # 18
+        "}",                                                                      # 19
+        "",                                                                      # 20
+        "struct Store {",                                                         # 21
+        "    inner: PostgresEffectReplay,",                                       # 22
+        "}",                                                                      # 23
+        "",                                                                      # 24
+        "impl Store {",                                                           # 25
+        "    async fn retire(",                                                    # 26
+        "        &self,",                                                          # 27
+        "        retirement: Retirement,",                                          # 28
+        "    ) -> Result<(), StoreError> {",                                        # 29
+        "        self.inner.retire_effect_journal(retirement).await",                # 30
+        "    }",                                                                    # 31
+        "",                                                                        # 32
+        "    fn unrelated(&self, slot: Slot) {",                                    # 33
+        "        let text = String::new();",                                        # 34
+        "        text.clear_prompt_slot(slot);",                                    # 35
+        "    }",                                                                    # 36
+        "}",                                                                        # 37
+        "",                                                                        # 38
+        "fn build(call: SourceCall) -> CompletedToolCall {",                        # 39
+        "    CompletedToolCall {",                                                  # 40
+        "        call_id: call.call_id.clone(),",                                    # 41
+        "        model_return: ModelToolReturn {",                                   # 42
+        "            call_id: call.call_id.clone(),",                                # 43
+        "        },",                                                               # 44
+        "    }",                                                                    # 45
+        "}",                                                                        # 46
+    ]
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _RESOLVED_RECEIVERS.clear()
+        _IMPORTED_TYPES.pop(self.FILE, None)
+        # The type index is built once per run over every readable source file,
+        # so a test that supplies one has to let it be rebuilt.
+        _TYPE_FACTS.clear()
+        _LITERAL_STACKS.pop(self.FILE, None)
+        self.addCleanup(_TYPE_FACTS.clear)
+        self.addCleanup(_LITERAL_STACKS.pop, self.FILE, None)
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+        self.addCleanup(_IMPORTED_TYPES.pop, self.FILE, None)
+
+    def anchor(self, line):
+        return f"{self.FILE}:{line}#{self.SOURCE[line - 1].strip()}"
+
+    def defect(self, symbol, line, kind="function", rivals=frozenset()):
+        return member_anchor_defect(symbol, [], kind, set(rivals), self.anchor(line))
+
+    def test_accepts_a_receiver_that_resolves_through_fields_to_the_owner(self):
+        # `self.input.turn_context` is three hops from the `impl` block to a type
+        # that implements the owning trait; the owning trait is never named on
+        # the line or in the function.
+        self.assertIsNone(
+            self.defect("lash_core::facade_support::TurnContextFacadeOps::clear_prompt_slot", 17)
+        )
+
+    def test_follows_a_type_alias_to_the_type_that_owns_the_member(self):
+        # `type PostgresEffectReplay = EffectReplayDriver<..>` is the only line
+        # that ties the store's field to the driver whose method this is.
+        self.assertIsNone(
+            self.defect(
+                "lash_core::facade_support::effect_replay_driver::"
+                "EffectReplayDriver::retire_effect_journal",
+                30,
+            )
+        )
+
+    def test_rejects_a_prelude_typed_receiver_no_rival_check_could_name(self):
+        # `String` is neither a ledger item nor an import, so the rival check saw
+        # nothing to object to and passed the line.
+        defect = self.defect(
+            "lash_core::facade_support::TurnContextFacadeOps::clear_prompt_slot", 35
+        )
+        self.assertIsNotNone(defect)
+        self.assertIn("rather than TurnContextFacadeOps", defect)
+
+    def test_rejects_a_receiver_that_resolves_to_nothing_this_repo_declares(self):
+        defect = self.defect("lash::store::Store::retire_effect_journal", 30)
+        self.assertIsNotNone(defect)
+        self.assertIn("rather than Store", defect)
+
+    def test_reads_a_field_anchor_against_the_literal_it_sits_in(self):
+        # Adjacent literals write `call_id` twice for two different types.
+        symbol = "lash_core::facade_support::ModelToolReturn::call_id"
+        defect = self.defect(symbol, 41, kind="field")
+        self.assertIsNotNone(defect)
+        self.assertIn("inside a CompletedToolCall literal", defect)
+        self.assertIsNone(self.defect(symbol, 43, kind="field"))
+
+    def test_keeps_functions_apart_when_a_signature_spans_lines(self):
+        # `) -> Result<(), StoreError> {` names no function, and a function
+        # nobody can find is a scope the size of the file: two `retirement`
+        # bindings from two functions then answer for each other.
+        scope = anchor_scope(self.FILE, 30)
+        self.assertIn("self.inner.retire_effect_journal", scope)
+        self.assertNotIn("let text = String::new();", scope)
+
+
+class MultiLineReceiverTests(unittest.TestCase):
+    """A fluent chain is written down the page; its receiver is not on the line.
+
+    Reading only the anchor's own line found no receiver at all, and the
+    fail-closed rule then turned 26 live consumers into deletion instructions
+    (FIG-1223).
+    """
+
+    FILE = "crates/lash-fixture/src/fluent.rs"
+    SOURCE = [
+        "struct Env {",                                                  # 1
+        "    control: ControlConfig,",                                   # 2
+        "}",                                                             # 3
+        "",                                                              # 4
+        "struct ControlConfig {",                                        # 5
+        "    effect_host: Arc<dyn EffectHost>,",                         # 6
+        "}",                                                             # 7
+        "",                                                              # 8
+        "enum StreamEvent {",                                            # 9
+        "    Part(OutputPart),",                                         # 10
+        "    Delta(String),",                                            # 11
+        "}",                                                             # 12
+        "",                                                              # 13
+        "impl Env {",                                                    # 14
+        "    fn retire(&self, session: SessionId) -> Result<()> {",      # 15
+        "        self.control",                                          # 16
+        "            .effect_host",                                      # 17
+        "            .retire_effect_journal(Retirement::session(&session))", # 18
+        "    }",                                                         # 19
+        "",                                                              # 20
+        "    fn scope(&self, host: &dyn EffectHost) -> Result<()> {",    # 21
+        "        let scoped: Scoped = host",                             # 22
+        "            .scoped_static(self.turn_scope())?",                # 23
+        "            .ok_or(Error::Static)?;",                           # 24
+        "        let outcome = scoped",                                   # 25
+        "            .controller()",                                     # 26
+        "            .execute_effect(Envelope::new())?;",                # 27
+        "        Ok(())",                                                # 28
+        "    }",                                                         # 29
+        "",                                                              # 30
+        "    fn stamp(&self, mut event: StreamEvent, route: &Route) {",  # 31
+        "        if let StreamEvent::Part(part) = &mut event {",         # 32
+        "            let _ = part.stamp_replay_origin(route);",          # 33
+        "        }",                                                     # 34
+        "    }",                                                        # 35
+        "}",                                                            # 36
+        "",                                                             # 37
+        "enum WireEvent {",                                             # 38
+        "    RetryStatus {",                                            # 39
+        "        attempt: usize,",                                       # 40
+        "    },",                                                       # 41
+        "}",                                                            # 42
+        "",                                                             # 43
+        "fn wire() -> WireEvent {",                                     # 44
+        "    WireEvent::RetryStatus { attempt: 1 }",                     # 45
+        "}",                                                            # 46
+        "",                                                             # 47
+        "struct Scoped {}",                                             # 48
+        "",                                                             # 49
+        "impl Scoped {",                                                # 50
+        "    fn controller(&self) -> RuntimeEffectController {",         # 51
+        "        self.inner.clone()",                                    # 52
+        "    }",                                                        # 53
+        "}",                                                            # 54
+        "",                                                             # 55
+        "struct Wrapper {",                                             # 56
+        "    inner: lash_core::facade_support::Env,",                    # 57
+        "}",                                                            # 58
+        "",                                                             # 59
+        "struct RemoteUsage {",                                         # 60
+        "    output_tokens: u64,",                                       # 61
+        "}",                                                            # 62
+        "",                                                             # 63
+        "impl From<TokenUsage> for RemoteUsage {}",                      # 64
+        "",                                                             # 65
+        "impl RemoteUsage {",                                           # 66
+        "    fn add(&mut self, other: &Self) {",                         # 67
+        "        self.output_tokens = other.output_tokens;",             # 68
+        "    }",                                                        # 69
+        "",                                                             # 70
+        "    fn borrowed(&self, map: &Registry, key: &Key) {",           # 71
+        "        if let Some(found) = map.get(key) {",                    # 72
+        "            let _ = found.output_tokens;",                       # 73
+        "        }",                                                     # 74
+        "    }",                                                        # 75
+        "}",                                                            # 76
+        "",                                                             # 77
+        "struct ToolState {}",                                          # 78
+        "",                                                             # 79
+        "impl ToolStateFacadeOps for ToolState {}",                      # 80
+        "",                                                             # 81
+        "struct Admin {}",                                              # 82
+        "",                                                             # 83
+        "impl Admin {",                                                 # 84
+        "    async fn tool_state(&self) -> Result<ToolState> {",         # 85
+        "        Ok(self.state.clone())",                                # 86
+        "    }",                                                        # 87
+        "",                                                             # 88
+        "    async fn newest(&self) -> Result<u64> {",                   # 89
+        "        Ok(self.tool_state().await?.generation())",             # 90
+        "    }",                                                        # 91
+        "",                                                             # 92
+        "    fn manifests(&self) -> Result<Vec<Manifest>> {",            # 93
+        "        Ok(self.tool_state()?.tool_manifests())",               # 94
+        "    }",                                                        # 95
+        "}",                                                            # 96
+        "",                                                             # 97
+        "enum TurnFinish {",                                            # 98
+        "    FinalValue { value: Value },",                              # 99
+        "}",                                                            # 100
+        "",                                                             # 101
+        "fn read(finish: &TurnFinish, event: &TurnEvent) {",             # 102
+        "    if let TurnFinish::FinalValue { value } = finish {}",        # 103
+        "    if let TurnEvent::FinalValue { value } = event {}",          # 104
+        "}",                                                            # 105
+        "",                                                             # 106
+        "impl ToolStateFacadeOps for OtherState {",                      # 107
+        "    fn generation(&self) -> u64 {",                             # 108
+        "        0",                                                     # 109
+        "    }",                                                        # 110
+        "}",                                                            # 111
+        "",                                                             # 112
+        "mod harness {",                                                # 113
+        "    use lash_core::{",                                         # 114
+        "        TurnDriverPreamble,",                                   # 115
+        "    };",                                                       # 116
+        "",                                                             # 117
+        "    fn build() -> AnthropicProvider {",                        # 118
+        "        use lash_core::facade_support::ParkedSession;",         # 119
+        "        let provider = AnthropicProvider::new(\"key\");",       # 120
+        "        provider.with_parked(ParkedSession::new())",            # 121
+        "    }",                                                       # 122
+        "}",                                                           # 123
+    ]
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _RESOLVED_RECEIVERS.clear()
+        _IMPORTED_TYPES.pop(self.FILE, None)
+        _LITERAL_STACKS.pop(self.FILE, None)
+        _TYPE_FACTS.clear()
+        self.addCleanup(_TYPE_FACTS.clear)
+        self.addCleanup(_LITERAL_STACKS.pop, self.FILE, None)
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+        self.addCleanup(_IMPORTED_TYPES.pop, self.FILE, None)
+
+    def anchor(self, line):
+        return f"{self.FILE}:{line}#{self.SOURCE[line - 1].strip()}"
+
+    def defect(self, symbol, line, kind="function"):
+        return member_anchor_defect(symbol, [], kind, set(), self.anchor(line))
+
+    def test_assembles_a_chain_split_across_lines(self):
+        # `self.control` / `.effect_host` / `.retire_effect_journal(..)`: the
+        # receiver is two lines above the anchor.
+        self.assertIsNone(
+            self.defect("lash::durability::EffectHost::retire_effect_journal", 18)
+        )
+
+    def test_assembles_a_chain_whose_receiver_is_a_signature_parameter(self):
+        self.assertIsNone(self.defect("lash::durability::EffectHost::scoped_static", 23))
+
+    def test_carries_a_method_return_type_across_a_split_chain(self):
+        self.assertIsNone(
+            self.defect("lash::runtime::RuntimeEffectController::execute_effect", 27)
+        )
+
+    def test_types_a_binding_a_variant_pattern_introduces(self):
+        # `if let StreamEvent::Part(part)` is the only line that types `part`, and
+        # round 4 read it as no type at all and filed the path for removal.
+        self.assertIsNone(self.defect("lash::direct::OutputPart::stamp_replay_origin", 33))
+
+    def test_rejects_a_field_declaration_in_another_crates_own_enum(self):
+        symbol = "lash_core::facade_support::SessionStreamEvent::RetryStatus::attempt"
+        defect = self.defect(symbol, 40, kind="field")
+        self.assertIsNotNone(defect)
+        self.assertIn("sits inside the declaration of WireEvent", defect)
+
+    def test_requires_the_container_a_nested_field_belongs_to(self):
+        # `WireEvent::RetryStatus { attempt: 1 }` writes another crate's variant,
+        # so the literal resolves to the wrong container.
+        symbol = "lash_core::facade_support::SessionStreamEvent::RetryStatus::attempt"
+        defect = self.defect(symbol, 45, kind="field")
+        self.assertIsNotNone(defect)
+        self.assertIn("SessionStreamEvent", defect)
+
+    def test_reads_only_the_traits_own_name_from_an_impl_header(self):
+        # `impl From<TokenUsage> for RemoteUsage` implements `From`; reading its
+        # argument as a trait made every RemoteUsage field evidence for
+        # TokenUsage's field of the same name.
+        defect = self.defect("lash::usage::TokenUsage::output_tokens", 68, kind="field")
+        self.assertIsNotNone(defect)
+        self.assertIn("resolves to RemoteUsage", defect)
+
+    def test_refuses_to_type_a_binding_from_an_option_pattern(self):
+        # `Some(found)` says nothing about the type, and guessing from every
+        # `Some(..)` payload in the workspace gave one receiver forty types.
+        defect = self.defect("lash::usage::TokenUsage::output_tokens", 73, kind="field")
+        self.assertIsNotNone(defect)
+        self.assertIn("no type this repository declares", defect)
+
+    def test_rejects_an_anchor_in_the_file_that_declares_the_item(self):
+        for anchor in (self.anchor(15), self.anchor(1)):
+            self.assertIn(
+                "declares",
+                declaration_anchor_defect("lash_core::sansio::Env", anchor) or "",
+            )
+
+    def test_accepts_a_path_qualified_anchor_in_a_file_declaring_the_same_name(self):
+        # `crates/lash/src/session.rs` declares its own `ParkedSession` wrapper
+        # around `lash_core::facade_support::ParkedSession`; the path settles it.
+        self.assertIsNone(
+            declaration_anchor_defect("lash_core::facade_support::Env", self.anchor(57))
+        )
+
+    def test_peels_await_and_question_marks_out_of_a_chain(self):
+        # `self.tool_state().await?.generation()`: the future and the `Result` are
+        # unwraps, not hops, and reading them as unknown hops made every fallible
+        # accessor unresolvable -- and its path deletable.
+        symbol = "lash_core::facade_support::ToolStateFacadeOps::generation"
+        self.assertIsNone(self.defect(symbol, 90))
+
+    def test_peels_a_bare_question_mark_out_of_a_chain(self):
+        symbol = "lash_core::facade_support::ToolStateFacadeOps::tool_manifests"
+        self.assertIsNone(self.defect(symbol, 94))
+
+    def test_rejects_qualification_by_a_different_container(self):
+        # `TurnFinish::FinalValue { value }` and `TurnEvent::FinalValue { value }`
+        # write the same variant name under two different enums.
+        symbol = "lash::TurnEvent::FinalValue::value"
+        defect = self.defect(symbol, 103, kind="field")
+        self.assertIsNotNone(defect)
+        self.assertIn("under TurnFinish, not under TurnEvent", defect)
+        self.assertIsNone(self.defect(symbol, 104, kind="field"))
+
+    def test_treats_an_import_as_reachability_not_consumption(self):
+        # Ruled for FIG-1223: a `use` resolves whether or not anything needs the
+        # item, so it cannot carry an internal seam's dependency claim.
+        for line in (
+            "crates/lash-sansio/src/lib.rs:85#pub use turn::{PreparedTurnMachine};",
+            "crates/lash-sim/src/store.rs:4#use lash_core::facade_support::ParkedSession;",
+        ):
+            self.assertIn("is an import", import_anchor_defect(line) or "")
+
+    def test_rejects_only_the_lines_a_use_list_actually_spans(self):
+        # A brace-list continuation is still an import; the line *after* a
+        # completed `use ...;` is not.  Testing the `use` before the statement
+        # break read every line under an indented import as part of it, and 44
+        # real anchors here -- `let provider = AnthropicProvider::new("key");`
+        # among them -- were rejected as imports (FIG-1223).
+        self.assertIn("is an import", import_anchor_defect(self.anchor(115)) or "")
+        self.assertIsNone(import_anchor_defect(self.anchor(120)))
+        self.assertIsNone(import_anchor_defect(self.anchor(121)))
+
+    def test_keeps_a_use_site_that_merely_mentions_a_path(self):
+        self.assertIsNone(
+            import_anchor_defect(
+                "crates/lash/src/session.rs:391#pub(crate) inner: "
+                "lash_core::facade_support::ParkedSession,"
+            )
+        )
+
+    def test_accepts_a_trait_impl_signature_as_a_dependency_claim(self):
+        # Ruled for FIG-1223: implementing the contract is the strongest form the
+        # dependency claim takes, so a signature inside `impl Trait for Type` is
+        # evidence even though it declares rather than calls.
+        self.assertIsNone(
+            member_anchor_defect(
+                "lash_core::facade_support::ToolStateFacadeOps::generation",
+                [],
+                "function",
+                set(),
+                self.anchor(108),
+            )
+        )
+
+    def test_rejects_an_anchor_in_the_crate_that_declares_the_item(self):
+        # The ledger keys an item by the path a host writes, so a re-export can
+        # put the declaring crate outside the path root: `lash-sansio` declares
+        # `lash_core::PreparedTurnMachine`.
+        self.assertEqual(declaring_crates({"Env"}), {"crates/lash-fixture"})
+        defect = declaration_anchor_defect(
+            "lash_core::sansio::Env",
+            "crates/lash-fixture/src/other.rs:3#let env = Env::default();",
+        )
+        self.assertIn("the crate whose source declares Env", defect or "")
+
+    def test_rejects_a_bare_name_that_reaches_nothing(self):
+        # The branch that accepted a field name inside a SQL string and a `let`
+        # of the same name in an unrelated function.
+        defect = self.defect("lash::triggers::TriggerFilter::attempt", 28, kind="field")
+        self.assertIsNotNone(defect)
+        self.assertIn("without reaching the member", defect)
+
+
+class ProseCitationTests(unittest.TestCase):
+    """Prose that cites a line has to be about the item at that line."""
+
+    FILE = "crates/lash-fixture/src/citation.rs"
+    SOURCE = [
+        "fn unrelated() {",
+        "    let total = 1 + 1;",
+        "}",
+        "fn consumer(record: TurnRecord) {",
+        "    let _ = record.duration_ms;",
+        "}",
+    ]
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _RESOLVED_RECEIVERS.clear()
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+
+    def test_accepts_a_citation_the_named_item_appears_in(self):
+        self.assertIsNone(
+            prose_citation_defect(
+                "lash::TurnRecord::duration_ms",
+                "field",
+                f"Consumed at {self.FILE}:5 (FIG-1223).",
+            )
+        )
+
+    def test_rejects_a_citation_that_never_mentions_the_item(self):
+        defect = prose_citation_defect(
+            "lash::TurnRecord::duration_ms",
+            "field",
+            f"Consumed at {self.FILE}:2 (FIG-1223).",
+        )
+        self.assertIn("where neither duration_ms", defect or "")
+
+    def test_rejects_a_citation_past_the_end_of_the_file(self):
+        defect = prose_citation_defect(
+            "lash::TurnRecord::duration_ms",
+            "field",
+            f"Consumed at {self.FILE}:900 (FIG-1223).",
+        )
+        self.assertIn("not a line in that file", defect or "")
+
+    def test_holds_no_opinion_about_prose_without_a_citation(self):
+        self.assertIsNone(
+            prose_citation_defect("lash::TurnRecord", "struct", "Internal seam (FIG-1223).")
+        )
+
+
+class AnchorTierTests(unittest.TestCase):
+    """The tier is the anchor's path shape, never the row's claim about it."""
+
+    def test_reads_another_crates_src_as_the_internal_tier(self):
+        self.assertEqual(
+            anchor_tier("crates/lash-restate/src/lib.rs:588#use lash_core::X;"),
+            "crate-src",
+        )
+        self.assertEqual(
+            anchor_crate("crates/lash-restate/src/lib.rs:588#use lash_core::X;"),
+            "crates/lash-restate",
+        )
+
+    def test_reads_a_crate_tests_directory_as_the_weakest_tier(self):
+        self.assertEqual(
+            anchor_tier("crates/lash-core/tests/probe.rs:12#let _ = X;"),
+            "workspace-tests",
+        )
+
+    def test_rejects_a_path_outside_the_anchorable_roots(self):
+        self.assertIsNone(anchor_tier("docs/adr/0051.md:12#X"))
+        self.assertIsNone(anchor_tier("not an anchor"))
+
+
+class ExampleTestRatchetTests(unittest.TestCase):
+    """The example-test population may fall; it may not rise."""
+
+    def rows(self, count):
+        # `benches/` needs no filesystem read to land in the example-test tier.
+        return [
+            {
+                "disposition": "used-unasserted",
+                "usage": f"examples/docs-snippets/benches/b.rs:{index + 1}#let _ = X;",
+            }
+            for index in range(count)
+        ]
+
+    def test_rejects_growth_past_the_ratchet(self):
+        errors = example_test_tier_errors(self.rows(EXAMPLE_TEST_TIER_RATCHET + 1))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("above the", errors[0])
+
+    def test_requires_the_ratchet_to_follow_a_reduction_down(self):
+        errors = example_test_tier_errors(self.rows(EXAMPLE_TEST_TIER_RATCHET - 1))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Lower EXAMPLE_TEST_TIER_RATCHET", errors[0])
+
+    def test_accepts_the_recorded_population(self):
+        self.assertEqual(example_test_tier_errors(self.rows(EXAMPLE_TEST_TIER_RATCHET)), [])
+
+    def test_reports_the_distribution_every_run(self):
+        lines = tier_breakdown(self.rows(2))
+        self.assertIn("evidence tiers (rows by usage anchor):", lines[0])
+        self.assertTrue(any("example-test: 2" in line for line in lines))
+        self.assertTrue(any("ratchet" in line for line in lines))
+
+
+class InternalConsumerTests(unittest.TestCase):
+    """An `internal-consumed` anchor has to name a consumer, not the definition."""
+
+    ITEM = ApiItem(
+        primary="lash::TurnOutcome",
+        kind="struct",
+        availability="default+all-features",
+        paths=["lash::TurnOutcome", "lash_core::facade_support::TurnOutcome"],
+        identity="lash_core::runtime::turn_loop::TurnOutcome",
+    )
+    CRATE_DIRS = {"lash": "crates/lash", "lash_core": "crates/lash-core"}
+
+    def errors(self, usage):
+        rows = {
+            ("lash::TurnOutcome", "struct"): {
+                "symbol": "lash::TurnOutcome",
+                "disposition": "internal-consumed",
+                "usage": usage,
+            }
+        }
+        return internal_consumer_errors(rows, [self.ITEM], self.CRATE_DIRS)
+
+    def test_rejects_an_anchor_in_the_crate_that_defines_the_item(self):
+        # The identity, not the path, names lash-core here.
+        errors = self.errors("crates/lash-core/src/runtime/turn_loop.rs:88#TurnOutcome {")
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("which defines this item", errors[0])
+
+    def test_accepts_an_anchor_in_a_consuming_crate(self):
+        self.assertEqual(
+            self.errors("crates/lash-restate/src/lib.rs:588#let outcome: TurnOutcome ="), []
+        )
+
+
+class RemovalVerdictTests(unittest.TestCase):
+    """FIG-1223: relocation cannot discharge a removal verdict.
+
+    `678d567bf` is the shape under test. `SessionPickerInfo` carried a written
+    `unused-remove` verdict, the commit moved it behind a doc-hidden module and
+    deleted the row, and the gate had nothing left to compare against.
+    """
+
+    PICKER = ApiItem(
+        primary="lash_core::facade_support::SessionPickerInfo",
+        kind="struct",
+        availability="default+all-features",
+        paths=["lash_core::facade_support::SessionPickerInfo"],
+        identity="lash_core::session::SessionPickerInfo",
+    )
+
+    def verdict(self, **extra):
+        return {"symbol": "lash_core::SessionPickerInfo", "kind": "struct", **extra}
+
+    def rows(self, disposition):
+        return {
+            ("lash_core::facade_support::SessionPickerInfo", "struct"): {
+                "symbol": "lash_core::facade_support::SessionPickerInfo",
+                "disposition": disposition,
+            }
+        }
+
+    def errors(self, verdicts, recorded=None, rows=None, items=None):
+        return removal_verdict_errors(
+            verdicts,
+            len(verdicts) if recorded is None else recorded,
+            {} if rows is None else rows,
+            [] if items is None else items,
+        )
+
+    def test_rejects_a_verdict_discharged_by_relocation(self):
+        errors = self.errors(
+            [self.verdict()], rows=self.rows("internal-consumed"), items=[self.PICKER]
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Relocation does not discharge", errors[0])
+        self.assertIn("lash_core::facade_support::SessionPickerInfo", errors[0])
+
+    def test_accepts_a_relocation_with_an_explicit_superseding_verdict(self):
+        errors = self.errors(
+            [
+                self.verdict(
+                    superseded_by="internal-consumed",
+                    reason="Another crate's shipped code consumes it; anchor recorded.",
+                )
+            ],
+            rows=self.rows("internal-consumed"),
+            items=[self.PICKER],
+        )
+        self.assertEqual(errors, [])
+
+    def test_rejects_a_superseding_verdict_the_ledger_disagrees_with(self):
+        errors = self.errors(
+            [self.verdict(superseded_by="used-asserted", reason="Exercised now.")],
+            rows=self.rows("internal-consumed"),
+            items=[self.PICKER],
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("the tombstone and the ledger have to agree", errors[0])
+
+    def test_requires_a_reason_for_a_superseding_verdict(self):
+        errors = self.errors(
+            [self.verdict(superseded_by="internal-consumed")],
+            rows=self.rows("internal-consumed"),
+            items=[self.PICKER],
+        )
+        self.assertTrue(any("requires a reason" in error for error in errors), errors)
+
+    def test_accepts_a_relocation_that_keeps_the_verdict(self):
+        # A path change is not laundering while the answer is unchanged: the
+        # removal is still owed, at whatever path the item now uses.
+        errors = self.errors(
+            [
+                self.verdict(),
+                {"symbol": self.PICKER.primary, "kind": "struct"},
+            ],
+            rows=self.rows("unused-remove"),
+            items=[self.PICKER],
+        )
+        self.assertEqual(errors, [])
+
+    def test_accepts_a_verdict_discharged_by_actual_removal(self):
+        self.assertEqual(self.errors([self.verdict()]), [])
+
+    def test_requires_a_tombstone_for_every_removal_row(self):
+        rows = {
+            ("lash::Widget", "struct"): {"symbol": "lash::Widget", "disposition": "unused-remove"}
+        }
+        errors = self.errors([], rows=rows)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("without a removal verdict", errors[0])
+
+    def test_pins_the_recorded_count_so_history_cannot_be_dropped(self):
+        errors = self.errors([self.verdict()], recorded=2)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("removal_verdicts_recorded", errors[0])
+
+    def test_keys_a_member_verdict_on_the_item_that_owns_it(self):
+        # `id` alone is a hundred fields; the verdict is about one of them.
+        self.assertEqual(
+            relocation_key("lash_core::AcceptedInjectedTurnInput::id", "field"),
+            "AcceptedInjectedTurnInput::id",
+        )
+        self.assertEqual(relocation_key("lash_core::AgentFrameRun", "struct"), "AgentFrameRun")
 
 
 if __name__ == "__main__":
