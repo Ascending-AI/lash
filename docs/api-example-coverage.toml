@@ -43565,7 +43565,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:242#.with_deferred_tool_resolver(deferred_tools.resolver())"
+usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:243#.with_deferred_tool_resolver(deferred_tools.resolver())"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
