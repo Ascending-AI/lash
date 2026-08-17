@@ -25,6 +25,7 @@ pub(crate) mod javascript_regexp;
 mod javascript_stdlib;
 mod javascript_substrate;
 mod javascript_url;
+mod projected_paths;
 mod reference_assignment;
 
 #[cfg(test)]
@@ -580,10 +581,18 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::JavaScriptUnary(op) => self.execute_javascript_unary(op)?,
             Instruction::JavaScriptBinary(op) => self.execute_javascript_binary(op)?,
+            // `a ?? b` asks whether the *value* is absent, and a projected handle
+            // is a host-side view of one, so testing the wrapper made every
+            // projected binding look present. `ProjectedValue::is_nullish` settles
+            // it without asking the host — see there for why reading would be both
+            // wrong and expensive. Only the duplicate the `??` lowering pushes is
+            // consumed, so a present projection stays projected in the result.
             Instruction::IsNullish => {
-                let value = self.pop_stack()?;
-                self.stack
-                    .push(Value::Bool(matches!(value, Value::Null | Value::Undefined)));
+                let nullish = match self.pop_stack()? {
+                    Value::Projected(projected) => projected.is_nullish(),
+                    value => matches!(value, Value::Null | Value::Undefined),
+                };
+                self.stack.push(Value::Bool(nullish));
             }
             Instruction::SlotNumberBinary { slot, op, right } => {
                 let value = match self.load_slot(slot)? {
@@ -993,9 +1002,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let field = self.chunk.names[field].clone();
                 let value = match value {
                     Value::Projected(projected) => {
-                        let parent_name = projected.name().to_string();
-                        let inner = projected.get_field(&field).await?;
-                        ProjectedValue::propagate_field(&parent_name, &field.text, inner)
+                        self.read_projected_field(&projected, &field).await?
                     }
                     value => self.read_dialect_field(value, &field)?,
                 };
@@ -1006,9 +1013,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let field = self.chunk.names[field].clone();
                 let value = match value {
                     Value::Projected(projected) => {
-                        let parent_name = projected.name().to_string();
-                        let inner = projected.get_field(&field).await?;
-                        ProjectedValue::propagate_field(&parent_name, &field.text, inner)
+                        self.read_projected_field(&projected, &field).await?
                     }
                     value => self.read_dialect_field(value, &field)?,
                 };
@@ -1019,9 +1024,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let field = self.chunk.names[field].clone();
                 let value = match target {
                     Value::Projected(projected) => {
-                        let parent_name = projected.name().to_string();
-                        let inner = projected.get_field(&field).await?;
-                        ProjectedValue::propagate_field(&parent_name, &field.text, inner)
+                        self.read_projected_field(&projected, &field).await?
                     }
                     target => self.read_dialect_field(target, &field)?,
                 };
@@ -1032,9 +1035,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let target = self.pop_stack()?;
                 let value = match target {
                     Value::Projected(projected) => {
-                        let parent_name = projected.name().to_string();
-                        let inner = projected.get_index(&index).await?;
-                        ProjectedValue::propagate_index(&parent_name, &index, inner)
+                        self.read_projected_index(&projected, &index).await?
                     }
                     target => self.read_dialect_index(target, index)?,
                 };
