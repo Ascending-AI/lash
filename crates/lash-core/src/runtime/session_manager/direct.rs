@@ -37,6 +37,11 @@ enum DirectCompletionSource<'run> {
 #[derive(Clone)]
 pub struct DirectCompletionClient<'run> {
     source: DirectCompletionSource<'run>,
+    /// The effect this client was minted inside, when the minting site knows
+    /// it. A client stamped with an open `ToolAttempt` must never journal: the
+    /// controller already owns one entry for the whole attempt. Boxed because
+    /// this client is captured by the deep tool-dispatch futures.
+    parent_invocation: Option<Box<crate::RuntimeInvocation>>,
 }
 
 impl<'run> DirectCompletionClient<'run> {
@@ -51,7 +56,19 @@ impl<'run> DirectCompletionClient<'run> {
                 effect_controller,
                 turn_id,
             }),
+            parent_invocation: None,
         }
+    }
+
+    /// Binds this client to the effect that owns it, so every entry point —
+    /// not just the tool-attributed one — classifies its journal position the
+    /// same way. Applied where an attempt-scoped dispatch is derived.
+    pub(crate) fn with_parent_invocation(
+        mut self,
+        parent_invocation: Option<crate::RuntimeInvocation>,
+    ) -> Self {
+        self.parent_invocation = parent_invocation.map(Box::new);
+        self
     }
 
     pub(crate) fn to_static(&self) -> Option<DirectCompletionClient<'static>> {
@@ -72,7 +89,32 @@ impl<'run> DirectCompletionClient<'run> {
                 DirectCompletionSource::TestFn(Arc::clone(invoke))
             }
         };
-        Some(DirectCompletionClient { source })
+        Some(DirectCompletionClient {
+            source,
+            parent_invocation: self.parent_invocation.clone(),
+        })
+    }
+
+    /// Classifies where a direct call sits relative to the journal.
+    ///
+    /// A caller-supplied parent wins when it names an attempt; otherwise the
+    /// invocation this client was minted inside decides. Either answer must be
+    /// `ToolAttempt` for the journal-free branch, because a recorded attempt
+    /// replays without re-entering its body.
+    fn position(
+        &self,
+        parent_invocation: Option<&crate::RuntimeInvocation>,
+    ) -> DirectExecutionPosition {
+        let is_attempt = |invocation: &crate::RuntimeInvocation| {
+            invocation.effect_kind() == Some(crate::RuntimeEffectKind::ToolAttempt)
+        };
+        if parent_invocation.is_some_and(is_attempt)
+            || self.parent_invocation.as_deref().is_some_and(is_attempt)
+        {
+            DirectExecutionPosition::ToolAttempt
+        } else {
+            DirectExecutionPosition::Independent
+        }
     }
 
     pub async fn direct_completion(
@@ -80,7 +122,7 @@ impl<'run> DirectCompletionClient<'run> {
         request: crate::DirectRequest,
         usage_source: &str,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
-        self.direct_completion_at(request, usage_source, DirectExecutionPosition::Independent)
+        self.direct_completion_at(request, usage_source, self.position(None))
             .await
     }
 
@@ -90,14 +132,7 @@ impl<'run> DirectCompletionClient<'run> {
         usage_source: &str,
         parent_invocation: Option<&crate::RuntimeInvocation>,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
-        let position = if parent_invocation.is_some_and(|invocation| {
-            invocation.effect_kind() == Some(crate::RuntimeEffectKind::ToolAttempt)
-        }) {
-            DirectExecutionPosition::ToolAttempt
-        } else {
-            DirectExecutionPosition::Independent
-        };
-        self.direct_completion_at(request, usage_source, position)
+        self.direct_completion_at(request, usage_source, self.position(parent_invocation))
             .await
     }
 
@@ -134,6 +169,11 @@ impl<'run> DirectCompletionClient<'run> {
     /// The request id must be unique for each logical direct call. Reusing it
     /// in the same session, turn, and usage source deliberately replays the
     /// first result even when the rest of the request differs.
+    ///
+    /// Replay is a property of the journal, so it does not apply inside a
+    /// recorded tool attempt: a client bound to an open `ToolAttempt` executes
+    /// locally and never presents its replay key, and the enclosing attempt
+    /// entry is what redrive replays instead.
     pub async fn direct_llm_completion(
         &self,
         request: crate::LlmRequest,
@@ -145,7 +185,7 @@ impl<'run> DirectCompletionClient<'run> {
                     .manager
                     .direct
                     .invoke_direct_llm_completion(
-                        source.invocation_context(DirectExecutionPosition::Independent),
+                        source.invocation_context(self.position(None)),
                         request,
                         usage_source,
                     )
@@ -166,6 +206,7 @@ impl<'run> DirectCompletionClient<'run> {
     pub(crate) fn unavailable(message: impl Into<String>) -> Self {
         Self {
             source: DirectCompletionSource::Unavailable(message.into()),
+            parent_invocation: None,
         }
     }
 
@@ -179,6 +220,7 @@ impl<'run> DirectCompletionClient<'run> {
     {
         Self {
             source: DirectCompletionSource::TestFn(Arc::new(invoke)),
+            parent_invocation: None,
         }
     }
 }

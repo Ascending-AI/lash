@@ -433,6 +433,9 @@ impl RuntimeExecutionContext<'_> {
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut attempt_dispatch = (*self.dispatch).clone();
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
+        attempt_dispatch.direct_completions = attempt_dispatch
+            .direct_completions
+            .with_parent_invocation(Some(attempt_invocation.clone()));
         attempt_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         let attempt_dispatch = std::sync::Arc::new(attempt_dispatch);

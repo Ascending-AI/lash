@@ -111,6 +111,11 @@ pub struct AttemptContext<'run> {
     runtime_process_id: Option<String>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     direct_completions: crate::DirectCompletionClient<'run>,
+    /// The recorded attempt this leaf body runs inside. Carried so
+    /// attempt-attributed capabilities classify their journal position exactly
+    /// as the legacy [`ToolContext`] path does. Boxed because this context is
+    /// captured by the deep tool-dispatch futures.
+    parent_invocation: Option<Box<crate::RuntimeInvocation>>,
     provider: Option<crate::ProviderHandle>,
     prepared_payload: serde_json::Value,
     tool_execution_binding: serde_json::Value,
@@ -156,6 +161,7 @@ impl<'run> AttemptContext<'run> {
             runtime_process_id: context.runtime_process_id.clone(),
             attachment_store: Arc::clone(&context.attachment_store),
             direct_completions: context.direct_completions.clone(),
+            parent_invocation: context.parent_invocation.clone().map(Box::new),
             provider,
             prepared_payload: context.prepared_payload.clone(),
             tool_execution_binding: context.tool_execution_binding.clone(),
@@ -218,12 +224,17 @@ impl<'run> AttemptContext<'run> {
         }
     }
     /// Integrator class 3 direct-completion client attributed to this attempt call.
+    ///
+    /// The attempt invocation travels with the client so the completion runs on
+    /// the journal-free branch: the controller already owns one entry for this
+    /// whole attempt, and a second entry emitted from inside the body would be
+    /// left unre-issued by redrive.
     pub fn direct_completions(&self) -> ToolDirectCompletionClient<'run> {
         ToolDirectCompletionClient {
             session_id: self.session_id.clone(),
             tool_call_id: self.tool_call_id.clone(),
             direct_completions: self.direct_completions.clone(),
-            parent_invocation: None,
+            parent_invocation: self.parent_invocation.as_deref().cloned(),
         }
     }
     /// Integrator class 3 resolved model provider visible to the attempt host.
@@ -969,6 +980,7 @@ impl<'run> ToolContext<'run> {
         parent_invocation: crate::RuntimeInvocation,
     ) -> Self {
         self.effect_controller = dispatch.effect_controller.clone();
+        self.direct_completions = dispatch.direct_completions.clone();
         self.runtime_dispatch = Some(dispatch);
         self.parent_invocation = Some(parent_invocation);
         self

@@ -1003,6 +1003,9 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         };
         let mut dispatch = (*self.dispatch).clone();
         dispatch.parent_invocation = Some(envelope.invocation.clone());
+        dispatch.direct_completions = dispatch
+            .direct_completions
+            .with_parent_invocation(Some(envelope.invocation.clone()));
         dispatch.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         let dispatch = Arc::new(dispatch);
         let tool_context = self
