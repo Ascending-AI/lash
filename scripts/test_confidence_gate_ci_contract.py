@@ -1220,17 +1220,17 @@ derive_mutation_jobs() {{
 
     def test_provider_conformance_is_explicitly_featured_in_ci(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        test_doc = workflow_job_block(workflow, "test-doc")
+        feature_checks = workflow_job_block(workflow, "package-feature-checks")
 
         for provider in ("openai", "anthropic", "google"):
             self.assertIn(
                 f"cargo test -p lash-provider-{provider} --features testing --locked conformance",
-                test_doc,
+                feature_checks,
             )
 
     def test_lash_runtime_default_tests_are_pinned_to_the_feature_boundary_lane(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        test_doc = workflow_job_block(workflow, "test-doc")
+        boundary_job = workflow_job_block(workflow, "runtime-feature-boundary")
         push_gate = PUSH_GATE.read_text(encoding="utf-8")
         feature_boundary = shell_function_body(
             push_gate, "run_runtime_feature_boundary_check"
@@ -1246,7 +1246,7 @@ derive_mutation_jobs() {{
         )
 
         for snippet in (command, count_command, count_floor):
-            self.assertIn(snippet, test_doc)
+            self.assertIn(snippet, boundary_job)
             self.assertIn(snippet, feature_boundary)
 
     def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
@@ -1324,9 +1324,176 @@ derive_mutation_jobs() {{
         self.assertNotIn("  test:\n", workflow)
         self.assertIn("  test-doc:\n", workflow)
         self.assertIn("  test-shard:\n", workflow)
-        self.assertIn("--partition count:${{ matrix.shard }}/3", workflow)
+        self.assertIn("--partition count:${{ matrix.shard }}/4", workflow)
+        self.assertIn("shard: [1, 2, 3, 4]", workflow)
+        self.assertIn("Test shard ${{ matrix.shard }}/4", workflow)
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
         self.assertIn("--no-fail-fast", workflow)
+
+        # test-doc is the cache writer and the doctest gate, nothing else. Gates
+        # that neither warm nor consume that superset are sibling jobs, not
+        # serial steps behind twelve minutes of compilation.
+        test_doc = workflow_job_block(workflow, "test-doc")
+        self.assertIn("cargo check --workspace --all-targets --locked", test_doc)
+        self.assertIn("cargo test --doc --workspace --locked", test_doc)
+        for foreign in (
+            "python3 scripts/check_api_example_coverage.py",
+            "python3 scripts/lint_docs.py",
+            "cargo check -p agent-service --features restate --all-targets --locked",
+            "cargo check -p lash-runtime --no-default-features --locked",
+        ):
+            self.assertNotIn(foreign, test_doc)
+
+        # Every gate that moved is pinned to the job that now owns it. Asserting
+        # only that test-doc no longer runs them would be satisfied by deleting
+        # them outright, which is the way a decomposition silently drops
+        # coverage: the split is a scheduling change, so each command has to be
+        # somewhere, and named.
+        moved_gates = {
+            "repo-gates": (
+                "python3 scripts/lint_docs.py",
+                "python3 scripts/lint_orchestrating_tools.py",
+                "python3 scripts/check_test_quarantines.py",
+                "bash scripts/check-rustdoc.sh",
+                "bash scripts/test-worktree-gate-env.sh",
+                "bash scripts/test-dev-script-process-identity.sh",
+            ),
+            "api-coverage": ("python3 scripts/check_api_example_coverage.py",),
+            "package-feature-checks": (
+                "cargo check -p lash-protocol-rlm --features testing --locked",
+                "cargo check -p agent-workbench --locked",
+                "cargo check -p slack-clone --all-targets --features e2e --locked",
+                "cargo check -p agent-service --features restate --all-targets --locked",
+                "cargo test -p lash-remote-protocol --features core-conversions --locked",
+            ),
+            "runtime-feature-boundary": (
+                "cargo check -p lash-runtime --no-default-features --locked",
+                "cargo check -p lash-runtime --no-default-features --features testing --locked",
+                "cargo tree -p lash-runtime -e normal --no-default-features --locked",
+            ),
+        }
+        for job_id, commands in moved_gates.items():
+            self.assertIn(f"  {job_id}:\n", workflow)
+            block = workflow_job_block(workflow, job_id)
+            for command in commands:
+                with self.subTest(job=job_id, command=command):
+                    self.assertIn(command, block)
+
+        # The hand-enumerated script self-tests moved as a block; the discovery
+        # test above proves CI runs every one, this proves they all live in the
+        # job that took them.
+        repo_gates = workflow_job_block(workflow, "repo-gates")
+        discovered = sorted(path.name for path in (ROOT / "scripts").glob("test_*.py"))
+        self.assertGreater(len(discovered), 5, "the self-test discovery found nothing")
+        for name in discovered:
+            with self.subTest(self_test=name):
+                self.assertIn(f"python3 scripts/{name}", repo_gates)
+
+        # Both 8-vCPU compile jobs reclaim runner disk, as the job they were
+        # split out of did.
+        for job_id in ("repo-gates", "runtime-feature-boundary"):
+            with self.subTest(job=job_id):
+                self.assertIn(
+                    "bash scripts/ci-reclaim-disk.sh",
+                    workflow_job_block(workflow, job_id),
+                )
+
+    def test_one_ci_run_per_head_branch_whatever_the_trigger(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        # A `pull_request` run carries refs/pull/<n>/merge and a manual recovery
+        # dispatch of the same commit carries refs/heads/<branch>: keying the
+        # concurrency group on `github.ref` put them in different groups and ran
+        # the whole board twice over one tree. Same-repo pull requests and
+        # dispatches share the head-branch key, which is what makes the dispatch
+        # supersede the pull-request run instead of doubling it.
+        group = workflow[workflow.index("concurrency:") : workflow.index("permissions:")]
+        self.assertIn("|| github.head_ref", group)
+        self.assertIn("|| github.ref_name", group)
+
+        # Trunk runs are the release evidence — release.yml will not release a
+        # commit without its own green main CI run — so no cancellable event may
+        # ever key into a trunk run's group. Both trunk keys carry a colon, which
+        # `git check-ref-format` forbids in a ref name: that is what makes them
+        # unforgeable by any branch, in this repository or a fork, rather than
+        # merely unlikely to collide.
+        self.assertIn("github.event_name == 'push' && 'trunk:push'", group)
+        self.assertIn(
+            "(github.event_name == 'workflow_dispatch' && github.ref_name == 'main')"
+            " && 'trunk:dispatch'",
+            group,
+        )
+        # A fork's branch name is not this repository's namespace, so a fork PR is
+        # keyed by PR number — also colon-guarded, so no branch can imitate it.
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name != github.repository",
+            group,
+        )
+        self.assertIn("format('fork-pr:{0}', github.event.pull_request.number)", group)
+        for key in ("trunk:push", "trunk:dispatch", "fork-pr:{0}"):
+            with self.subTest(key=key):
+                self.assertIn(":", key, "an unforgeable key needs the forbidden colon")
+
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name == 'pull_request' || "
+            "(github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}",
+            group,
+        )
+
+    def test_required_checks_are_delivered_to_merge_queue_entries(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        # A merge-queue entry runs from its own gh-readonly-queue ref and gets no
+        # checks at all unless the workflow subscribes to `merge_group`; without
+        # this the queue stalls on checks that never report.
+        self.assertIn("  merge_group:\n", workflow)
+
+        # Cache warming is not a queue gate: a cache written from a queue ref is
+        # scoped to that ref and discarded with it, so warming it there would
+        # only add the longest job on the board to every queue entry.
+        release_cache = workflow_job_block(workflow, "linux-release-cache")
+        self.assertIn(
+            "if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'",
+            release_cache,
+        )
+
+        # A queue head carries a whole PR — often several commits — on top of the
+        # base the queue chose, so HEAD~1 checks only its last commit: the gate
+        # passes vacuously when the change is earlier and fails falsely when the
+        # bump is. The queue states its base; the gate uses it.
+        lint = workflow_job_block(workflow, "lint")
+        bumps = workflow_step_block(lint, "Check versioned surface bumps")
+        self.assertIn(
+            "MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}", bumps
+        )
+        self.assertIn('elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then', bumps)
+        self.assertIn('base="$MERGE_GROUP_BASE_SHA"', bumps)
+        # An empty base would silently become `--base ""`, so it fails loudly.
+        self.assertIn(
+            '[ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }',
+            bumps,
+        )
+
+    def test_the_transcript_gate_can_read_a_queued_pull_request(self) -> None:
+        gate = (ROOT / "scripts" / "check-transcript-diff.py").read_text(
+            encoding="utf-8"
+        )
+
+        # In the queue there is no pull request in the payload and the ref is
+        # nobody's head branch, so the by-head lookup finds nothing. The queue
+        # ref names the PR; the gate has to use it or it fails a justified change
+        # at the last gate before merge.
+        self.assertIn("gh-readonly-queue/[^/]+/pr-(?P<number>\\d+)-[0-9a-f]+", gate)
+        self.assertIn("def queried_pull_request_body_by_number(", gate)
+
+    def test_shared_debug_cache_has_one_backend(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        # The writer saves through useblacksmith/rust-cache. A reader restoring
+        # through a different action reads a different backend and logs
+        # `No cache found` on every run, which is what every test shard did.
+        self.assertIn("shared-key: linux-debug", workflow)
+        self.assertNotIn("uses: Swatinem/rust-cache", workflow)
 
     def test_heavy_compile_jobs_route_through_sccache(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -1335,6 +1502,10 @@ derive_mutation_jobs() {{
         for job_id in (
             "test-doc",
             "test-shard",
+            "repo-gates",
+            "api-coverage",
+            "package-feature-checks",
+            "runtime-feature-boundary",
             "lint",
             "confidence-fast",
             "linux-release-cache",

@@ -42,7 +42,7 @@ The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) i
 source of truth for the CI split:
 
 - **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
-  `Test shard ${{ matrix.shard }}/3` runs workspace tests.
+  `Test shard ${{ matrix.shard }}/4` runs workspace tests.
 - **Full-host CI:** `Functional E2E (agent-service)` runs `agent-service-restate-e2e`,
   including the Restate ingress and process-workflow live test; it does not judge the
   browser journeys.

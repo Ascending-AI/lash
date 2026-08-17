@@ -56,7 +56,7 @@ The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) i
 source of truth for the CI split:
 
 - **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
-  `Test shard ${{ matrix.shard }}/3` runs the workspace tests, including the Slack
+  `Test shard ${{ matrix.shard }}/4` runs the workspace tests, including the Slack
   package tests.
 - **Full-host CI:** the `slack-clone-full-host` functional E2E leg runs
   `just slack-clone-full-host-e2e` (token-free, deterministic). CI still does not

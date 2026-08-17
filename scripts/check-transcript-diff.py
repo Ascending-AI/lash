@@ -249,11 +249,34 @@ def current_branch() -> str | None:
     return branch or None
 
 
+def queued_pull_request_number() -> str | None:
+    """The PR number a merge-queue ref is queueing, if this is one.
+
+    A `merge_group` run checks out `gh-readonly-queue/<base>/pr-<n>-<sha>`, a ref
+    that is no branch any pull request has as its head — so the by-head query
+    below finds nothing and the gate would fail a change whose PR justifies it.
+    The queue writes the PR number into the ref, so ask for that PR by number.
+
+    Only the queue's own event may name a PR this way. A ref name is something a
+    developer can choose, and reading one as a queue ref outside the queue would
+    let a branch named after the pattern fetch an unrelated PR's body and answer
+    this gate with someone else's justification.
+    """
+    if os.environ.get("GITHUB_EVENT_NAME") != "merge_group":
+        return None
+    branch = current_branch()
+    if not branch:
+        return None
+    match = re.fullmatch(r"gh-readonly-queue/[^/]+/pr-(?P<number>\d+)-[0-9a-f]+", branch)
+    return match.group("number") if match else None
+
+
 def queried_pull_request_body() -> str | None:
     """The open PR for this branch, asked for directly.
 
     A manually dispatched run is the sanctioned recovery when GitHub stops
-    delivering a branch's events, and it arrives with no PR in its payload. The
+    delivering a branch's events, and it arrives with no PR in its payload. A
+    merge-queue run has no PR in its payload either, by design. The
     justification still exists — it is in the PR body — so the gate asks for it
     rather than failing a run for the shape of its trigger. Returns `None` when
     the question cannot be asked at all, which is distinct from asking and
@@ -264,6 +287,8 @@ def queried_pull_request_body() -> str | None:
     branch = current_branch()
     if not (token and repository and branch):
         return None
+    if number := queued_pull_request_number():
+        return queried_pull_request_body_by_number(repository, token, number)
     owner = repository.split("/")[0]
     head = urllib.parse.quote(f"{owner}:{branch}", safe="")
     request = urllib.request.Request(
@@ -290,6 +315,33 @@ def queried_pull_request_body() -> str | None:
         if isinstance(pull_request, dict):
             return pull_request.get("body") or ""
     return None
+
+
+def queried_pull_request_body_by_number(
+    repository: str, token: str, number: str
+) -> str | None:
+    """One PR's body, by number. Same failure semantics as the by-head query."""
+    request = urllib.request.Request(
+        f"{GITHUB_API}/repos/{repository}/pulls/{number}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "lash-transcript-gate",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError) as error:
+        print(
+            f"note: could not query queued pull request #{number}: {error}",
+            file=sys.stderr,
+        )
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload.get("body") or ""
 
 
 def has_transcript_justification() -> bool:

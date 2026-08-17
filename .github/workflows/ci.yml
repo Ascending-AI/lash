@@ -13,17 +13,57 @@ on:
   # from another workflow, and unrelated to the removed pass-2 bump chain.
   workflow_dispatch:
   pull_request:
+  # The merge queue delivers a queued PR's required checks on its own event, from
+  # its own `gh-readonly-queue/...` ref. Without this trigger a queue entry gets
+  # no checks at all and the queue stalls.
+  merge_group:
   push:
     branches:
       - main
 
-# Superseded pull-request runs are cancelled the moment a new push replaces
-# them. Main pushes are never cancelled: release.yml refuses to release a commit
-# without its own successful main CI run, so a cancelled main run would strand
-# that commit as unreleasable.
+# One live CI run per head branch, whatever event produced it — because a
+# `pull_request` run carries `refs/pull/<n>/merge` while a manual recovery
+# dispatch of the same commit carries `refs/heads/<branch>`, so keying on
+# `github.ref` put them in different groups and ran the whole board twice over an
+# identical tree. That duplication was the single largest line in the CI bill
+# (54% of branch runner-minutes). Now a dispatch supersedes the pull-request run
+# of the same branch instead of doubling it, and the dispatch trigger itself
+# stays exactly as it was — still the recovery path for a dropped push event.
+#
+# The key is not *only* the branch name, because a branch name is not unique
+# across repositories: a fork's pull request from a branch literally named `main`
+# would key into main's group and, being a pull-request run, would cancel a live
+# trunk run — destroying the one guarantee below. So each event class that must
+# never be collided into gets its own key, and those keys contain a colon, which
+# `git check-ref-format` forbids in a ref name. That is what makes them
+# unforgeable: no branch anyone can push, here or in a fork, can produce one.
+#
+# * `push` (main only) keys on `trunk:push`, so a trunk run shares a group with
+#   nothing but another trunk push. Trunk runs are never cancelled: release.yml
+#   refuses to release a commit without its own successful main CI run, so a
+#   cancelled trunk run would strand that commit as unreleasable.
+# * a dispatch on main keys on `trunk:dispatch` for the same reason — it is the
+#   recovery path that produces exactly that release evidence. The cost is that
+#   it no longer queues behind a live trunk push run but runs beside it; two
+#   validations of main are wasteful, never wrong.
+# * a *fork* pull request keys on its PR number, which no branch name can
+#   collide with. Same-repo pull requests keep the branch key, which is what lets
+#   a dispatch dedupe with them.
+# * a `merge_group` run has no `head_ref` and falls through to its own
+#   `gh-readonly-queue/main/pr-<n>-<sha>` ref name, unique per queue entry: two
+#   queue builds never share a group and never cancel each other. Their
+#   cancellation belongs to the queue, which drops an entry's run when it
+#   dequeues it, so `cancel-in-progress` stays false for the event.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'push' && 'trunk:push'
+      || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') && 'trunk:dispatch'
+      || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && format('fork-pr:{0}', github.event.pull_request.number)
+      || github.head_ref
+      || github.ref_name
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}
 
 permissions:
   contents: read
@@ -39,6 +79,14 @@ jobs:
   # the superset (`cargo check --workspace --all-targets` plus the doctest
   # link) that every read-only debug-profile job restores. The nextest run is
   # sharded out to the test-shard matrix below.
+  #
+  # This job is deliberately *only* the cache superset and the doctests. Every
+  # gate that neither warms nor needs that superset — the repository gates, the
+  # public-API coverage gate, the package feature checks, the default-off runtime
+  # boundary — used to queue behind it as serial steps, which made this job the
+  # run's critical path (9m40s warm, 20m36s on a cold branch cache) for work
+  # that has no dependency on it. They are sibling jobs now; nothing was dropped
+  # or weakened.
   test-doc:
     name: Test docs + build cache
     runs-on: blacksmith-16vcpu-ubuntu-2404
@@ -73,14 +121,66 @@ jobs:
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
 
+      # Compiles every target of every workspace crate — libs, bins, tests,
+      # examples, and benches. This subsumes the old standalone checks for
+      # docs-snippets and the runtime perf harness, which would otherwise only break post-merge. It also warms the
+      # dependency graph the test-shard matrix restores.
+      - name: Check workspace (all targets)
+        run: |
+          # shellcheck disable=SC2086
+          cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
+
+      # nextest does not run doctests; keep them covered here (also builds the
+      # workspace crates as rlibs, warming the shared cache for the readers).
+      - name: Test workspace doctests
+        run: |
+          # shellcheck disable=SC2086
+          cargo test --doc --workspace --locked ${LASH_CI_FEATURES}
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # Python-only repository gates plus the rustdoc lint. These were serial steps
+  # of test-doc, where they sat behind twelve minutes of compilation for no
+  # reason: nothing here depends on the workspace check. The rustdoc lint is the
+  # one cargo consumer, so this job restores the shared cache read-only.
+  repo-gates:
+    name: Repository gates
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: protoc
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
       - name: Lint docs
         run: python3 scripts/lint_docs.py
 
       - name: Lint orchestrating tools
         run: python3 scripts/lint_orchestrating_tools.py
-
-      - name: Lint rustdoc
-        run: bash scripts/check-rustdoc.sh
 
       - name: Check test quarantine metadata
         run: python3 scripts/check_test_quarantines.py
@@ -104,23 +204,90 @@ jobs:
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
 
+      - name: Lint rustdoc
+        run: bash scripts/check-rustdoc.sh
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # The public-API disposition gate builds rustdoc JSON for the facade crates,
+  # which is its own compile of the dependency graph — 7m49s of the old 21m
+  # test-doc critical path, and independent of every other check. Its own job.
+  api-coverage:
+    name: Public API example coverage
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: protoc
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
       - name: Check public API example coverage
         run: python3 scripts/check_api_example_coverage.py
 
-      # Compiles every target of every workspace crate — libs, bins, tests,
-      # examples, and benches. This subsumes the old standalone checks for
-      # docs-snippets and the runtime perf harness, which would otherwise only break post-merge. It also warms the
-      # dependency graph the test-shard matrix restores.
-      - name: Check workspace (all targets)
-        run: |
-          # shellcheck disable=SC2086
-          cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # Feature-set coverage the workspace check cannot reach, and the deliberately
+  # non-default provider/protocol test features. Split out of test-doc: these
+  # resolve their own feature graphs, so they neither reuse nor warm anything the
+  # workspace check produces, and running them beside it costs nothing.
+  package-feature-checks:
+    name: Package feature checks
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: protoc
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
 
       # The workspace check unifies testing features through dev-dependencies.
       # Keep these package-scoped consumers honest about feature forwarding.
       #
       # agent-service's `restate` feature is off by default, so the workspace
-      # check above compiles neither its restate constructor nor the E2E test
+      # check compiles neither its restate constructor nor the E2E test
       # target that calls it. That gap shipped a `missing field` break to the
       # Functional E2E leg, twenty minutes of docker away, when a local
       # workspace battery was entirely green. Compile it here in seconds.
@@ -130,6 +297,59 @@ jobs:
           cargo check -p agent-workbench --locked
           cargo check -p slack-clone --all-targets --features e2e --locked
           cargo check -p agent-service --features restate --all-targets --locked
+
+      # The workspace test run only reaches lash-remote-protocol's core
+      # conversions because `lash` unifies the feature in. Run the crate on its
+      # own so the coverage survives any change to who depends on what, and so
+      # `cargo test -p lash-remote-protocol` stops being a misleading command.
+      - name: Test lash-remote-protocol core conversions
+        run: cargo test -p lash-remote-protocol --features core-conversions --locked
+
+      # Provider test support is deliberately outside each crate's default
+      # feature set. Keep the shared normalization contract explicit so a
+      # production-safe default cannot silently reduce conformance coverage.
+      - name: Test provider response-normalization conformance
+        run: |
+          cargo test -p lash-provider-openai --features testing --locked conformance
+          cargo test -p lash-provider-anthropic --features testing --locked conformance
+          cargo test -p lash-provider-google --features testing --locked conformance
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # The default-off boundary lane: `lash-runtime` without its default features
+  # compiles, tests, and pulls no RLM/Lashlang dependency. Its feature
+  # resolution differs from every other job's, so it is its own compile and its
+  # own job; `scripts/push-gate` runs the identical commands locally.
+  runtime-feature-boundary:
+    name: Runtime feature boundary
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: protoc
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
 
       - name: Check lash-runtime feature boundary
         run: |
@@ -154,47 +374,29 @@ jobs:
             exit 1
           fi
 
-      # The workspace test run only reaches lash-remote-protocol's core
-      # conversions because `lash` unifies the feature in. Run the crate on its
-      # own so the coverage survives any change to who depends on what, and so
-      # `cargo test -p lash-remote-protocol` stops being a misleading command.
-      - name: Test lash-remote-protocol core conversions
-        run: cargo test -p lash-remote-protocol --features core-conversions --locked
-
-      # Provider test support is deliberately outside each crate's default
-      # feature set. Keep the shared normalization contract explicit so a
-      # production-safe default cannot silently reduce conformance coverage.
-      - name: Test provider response-normalization conformance
-        run: |
-          cargo test -p lash-provider-openai --features testing --locked conformance
-          cargo test -p lash-provider-anthropic --features testing --locked conformance
-          cargo test -p lash-provider-google --features testing --locked conformance
-
-      # nextest does not run doctests; keep them covered here (also builds the
-      # workspace crates as rlibs, warming the shared cache for the readers).
-      - name: Test workspace doctests
-        run: |
-          # shellcheck disable=SC2086
-          cargo test --doc --workspace --locked ${LASH_CI_FEATURES}
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
 
   # The workspace test suite, sharded by nextest partitions so it drops off the
   # critical path. Restore-only against the linux-debug cache the test-doc job
   # writes; sccache absorbs the workspace test-binary codegen that rust-cache's
   # read-only restore cannot save, sharing it across the shards and runs.
   # --no-fail-fast so one failure never hides the rest (the alpha.82 lesson).
-
-      - name: Report sccache stats
-        if: always()
-        run: sccache --show-stats
-
+  #
+  # Four partitions, not three: with the old three, shard 3 ran 30% longer than
+  # shard 1 (12m09s vs 9m20s) and set the wall time for the whole lane. nextest
+  # partitions by count, which balances test *numbers* and not test *durations*,
+  # so the residual skew is reduced by making each partition smaller rather than
+  # by hand-assigning tests to shards.
   test-shard:
-    name: Test shard ${{ matrix.shard }}/3
+    name: Test shard ${{ matrix.shard }}/4
     runs-on: blacksmith-16vcpu-ubuntu-2404
 
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Check out repository
@@ -211,8 +413,12 @@ jobs:
         with:
           node-version: 24
 
+      # Same action as the writer. A `Swatinem/rust-cache` restore here read a
+      # different cache backend than the `useblacksmith/rust-cache` save in
+      # test-doc, so every shard logged `No cache found` and rebuilt the whole
+      # dependency graph from scratch.
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -228,13 +434,13 @@ jobs:
 
       # Workspace-wide: every crate's tests run, not a hand-maintained crate
       # list. Live tests (Restate e2e, Postgres conformance without a database
-      # URL) are #[ignore]d or self-skip. Partition count:i/3 splits execution
-      # across the three shards.
+      # URL) are #[ignore]d or self-skip. Partition count:i/4 splits execution
+      # across the four shards.
       - name: Test workspace shard
         run: |
           # shellcheck disable=SC2086
           cargo nextest run --workspace --locked ${LASH_CI_FEATURES} \
-            --no-fail-fast --partition count:${{ matrix.shard }}/3
+            --no-fail-fast --partition count:${{ matrix.shard }}/4
 
       - name: Report sccache stats
         if: always()
@@ -266,16 +472,28 @@ jobs:
             --range "${merge_base}..HEAD" \
             --summary "$GITHUB_STEP_SUMMARY"
 
+      # Every event compares against the base its own tree actually sits on.
+      #
       # PRs compare with their target branch's merge-base. Main pushes compare
       # with HEAD~1 so the landed tree is independently rechecked; manual
       # workflow dispatches have no meaningful base and intentionally skip it.
+      # A merge-queue entry is neither: its head is a queue commit carrying one
+      # or more PRs on top of the base the queue chose, so HEAD~1 would check
+      # only the last commit of a multi-commit PR — passing vacuously when the
+      # change is earlier, and failing falsely when the bump is earlier. The
+      # queue states the base it built on, so use it.
       # The PR guarantee requires a current merge ref, enforced by an up-to-date
       # branch rule or merge queue; a stale merge ref has a stale merge-base.
       - name: Check versioned surface bumps
         if: github.event_name != 'workflow_dispatch'
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             base="$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)"
+          elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+            base="$MERGE_GROUP_BASE_SHA"
+            [ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }
           else
             base="HEAD~1"
           fi
@@ -659,8 +877,10 @@ jobs:
     # main. A cache written by a pull-request run is scoped to that PR's merge
     # ref and can only be restored by re-runs of the same pull request, so on a
     # PR this spends the longest job on the board building a cache no other
-    # workflow can read. Cache warming belongs on main.
-    if: github.event_name != 'pull_request'
+    # workflow can read. The same is true of a merge-queue entry's
+    # `gh-readonly-queue/...` ref, and there it would also be the longest job
+    # gating queue throughput. Cache warming belongs on main.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Check out repository
@@ -839,9 +1059,11 @@ jobs:
 
       # The e2e binaries are built on the host by the just recipe and
       # bind-mounted into the compose services, so the build reuses the
-      # workspace debug cache that the test-doc job saves.
+      # workspace debug cache that the test-doc job saves — which means using
+      # the same cache action the writer uses, not a second backend that always
+      # missed.
       - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
           shared-key: linux-debug
