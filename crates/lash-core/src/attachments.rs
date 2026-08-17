@@ -332,11 +332,14 @@ pub struct AttachmentReclamationReport {
     pub deleted_while_referenced: Vec<AttachmentId>,
     /// Whether this sweep's deletes were fenced against concurrent writers.
     pub fence: AttachmentGcFence,
-    /// Digests skipped because another sweeper already held their condemnation.
-    /// Skip-on-contention: the sweep never waits for a peer, it defers the
-    /// digest to the next sweep. A digest that keeps appearing here across
-    /// sweeps with no other sweeper running is a condemnation left behind by a
-    /// dead sweeper; see
+    /// Digests this sweep deferred on contention rather than waiting: either a
+    /// peer sweeper already held the condemnation, or a writer revoked it before
+    /// the delete could be armed. Both are ordinary outcomes — the digest is
+    /// simply left for the next sweep.
+    ///
+    /// A digest that keeps appearing here across sweeps with no other sweeper
+    /// and no writer is a condemnation left behind by a sweeper that died
+    /// mid-delete; see
     /// [`AttachmentRootSet::release_attachment_condemnation`].
     pub condemn_deferred_ids: Vec<AttachmentId>,
 }
