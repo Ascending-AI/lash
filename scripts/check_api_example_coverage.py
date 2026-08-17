@@ -33,7 +33,7 @@ noticed.  Adding, removing, or moving any path fails the gate; only the
 *disposition* is centralized, never the path set.  `--dump-surface` prints the
 same projection the check compares against.
 
-Evidence prose carries eight lints, because the prose is the evidence:
+Evidence prose carries nine lints, because the prose is the evidence:
 
 * No machine-local paths.  `/workspace/...`, `~/...`, and `C:\...` are one
   developer's checkout, not a contract another reader can verify.  Evidence
@@ -69,26 +69,137 @@ Evidence prose carries eight lints, because the prose is the evidence:
   it hid 904 rows' actual contract behind boilerplate.  The same goes for the
   `used-unasserted` wording on a row that names an assertion.  See
   `stale_disposition_reason`.
+* No unconfirmable citations.  Prose that cites `file.rs:line` has to be about
+  the item at that line: the item's own name, or the type that owns it, must
+  appear in the function around it.  64 rows written earlier in this arc cited
+  real lines that never mentioned the symbol, which reads as verification and is
+  not.  Scoped to the internal dispositions and to rows whose prose invokes
+  FIG-1223; see `prose_citation_defect`.
 * No missing repository paths.  A `crates/...`, `examples/...`, `runbooks/...`,
   `scripts/...`, or `docs/...` file cited in reason prose must still exist in
   the repository; a `:line` anchor is metadata and does not change which file
   must exist.  See `missing_repository_path`.
 
-Three exclusions are deliberate, and each is enforced structurally rather than
+Evidence is tiered, and the tier is the *path shape* of the anchor rather than a
+word in the prose.  Four tiers exist, strongest first:
+
+1. `example-host` -- an example's own host code.  It proves a host needs the API
+   to do a real job.
+2. `example-test` -- a test module inside an example, or a file under an
+   example's `tests/`.  Callable and asserted, but it can be circular: the test
+   exists because the API does.
+3. `crate-src` -- another workspace crate's `src/`.  Load-bearing internally,
+   which is the right bar for an internal seam and the wrong bar for host API.
+4. `workspace-tests` -- a `tests/` directory in a crate.  It proves nothing
+   about demand; a probe usage in a test is exactly what let a dead session
+   picker look alive (FIG-1223).
+
+Test code is found the way the compiler finds it, not by how the file reads: a
+`#[cfg(test)]` block, a `tests`-shaped path, and a file some *parent* declares
+for tests are all test code.  The declaration is the shape that hides -- the gate
+is in the parent, the file itself looks like shipped source -- so all of its
+spellings count: any predicate that gates on `test` (`all(test, ...)` included,
+`not(test)` excluded), the gate and the `mod` on one line, and `#[path]` sending
+the module somewhere its name does not predict.  93 files here are test code only
+by declaration.
+
+`DISPOSITION_TIERS` records which tiers each disposition may anchor in, so no
+row can blend them, and `tier_breakdown` prints the standing distribution on
+every run.  The `example-test` population is *ratcheted* by
+`EXAMPLE_TEST_TIER_RATCHET` rather than migrated: each row there is a per-row
+design question ("should the example's host code use this?"), so the number may
+only fall, and it falls in a diff a reviewer can see.
+
+Two dispositions describe internal seams, because `#[doc(hidden)]` support
+modules are real internal API and pretending otherwise is what turned one of
+them into an amnesty channel (FIG-1223):
+
+* `internal-consumed` -- another crate's shipped code needs this item.  The
+  justification is not prose: it is a `crate-src` anchor in a crate other than
+  the one that defines the item, checked by `reference_exists` on every run.  A
+  dead item cannot produce one, and a fabricated one has to name a file and line
+  that do not exist.  The claim here is *dependency*, not *exercise*, but an
+  import is *not* an anchor: ruled for FIG-1223, a `use` line resolves whether or
+  not anything in the crate needs the item, and four rows anchored on `pub use`
+  were citing the declaring crate's own re-export.  A trait-impl signature *is*
+  one, ruled the same way: `impl EffectHost for X { async fn
+  retire_effect_journal(` is a crate binding itself to the item's contract, which
+  is the strongest form the dependency claim takes.  A *member*'s anchor has to
+  tie its line to the type that owns it --
+  qualified on the line, or reached through a receiver that *resolves* to that
+  type -- because `reference_exists` is a substring match and a leaf name matches
+  by coincidence.  Resolution is textual and hop by hop (`type_facts`): the
+  `impl` block types `self`, struct fields and method return types carry the
+  chain forward, `type` aliases are followed, `impl Trait for Type` ties a
+  receiver to the trait that owns the member, and a variant's declared payload
+  types the binding a `if let Enum::Variant(x)` introduces.  The expression is
+  assembled across continuation lines, because a fluent chain is written down the
+  page and its receiver is rarely on the anchor's own line.  A field written in a
+  literal is judged by the literal it sits in, since adjacent literals write one
+  field name for two types, and an anchor inside a `struct`/`enum`/`trait` body
+  is rejected outright: a declaration of a crate's own same-named member is not a
+  consumer of ours.  Naming no rival is no defence: prelude types, file-local
+  types and path-qualified rivals cannot be named, so a receiver that resolves
+  elsewhere -- or nowhere -- is a defect on its own.  Nor is a bare occurrence of
+  the name: with nothing qualifying it, no receiver carrying it, no literal
+  containing it and no implementation declaring it, the line is a coincidence --
+  that branch was passing a field name inside a SQL string and a `let session_id`
+  in an unrelated test.  Nor is a *declaration* of the item a consumer of it, at
+  any level: a file that declares the type is where the type lives, whatever path
+  the ledger keys it under, unless the line writes the path and so names another
+  crate's type explicitly.  See `declaration_anchor_defect`.  See `member_anchor_defect`.  The same predicate decides
+  the *search* for a consumer, not only the check on an anchor already written; a
+  name-based search answers a different question and files live API as dead.  A
+  consumer that cannot be tied that way is recorded in prose under an `unused-*`
+  disposition, so the dispositions that claim checked evidence keep meaning it --
+  and where *any* earlier round tied one -- by anchor or in prose -- the row keeps
+  its candidate in prose instead of hardening into a removal verdict, because a
+  resolver that fails closed must fail into a question, never into a deletion
+  instruction.  Fallible chains are read through their unwraps (`?`, `.await?`),
+  a qualification has to use the row's *own* container (`TurnFinish::FinalValue`
+  is not `TurnEvent::FinalValue`), and the crate that declares an item is found
+  from its source rather than from the path root the ledger keys it under.
+* `internal-test-only` -- the only consumers are tests.  The anchor must sit in
+  a test tier, and the reason says so; an item that is not already behind the
+  `testing` feature carries a `Relocate:` note, because "a test imports it" is
+  exactly the level of justification that let a dead session picker look alive.
+
+`unused-remove` verdicts leave a tombstone.  `[[removal_verdict]]` records every
+item that has ever carried one, and a verdict may only be discharged by actually
+removing the item -- never by moving it.  Commit `678d567bf` moved 126 items
+behind a doc-hidden module and deleted their 444 rows in the same diff, so the
+written verdicts simply evaporated; `removal_verdict_errors` is the rule that
+would have failed it.  Reappearing under another path requires an explicit
+`superseded_by` disposition change in the same diff, and the tombstone count is
+pinned by `removal_verdicts_recorded` so deleting history is a visible edit
+rather than a silent one.
+
+Two exclusions remain deliberate, and each is enforced structurally rather than
 by a hand-maintained list:
 
-1. `#[doc(hidden)]` items.  Hidden means "not host contract"; rustdoc omits
-   them from this JSON unless `--document-hidden-items` is passed, which
-   `rustdoc()` never does, and `doc_hidden` refuses them a second time so a
-   future rustdoc that stops omitting them cannot silently widen the gate.
-   `lash_core::runtime::await_event_coordinator` is the current example: a
-   doc-hidden re-export of a `pub(crate)`-rooted module, deliberately outside
-   the gate.
-2. Items in nested `lash-core` public modules that no publicly reachable
+1. Items in nested `lash-core` public modules that no publicly reachable
    signature mentions.  They are internals; if one becomes host-visible it
-   enters through the reachability closure automatically.
-3. Items owned by another crate and not re-exported by `lash` or `lash-core`.
+   enters through the reachability closure automatically.  The `#[doc(hidden)]`
+   support modules at the crate root are the exception and are walked in full:
+   they are the workspace's internal cross-crate API, `gated_core_modules`
+   records them in the inventory, and a hidden root module missing from that
+   list fails the gate rather than escaping it.
+2. Items owned by another crate and not re-exported by `lash` or `lash-core`.
    Each crate answers for its own surface.
+
+`#[doc(hidden)]` is no longer one of them.  Hiding an internal seam from
+host-facing rustdoc is a legitimate *documentation* choice; whether the ledger
+answers for it is a separate *API* question, and one switch for both was the
+bug.  `rustdoc()` passes `--document-hidden-items` so the compiler still names
+what it hides.
+
+Running this check builds rustdoc JSON for the facade and for every workspace
+crate whose re-exports it has to resolve, so it reads `CARGO_TARGET_DIR` and
+inherits whatever that names.  With a warm target directory it is about a
+minute; pointed at an empty one it is a cold build of the workspace's documents,
+which is why CI gives it its own job.  In a worktree, export the target
+directory the rest of that worktree's builds use, or the check pays for a second
+copy of everything.
 """
 
 from __future__ import annotations
@@ -124,7 +235,33 @@ DISPOSITIONS = {
     "unused-add",
     "unused-justify",
     "unused-remove",
+    "internal-consumed",
+    "internal-test-only",
 }
+#: Dispositions whose evidence is an internal seam rather than example coverage.
+INTERNAL_DISPOSITIONS = {"internal-consumed", "internal-test-only"}
+#: Dispositions that record an anchor at all, in the order the report prints.
+ANCHORED_DISPOSITIONS = (
+    "used-asserted",
+    "used-unasserted",
+    "internal-consumed",
+    "internal-test-only",
+)
+#: Evidence tiers, strongest first.  See the module docstring.
+ANCHOR_TIERS = ("example-host", "example-test", "crate-src", "workspace-tests")
+#: The tiers each disposition's anchors may live in.  A row that blends them is
+#: claiming a stronger kind of evidence than its anchor can carry.
+DISPOSITION_TIERS = {
+    "used-asserted": {"example-host", "example-test"},
+    "used-unasserted": {"example-host", "example-test"},
+    "internal-consumed": {"crate-src"},
+    "internal-test-only": {"example-test", "workspace-tests"},
+}
+#: Rows whose usage anchor sits in an example's test code rather than its host
+#: code.  A ratchet, not a target: the count may only fall, and lowering it is a
+#: one-line diff beside the row that was upgraded.  Raising it is the bleeding
+#: this gate exists to stop, so an increase fails.
+EXAMPLE_TEST_TIER_RATCHET = 1914
 PUBLIC_KINDS = {
     "assoc_const",
     "assoc_type",
@@ -142,6 +279,12 @@ PUBLIC_KINDS = {
     "union",
 }
 
+#: Crates whose rustdoc JSON this check may need in order to resolve a
+#: re-exported member-bearing type.  The boolean is "first party": a workspace
+#: crate answers to this repository's feature graph and to its ledger, so it is
+#: documented with `--all-features` and with hidden items; a third-party crate
+#: answers to neither, and its hidden internals are not this inventory's
+#: business.  A spec is version-qualified when the graph holds two majors.
 DEPENDENCY_PACKAGES = {
     "lash_core": ("lash-core", "lash_core", True),
     "lash_http_transport": ("lash-http-transport", "lash_http_transport", True),
@@ -159,8 +302,8 @@ DEPENDENCY_PACKAGES = {
     "lash_tool_support": ("lash-tool-support", "lash_tool_support", True),
     "lash_trace": ("lash-trace", "lash_trace", True),
     "lashlang": ("lashlang", "lashlang", True),
-    "schemars": ("schemars", "schemars", False),
-    "schemars_derive": ("schemars_derive", "schemars_derive", False),
+    "schemars": ("schemars@0.8", "schemars", False),
+    "schemars_derive": ("schemars_derive@0.8", "schemars_derive", False),
     "tokio_util": ("tokio-util", "tokio_util", False),
 }
 _DEPENDENCY_DOCUMENTS: dict[tuple[str, bool], dict[str, Any]] = {}
@@ -210,16 +353,26 @@ def public(visibility: Any) -> bool:
 def doc_hidden(item: dict[str, Any]) -> bool:
     """Whether rustdoc recorded `#[doc(hidden)]` on this item.
 
-    Hidden items are not host contract, so they stay outside the gate. Today
-    rustdoc already omits them from the JSON; this keeps the exclusion true by
-    intent rather than by side effect.
+    This is the drift guard for `gated_core_modules`, so it has to recognize
+    every shape rustdoc has used to say it.  Older formats wrote the attribute
+    as a bare string or as a `{"doc_hidden": ...}` tag; the current one wraps
+    unparsed attributes as `{"other": "#[doc(hidden)]"}`, which a key lookup
+    misses -- and a guard that silently answers "no" to every item is not a
+    guard.  Any string in the attribute, key or value, therefore decides.
     """
     for attribute in item.get("attrs") or []:
-        if isinstance(attribute, str):
-            if "doc(hidden)" in attribute.replace(" ", ""):
+        if isinstance(attribute, dict):
+            texts = [*attribute.keys(), *(
+                value for value in attribute.values() if isinstance(value, str)
+            )]
+        else:
+            texts = [attribute]
+        for text in texts:
+            if not isinstance(text, str):
+                continue
+            collapsed = text.replace(" ", "")
+            if "doc(hidden)" in collapsed or "doc_hidden" in collapsed:
                 return True
-        elif isinstance(attribute, dict) and "doc_hidden" in attribute:
-            return True
     return False
 
 
@@ -265,8 +418,6 @@ def add_members(
     if kind == "enum":
         for variant_id in inner["variants"]:
             variant = index[str(variant_id)]
-            if doc_hidden(variant):
-                continue
             variant_path = f"{path}::{variant['name']}"
             variant_canonical = f"{canonical}::{variant['name']}"
             surface[(variant_path, "variant")] = variant_canonical
@@ -280,8 +431,6 @@ def add_members(
                 ]
             for field_id in variant_fields:
                 field = index[str(field_id)]
-                if doc_hidden(field):
-                    continue
                 name = field.get("name") or field_id
                 surface[(f"{variant_path}::{name}", "field")] = (
                     f"{variant_canonical}::{name}"
@@ -297,15 +446,13 @@ def add_members(
             field_ids = inner["fields"]
         for field_id in field_ids:
             field = index[str(field_id)]
-            if public(field["visibility"]) and not doc_hidden(field):
+            if public(field["visibility"]):
                 name = field.get("name") or field_id
                 surface[(f"{path}::{name}", "field")] = f"{canonical}::{name}"
 
     if kind == "trait":
         for member_id in inner["items"]:
             member = index[str(member_id)]
-            if doc_hidden(member):
-                continue
             name = member["name"]
             surface[(f"{path}::{name}", item_kind(member))] = f"{canonical}::{name}"
 
@@ -320,8 +467,6 @@ def add_members(
         for member_id in impl["items"]:
             member = index.get(str(member_id))
             if member is None or not public(member["visibility"]):
-                continue
-            if doc_hidden(member):
                 continue
             name = member["name"]
             surface[(f"{path}::{name}", item_kind(member))] = f"{canonical}::{name}"
@@ -380,7 +525,7 @@ def add_export(
             raise RuntimeError(f"cannot resolve external module export {path}")
         for child_id in target["inner"]["module"]["items"]:
             child = member_index[str(child_id)]
-            if not public(child["visibility"]) or doc_hidden(child):
+            if not public(child["visibility"]):
                 continue
             add_export(
                 surface,
@@ -410,7 +555,7 @@ def lash_surface(
         module = index[module_id]["inner"]["module"]
         for child_id in module["items"]:
             child = index[str(child_id)]
-            if not public(child["visibility"]) or doc_hidden(child):
+            if not public(child["visibility"]):
                 continue
             kind = item_kind(child)
             name = exported_name(child)
@@ -482,7 +627,7 @@ def exposed_ids(item_id: str, index: dict[str, dict[str, Any]]) -> set[str]:
     if kind == "enum":
         for variant_id in inner["variants"]:
             variant = index.get(str(variant_id))
-            if variant is None or doc_hidden(variant):
+            if variant is None:
                 continue
             shape = variant["inner"]["variant"]["kind"]
             if isinstance(shape, dict) and "struct" in shape:
@@ -504,7 +649,7 @@ def exposed_ids(item_id: str, index: dict[str, dict[str, Any]]) -> set[str]:
         ]
     for field_id in field_ids:
         field = index.get(str(field_id))
-        if field is None or doc_hidden(field):
+        if field is None:
             continue
         referenced_ids(field["inner"]["struct_field"], found)
 
@@ -530,8 +675,6 @@ def exposed_ids(item_id: str, index: dict[str, dict[str, Any]]) -> set[str]:
             and public(member["visibility"])
         ]
     for member in members:
-        if doc_hidden(member):
-            continue
         found |= signature_ids(member)
     return found
 
@@ -560,8 +703,6 @@ def core_reachable_types(
             # Absent from this index means another crate owns it.
             if item is None or item_kind(item) not in REACHABLE_KINDS:
                 continue
-            if doc_hidden(item):
-                continue
             reached.add(candidate)
             frontier.append(candidate)
 
@@ -575,7 +716,9 @@ def core_reachable_types(
 
 
 def lash_core_surface(
-    document: dict[str, Any], all_features: bool
+    document: dict[str, Any],
+    all_features: bool,
+    gated_modules: set[str] | None = None,
 ) -> dict[tuple[str, str], str]:
     """Root host exports plus every core-owned type they make reachable.
 
@@ -583,17 +726,41 @@ def lash_core_surface(
     the contract. Nested public modules are not walked -- an item there enters
     the gate only when a publicly reachable signature exposes it, which is the
     same thing as being host-visible.
+
+    `gated_modules` are the exception: the crate root's internal support modules,
+    walked in full because they are the workspace's cross-crate API and the
+    ledger answers for them like any other path. The set is recorded in the
+    inventory rather than derived from `#[doc(hidden)]` alone, so neither adding
+    a hidden support module nor un-hiding an existing one changes what the gate
+    covers without an explicit edit: an unlisted hidden root module is an error,
+    and a listed module that has vanished is an error too.
     """
     index = document["index"]
     paths = document["paths"]
     root = index[str(document["root"])]["inner"]["module"]
     surface: dict[tuple[str, str], str] = {}
     seeds: set[str] = set()
+    gated = set(gated_modules or ())
+    walked: set[str] = set()
+    unlisted: list[str] = []
     for child_id in root["items"]:
         child = index[str(child_id)]
-        if not public(child["visibility"]) or item_kind(child) == "module":
+        if not public(child["visibility"]):
             continue
-        if doc_hidden(child):
+        if item_kind(child) == "module":
+            name = exported_name(child)
+            if name in gated:
+                walked.add(name)
+                add_export(
+                    surface,
+                    export_path("lash_core", child),
+                    child,
+                    index,
+                    paths,
+                    all_features,
+                )
+            elif doc_hidden(child):
+                unlisted.append(name)
             continue
         add_export(
             surface,
@@ -607,6 +774,21 @@ def lash_core_surface(
         if target is not None and target in index:
             seeds.add(target)
 
+    if unlisted:
+        raise AssertionError(
+            "doc-hidden lash-core root modules outside the gate: "
+            f"{', '.join(sorted(unlisted))}. Hidden is a documentation choice, "
+            "not a ledger exemption -- add each to gated_core_modules in "
+            f"{INVENTORY.name} and disposition its paths."
+        )
+    missing = sorted(gated - walked)
+    if missing:
+        raise AssertionError(
+            f"gated_core_modules names modules lash-core no longer exports: "
+            f"{', '.join(missing)}. Retiring a support module retires every path "
+            "it published; record that in the inventory rather than here."
+        )
+
     for path, item_id in core_reachable_types(seeds, index, paths).items():
         # A closure type is keyed by its canonical path, so path *is* identity.
         surface[(path, item_kind(index[item_id]))] = path
@@ -614,11 +796,24 @@ def lash_core_surface(
     return surface
 
 
-def rustdoc(package: str, crate_name: str, all_features: bool) -> dict[str, Any]:
+def rustdoc(
+    package: str, crate_name: str, all_features: bool, hidden_items: bool = True
+) -> dict[str, Any]:
     command = ["cargo", "rustdoc", "-p", package]
     if all_features:
         command.append("--all-features")
-    command += ["--lib", "--", "-Z", "unstable-options", "--output-format", "json"]
+    command += [
+        "--lib",
+        "--",
+        "-Z",
+        "unstable-options",
+        "--output-format",
+        "json",
+    ]
+    if hidden_items:
+        # Hidden items are still contract; the gate decides what to do with
+        # them, and it cannot decide about what the compiler never names.
+        command.append("--document-hidden-items")
     env = os.environ.copy()
     env["RUSTC_BOOTSTRAP"] = "1"
     completed = subprocess.run(
@@ -646,7 +841,10 @@ def dependency_document(crate_name: str, all_features: bool) -> dict[str, Any] |
     key = (crate_name, configured_all_features)
     if key not in _DEPENDENCY_DOCUMENTS:
         _DEPENDENCY_DOCUMENTS[key] = rustdoc(
-            package_name, rustdoc_name, configured_all_features
+            package_name,
+            rustdoc_name,
+            configured_all_features,
+            hidden_items=supports_all_features,
         )
     return _DEPENDENCY_DOCUMENTS[key]
 
@@ -669,12 +867,30 @@ def external_target(
     return None
 
 
+def inventory_document() -> dict[str, Any]:
+    with INVENTORY.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def gated_core_modules(document: dict[str, Any] | None = None) -> set[str]:
+    """The `lash-core` root support modules the ledger answers for.
+
+    Recorded rather than derived so that both directions of drift are explicit:
+    a new hidden support module has to be added here before it can carry rows,
+    and un-hiding one does not quietly drop the paths it already published.
+    """
+    inventory = document if document is not None else inventory_document()
+    return set(inventory.get("gated_core_modules", []))
+
+
 def configured_surface(all_features: bool) -> dict[tuple[str, str], str]:
     surface = lash_surface(
         rustdoc("lash-runtime", "lash", all_features), all_features
     )
     core = lash_core_surface(
-        rustdoc("lash-core", "lash_core", all_features), all_features
+        rustdoc("lash-core", "lash_core", all_features),
+        all_features,
+        gated_core_modules(),
     )
     overlap = set(surface) & set(core)
     if overlap:
@@ -772,7 +988,9 @@ def relocated_reference(reference: str) -> str | None:
     except (ValueError, TypeError):
         return None
     path = REPO / relative
-    if not path.is_relative_to(REPO / "examples") or not path.is_file():
+    if not any(
+        path.is_relative_to(REPO / root) for root in ANCHOR_ROOTS
+    ) or not path.is_file():
         return None
     lines = path.read_text(encoding="utf-8").splitlines()
     hits = [index + 1 for index, line in enumerate(lines) if needle in line]
@@ -951,6 +1169,46 @@ def missing_repository_path(text: str) -> str | None:
     return None
 
 
+#: A `file.rs:line` citation inside reason prose.
+PROSE_CITATION = re.compile(r"((?:crates|examples)/[^\s,;:()\"]+\.rs):([0-9]+)")
+
+
+def prose_citation_defect(symbol: str, kind: str, reason: str) -> str | None:
+    """Why a cited line does not show what the prose says it shows, if so.
+
+    Prose is only evidence while the line it points at is about this item.  The
+    rows this arc first wrote cited real files at real lines that never mentioned
+    the symbol -- 64 of them -- which reads as verification and is not.  The check
+    is deliberately the anchor rule's weaker sibling: the item's own name, or the
+    type that owns it, has to appear in the function around the cited line.
+
+    Scope: internal dispositions, and any row whose prose invokes FIG-1223 -- the
+    rows this arc is answerable for.  298 older citations across the ledger fail
+    it and are a separate cleanup; widening this to them without fixing them
+    would just turn the gate red.
+
+    That scope gate is escapable and known to be: a row that cites a line and
+    does not say FIG-1223 is not checked, so the cheapest way past this lint is
+    to write the prose without the reference to the ticket.  The gate only stops
+    getting worse once the check applies to every citation, and the follow-up
+    ticket filed for the 298 owns both the cleanup and widening this to them.
+    """
+    leaf = symbol.split("::")[-1]
+    owner = symbol.split("::")[-2] if "::" in symbol else ""
+    for relative, line_text in PROSE_CITATION.findall(reason):
+        line_number = int(line_text)
+        lines = source_file_lines(relative)
+        if lines is None or line_number > len(lines):
+            return f"cites {relative}:{line_number}, which is not a line in that file"
+        scope = anchor_scope(relative, line_number)
+        if not names_word(leaf, scope) and not (owner and names_word(owner, scope)):
+            return (
+                f"cites {relative}:{line_number}, where neither {leaf} nor the type "
+                "that owns it appears -- in the line or in the function around it"
+            )
+    return None
+
+
 def tautological_assertion(assertion: str) -> bool:
     """Whether an assertion anchor asserts something that is always true.
 
@@ -1069,6 +1327,53 @@ def stale_disposition_reason(disposition: str, reason: str) -> str | None:
     return None
 
 
+_METADATA: dict[str, Any] = {}
+
+
+def cargo_metadata() -> dict[str, Any]:
+    """The resolved workspace graph, read once per run.
+
+    All features, so a feature-gated dependency edge cannot hide a cycle from
+    `facade_dependency_dirs` or a crate from `crate_directories`.
+    """
+    if not _METADATA:
+        completed = subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--all-features", "--locked"],
+            cwd=REPO,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
+        _METADATA.update(json.loads(completed.stdout))
+    return _METADATA
+
+
+def crate_directories() -> dict[str, str]:
+    """`{crate identifier: directory}` for every workspace library crate.
+
+    An `internal-consumed` anchor has to name a *consuming* crate, so the check
+    needs the defining crate's directory: the identity root `lash_core` is the
+    `crates/lash-core` library, and an anchor there proves only that the crate
+    uses its own code.  Derived from the resolved graph rather than from the
+    directory name, because a package name and its library name need not match --
+    `lash-runtime` lives in `crates/lash`.
+    """
+    metadata = cargo_metadata()
+    members = set(metadata["workspace_members"])
+    directories: dict[str, str] = {}
+    for package in metadata["packages"]:
+        if package["id"] not in members:
+            continue
+        manifest = Path(package["manifest_path"]).parent
+        if not manifest.is_relative_to(REPO):
+            continue
+        directory = manifest.relative_to(REPO).as_posix()
+        for target in package["targets"]:
+            if "lib" in target["kind"] or "proc-macro" in target["kind"]:
+                directories[target["name"].replace("-", "_")] = directory
+    return directories
+
+
 def facade_dependency_dirs() -> set[str]:
     """Workspace crate directories the `lash` facade is built on.
 
@@ -1077,15 +1382,7 @@ def facade_dependency_dirs() -> set[str]:
     from the resolved dependency graph so the rule cannot drift out of date the
     way a hand-written crate list would.
     """
-    completed = subprocess.run(
-        # All features, so a feature-gated dependency edge cannot hide a cycle.
-        ["cargo", "metadata", "--format-version", "1", "--all-features", "--locked"],
-        cwd=REPO,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-    )
-    metadata = json.loads(completed.stdout)
+    metadata = cargo_metadata()
     members = set(metadata["workspace_members"])
     packages = {package["id"]: package for package in metadata["packages"]}
     dependencies = {
@@ -1146,19 +1443,287 @@ def toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def anchored_source(reference: str) -> str | None:
-    """The source line a reference points at, or None when it does not resolve."""
+#: Roots an evidence anchor may point into.  `examples/` is host coverage;
+#: `crates/` is where an internal seam's consumer lives.
+ANCHOR_ROOTS = ("examples", "crates")
+#: A `#[cfg(test)]` gate, including the `#[cfg(any(test, ...))]` spelling the
+#: workspace uses for fixtures shared with the `testing` feature.
+#: The `cfg` predicate of an attribute, however the predicate is spelled.
+CFG_ATTRIBUTE = re.compile(r"#\[cfg\(")
+#: `not(...)`, whose contents invert: `#[cfg(not(test))]` is shipped code.
+CFG_NEGATION = re.compile(r"\bnot\s*\(")
+#: A module declared without a body: the code is in another file.
+OUT_OF_LINE_MODULE = re.compile(
+    r"(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;"
+)
+#: `#[path = "other.rs"]`, which decides where a module's code actually lives.
+PATH_ATTRIBUTE = re.compile(r"#\[path\s*=\s*\"([^\"]+)\"\s*\]")
+_SOURCE_LINES: dict[str, list[str] | None] = {}
+_SCOPE_BLOCKS: dict[str, list[tuple[int, int, str]]] = {}
+_IMPORTED_TYPES: dict[str, set[str]] = {}
+_TEST_REGIONS: dict[str, list[tuple[int, int]] | None] = {}
+_TEST_MODULES: tuple[frozenset[str], tuple[str, ...]] | None = None
+
+
+def anchor_location(reference: str) -> tuple[str, int] | None:
+    """The `path`, `line` an anchor names, or None when it is not an anchor."""
     try:
         location, _ = reference.split("#", 1)
         relative, line_text = location.rsplit(":", 1)
         line_number = int(line_text)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return None
+    if line_number < 1:
+        return None
+    return relative, line_number
+
+
+def balanced_group(text: str, start: int) -> str:
+    """The contents of the parenthesis group opening at `start`."""
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : index]
+    return text[start + 1 :]
+
+
+def cfg_gates_test(line: str) -> bool:
+    """Whether a `cfg` attribute on this line compiles the item for tests only.
+
+    The predicate is a tree, not a prefix: `test`, `any(test, ...)`,
+    `all(test, feature = "testing")` and deeper nestings all gate on tests, while
+    anything under `not(...)` says the opposite.  A prefix match read
+    `#[cfg(all(test, ...))]` as shipped code, which is how a provider's
+    conformance route counted as another crate's `src/` (FIG-1223).
+    """
+    match = CFG_ATTRIBUTE.search(line)
+    if match is None:
+        return False
+    predicate = balanced_group(line, match.end() - 1)
+    while True:
+        negation = CFG_NEGATION.search(predicate)
+        if negation is None:
+            break
+        inner = balanced_group(predicate, negation.end() - 1)
+        predicate = predicate.replace(f"{negation.group(0)}{inner})", " ", 1)
+    return re.search(r"(?<![A-Za-z0-9_])test(?![A-Za-z0-9_])", predicate) is not None
+
+
+def test_regions(lines: list[str]) -> list[tuple[int, int]]:
+    """Line ranges of `#[cfg(test)]` items in a source file.
+
+    Brace depth, not indentation: a test module's contents can be nested
+    arbitrarily and a file can hold several of them.  This is what separates an
+    example's host code from the tests beside it, and the separation is the whole
+    point of the tier -- 84% of this inventory's "exercised by an example"
+    evidence turned out to be an example's own tests (FIG-1223).
+    """
+    regions: list[list[int]] = []
+    depth = 0
+    gate: int | None = None
+    for number, line in enumerate(lines, start=1):
+        if gate is None and cfg_gates_test(line.strip()):
+            gate = number
+            gate_depth = depth
+        opened = line.count("{")
+        after = depth + opened - line.count("}")
+        if gate is not None and opened:
+            regions.append([gate, 0, gate_depth])
+            gate = None
+        for region in regions:
+            if not region[1] and after <= region[2]:
+                region[1] = number
+        depth = after
+    return [(start, end or len(lines)) for start, end, _ in regions]
+
+
+def cfg_test_regions(relative: str) -> list[tuple[int, int]] | None:
+    """`test_regions` for a repository file, or None when it cannot be read."""
+    if relative not in _TEST_REGIONS:
+        lines = source_file_lines(relative)
+        _TEST_REGIONS[relative] = None if lines is None else test_regions(lines)
+    return _TEST_REGIONS[relative]
+
+
+def module_directory(relative: str) -> str:
+    """Where an out-of-line submodule of this file lives.
+
+    `src/a/mod.rs` and `src/a.rs` both own `src/a/`, and a crate root owns its
+    own directory.
+    """
+    parent, _, name = relative.rpartition("/")
+    stem = name.removesuffix(".rs")
+    if stem in {"mod", "lib", "main"}:
+        return parent
+    return f"{parent}/{stem}" if parent else stem
+
+
+def declared_test_modules(lines: list[str]) -> list[tuple[str, str | None]]:
+    """`(name, path)` for every out-of-line module this file declares for tests.
+
+    `#[cfg(test)] mod support;` compiles a whole *other* file as test code, and
+    that file carries no marker of its own: read on its own it is
+    indistinguishable from shipped source.  92 files in this repository are test
+    code only by their declaration, and reading them as `crate-src` is what let
+    test-only evidence justify internal seams (FIG-1223).
+
+    Three spellings all count, because the compiler treats them alike: the gate
+    and the declaration on separate lines, on the same line, and a `#[path]`
+    attribute that sends the module somewhere the module name does not predict.
+    """
+    declared: list[tuple[str, str | None]] = []
+    gated = False
+    path: str | None = None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*")):
+            continue
+        if cfg_gates_test(stripped):
+            gated = True
+        override = PATH_ATTRIBUTE.search(stripped)
+        if override:
+            path = override.group(1)
+        if gated:
+            declaration = OUT_OF_LINE_MODULE.search(stripped)
+            if declaration:
+                declared.append((declaration.group(1), path))
+                gated = False
+                path = None
+                continue
+            if not stripped.startswith("#["):
+                gated = False
+                path = None
+        elif not stripped.startswith("#["):
+            path = None
+    return declared
+
+
+def test_module_paths() -> tuple[frozenset[str], tuple[str, ...]]:
+    """Files, and directory prefixes, that are test code by declaration.
+
+    Scanned once for the whole repository: the fact lives in the *parent* file,
+    so no per-anchor lookup can find it.  A module's directory comes along with
+    it, because a test module's submodules are test code too.
+    """
+    global _TEST_MODULES
+    if _TEST_MODULES is None:
+        files: set[str] = set()
+        directories: set[str] = set()
+        for root in ANCHOR_ROOTS:
+            for path in sorted((REPO / root).rglob("*.rs")):
+                relative = path.relative_to(REPO).as_posix()
+                lines = source_file_lines(relative)
+                if lines is None:
+                    continue
+                for name, override in declared_test_modules(lines):
+                    if override is not None:
+                        # `#[path]` is relative to the declaring file's own
+                        # directory, and it is the whole point of the attribute
+                        # that the name predicts nothing about the location.
+                        directory = relative.rpartition("/")[0]
+                        target = f"{directory}/{override}".replace("/./", "/")
+                        files.add(target)
+                        directories.add(f"{target.removesuffix('.rs')}/")
+                        continue
+                    owner = module_directory(relative)
+                    files.add(f"{owner}/{name}.rs")
+                    directories.add(f"{owner}/{name}/")
+        _TEST_MODULES = (frozenset(files), tuple(sorted(directories)))
+    return _TEST_MODULES
+
+
+def test_path(relative: str) -> bool:
+    """Whether a file is test code by where it sits, before reading a line of it.
+
+    A `tests` directory is the obvious case; a `tests.rs` beside the module it
+    tests is the same claim spelled differently, and treating it as shipped code
+    is how a probe usage passes for a consumer.  A file some parent declares as
+    `#[cfg(test)] mod ...;` is the same claim again, written where the file
+    itself cannot show it.
+    """
+    parts = relative.split("/")
+    if (
+        "tests" in parts
+        or "benches" in parts
+        or parts[-1].removesuffix(".rs") in {"test", "tests", "bench", "benches"}
+    ):
+        return True
+    files, directories = test_module_paths()
+    return relative in files or any(
+        relative.startswith(directory) for directory in directories
+    )
+
+
+def anchor_tier(reference: str) -> str | None:
+    """Which evidence tier an anchor's path shape places it in.
+
+    The tier is a property of where the code lives, never of what the row says
+    about it: an example's host code, an example's tests, another crate's `src/`,
+    or a crate's `tests/`.  See the module docstring for what each one proves.
+    """
+    location = anchor_location(reference)
+    if location is None:
+        return None
+    relative, line_number = location
+    root = relative.split("/", 1)[0]
+    if root not in ANCHOR_ROOTS:
+        return None
+    regions = cfg_test_regions(relative) or []
+    # A `#[cfg(test)]` block is test code wherever it lives. The session picker
+    # looked alive because a probe usage sat in one of these inside the crate
+    # that defined it, so shipped code and test code cannot share a tier just
+    # because they share a file.
+    in_test = test_path(relative) or any(
+        start <= line_number <= end for start, end in regions
+    )
+    if root == "crates":
+        return "workspace-tests" if in_test else "crate-src"
+    return "example-test" if in_test else "example-host"
+
+
+def anchor_crate(reference: str) -> str | None:
+    """The workspace crate directory an anchor points into, if it is in one."""
+    location = anchor_location(reference)
+    if location is None:
+        return None
+    parts = location[0].split("/")
+    if parts[0] != "crates" or len(parts) < 2:
+        return None
+    return f"crates/{parts[1]}"
+
+
+def source_file_lines(relative: str) -> list[str] | None:
+    """A repository file's lines, read once per run.
+
+    Every evidence lint reads the same handful of source files over and over --
+    the anchor's line, its `cfg(test)` regions, the function around it -- so the
+    cache is what keeps a per-row rule from being a per-row file read.
+    """
+    if relative not in _SOURCE_LINES:
+        try:
+            _SOURCE_LINES[relative] = (
+                (REPO / relative).read_text(encoding="utf-8").splitlines()
+            )
+        except OSError:
+            _SOURCE_LINES[relative] = None
+    return _SOURCE_LINES[relative]
+
+
+def anchored_source(reference: str) -> str | None:
+    """The source line a reference points at, or None when it does not resolve."""
+    location = anchor_location(reference)
+    if location is None:
+        return None
+    relative, line_number = location
     path = REPO / relative
-    if not path.is_relative_to(REPO / "examples") or not path.is_file() or line_number < 1:
+    if not any(path.is_relative_to(REPO / root) for root in ANCHOR_ROOTS):
         return None
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if line_number > len(lines):
+    lines = source_file_lines(relative)
+    if lines is None or line_number > len(lines):
         return None
     return lines[line_number - 1]
 
@@ -1174,7 +1739,7 @@ def anchored_exercise_source(reference: str) -> str | None:
         line_number = int(line_text)
     except (ValueError, TypeError):
         return source
-    lines = (REPO / relative).read_text(encoding="utf-8").splitlines()
+    lines = source_file_lines(relative) or []
     target = line_number - 1
     for index in range(target, max(-1, target - 20), -1):
         candidate = lines[index].strip()
@@ -1190,6 +1755,1255 @@ def anchored_exercise_source(reference: str) -> str | None:
 def reference_exists(reference: str) -> bool:
     source = anchored_source(reference)
     return source is not None and reference.split("#", 1)[-1] in source
+
+
+#: Kinds whose name means nothing without the item that owns it: `id` is a
+#: hundred fields, `AcceptedInjectedTurnInput::id` is one.
+MEMBER_KINDS = {"field", "variant", "function", "assoc_const", "assoc_type"}
+#: A function definition's opening line, in any of the orders Rust allows.
+FUNCTION_HEADER = re.compile(
+    r"^(?:pub(?:\s*\([^)]*\))?\s+)?(?:default\s+)?(?:const\s+)?(?:async\s+)?"
+    r"(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s"
+)
+
+
+def member_owners(symbol: str, aliases: Any, kind: str) -> set[str]:
+    """The type names that could legitimately introduce this member on a line.
+
+    Every path the item is visible under contributes one, because a consumer
+    writes whichever path it imported.
+    """
+    if kind not in MEMBER_KINDS:
+        return set()
+    owners = set()
+    for path in [symbol, *(aliases or [])]:
+        segments = str(path).split("::")
+        if len(segments) > 1:
+            owners.add(segments[-2])
+    return owners
+
+
+def member_leaf_owners(entries: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Which types each member name belongs to, across every path in the ledger.
+
+    A leaf shared by two items is a leaf no anchor can identify on its own.
+    """
+    owners: dict[str, set[str]] = {}
+    for entry in entries:
+        if entry.get("kind") not in MEMBER_KINDS:
+            continue
+        for path in [entry.get("symbol", ""), *(entry.get("aliases") or [])]:
+            segments = str(path).split("::")
+            if len(segments) > 1:
+                owners.setdefault(segments[-1], set()).add(segments[-2])
+    return owners
+
+
+def names_word(name: str, text: str) -> bool:
+    """Whether `text` names `name` as a whole identifier."""
+    return (
+        re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", text)
+        is not None
+    )
+
+
+def block_header(lines: list[str], index: int) -> tuple[str, int]:
+    """The kind of block opening at `index`, and the line its header starts on.
+
+    A signature that spans lines opens its block on `) -> Result<_, _> {`, which
+    names nothing.  Reading only that line makes the enclosing function
+    unrecognizable, and a function nobody can find becomes a scope the size of the
+    file -- which is how two different `context:` parameters ended up in one
+    scope and a receiver resolved to both (FIG-1223).
+    """
+    for position in range(index, max(-1, index - 14), -1):
+        stripped = lines[position].strip()
+        if FUNCTION_HEADER.match(stripped):
+            return "fn", position
+        if stripped.startswith("impl"):
+            return "impl", position
+        if position < index and (
+            not stripped
+            or stripped.endswith((";", "{", "}"))
+            or stripped.startswith(("//", "#["))
+        ):
+            break
+    return "", index
+
+
+def scope_blocks(lines: list[str]) -> list[tuple[int, int, str]]:
+    """`(start, end, kind)` for every `fn` and `impl` block in a source file.
+
+    Computed once per file: a per-anchor brace walk is a per-anchor pass over the
+    whole file, and the member rule asks this question of every candidate line.
+    """
+    depth = 0
+    open_blocks: list[list[Any]] = []
+    blocks: list[tuple[int, int, str]] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        opened = line.count("{")
+        if opened:
+            kind, header = block_header(lines, index)
+            open_blocks.append([depth, header, kind])
+        depth += opened - line.count("}")
+        while open_blocks and depth <= open_blocks[-1][0]:
+            start, position, kind = open_blocks.pop()
+            if kind:
+                blocks.append((position, index, kind))
+    for start, position, kind in open_blocks:
+        if kind:
+            blocks.append((position, len(lines) - 1, kind))
+    return sorted(blocks)
+
+
+def file_scope_blocks(relative: str) -> list[tuple[int, int, str]]:
+    """`scope_blocks` for a repository file, read and parsed once per run."""
+    if relative not in _SCOPE_BLOCKS:
+        lines = source_file_lines(relative)
+        _SCOPE_BLOCKS[relative] = [] if lines is None else scope_blocks(lines)
+    return _SCOPE_BLOCKS[relative]
+
+
+def anchor_scope(relative: str, line_number: int) -> str:
+    """The innermost function containing a line, cached by the region it spans."""
+    key = (relative, *anchor_scope_region(relative, line_number))
+    if key not in _ANCHOR_SCOPES:
+        _ANCHOR_SCOPES[key] = anchor_scope_text(relative, line_number)
+    return _ANCHOR_SCOPES[key]
+
+
+def anchor_scope_region(relative: str, line_number: int) -> tuple[int, int]:
+    """The `(start, end)` of the innermost function block around a line."""
+    target = line_number - 1
+    body = (-1, -1)
+    for start, end, kind in file_scope_blocks(relative):
+        if start > target or target > end or kind == "impl":
+            continue
+        if start > body[0]:
+            body = (start, end)
+    return body
+
+
+def anchor_scope_text(relative: str, line_number: int) -> str:
+    """The innermost function containing a line, plus its `impl` headers.
+
+    The window a member anchor is read in.  A function is the smallest region
+    where a receiver's type is established, and the `impl` header is where a
+    trait method's owner is named -- `fn begin(&self, ...)` proves nothing on its
+    own, `impl RuntimeTurnPhaseProbe for ...` above it proves everything.
+    """
+    lines = source_file_lines(relative) or []
+    target = line_number - 1
+    body: tuple[int, int] | None = None
+    headers: list[int] = []
+    for start, end, kind in file_scope_blocks(relative):
+        if start > target or target > end:
+            continue
+        if kind == "impl":
+            headers.append(start)
+        elif body is None or start > body[0]:
+            body = (start, end)
+    region = lines if body is None else lines[body[0] : body[1] + 1]
+    return "\n".join([*(lines[index] for index in headers), *region])
+
+
+def member_containers(symbol: str, aliases: Any, kind: str) -> set[str]:
+    """The types a nested member sits inside, beyond its immediate owner.
+
+    A variant's field is owned by the variant, and variant names are as generic
+    as member names -- `Message`, `Text`, `Error`. Naming the variant alone left
+    `BorrowedChronologicalPayload::Message::0` "proved" by
+    `use tokio_tungstenite::...::Message as WsMessage;`. Only CamelCase segments
+    qualify, so a module path never becomes a requirement.
+    """
+    if kind not in MEMBER_KINDS:
+        return set()
+    containers = set()
+    for path in [symbol, *(aliases or [])]:
+        segments = str(path).split("::")
+        if len(segments) > 2 and segments[-3][:1].isupper():
+            containers.add(segments[-3])
+    return containers
+
+
+def imported_type_names(relative: str) -> set[str]:
+    """Type names a file imports, from its `use` tree, aliases included.
+
+    The rival set cannot come from this inventory alone: the motivating
+    coincidence was `serde_json`'s `Value::as_str` and an alias of
+    `tungstenite`'s `Message`, neither of which is Lash API at all.  Any imported
+    type in the file is a candidate subject for a member access the line does not
+    qualify (FIG-1223).
+    """
+    if relative not in _IMPORTED_TYPES:
+        names: set[str] = set()
+        for line in source_file_lines(relative) or []:
+            stripped = line.strip()
+            if not stripped.startswith(("use ", "pub use ", "pub(crate) use ")):
+                continue
+            names.update(
+                name
+                for name in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", stripped)
+                if name[:1].isupper()
+            )
+        _IMPORTED_TYPES[relative] = names
+    return _IMPORTED_TYPES[relative]
+
+
+def qualifies_member(owner: str, leaf: str, snippet: str) -> bool:
+    """Whether a line ties a member to its owner outright, not by proximity.
+
+    `Owner::leaf`, `Owner { leaf, .. }` and a tuple variant's `Owner(..)` name
+    both halves of the contract on one line.  A line that merely mentions the
+    owner elsewhere does not: `RemoteInputItem::Text { text: text.into() }`
+    mentions plenty and settles nothing.
+    """
+    owner_pattern = re.escape(owner)
+    leaf_pattern = re.escape(leaf)
+    if re.search(rf"(?<![A-Za-z0-9_]){owner_pattern}\s*::\s*{leaf_pattern}(?![A-Za-z0-9_])", snippet):
+        return True
+    brace = re.search(rf"(?<![A-Za-z0-9_]){owner_pattern}\s*\{{", snippet)
+    if brace and names_word(leaf, snippet[brace.end() :]):
+        return True
+    if leaf.isdigit() and re.search(
+        rf"(?<![A-Za-z0-9_]){owner_pattern}\s*\(", snippet
+    ):
+        return True
+    return False
+
+
+def anchor_receiver(leaf: str, snippet: str) -> str | None:
+    """The identifier a member is reached through on this line, if any."""
+    match = re.search(
+        rf"(?<![A-Za-z0-9_.])([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*{re.escape(leaf)}"
+        r"(?![A-Za-z0-9_])",
+        snippet,
+    )
+    return None if match is None else match.group(1)
+
+
+def binds_receiver(scope: str, receiver: str, owners: set[str]) -> bool:
+    """Whether the surrounding function ties this receiver to the owning type.
+
+    `value.as_str()` and `entry.payload` are the same shape and different
+    evidence: one file binds `value: &Value`, the other binds `entry` from a
+    `BorrowedChronologicalEntry`.  Reading the binding is what separates them, and
+    it is the difference between a coincidence and a consumer (FIG-1223).
+    """
+    name = re.escape(receiver)
+    for owner in owners:
+        pattern = re.escape(owner)
+        shapes = (
+            rf"{name}\s*:\s*[^,;)=]*(?<![A-Za-z0-9_]){pattern}(?![A-Za-z0-9_])",
+            rf"let\s+(?:mut\s+)?{name}\s*(?::[^=;]*|=[^;]*)"
+            rf"(?<![A-Za-z0-9_]){pattern}(?![A-Za-z0-9_])",
+            rf"{name}\s*=\s*[^;]*(?<![A-Za-z0-9_]){pattern}(?![A-Za-z0-9_])",
+            rf"for\s+{name}\s+in\s+[^{{]*(?<![A-Za-z0-9_]){pattern}(?![A-Za-z0-9_])",
+        )
+        if any(re.search(shape, scope) for shape in shapes):
+            return True
+    return False
+
+
+#: `impl Trait for Type`, `impl Type`, and the generics either may carry.
+IMPL_HEADER = re.compile(
+    r"^impl(?:\s*<.*?>)?\s+(?:(?P<trait>[A-Za-z_][\w:<>, '&]*?)\s+for\s+)?"
+    r"(?P<type>[A-Za-z_][\w:]*)"
+)
+#: `type Alias = Real<..>;`, which is often where the real type is named.
+ALIAS_HEADER = re.compile(r"^(?:pub(?:\s*\([^)]*\))?\s+)?type\s+([A-Z]\w*)\s*(?:<[^>]*>)?\s*=")
+#: `struct X`, `enum X`, `trait X` -- the container a following field belongs to.
+CONTAINER_HEADER = re.compile(
+    r"^(?:pub(?:\s*\([^)]*\))?\s+)?(?P<keyword>struct|enum|trait|union)\s+(?P<name>[A-Za-z_]\w*)"
+)
+#: `Part(LlmOutputPart)` -- an enum variant carrying a payload type.
+VARIANT_PAYLOAD = re.compile(r"^(?P<name>[A-Z]\w*)\s*\((?P<payload>[^()]*(?:\([^()]*\)[^()]*)*)\)")
+#: `name: Type` in a field or parameter position.
+TYPED_NAME = re.compile(r"^(?:pub(?:\s*\([^)]*\))?\s+)?([a-z_]\w*)\s*:\s*(.+?),?$")
+#: `fn name(...) -> Return`
+TYPED_FUNCTION = re.compile(r"\bfn\s+([a-z_]\w*)\s*(?:<[^>]*>)?\s*\(.*?\)\s*->\s*(.+?)\s*\{?$")
+#: A CamelCase type name inside a type expression, wrappers and all.
+TYPE_NAME = re.compile(r"(?<![A-Za-z0-9_])([A-Z]\w*)")
+_TYPE_FACTS: dict[str, Any] = {}
+_LITERAL_STACKS: dict[str, list[list[str]]] = {}
+_ANCHOR_SCOPES: dict[tuple[str, int, int], str] = {}
+_RESOLVED_RECEIVERS: dict[tuple[Any, ...], set[str]] = {}
+
+
+def index_targets() -> list[str]:
+    """Every source file the type index reads: on disk, or supplied by a test."""
+    found = {
+        path.relative_to(REPO).as_posix()
+        for root in ANCHOR_ROOTS
+        for path in (REPO / root).rglob("*.rs")
+    }
+    found.update(
+        relative
+        for relative, lines in _SOURCE_LINES.items()
+        if lines and relative.split("/", 1)[0] in ANCHOR_ROOTS
+    )
+    return sorted(found)
+
+
+def type_facts() -> dict[str, Any]:
+    """A textual model of the workspace's types, built once per run.
+
+    The consumer search has to answer "is this call about *that* type", and a
+    name match cannot: `self.input.turn_context.clear_prompt_slot(slot)` names no
+    type at all, and its member belongs to a trait two hops away.  So the index
+    records what the source says out loud -- a struct's field types, a method's
+    return type, and which traits each type implements -- which is enough to walk
+    a receiver expression back to a type and then to the trait that owns the
+    member.  Textual, not semantic: it resolves what a reader resolves.
+    """
+    if _TYPE_FACTS:
+        return _TYPE_FACTS
+    fields: dict[str, dict[str, str]] = {}
+    methods: dict[str, dict[str, str]] = {}
+    traits: dict[str, set[str]] = {}
+    impls: dict[str, list[tuple[int, int, str, str]]] = {}
+    aliases: dict[str, str] = {}
+    variants: dict[str, dict[str, str]] = {}
+    payloads: dict[str, set[str]] = {}
+    declarations: dict[str, list[tuple[int, int, str, str]]] = {}
+    enums: set[str] = set()
+    for relative in index_targets():
+        lines = source_file_lines(relative)
+        if lines is None:
+            continue
+        blocks: list[tuple[int, int, str]] = []
+        depth = 0
+        open_blocks: list[list[Any]] = []
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            alias = ALIAS_HEADER.match(stripped)
+            if alias:
+                # `type X = Driver<..>;` may wrap to the next lines, and the
+                # alias is often the only place the real type is named.
+                text = stripped
+                following = index
+                while ";" not in text and following + 1 < len(lines):
+                    following += 1
+                    text += " " + lines[following].strip()
+                aliases[alias.group(1)] = text.split("=", 1)[1]
+            header: tuple[str, str] | None = None
+            impl_match = IMPL_HEADER.match(stripped)
+            container = CONTAINER_HEADER.match(stripped)
+            if impl_match:
+                owner = impl_match.group("type").split("::")[-1]
+                # Only the trait's own name: `impl From<TokenUsage> for RemoteUsage`
+                # implements `From`, and reading its argument as a trait made every
+                # `self.field` in RemoteUsage evidence for TokenUsage's field.
+                head = re.match(r"[A-Za-z_][\w:]*", (impl_match.group("trait") or "").strip())
+                trait_names = [head.group(0).split("::")[-1]] if head else []
+                if trait_names:
+                    traits.setdefault(owner, set()).update(trait_names)
+                header = ("impl", owner)
+                impls.setdefault(relative, []).append(
+                    (index, index, owner, trait_names[0] if trait_names else "")
+                )
+            elif container:
+                name = container.group("name")
+                header = ("container", name)
+                if container.group("keyword") == "enum":
+                    enums.add(name)
+                declarations.setdefault(relative, []).append(
+                    (index, index, name, container.group("keyword"))
+                )
+            opened = line.count("{")
+            if opened:
+                open_blocks.append([depth, index, header])
+            depth += opened - line.count("}")
+            while open_blocks and depth <= open_blocks[-1][0]:
+                start, position, kind = open_blocks.pop()
+                if kind is not None:
+                    blocks.append((position, index, kind[1]))
+                    source = impls if kind[0] == "impl" else declarations
+                    for slot, entry in enumerate(source.get(relative, [])):
+                        if entry[0] == position:
+                            source[relative][slot] = (position, index, entry[2], entry[3])
+            owner = next(
+                (
+                    name
+                    for begin, _, name in reversed(blocks + [
+                        (start, index, kind[1])
+                        for start, _, kind in [
+                            (block[1], index, block[2])
+                            for block in open_blocks
+                            if block[2] is not None
+                        ]
+                    ])
+                    if begin <= index
+                ),
+                None,
+            )
+            if owner is None:
+                continue
+            if owner in enums:
+                # `Part(LlmOutputPart)` is where a variant's payload type is
+                # declared, and `if let ..::Part(part)` is how a consumer binds
+                # it -- without the pair, a destructured binding has no type.
+                variant = VARIANT_PAYLOAD.match(stripped)
+                if variant:
+                    payload = variant.group("payload")
+                    variants.setdefault(owner, {})[variant.group("name")] = payload
+                    payloads.setdefault(variant.group("name"), set()).add(payload)
+            function = TYPED_FUNCTION.search(stripped)
+            if function:
+                methods.setdefault(owner, {})[function.group(1)] = function.group(2)
+                continue
+            typed = TYPED_NAME.match(stripped)
+            if typed:
+                fields.setdefault(owner, {}).setdefault(typed.group(1), typed.group(2))
+    _TYPE_FACTS.update(
+        {
+            "fields": fields,
+            "methods": methods,
+            "traits": traits,
+            "impls": impls,
+            "aliases": aliases,
+            "variants": variants,
+            "payloads": payloads,
+            "declarations": declarations,
+        }
+    )
+    return _TYPE_FACTS
+
+
+def type_names(expression: str | None, expand: bool = True) -> set[str]:
+    """The type names a type expression mentions, wrappers and aliases resolved."""
+    if not expression:
+        return set()
+    names = {
+        name
+        for name in TYPE_NAME.findall(expression)
+        if name not in {"Self", "Option", "Result", "Vec", "Box", "Arc", "Rc", "String"}
+    }
+    if not expand:
+        return names
+    aliases = type_facts()["aliases"]
+    resolved = set(names)
+    for name in names:
+        target = aliases.get(name)
+        if target:
+            resolved |= type_names(target, expand=False)
+    return resolved
+
+
+def impl_owner(relative: str, line_number: int) -> set[str]:
+    """The types whose `impl` blocks contain a line, innermost first."""
+    target = line_number - 1
+    return {
+        owner
+        for start, end, owner, _ in type_facts()["impls"].get(relative, [])
+        if start <= target <= end
+    }
+
+
+def pattern_binding_types(scope: str, name: str) -> set[str]:
+    """Types a destructuring pattern gives a local name.
+
+    `if let LlmStreamEvent::Part(part) = &mut event` is the only line that types
+    `part`, and it types it through the variant's declared payload.  A binding the
+    resolver cannot read is a receiver it must reject, so a rule that fails closed
+    has to know this shape or it calls a live consumer dead (FIG-1223).
+    """
+    binding = rf"(?:ref\s+)?(?:mut\s+)?&?(?:mut\s+)?{re.escape(name)}\s*[,)]"
+    found: set[str] = set()
+    facts = type_facts()
+    for pattern in (
+        rf"(?:if|while)\s+let\s+([\w:]+)\s*\(\s*{binding}",
+        # A match arm, anchored at the start of the arm: `foo(entry)` in an
+        # argument list is a call, not a pattern, and reading it as one gave a
+        # receiver every payload type in the workspace.
+        rf"(?m)^\s*(?:\|\s*)?([\w:]+)\s*\(\s*{binding}\s*(?:if\b[^=]*)?=>",
+    ):
+        for match in re.finditer(pattern, scope):
+            segments = match.group(1).split("::")
+            variant = segments[-1]
+            if len(segments) > 1:
+                owner = segments[-2]
+                declared = facts["variants"].get(owner, {}).get(variant)
+                if declared:
+                    found |= type_names(declared)
+                    continue
+            if variant in {"Some", "Ok", "Err", "None"}:
+                # `Some(entry)` says nothing about the type; the map it came from
+                # does, and that is beyond a textual read.
+                continue
+            declared = facts["payloads"].get(variant, set())
+            if len(declared) == 1:
+                # An unqualified variant is only a type when the workspace
+                # declares exactly one variant by that name.
+                found |= type_names(next(iter(declared)))
+    return found
+
+
+def local_binding_types(scope: str, name: str) -> set[str]:
+    """Types the surrounding function gives a local name.
+
+    Read the way a reader reads it: the signature types a parameter, a `let`
+    types its binding by annotation or by the constructor on its right-hand side.
+    Anything looser answers with the whole function -- a hundred-line body writes
+    `entry:` in a dozen literals, and taking all of them gave one receiver forty
+    types and made the tie meaningless (FIG-1223).
+    """
+    found: set[str] = pattern_binding_types(scope, name)
+    position = scope.find("fn ")
+    signature = scope if position < 0 else scope[position : scope.find("{", position)]
+    binding = re.escape(name)
+    for pattern, text in (
+        (rf"(?<![A-Za-z0-9_]){binding}\s*:\s*([^,;)=]+)", signature),
+        (rf"let\s+(?:mut\s+)?{binding}\s*:\s*([^=;]+)", scope),
+        (
+            rf"let\s+(?:mut\s+)?{binding}\s*=\s*(?:&\s*)?(?:mut\s+)?"
+            rf"([A-Z]\w*)\s*(?:::|\{{|\()",
+            scope,
+        ),
+        (rf"for\s+{binding}\s+in\s+([^{{]+)", scope),
+    ):
+        for match in re.finditer(pattern, text):
+            for group in match.groups():
+                found |= type_names(group)
+    return found
+
+
+def resolve_receiver_types(relative: str, line_number: int, chain: str) -> set[str]:
+    """`resolve_receiver_chain`, cached per function region and expression."""
+    key = (relative, *anchor_scope_region(relative, line_number), chain)
+    if key not in _RESOLVED_RECEIVERS:
+        _RESOLVED_RECEIVERS[key] = resolve_receiver_chain(relative, line_number, chain)
+    return _RESOLVED_RECEIVERS[key]
+
+
+def resolve_receiver_chain(relative: str, line_number: int, chain: str) -> set[str]:
+    """The types a receiver expression can have, walked one hop at a time.
+
+    `self.input.turn_context` is three hops: the `impl` block gives `self`, a
+    struct field gives `input`, another gives `turn_context`.  Each hop is a
+    lookup in `type_facts`, and an unresolvable hop returns nothing rather than
+    guessing -- an empty answer fails the anchor rather than passing it.
+    """
+    facts = type_facts()
+    scope = anchor_scope(relative, line_number)
+    parts = [part.strip() for part in chain.split(".") if part.strip()]
+    # `self.tool_state().await?.generation()` navigates twice and *unwraps* once:
+    # the future and the `Result` are not hops, and treating them as unknown hops
+    # made every fallible accessor unresolvable -- and its path deletable.
+    parts = [part for part in parts if part not in PEELED_HOPS]
+    parts = [part[:-1] if part.endswith("?") else part for part in parts]
+    if not parts:
+        return set()
+    head, *rest = parts
+    if head == "self":
+        current = impl_owner(relative, line_number)
+    else:
+        current = local_binding_types(scope, head.removesuffix("()"))
+        if head.endswith("()"):
+            current |= {
+                name
+                for owner in impl_owner(relative, line_number)
+                for name in type_names(facts["methods"].get(owner, {}).get(head[:-2]))
+            }
+    for part in rest:
+        name = part.removesuffix("()")
+        following: set[str] = set()
+        for owner in current:
+            if part.endswith("()"):
+                following |= type_names(facts["methods"].get(owner, {}).get(name))
+            else:
+                following |= type_names(facts["fields"].get(owner, {}).get(name))
+        current = following
+        if not current:
+            return set()
+    return current
+
+
+def ties_receiver(
+    owners: set[str], relative: str, line_number: int, chain: str
+) -> bool:
+    """Whether a receiver expression resolves to a type the member belongs to.
+
+    Directly, or through the trait: `retire_effect_journal` is owned by a trait,
+    the receiver is a store, and `impl EffectReplayDriver for ...` is the line
+    that ties them together.
+    """
+    resolved = resolve_receiver_types(relative, line_number, chain)
+    if resolved & owners:
+        return True
+    implemented = {
+        trait
+        for candidate in resolved
+        for trait in type_facts()["traits"].get(candidate, set())
+    }
+    return bool(implemented & owners)
+
+
+#: A member reached through an expression: `x.leaf`, `self.a.b().leaf`.
+RECEIVER_CHAIN = re.compile(
+    r"((?:[A-Za-z_]\w*\s*(?:\(\s*\))?\s*\??\s*\.\s*)+)$"
+)
+#: Hops that unwrap rather than navigate: `?`, `.await`, `.await?`.
+PEELED_HOPS = {"await", "await?", "?"}
+
+
+#: A line whose expression continues on the next one.
+CONTINUES = ("(", ".", ",", "=", "&", "|", "+", "-", "*", "/", "?", "<", ">", ":", "!")
+
+
+def expression_prefix(relative: str, line_number: int, leaf: str, snippet: str) -> str:
+    """The text leading up to a member on its line, continuation lines included.
+
+    A fluent chain is written down the page -- `effect_host` on one line,
+    `.scoped_static(..)` on the next -- so reading the anchor's own line finds no
+    receiver at all.  The prefix is assembled backwards while the lines say they
+    continue, and only the prefix: the leaf is located on the anchor's own line so
+    an earlier line writing the same name cannot move it (FIG-1223).
+    """
+    lines = source_file_lines(relative) or []
+    index = line_number - 1
+    if index < 0 or index >= len(lines):
+        return snippet.split(leaf)[0]
+    line = lines[index]
+    match = re.search(rf"(?<![A-Za-z0-9_]){re.escape(leaf)}(?![A-Za-z0-9_])", line)
+    head = line[: match.start()] if match else line
+    first = index
+    while first > 0:
+        previous = lines[first - 1].strip()
+        current = lines[first].strip()
+        if not previous or previous.endswith((";", "{", "}")):
+            break
+        if current.startswith((".", "?")) or previous.endswith(CONTINUES):
+            first -= 1
+            continue
+        break
+    return " ".join([*(lines[position].strip() for position in range(first, index)), head])
+
+
+#: How far below its opening brace a literal's field can be and still be read as
+#: part of it.  A brace walk over text drifts -- macros and `cfg` blocks leave it
+#: unbalanced -- and a literal whose opening line is off the screen is not
+#: something a reader would attribute a field to.
+LITERAL_REACH = 60
+#: A string or char literal, escapes included.
+STRING_LITERAL = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])'")
+
+
+def file_literal_stacks(relative: str) -> list[list[str]]:
+    """For each line of a file, the named `{` blocks it sits inside.
+
+    Computed in one pass per file: the member rule asks this of every candidate
+    line, and a per-line brace walk is a per-line pass over the whole file.
+    """
+    if relative in _LITERAL_STACKS:
+        return _LITERAL_STACKS[relative]
+    lines = source_file_lines(relative)
+    if lines is None:
+        _LITERAL_STACKS[relative] = []
+        return []
+    starts = {start for start, _, _ in file_scope_blocks(relative)}
+    stack: list[tuple[str | None, int]] = []
+    per_line: list[list[str]] = []
+    for index, raw in enumerate(lines):
+        # Braces inside string literals, char literals and comments are not
+        # blocks: a `format!("{spec}")` or a lone `"{"` unbalances the walk, and
+        # then a line inherits a literal that closed hundreds of lines earlier.
+        line = STRING_LITERAL.sub('""', raw)
+        line = line.split("//", 1)[0] if "//" in line else line
+        per_line.append(
+            [
+                name
+                for name, opened_at in stack
+                if name and index - opened_at <= LITERAL_REACH
+            ]
+        )
+        for position, character in enumerate(line):
+            if character == "{":
+                name = re.search(r"([A-Za-z_][\w:]*)\s*$", line[:position].rstrip())
+                candidate = name.group(1).split("::")[-1] if name else None
+                if index in starts:
+                    # `fn make() -> ModelToolReturn {` opens a function, not a
+                    # literal; its return type is not a literal a field sits in.
+                    candidate = None
+                stack.append(
+                    (candidate if candidate and candidate[:1].isupper() else None, index)
+                )
+            elif character == "}" and stack:
+                stack.pop()
+    _LITERAL_STACKS[relative] = per_line
+    return per_line
+
+
+def literal_stack(relative: str, line_number: int) -> list[str]:
+    """The named `{` blocks a line sits inside, outermost first."""
+    stacks = file_literal_stacks(relative)
+    index = line_number - 1
+    return stacks[index] if 0 <= index < len(stacks) else []
+
+
+def declaration_owner(relative: str, line_number: int) -> str | None:
+    """The type whose `struct`/`enum`/`trait` body a line sits in, if any.
+
+    A field *declaration* is not a consumer of the same-named field of some other
+    type: `attempt: usize,` inside another crate's own `RetryStatus` variant is
+    that crate declaring its own wire enum (FIG-1223).
+    """
+    target = line_number - 1
+    for start, end, name, _ in type_facts()["declarations"].get(relative, []):
+        if start <= target <= end:
+            return name
+    return None
+
+
+def receiver_chain(leaf: str, snippet: str) -> str | None:
+    """The expression a member is reached through on this line, if any."""
+    match = re.search(rf"(?<![A-Za-z0-9_])({re.escape(leaf)})(?![A-Za-z0-9_])", snippet)
+    if match is None:
+        return None
+    prefix = snippet[: match.start()]
+    chain = RECEIVER_CHAIN.search(prefix)
+    if chain is None:
+        return None
+    text = chain.group(1).strip()
+    return text[:-1].strip() if text.endswith(".") else text
+
+
+def enclosing_literal(relative: str, line_number: int) -> str | None:
+    """The type whose literal or pattern block a line sits inside.
+
+    A field line says nothing about which literal it belongs to, and adjacent
+    literals nest: `CompletedToolCall { call_id: ..., model_return: ModelToolReturn
+    { call_id: ... } }` writes the same field name twice for two different types
+    (FIG-1223).
+    """
+    lines = source_file_lines(relative)
+    if lines is None:
+        return None
+    depth = 0
+    stack: list[str | None] = []
+    for index in range(line_number - 1):
+        line = lines[index]
+        for position, character in enumerate(line):
+            if character == "{":
+                head = line[:position].rstrip()
+                name = re.search(r"([A-Za-z_][\w:]*)\s*$", head)
+                candidate = name.group(1).split("::")[-1] if name else None
+                stack.append(candidate if candidate and candidate[:1].isupper() else None)
+            elif character == "}" and stack:
+                stack.pop()
+    for candidate in reversed(stack):
+        if candidate:
+            return candidate
+    return None
+
+
+def declaration_anchor_defect(symbol: str, reference: str) -> str | None:
+    """Why an anchor is the item's own declaration rather than a use of it.
+
+    `pub struct PreparedTurnMachine<..>` is where the type is *defined*; a row
+    anchored there records that the workspace declares its own API, which every
+    row could claim (FIG-1223).
+    """
+    segments = symbol.split("::")
+    leaf = segments[-1]
+    owner = next((segment for segment in segments if segment[:1].isupper()), None)
+    if owner is None:
+        return None
+    if not leaf[:1].isupper():
+        # A member is owned by its type, and the type is what a crate declares:
+        # `lash_core::RuntimeError::message` is declared in `lashlang`, which the
+        # leaf name alone never revealed.
+        leaf = owner
+    snippet = reference.split("#", 1)[-1]
+    if re.search(rf"\b(?:struct|enum|trait|union|type)\s+{re.escape(leaf)}\b", snippet):
+        return "declares the item rather than using it"
+    location = anchor_location(reference)
+    if location is None:
+        return None
+    declared = {name for _, _, name, _ in type_facts()["declarations"].get(location[0], [])}
+    if re.search(rf"\w\s*::\s*{re.escape(leaf)}(?![A-Za-z0-9_])", snippet):
+        # The line writes the path, so it is unambiguously about this item even
+        # in a file that declares a wrapper by the same name.
+        return None
+    parts = location[0].split("/")
+    crate = f"{parts[0]}/{parts[1]}" if len(parts) > 1 else parts[0]
+    if crate in declaring_crates({leaf}):
+        return (
+            f"sits in {crate}, the crate whose source declares {leaf}; a crate "
+            "citing its own declaration is not an internal consumer"
+        )
+    if leaf in declared:
+        # The file that declares the type is where it lives, whatever path the
+        # ledger keys it under: `lash_core::PreparedTurnMachine` is declared in
+        # `lash-sansio`, so a signature there is the definition, not a consumer.
+        return "sits in the file that declares the item, which defines it rather than consuming it"
+    return None
+
+
+def qualifying_container(owner: str, snippet: str) -> str | None:
+    """The type segment a line qualifies the owner with, if it is a type.
+
+    `TurnFinish::FinalValue { value }` and `TurnEvent::FinalValue { value }` write
+    the same variant name under two different enums, and a variant is only as
+    unique as the type it belongs to (FIG-1223).
+    """
+    match = re.search(
+        rf"([A-Za-z_]\w*)\s*::\s*{re.escape(owner)}(?![A-Za-z0-9_])", snippet
+    )
+    if match is None:
+        return None
+    segment = match.group(1)
+    return segment if segment[:1].isupper() else None
+
+
+IMPORT_LINE = re.compile(r"^\s*(?:pub(?:\s*\([^)]*\))?\s+)?use\s")
+
+
+IMPORT_MESSAGE = (
+    "is an import, which proves the path resolves and not that anything needs "
+    "it; anchor the line that uses the item"
+)
+
+
+def import_anchor_defect(reference: str) -> str | None:
+    """Why an import cannot be an internal consumer's anchor.
+
+    Ruled for FIG-1223: a `use` line is *reachability*, not consumption.  It
+    resolves whether or not anything in the crate needs the item -- an unused
+    import is a warning, not a contract -- and four rows anchored on `pub use`
+    lines were citing the declaring crate's own re-export.  An internal seam's
+    claim is that shipped code needs the item, so the anchor has to be a line
+    that uses it: a call, a field, a literal, or an implementation of it.
+    """
+    if IMPORT_LINE.match(reference.split("#", 1)[-1]):
+        return IMPORT_MESSAGE
+    location = anchor_location(reference)
+    if location is None:
+        return None
+    lines = source_file_lines(location[0]) or []
+    # A `use lash_core::{` list runs down the page, and its middle lines look
+    # like bare identifiers: four rows anchored on one.
+    for index in range(location[1] - 2, max(-1, location[1] - 15), -1):
+        text = lines[index].strip() if index < len(lines) else ""
+        # A statement that ended is not a list this line is inside of, and that
+        # has to be read before the `use` itself: a completed `use foo::bar;`
+        # above real code otherwise swallows the code (44 lines here).  A `use`
+        # ending in `{` is the exception, since that brace opens the list.
+        if not text or text.endswith((";", "}")) or text.startswith("#["):
+            break
+        if IMPORT_LINE.match(text):
+            return IMPORT_MESSAGE
+        if text.endswith("{"):
+            break
+    return None
+
+
+def declaring_crates(names: set[str]) -> set[str]:
+    """Crate directories whose source declares any of these type names.
+
+    The ledger keys an item by the path a host writes, which is often a facade
+    re-export: `lash_core::PreparedTurnMachine` is declared in `lash-sansio`, and
+    mapping only path roots let that crate cite its own declaration as if it were
+    a consumer (FIG-1223).
+    """
+    declarations = type_facts()["declarations"]
+    found: set[str] = set()
+    for relative, entries in declarations.items():
+        if not any(name in names for _, _, name, _ in entries):
+            continue
+        parts = relative.split("/")
+        if len(parts) > 1:
+            found.add(f"{parts[0]}/{parts[1]}")
+    return found
+
+
+def member_anchor_defect(
+    symbol: str, aliases: Any, kind: str, rivals: set[str], reference: str
+) -> str | None:
+    """Why a member's anchor could be about something else entirely, or None.
+
+    `reference_exists` is a substring test and a member's leaf name is rarely
+    unique, so for the dispositions whose justification *is* the anchor the leaf
+    alone cannot carry it: `SchemaDialect::as_str` was "proved" by `serde_json`'s
+    `value.as_str()`, two unrelated members by the same `row.get(3)`, and a
+    variant's field by a `tungstenite` import alias (FIG-1223).
+
+    A line that *qualifies* the member by its owner settles it outright.  Failing
+    that, a line that reaches the member through an expression is judged on the
+    expression alone: it has to resolve, hop by hop, to the owning type or to a
+    type that implements the owning trait.  Naming no rival is not a defence --
+    prelude types, file-local types and path-qualified rivals are all unnameable,
+    so an unresolved receiver is a defect whether or not a contender can be
+    pointed at.  A field written in a literal is judged by the literal it sits
+    in, because adjacent literals write the same field name for different types.
+    Only anchors of neither shape fall back to reading the surrounding function.
+    """
+    owners = member_owners(symbol, aliases, kind)
+    if not owners:
+        return None
+    containers = member_containers(symbol, aliases, kind)
+    leaf = symbol.split("::")[-1]
+    snippet = reference.split("#", 1)[-1]
+    location = anchor_location(reference)
+    lines = None if location is None else source_file_lines(location[0])
+    if not lines:
+        return "does not resolve to a readable file"
+    relative, line_number = location
+    qualified = [owner for owner in owners if qualifies_member(owner, leaf, snippet)]
+    written = {
+        segment
+        for owner in qualified
+        if (segment := qualifying_container(owner, snippet)) is not None
+    }
+    if written and not written & (owners | containers):
+        # The line spells out a container, and it is somebody else's: a variant of
+        # a different enum, not this row's member.
+        return (
+            f"qualifies {leaf} under {' or '.join(sorted(written))}, not under "
+            f"{' or '.join(sorted(containers or owners))}, so it writes a "
+            "same-named member of another type"
+        )
+    if qualified and (
+        not containers
+        or any(names_word(name, snippet) for name in containers)
+        or any(names_word(name, anchor_scope(relative, line_number)) for name in containers)
+    ):
+        return None
+    scope = anchor_scope(relative, line_number)
+    declaration = declaration_owner(relative, line_number)
+    if declaration is not None:
+        return (
+            f"sits inside the declaration of {declaration}, and a declaration is "
+            "not a consumer: the line declares that crate's own same-named member"
+        )
+    prefix = expression_prefix(relative, line_number, leaf, snippet)
+    assembled = RECEIVER_CHAIN.search(prefix)
+    chain = None
+    if assembled:
+        text = assembled.group(1).strip()
+        chain = re.sub(r"\s+", "", text[:-1].strip() if text.endswith(".") else text)
+    if chain:
+        resolved = resolve_receiver_types(relative, line_number, chain)
+        implemented = {
+            trait
+            for candidate in resolved
+            for trait in type_facts()["traits"].get(candidate, set())
+        }
+        if (resolved | implemented) & owners or binds_receiver(
+            scope, chain.split(".")[-1].removesuffix("()"), owners
+        ):
+            return None
+        return (
+            f"reaches the member through `{chain}`, which resolves to "
+            f"{' or '.join(sorted(resolved)) or 'no type this repository declares'}"
+            f" rather than {' or '.join(sorted(owners))}, so the line is about "
+            "some other type's same-named member"
+        )
+    if re.search(rf"Self\s*::\s*{re.escape(leaf)}(?![A-Za-z0-9_])", snippet) and (
+        impl_owner(relative, line_number) & owners
+        or {
+            trait
+            for candidate in impl_owner(relative, line_number)
+            for trait in type_facts()["traits"].get(candidate, set())
+        }
+        & owners
+    ):
+        return None
+    if re.search(rf"(?<![A-Za-z0-9_.]){re.escape(leaf)}\s*[:,}}]", snippet) or re.search(
+        rf"(?<![A-Za-z0-9_.]){re.escape(leaf)}\s*$", snippet
+    ):
+        stack = literal_stack(relative, line_number)
+        literal = stack[-1] if stack else None
+        if literal in owners and (
+            not containers
+            or containers & set(stack)
+            or any(names_word(name, scope) for name in containers)
+        ):
+            return None
+        return (
+            f"writes the field inside a {literal or 'nameless'} literal"
+            + (f" (nested in {' > '.join(stack[:-1])})" if len(stack) > 1 else "")
+            + f", which is not a {' or '.join(sorted(owners))} one"
+            + (
+                f" carrying {' or '.join(sorted(containers))}"
+                if containers
+                else ""
+            )
+            + ", so it is a same-named field of another type"
+        )
+    implemented = {
+        trait for _, _, _, trait in type_facts()["impls"].get(relative, []) if trait
+    }
+    if re.search(rf"\bfn\s+{re.escape(leaf)}\s*[(<]", snippet):
+        candidates = impl_owner(relative, line_number)
+        reachable = candidates | implemented | {
+            trait
+            for candidate in candidates
+            for trait in type_facts()["traits"].get(candidate, set())
+        }
+        if reachable & (owners | containers):
+            return None
+        return (
+            f"declares {leaf} in an implementation of "
+            f"{' or '.join(sorted(reachable)) or 'nothing this repository names'}, "
+            f"not of {' or '.join(sorted(owners))}"
+        )
+    contenders = (rivals | imported_type_names(relative)) - owners - containers
+    named = sorted(rival for rival in contenders if names_word(rival, scope))
+    return (
+        f"names {leaf} without reaching the member: nothing qualifies it by "
+        f"{' or '.join(sorted(owners))}, no receiver carries it, no literal "
+        "contains it, and no implementation declares it"
+        + (
+            f", while {', '.join(named[:3])} in scope offer the same name"
+            if named
+            else " -- a bare name is not evidence"
+        )
+    )
+
+
+def relocation_key(symbol: str, kind: str) -> str:
+    """The identity a removal verdict follows when a path changes.
+
+    A verdict is about an item, and an item survives being re-exported
+    somewhere else, so the tombstone cannot key on the full path it was written
+    at.  It keys on the part that names the thing: the type, or the member and
+    the type that owns it.
+    """
+    segments = symbol.split("::")
+    wanted = 2 if kind in MEMBER_KINDS else 1
+    return "::".join(segments[-wanted:])
+
+
+def removal_verdict_errors(
+    verdicts: list[dict[str, Any]],
+    recorded: Any,
+    by_api: dict[tuple[str, str], dict[str, Any]],
+    items: list[ApiItem],
+) -> list[str]:
+    """Enforce that a removal verdict can only be discharged by a removal.
+
+    `678d567bf` is the case this exists for.  126 items carried written
+    `unused-remove` verdicts; the commit moved them behind a doc-hidden module,
+    deleted their 444 rows, and shipped.  Nothing was removed and nothing said
+    so, because the only record of the verdict was the row the same diff erased.
+
+    So the verdict outlives the row.  Every `unused-remove` row leaves a
+    `[[removal_verdict]]` tombstone, and a tombstone is discharged exactly two
+    ways: the item is gone from the surface, or the row still says
+    `unused-remove`.  Anything else -- the item reappearing at a different path,
+    or the same path acquiring a friendlier disposition -- requires
+    `superseded_by` naming the new verdict, in the same diff, with a reason.
+    `removal_verdicts_recorded` pins the tombstone count so that deleting
+    history is an edit a reviewer sees rather than a line that vanishes among
+    thousands.
+    """
+    errors: list[str] = []
+    keys = [(verdict.get("symbol", ""), verdict.get("kind", "")) for verdict in verdicts]
+    if not isinstance(recorded, int) or recorded != len(keys):
+        errors.append(
+            f"removal_verdicts_recorded is {recorded!r} but the inventory holds "
+            f"{len(keys)} removal verdicts; a verdict may be added or superseded, "
+            "never dropped unnoticed"
+        )
+    if keys != sorted(keys):
+        errors.append("removal verdicts must be sorted by symbol and kind")
+    if len(set(keys)) != len(keys):
+        duplicated = sorted({key for key in keys if keys.count(key) > 1})
+        errors.append(
+            "duplicate removal verdicts: "
+            + ", ".join(f"{symbol} ({kind})" for symbol, kind in duplicated)
+        )
+
+    by_path: dict[tuple[str, str], ApiItem] = {}
+    by_leaf: dict[tuple[str, str], list[ApiItem]] = {}
+    for item in items:
+        for path in item.paths:
+            by_path[(path, item.kind)] = item
+        for path in item.paths:
+            by_leaf.setdefault(
+                (relocation_key(path, item.kind), item.kind), []
+            ).append(item)
+
+    tombstoned = set(keys)
+    for (symbol, kind), row in sorted(by_api.items()):
+        if row.get("disposition") == "unused-remove" and (symbol, kind) not in tombstoned:
+            errors.append(
+                f"{symbol} ({kind}): an unused-remove row without a removal "
+                "verdict. Record a [[removal_verdict]] tombstone so the verdict "
+                "survives this row being edited away."
+            )
+
+    for verdict in verdicts:
+        symbol = verdict.get("symbol", "")
+        kind = verdict.get("kind", "")
+        superseded = verdict.get("superseded_by")
+        reason = verdict.get("reason", "")
+        if superseded is not None:
+            if superseded not in DISPOSITIONS:
+                errors.append(
+                    f"{symbol} ({kind}): unknown superseding disposition {superseded!r}"
+                )
+            elif superseded == "unused-remove":
+                errors.append(
+                    f"{symbol} ({kind}): superseded_by repeats unused-remove, which "
+                    "supersedes nothing; drop it or name the new verdict"
+                )
+            if not reason.strip():
+                errors.append(
+                    f"{symbol} ({kind}): superseding a removal verdict requires a "
+                    "reason saying what changed the answer"
+                )
+        item = by_path.get((symbol, kind))
+        relocated: ApiItem | None = None
+        if item is None:
+            candidates = by_leaf.get((relocation_key(symbol, kind), kind), [])
+            if not candidates:
+                # Discharged the honest way: the item is gone.
+                continue
+            relocated = candidates[0]
+            item = relocated
+        row = by_api.get((item.primary, item.kind))
+        disposition = (row or {}).get("disposition")
+        if superseded is None and disposition != "unused-remove":
+            # A path change with the verdict intact is not laundering: the
+            # removal is still owed, at whatever path the item now uses. What
+            # `678d567bf` did was change the answer while moving the item, and
+            # that is what needs saying out loud.
+            where = (
+                f"it now appears as {relocated.primary} with disposition "
+                f"{disposition!r}"
+                if relocated is not None
+                else f"its row now reads {disposition!r}"
+            )
+            errors.append(
+                f"{symbol} ({kind}): a removal verdict was written for this item, "
+                f"and {where}. Relocation does not discharge a removal verdict "
+                "(FIG-1223): remove the item, keep the verdict, or record "
+                "superseded_by with the reason the verdict no longer holds."
+            )
+        elif superseded is not None and superseded != disposition:
+            errors.append(
+                f"{symbol} ({kind}): superseded_by says {superseded!r} but the "
+                f"row at {item.primary} reads {disposition!r}; the tombstone and "
+                "the ledger have to agree"
+            )
+    return errors
+
+
+def internal_consumer_errors(
+    by_api: dict[tuple[str, str], dict[str, Any]],
+    items: list[ApiItem],
+    crate_dirs: dict[str, str],
+) -> list[str]:
+    """Reject an `internal-consumed` anchor that sits in the defining crate.
+
+    The claim is that *another* crate's shipped code needs the item, so the
+    crates that own it prove nothing: a crate using its own code is not a seam.
+    Ownership comes from the item's compiler identity as well as its paths --
+    `lash::X` is usually defined in `lash-core`, and reading only the path would
+    let the definition site pass for a consumer.
+    """
+    errors: list[str] = []
+    for item in items:
+        row = by_api.get((item.primary, item.kind))
+        if row is None or row.get("disposition") != "internal-consumed":
+            continue
+        owners = {
+            directory
+            for path in [item.identity, *item.paths]
+            if (directory := crate_dirs.get(path.split("::", 1)[0])) is not None
+        }
+        consumer = anchor_crate(row.get("usage", ""))
+        if consumer is not None and consumer in owners:
+            errors.append(
+                f"{item.primary}: internal-consumed anchor "
+                f"{row.get('usage')!r} points into {consumer}, which defines "
+                "this item. A consumer is another crate's src/; a crate using "
+                "its own code proves nothing about the seam."
+            )
+    return errors
+
+
+def tier_breakdown(entries: list[dict[str, Any]]) -> list[str]:
+    """The standing evidence distribution, printed on every run.
+
+    A number nobody sees is a number nobody fixes: 84% of this inventory's
+    example coverage turned out to be the examples' own tests, and it stayed
+    invisible for as long as the report only said "passed".
+    """
+    per_tier: dict[str, int] = {tier: 0 for tier in ANCHOR_TIERS}
+    unresolved = 0
+    per_disposition: dict[str, dict[str, int]] = {}
+    for entry in entries:
+        usage = entry.get("usage", "")
+        if not usage:
+            continue
+        tier = anchor_tier(usage)
+        if tier is None:
+            unresolved += 1
+            continue
+        per_tier[tier] += 1
+        per_disposition.setdefault(entry.get("disposition", ""), {}).setdefault(tier, 0)
+        per_disposition[entry.get("disposition", "")][tier] += 1
+    anchored = sum(per_tier.values())
+    lines = ["evidence tiers (rows by usage anchor):"]
+    for tier in ANCHOR_TIERS:
+        count = per_tier[tier]
+        share = f"{100 * count / anchored:.0f}%" if anchored else "0%"
+        lines.append(f"- {tier}: {count} ({share})")
+    if unresolved:
+        lines.append(f"- unresolved anchors: {unresolved}")
+    for disposition in ANCHORED_DISPOSITIONS:
+        tiers = per_disposition.get(disposition)
+        if not tiers:
+            continue
+        detail = ", ".join(
+            f"{tier} {tiers[tier]}" for tier in ANCHOR_TIERS if tiers.get(tier)
+        )
+        lines.append(f"- {disposition}: {detail}")
+    ratcheted = sum(
+        counts.get("example-test", 0)
+        for disposition, counts in per_disposition.items()
+        if disposition.startswith("used-")
+    )
+    lines.append(
+        f"- example-test ratchet: {ratcheted} of {EXAMPLE_TEST_TIER_RATCHET} "
+        "example-coverage rows"
+    )
+    return lines
+
+
+def example_test_tier_errors(entries: list[dict[str, Any]]) -> list[str]:
+    """The ratchet on example-test evidence: it may fall, never rise.
+
+    Each of these rows is a per-row design question -- should the example's host
+    code use this item, or is a test the honest home for it? -- so they are not
+    migrated in bulk.  What they must not do is grow, which is why the gate holds
+    a number instead of a note.
+    """
+    count = sum(
+        1
+        for entry in entries
+        if entry.get("disposition", "").startswith("used-")
+        and entry.get("usage")
+        and anchor_tier(entry["usage"]) == "example-test"
+    )
+    if count > EXAMPLE_TEST_TIER_RATCHET:
+        return [
+            f"{count} rows anchor example coverage in an example's own tests, "
+            f"above the {EXAMPLE_TEST_TIER_RATCHET}-row ratchet. Anchor the new "
+            "row in the example's host code, or re-disposition it."
+        ]
+    if count < EXAMPLE_TEST_TIER_RATCHET:
+        return [
+            f"only {count} rows anchor example coverage in an example's own "
+            f"tests, below the {EXAMPLE_TEST_TIER_RATCHET}-row ratchet. Lower "
+            "EXAMPLE_TEST_TIER_RATCHET to that number so the ratchet keeps its "
+            "teeth."
+        ]
+    return []
 
 
 def item_errors(
@@ -1270,12 +3084,13 @@ def item_errors(
 
 
 def check() -> int:
-    with INVENTORY.open("rb") as handle:
-        document = tomllib.load(handle)
+    document = inventory_document()
     entries = document.get("api", [])
     by_api: dict[tuple[str, str], dict[str, Any]] = {}
     errors: list[str] = []
     facade_dirs = facade_dependency_dirs()
+    crate_dirs = crate_directories()
+    leaf_owners = member_leaf_owners(entries)
     low_level_entries = document.get("low_level_api", [])
     low_level_symbols = {entry.get("symbol", "") for entry in low_level_entries}
     missing_low_level = sorted(REQUIRED_LOW_LEVEL_API - low_level_symbols)
@@ -1304,6 +3119,17 @@ def check() -> int:
             )
         if disposition.startswith("unused-") and not entry.get("reason", "").strip():
             errors.append(f"{symbol}: unused low-level disposition requires a concrete reason")
+        for field, reference in (("usage", usage), ("assertion", assertion)):
+            allowed = DISPOSITION_TIERS.get(disposition or "")
+            if not reference or allowed is None:
+                continue
+            tier = anchor_tier(reference)
+            if tier not in allowed:
+                errors.append(
+                    f"{symbol}: low-level {field} anchor {reference!r} is "
+                    f"{tier or 'unrecognized'}-tier evidence, but {disposition} "
+                    f"anchors in {' or '.join(sorted(allowed))}"
+                )
     for entry in entries:
         symbol = entry.get("symbol", "")
         kind = entry.get("kind", "")
@@ -1383,6 +3209,71 @@ def check() -> int:
                     )
         elif assertion:
             errors.append(f"{symbol}: only used-asserted entries may name an assertion")
+        if disposition in INTERNAL_DISPOSITIONS:
+            if not reference_exists(usage):
+                errors.append(
+                    f"{symbol}: stale or invalid internal consumer reference "
+                    f"{usage!r}. An internal seam's justification is its anchor, "
+                    "so the file, line, and source text all have to resolve."
+                )
+            owners = member_owners(symbol, entry.get("aliases"), kind or "")
+            imported = import_anchor_defect(usage)
+            if imported:
+                errors.append(
+                    f"{symbol}: usage anchor {usage!r} {imported}. An internal "
+                    "seam's claim is that shipped code needs the item."
+                )
+            declared = declaration_anchor_defect(symbol, usage)
+            if declared:
+                errors.append(
+                    f"{symbol}: usage anchor {usage!r} {declared}. An internal "
+                    "consumer's anchor is a line that needs the item, not the "
+                    "line that defines it."
+                )
+            defect = member_anchor_defect(
+                symbol,
+                entry.get("aliases"),
+                kind or "",
+                leaf_owners.get(symbol.split("::")[-1], set()) - owners,
+                usage,
+            )
+            if defect:
+                errors.append(
+                    f"{symbol}: usage anchor {usage!r} {defect}. Anchor a line "
+                    "that names the owning type, or record the consumer in prose "
+                    "under a disposition that does not claim machine-checked "
+                    "evidence."
+                )
+            if disposition == "internal-test-only":
+                reason_text = entry.get("reason", "")
+                if not reason_text.strip():
+                    errors.append(
+                        f"{symbol}: internal-test-only requires a reason; the anchor "
+                        "says a test consumes it, not why that is the whole story"
+                    )
+                elif "::testing" not in symbol and "Relocate:" not in reason_text:
+                    errors.append(
+                        f"{symbol}: internal-test-only outside a testing module "
+                        "requires a Relocate: note naming where the item goes, "
+                        "because a test is not a home"
+                    )
+        if disposition.startswith("unused-") and usage:
+            errors.append(
+                f"{symbol}: an unused disposition may not name a usage anchor "
+                f"({usage!r}); an anchor is a claim of use"
+            )
+        for field, reference in (("usage", usage), ("assertion", assertion)):
+            allowed = DISPOSITION_TIERS.get(disposition or "")
+            if not reference or allowed is None:
+                continue
+            tier = anchor_tier(reference)
+            if tier not in allowed:
+                errors.append(
+                    f"{symbol}: {field} anchor {reference!r} is "
+                    f"{tier or 'unrecognized'}-tier evidence, but {disposition} "
+                    f"anchors in {' or '.join(sorted(allowed))}. Each tier proves "
+                    "a different thing; a row may not blend them."
+                )
         if disposition.startswith("unused-") and not entry.get("reason", "").strip():
             errors.append(f"{symbol}: unused disposition requires a concrete reason")
         if disposition == "unused-remove" and "Breaking:" not in entry.get("reason", ""):
@@ -1398,6 +3289,13 @@ def check() -> int:
                 errors.append(
                     f"{symbol}: {field} names the machine-local path {offender!r}; "
                     "evidence must be repository-relative"
+                )
+        if disposition in INTERNAL_DISPOSITIONS or "FIG-1223" in reason:
+            citation = prose_citation_defect(symbol, kind or "", reason)
+            if citation:
+                errors.append(
+                    f"{symbol}: reason {citation}. A citation a reader cannot "
+                    "confirm is not a justification."
                 )
         stale = stale_disposition_reason(disposition or "", reason)
         if stale:
@@ -1416,9 +3314,20 @@ def check() -> int:
                 "crate and it cannot depend on the facade"
             )
 
+    all_entries = [*entries, *low_level_entries]
+    errors += example_test_tier_errors(all_entries)
+
     items = current_surface()
     errors += item_errors(by_api, items)
+    errors += internal_consumer_errors(by_api, items, crate_dirs)
+    verdicts = document.get("removal_verdict", [])
+    errors += removal_verdict_errors(
+        verdicts, document.get("removal_verdicts_recorded"), by_api, items
+    )
 
+    for line in tier_breakdown(all_entries):
+        print(line)
+    print(f"removal verdicts recorded: {len(verdicts)}")
     if errors:
         print("API example-coverage contract failed:", file=sys.stderr)
         for error in errors:

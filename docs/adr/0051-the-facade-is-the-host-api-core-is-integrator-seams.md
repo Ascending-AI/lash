@@ -155,6 +155,54 @@ authoritative.
   `scripts/check_api_example_coverage.py`. Only the *disposition* is centralized
   on the item; the path set is not, and a wave that internalizes core paths must
   still edit the inventory row by row.
+- **`#[doc(hidden)]` is not a ledger exemption.** Hiding the internal
+  cross-crate support modules from host-facing rustdoc is a documentation
+  choice; whether the inventory answers for their paths is a separate API
+  question, and one switch for both turned `lash_core::facade_support` into an
+  amnesty channel — 304 paths no row covered, and 126 items whose written
+  `unused-remove` verdicts were discharged by moving them there (FIG-1223).
+  The checker documents hidden items, records the gated support modules in the
+  inventory, tiers every anchor by its path shape (an example's host code, an
+  example's tests, another crate's `src/`, a `tests/` directory) and validates
+  each disposition against the tiers it may anchor in. Internal seams carry
+  `internal-consumed` — justified by an anchor in a *consuming* crate's `src/`,
+  checked on every run rather than asserted in prose — or `internal-test-only`
+  when nothing but tests reach them. Every `unused-remove` row leaves a
+  `[[removal_verdict]]` tombstone: a removal verdict is discharged by removing
+  the item, never by relocating it, and a path that reappears elsewhere needs an
+  explicit superseding disposition in the same diff.
+- **Machine-verified evidence is verified against the item, not against a
+  string.** A tier follows the code's compilation, so a file a parent declares for
+  tests is test code even though the file itself shows no marker — whatever the
+  `cfg` predicate says and wherever `#[path]` sends it. A member's anchor must tie
+  its line to the type that owns the member: qualified on the line, or reached
+  through a receiver that resolves — field by field, method by method, through
+  `type` aliases, variant payloads and `impl Trait for Type`, and assembled across
+  the continuation lines a fluent chain is written on — to that type or to the
+  trait that owns the member. A field written in a literal is judged by the
+  literal it sits in, because adjacent literals write the same field name for
+  different types, and an anchor inside a type declaration is no anchor at all: a
+  crate declaring its own same-named field is not consuming ours, and neither is
+  the crate whose source declares the item — which the ledger's path root does not
+  reveal, since `lash_core::PreparedTurnMachine` is declared in `lash-sansio`. Two
+  anchor shapes are ruled explicitly: an **import is not consumption** (a `use`
+  resolves whether or not anything needs the item, single-line or spread down a
+  brace list), while a **trait-impl signature is** (implementing the contract is
+  the strongest form the dependency claim takes). A bare
+  occurrence of the name — no qualification, no receiver, no literal, no
+  implementation — is a coincidence, not evidence. Failing closed on evidence is
+  right; failing closed into a *deletion instruction* is not, so a row any earlier
+  round tied to a consumer — by anchor or in prose — keeps that candidate in prose
+  for a reader instead of acquiring a removal verdict.
+  Naming no rival is not a defence: prelude and file-local types cannot be named,
+  so a receiver nobody can follow to the owner fails on its own. The same
+  predicate governs the *search* for a consumer, not just the check on an anchor
+  already written — a name-based search answers a different question and reports
+  live API as dead. A leaf name matches by coincidence — `as_str` on a
+  `serde_json::Value` once justified an internal seam — and prose citing a line
+  that never mentions the item is the same failure spelled in words. An item whose
+  consumer cannot be established that way carries a removal verdict for a reader
+  to confirm, not a justification nobody checked.
 - No justification may park a `lash-core` (or other facade-dependency) consumer
   behind a pending migration to the facade. The cycle this ADR names for
   `lash-remote-protocol` holds for every crate the facade is built on. The
