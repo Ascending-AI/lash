@@ -979,8 +979,18 @@ async fn delete_session_from_catalog(
             for node_id in unreachable_candidates {
                 persistence::retire_unreachable_ancestry_conn(tx, &node_id)?;
             }
+            // Delete-time reclaim covers this session's tombstoned rows plus any
+            // tombstoned row owned by an already-deleted session. A node can be
+            // tombstoned *after* its owner is gone (unpin of a pinned leaf whose
+            // session was deleted, or ancestry retired at a fork child's delete),
+            // and no session-scoped vacuum could ever reach it: the owning id is
+            // permanently unbindable. Live sessions' rows stay resident for their
+            // own vacuum, so this is not a catalog-wide sweep.
             tx.execute(
-                "DELETE FROM graph_nodes WHERE session_id = ?1 AND tombstoned = 1",
+                "DELETE FROM graph_nodes
+                 WHERE tombstoned = 1
+                   AND (session_id = ?1
+                        OR session_id IN (SELECT session_id FROM deleted_sessions))",
                 params![session_id],
             )
             .map_err(sqlite_error)?;

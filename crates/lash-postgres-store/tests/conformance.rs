@@ -951,7 +951,7 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
     };
     let storage = Arc::new(storage);
     // A Postgres session store takes its session id by value: no unbound handle.
-    lash_core::testing::conformance::session_store_factory(None, || {
+    lash_core::testing::conformance::session_store_factory("postgres", None, || {
         let storage = Arc::clone(&storage);
         sync_await(async move {
             reset(&storage).await;

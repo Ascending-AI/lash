@@ -13,11 +13,18 @@ use super::*;
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
 ///
+/// `backend` names the implementation under test; it only appears in
+/// diagnostics for cases a backend cannot express.
+///
 /// `unbound_store` is a store handle the backend built without a session
 /// binding, which the suite uses to police the session-scoped `vacuum`
 /// contract. Backends whose store handle cannot exist without a session id
-/// pass `None`.
+/// pass `None`: that is an assertion that the backend takes responsibility for
+/// reclaim itself (its handle is always bound, so it has no unbound sweep to
+/// police), not a licence to skip the contract. The skip is logged as a
+/// `tracing` warning naming the backend so it can never pass unnoticed.
 pub async fn session_store_factory<F>(
+    backend: &str,
     unbound_store: Option<Arc<dyn crate::store::StoreMaintenance>>,
     make: F,
 ) where
@@ -44,7 +51,7 @@ pub async fn session_store_factory<F>(
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_vacuum_is_scoped_to_bound_session(make()).await;
     session_store_factory_vacuum_agrees_on_unpin_before_delete(make()).await;
-    session_store_factory_unbound_vacuum_is_typed_error(unbound_store).await;
+    session_store_factory_unbound_vacuum_is_typed_error(backend, unbound_store).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
 }

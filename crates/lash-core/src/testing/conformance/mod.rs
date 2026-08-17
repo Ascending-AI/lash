@@ -503,7 +503,7 @@ mod tests {
     #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
         let unbound = crate::InMemorySessionStore::default();
-        session_store_factory(Some(Arc::new(unbound)), || {
+        session_store_factory("in-memory", Some(Arc::new(unbound)), || {
             Arc::new(crate::InMemorySessionStoreFactory::new())
                 as Arc<dyn crate::SessionStoreFactory>
         })

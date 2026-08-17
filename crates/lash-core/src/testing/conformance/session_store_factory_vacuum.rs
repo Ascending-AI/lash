@@ -234,19 +234,25 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         .expect("commit session d");
     factory.pin(&leaf_d).await.expect("pin leaf d");
 
+    // Both deletes happen before either unpin on purpose. `delete_session` also
+    // reclaims tombstoned rows owned by already-deleted sessions (otherwise a
+    // tombstone created after its owner's delete could never be reclaimed), so
+    // deleting D after unpinning C would legitimately reclaim C's tombstone and
+    // leave this case with nothing to say about vacuum scope. Tombstoning both
+    // nodes after both deletes keeps each row waiting for its own session's
+    // vacuum, which is the property under test.
     factory
         .delete_session(&req_c.session_id)
         .await
         .expect("delete session c");
     factory
-        .unpin(&leaf_c)
-        .await
-        .expect("unpin leaf c to tombstone");
-
-    factory
         .delete_session(&req_d.session_id)
         .await
         .expect("delete session d");
+    factory
+        .unpin(&leaf_c)
+        .await
+        .expect("unpin leaf c to tombstone");
     factory
         .unpin(&leaf_d)
         .await
@@ -343,13 +349,18 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
 /// than fall back to a catalog-wide sweep.
 ///
 /// Backends whose store handle cannot exist without a session id have nothing to
-/// police here and report `None`.
+/// police here and report `None`. `None` is a claim about the backend — it is
+/// always bound, so it owns reclaim itself and offers no unbound sweep to fence
+/// — so the skip is a named `tracing` warning rather than a silent pass.
 pub(super) async fn session_store_factory_unbound_vacuum_is_typed_error(
+    backend: &str,
     unbound: Option<Arc<dyn crate::store::StoreMaintenance>>,
 ) {
     let Some(unbound) = unbound else {
-        eprintln!(
-            "skipping unbound-vacuum conformance: this backend has no unbound store handle shape"
+        tracing::warn!(
+            backend,
+            "skipping unbound-vacuum conformance: backend reports no unbound store handle shape, \
+             so it takes responsibility for reclaim itself"
         );
         return;
     };
