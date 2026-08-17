@@ -380,7 +380,7 @@ mod tests {
         json!({"candidates": [candidate]})
     }
 
-    fn next_request_from_response_parts(parts: &[LlmOutputPart]) -> Value {
+    pub(crate) fn next_request_from_response_parts(parts: &[LlmOutputPart]) -> Value {
         let assistant_id = "google-regression.assistant";
         let mut durable_parts = Vec::new();
         for part in parts {
