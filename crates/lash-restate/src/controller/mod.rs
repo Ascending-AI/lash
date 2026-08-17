@@ -7,6 +7,7 @@
 //! through lives in [`context`].
 
 pub(crate) mod context;
+mod journal_budget;
 
 use std::fmt;
 use std::future::Future;
@@ -38,6 +39,7 @@ use crate::durable_wait::{
 use crate::process::RestateProcessCancelRequest;
 
 pub use context::RestateControllerContext;
+use journal_budget::{journalable_recorded_effect, unjournalable_envelope_give_up};
 
 struct RestateTraceObserver {
     sink: Weak<dyn lash_trace::TraceSink>,
@@ -389,6 +391,7 @@ where
     async fn record_effect<'run>(
         &'run self,
         metadata: &RuntimeInvocation,
+        envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
         // Keep the full journaled-effect executor behind one allocation. The
         // Restate SDK stores this future in its ctx.run state machine, so
         // accepting it inline here makes every composed turn carry the whole
@@ -399,8 +402,21 @@ where
         'ctx: 'run,
     {
         let effect_name = restate_effect_name(metadata);
-        let run_retry_policy = self.options.run_retry_policy.clone();
         let payload_budget = self.options.journaled_effect_byte_budget;
+        // A poison substitute still has to carry the envelope replay validation
+        // matches on, so an envelope that cannot be journaled leaves no
+        // journalable record at all - substituting the outcome would propose an
+        // over-budget entry the substrate rejects, reviving the redrive loop
+        // silently. Give up before running the effect instead: the verdict is a
+        // pure function of the reconstructed envelope, so every replay takes
+        // this same branch, journals nothing, and observes the same typed
+        // failure.
+        if let Some(give_up) =
+            unjournalable_envelope_give_up(&effect_name, payload_budget, envelope)
+        {
+            return Ok(give_up);
+        }
+        let run_retry_policy = self.options.run_retry_policy.clone();
         let poisoned_effect_name = effect_name.clone();
         let Json(value) = self
             .context
@@ -417,78 +433,6 @@ where
                 terminal: source,
             })?;
         Ok(value)
-    }
-}
-
-/// Measure a recorded effect's journal payload without allocating it, and stop
-/// serializing as soon as it cannot be journaled.
-struct JournalPayloadMeter {
-    written: u64,
-    budget: Option<u64>,
-    exceeded: bool,
-}
-
-impl std::io::Write for JournalPayloadMeter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.written = self.written.saturating_add(buf.len() as u64);
-        if let Some(budget) = self.budget
-            && self.written > budget
-        {
-            self.exceeded = true;
-            return Err(std::io::Error::other(
-                "recorded effect exceeded its durable journal payload budget",
-            ));
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-/// Give up on an effect outcome the durable journal can never accept.
-///
-/// The Restate SDK serializes a recorded effect while the journal command is
-/// being proposed, so an outcome that cannot be journaled fails the whole
-/// attempt with no journal progress - and, because that verdict is a pure
-/// function of the recorded value, it fails the same way on every redrive, so
-/// the turn never terminates. Substituting a typed poison outcome keeps the
-/// give-up inside the effect the host is already waiting on: the substitution
-/// is replay-deterministic, its envelope is two canonical strings and therefore
-/// always journalable, and the host observes
-/// [`RuntimeErrorCode::RestateJournaledEffectPoisoned`] as a terminal effect
-/// failure instead of an uncommitted turn.
-fn journalable_recorded_effect(
-    effect: &str,
-    payload_budget: Option<u64>,
-    recorded: RecordedRuntimeEffect,
-) -> RecordedRuntimeEffect {
-    let mut meter = JournalPayloadMeter {
-        written: 0,
-        budget: payload_budget,
-        exceeded: false,
-    };
-    let Err(error) = serde_json::to_writer(&mut meter, &recorded) else {
-        return recorded;
-    };
-    let reason = if meter.exceeded {
-        let budget = payload_budget.unwrap_or_default();
-        format!("its payload exceeded the {budget}-byte durable journal budget")
-    } else {
-        format!("its payload cannot be serialized: {error}")
-    };
-    tracing::error!(
-        %effect,
-        %reason,
-        "journaled effect outcome cannot be recorded; giving up with a terminal poison outcome"
-    );
-    RecordedRuntimeEffect {
-        envelope: recorded.envelope,
-        outcome: Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RestateJournaledEffectPoisoned,
-            format!("journaled effect `{effect}` gave up because {reason}"),
-        )),
     }
 }
 
@@ -733,12 +677,14 @@ where
                 .await
                 .map(|result| RuntimeEffectOutcome::Process { result });
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
+                let journaled_envelope = Arc::clone(&recorded_envelope);
                 let recorded = self
                     .record_effect(
                         &invocation,
+                        &recorded_envelope,
                         Box::pin(async move {
                             RecordedRuntimeEffect {
-                                envelope: recorded_envelope,
+                                envelope: journaled_envelope,
                                 outcome,
                             }
                         }),
@@ -763,12 +709,14 @@ where
                 let invocation = envelope.invocation.clone();
                 let outcome = local_executor.execute(envelope).await;
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
+                let journaled_envelope = Arc::clone(&recorded_envelope);
                 let recorded = self
                     .record_effect(
                         &invocation,
+                        &recorded_envelope,
                         Box::pin(async move {
                             RecordedRuntimeEffect {
-                                envelope: recorded_envelope,
+                                envelope: journaled_envelope,
                                 outcome,
                             }
                         }),
@@ -931,14 +879,16 @@ where
                     }
                 });
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
+                let journaled_envelope = Arc::clone(&recorded_envelope);
                 let recorded = self
                     .record_effect(
                         &invocation,
+                        &recorded_envelope,
                         Box::pin(async move {
                             let outcome =
                                 execute_restate_journaled_effect(envelope, local_executor).await;
                             RecordedRuntimeEffect {
-                                envelope: recorded_envelope,
+                                envelope: journaled_envelope,
                                 outcome,
                             }
                         }),

@@ -140,6 +140,63 @@ fn restate_context_future_repoll_after_ready_stays_pending() {
     assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
 }
 
+/// A future that wakes its own task once before completing - the shape
+/// `yield_now` and a re-armed `FuturesUnordered` both produce.
+fn self_waking_then_ready() -> impl Future<Output = u32> {
+    let mut woke = false;
+    std::future::poll_fn(move |cx: &mut Context<'_>| {
+        if woke {
+            return Poll::Ready(7);
+        }
+        woke = true;
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    })
+}
+
+/// FIG-1464: `ctx.run` polls arbitrary lash code, and a `RuntimeEffectCommand::LlmCall`
+/// reaches this seam with no task boundary in between. A self-wake from that
+/// code arrives before the closure has produced a value, so it is not the SDK's
+/// terminal park and must not fuse the run - fusing it would hang the turn while
+/// holding a paid completion.
+#[test]
+fn restate_run_future_pre_completion_self_wake_does_not_fuse() {
+    let closure_completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
+        self_waking_then_ready(),
+        Arc::clone(&closure_completed),
+    ));
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+
+    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
+    assert_eq!(
+        future.as_mut().poll(&mut context),
+        Poll::Ready(7),
+        "an unarmed wake fuse must leave the run future pollable"
+    );
+}
+
+/// The same wake once the closure has produced its value is the SDK recording a
+/// terminal handler state, so it must fuse.
+#[test]
+fn restate_run_future_post_completion_self_wake_fuses() {
+    let closure_completed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
+        self_waking_then_ready(),
+        Arc::clone(&closure_completed),
+    ));
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+
+    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
+    assert_eq!(
+        future.as_mut().poll(&mut context),
+        Poll::Pending,
+        "an armed wake fuse must never re-enter the SDK future"
+    );
+}
+
 /// Restate service-protocol message types used by the FIG-779/FIG-790 gates.
 /// `restate_sdk_shared_core::service_protocol::header` keeps these private, so
 /// they are restated here (`SleepCommand = 0x040C`, `Suspension = 0x0001`,
@@ -313,6 +370,8 @@ trait Fig1464RunGuardRepro {
     async fn repoll_failed_run(input: Json<Fig1464RunGuardReproInput>) -> HandlerResult<Json<()>>;
 
     async fn journaled_run(input: Json<Fig1464RunGuardReproInput>) -> HandlerResult<Json<u32>>;
+
+    async fn self_waking_run(input: Json<Fig1464RunGuardReproInput>) -> HandlerResult<Json<u32>>;
 }
 
 struct Fig1464RunGuardReproImpl;
@@ -354,6 +413,25 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
     ) -> HandlerResult<Json<u32>> {
         let Json(value) =
             RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
+                41_u32
+            })
+            .await?;
+        Ok(Json(value + 1))
+    }
+
+    /// The run closure polls arbitrary lash code, and that code is allowed to
+    /// wake its own task synchronously - `yield_now` is idiomatic one module
+    /// over. Such a wake arrives before the closure's future has returned, so it
+    /// must not fuse the run: fusing here would park a healthy effect forever
+    /// while holding a paid completion.
+    async fn self_waking_run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig1464RunGuardReproInput>,
+    ) -> HandlerResult<Json<u32>> {
+        let Json(value) =
+            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
+                tokio::task::yield_now().await;
                 41_u32
             })
             .await?;
@@ -2294,6 +2372,46 @@ async fn fig1464_journaled_run_still_returns_its_recorded_result() {
     assert_eq!(restate_output_json::<u32>(&output), Some(42));
 }
 
+/// FIG-1464: the run fuse must not arm while the closure's own future is still
+/// running. `LlmCall` routes to a journaled run with no task boundary between the
+/// streaming code and this seam, so a same-task self-wake from that code reaches
+/// the guard. Treating it as the SDK's terminal park would fuse a healthy run:
+/// the effect would never even be proposed as a `RunCommand`, and the turn would
+/// hang holding a paid completion.
+#[tokio::test]
+async fn fig1464_self_waking_run_closure_does_not_arm_the_wake_fuse() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig1464RunGuardReproImpl.serve())
+        .build();
+    let key = "fig1464-self-waking-run";
+    let input = Fig1464RunGuardReproInput {
+        effect_name: "lash:fig1464-self-waking-effect".to_string(),
+    };
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig1464RunGuardRepro",
+        "self_waking_run",
+        key,
+        &input,
+    )
+    .await
+    .expect("a self-waking run closure must still reach its proposed completion");
+    assert!(
+        restate_message_types(&suspended)
+            .expect("decode self-waking run frames")
+            .contains(&RESTATE_RUN_COMMAND_MESSAGE_TYPE),
+        "a self-waking run closure must still journal its effect"
+    );
+
+    let body = encode_run_replay(key, &input, &suspended, serde_json::json!(41))
+        .expect("encode completed self-waking run replay");
+    let output = invoke_endpoint_body(&endpoint, "Fig1464RunGuardRepro", "self_waking_run", body)
+        .await
+        .expect("the completed self-waking run must return its recorded result");
+
+    assert_eq!(restate_output_json::<u32>(&output), Some(42));
+}
+
 /// FIG-779 contrast: an already-completed timer replays straight to `Ready`, so
 /// the guard never sees a synchronous wake. This is why the panic is only
 /// reachable on the attempt that first parks on the timer, not on the resume.
@@ -3522,6 +3640,23 @@ async fn restate_handler_controller_journals_typed_trigger_execution() {
     );
 }
 
+fn fig1464_poison_list_envelope(session: &str, effect: &str) -> RuntimeEffectEnvelope {
+    RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            RuntimeScope::new(session),
+            effect,
+            RuntimeEffectKind::Trigger,
+            effect,
+        ),
+        RuntimeEffectCommand::Trigger {
+            command: Box::new(lash_core::TriggerCommand::List {
+                owner_scope: lash_core::TriggerOwnerScope::session(session),
+                filter: lash_core::TriggerSubscriptionFilter::default(),
+            }),
+        },
+    )
+}
+
 /// FIG-1464 poison path: an effect outcome the durable journal will refuse
 /// would fail every redrive of the enclosing turn identically, leaving the turn
 /// uncommitted forever. The seam decides that verdict itself and gives up with a
@@ -3529,30 +3664,46 @@ async fn restate_handler_controller_journals_typed_trigger_execution() {
 /// effect exactly once so replay reproduces the same give-up.
 #[tokio::test]
 async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_terminal_failure() {
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
+        .expect("source key");
+    store
+        .execute_command(
+            "fig1464-poison-register",
+            lash_core::TriggerCommand::Register {
+                owner_scope: lash_core::TriggerOwnerScope::session("restate-poison-session"),
+                actor: lash_core::ProcessOriginator::host_scoped("fig1464"),
+                draft: lash_core::TriggerSubscriptionDraft::for_process(
+                    "fig1464/poison-subscription",
+                    lash_core::ProcessExecutionEnvRef::new("process-env:fig1464"),
+                    "ui.button.pressed",
+                    source_key,
+                    ProcessInput::Engine {
+                        kind: "fig1464-engine".to_string(),
+                        payload: serde_json::json!({}),
+                    },
+                    lash_core::ProcessIdentity::new("fig1464-engine"),
+                )
+                .with_payload_schema(lash_core::LashSchema::any()),
+            },
+        )
+        .await
+        .expect("seed a subscription so the listed outcome outgrows the budget")
+        .expect("trigger registration outcome");
+
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::with_options(
         Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+        // Sits above the poison substitute (envelope plus a fixed-length typed
+        // message) and below the listed subscription record.
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(700),
     );
-    let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new("restate-poison-session"),
-            "restate-poison-list",
-            RuntimeEffectKind::Trigger,
-            "restate-poison-list",
-        ),
-        RuntimeEffectCommand::Trigger {
-            command: Box::new(lash_core::TriggerCommand::List {
-                owner_scope: lash_core::TriggerOwnerScope::session("restate-poison-session"),
-                filter: lash_core::TriggerSubscriptionFilter::default(),
-            }),
-        },
-    );
-    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::new())
-        as Arc<dyn lash_core::TriggerStore>;
 
     let error = controller
-        .execute_effect(envelope, RuntimeEffectLocalExecutor::triggers(store))
+        .execute_effect(
+            fig1464_poison_list_envelope("restate-poison-session", "restate-poison-list"),
+            RuntimeEffectLocalExecutor::triggers(store as Arc<dyn lash_core::TriggerStore>),
+        )
         .await
         .expect_err("an unjournalable effect outcome must not be recorded as a result");
 
@@ -3573,6 +3724,44 @@ async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_terminal_fai
         context.runs.lock_recover().as_slice(),
         ["lash:restate-poison-list"],
         "the give-up is journaled once, so replay reproduces it"
+    );
+}
+
+/// FIG-1464: the poison substitute still carries the envelope replay validation
+/// matches on, so an envelope that is itself over budget leaves no journalable
+/// record at all. Journaling the substitute anyway would propose an entry the
+/// engine rejects, reviving the redrive loop with the give-up now silent. The
+/// seam has to decide before it journals - and before it pays for the effect.
+#[tokio::test]
+async fn fig1464_over_budget_envelope_gives_up_without_journaling_anything() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    );
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::new())
+        as Arc<dyn lash_core::TriggerStore>;
+
+    let error = controller
+        .execute_effect(
+            fig1464_poison_list_envelope("restate-wide-envelope-session", "restate-wide-envelope"),
+            RuntimeEffectLocalExecutor::triggers(store),
+        )
+        .await
+        .expect_err("an unjournalable envelope must not be recorded as a result");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
+    assert!(
+        error.code.is_terminal(),
+        "the give-up must not be re-attempted"
+    );
+    assert!(
+        context.runs.lock_recover().is_empty(),
+        "an over-budget record must never be proposed: {:?}",
+        context.runs.lock_recover().as_slice()
     );
 }
 
