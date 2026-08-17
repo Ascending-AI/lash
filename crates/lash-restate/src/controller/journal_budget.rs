@@ -8,10 +8,42 @@ use std::sync::Arc;
 use lash_core::{
     RuntimeEffectControllerError, RuntimeErrorCode, facade_support::CanonicalRuntimeEffectEnvelope,
 };
+use serde::{Deserialize, Serialize};
 
 use std::fmt;
 
 use super::RecordedRuntimeEffect;
+
+/// What a journaled effect's `ctx.run` entry carries.
+///
+/// One journal shape for both give-up paths and the happy path, so the slot a
+/// recorded effect occupies never depends on the payload budget in force at the
+/// time. [`Self::GaveUp`] is the fixed-size poison entry: it carries the verdict
+/// and the budget that produced it, never the envelope, so it fits any journal
+/// even when the envelope-carrying record does not. Replaying it reproduces the
+/// original give-up under whatever budget the replaying attempt was configured
+/// with.
+///
+/// The encoding is untagged on purpose: a recorded effect keeps the exact
+/// payload bytes it had before this entry type existed, so a journal written by
+/// an older deployment still replays - a wrapper tag would fail to deserialize on
+/// every in-flight journal, which is the redrive-panic loop this whole seam
+/// exists to prevent. The two variants stay mutually exclusive because
+/// [`GaveUpEntry`] denies unknown fields and carries a field name no recorded
+/// effect has, while a recorded effect requires `envelope` and `outcome`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(super) enum JournaledEffectRecord {
+    Recorded(RecordedRuntimeEffect),
+    GaveUp(GaveUpEntry),
+}
+
+/// The fixed-size poison entry: one budget, no envelope, no error text.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GaveUpEntry {
+    journaled_effect_gave_up_over_budget: u64,
+}
 
 /// Measure a recorded effect's journal payload without allocating it, and stop
 /// serializing as soon as it cannot be journaled.
@@ -79,10 +111,15 @@ fn poisoned_effect_record(
     }
 }
 
-/// Measure a record against the journal payload budget.
-fn record_exceeds_budget(
+/// Measure a journal entry against the journal payload budget.
+///
+/// Any entry body is accepted by reference so a candidate can be measured before
+/// it is committed to a [`JournaledEffectRecord`] variant. [`JournaledEffectRecord`]
+/// is untagged, so measuring a variant's body yields exactly the bytes the
+/// wrapped variant would write.
+fn record_exceeds_budget<T: Serialize + ?Sized>(
     payload_budget: Option<u64>,
-    recorded: &RecordedRuntimeEffect,
+    recorded: &T,
 ) -> Result<(), (bool, serde_json::Error)> {
     let mut meter = JournalPayloadMeter {
         written: 0,
@@ -97,16 +134,17 @@ fn record_exceeds_budget(
 
 /// Give up before running an effect whose envelope alone cannot be journaled.
 ///
-/// Returns the un-journaled poison record when not even the substitute fits;
+/// Returns the budget the envelope blew, which the caller journals as the
+/// fixed-size [`JournaledEffectRecord::GaveUp`] entry before the effect runs;
 /// `None` means a poison substitute is available should the real outcome turn
 /// out to be unjournalable.
 pub(super) fn unjournalable_envelope_give_up(
     effect: &str,
     payload_budget: Option<u64>,
     envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
-) -> Option<RecordedRuntimeEffect> {
+) -> Option<u64> {
     let budget = payload_budget?;
-    // Measure the exact record the substitution would propose, in its longest
+    // Measure the exact entry the substitution would propose, in its longest
     // rendering, so a `None` verdict here is a proof rather than an estimate.
     let substitute = poisoned_effect_record(
         effect,
@@ -119,9 +157,41 @@ pub(super) fn unjournalable_envelope_give_up(
     tracing::error!(
         %effect,
         %budget,
-        "journaled effect envelope exceeds the durable journal budget; giving up without journaling"
+        "journaled effect envelope exceeds the durable journal budget; giving up with a fixed-size poison journal entry"
     );
-    Some(substitute)
+    Some(budget)
+}
+
+/// Reconstruct the recorded effect a journal entry stands for.
+///
+/// A [`JournaledEffectRecord::GaveUp`] entry deliberately omits the envelope
+/// replay validation matches on, so it is restored from the envelope the caller
+/// reconstructed for this attempt - the same canonical value every attempt
+/// derives from the invocation - while the give-up verdict itself comes from the
+/// journal. That keeps the observed failure identical across attempts whose
+/// configured budgets differ.
+pub(super) fn recorded_effect_from_journal(
+    envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+    effect: &str,
+    entry: JournaledEffectRecord,
+) -> RecordedRuntimeEffect {
+    match entry {
+        JournaledEffectRecord::Recorded(recorded) => recorded,
+        JournaledEffectRecord::GaveUp(GaveUpEntry {
+            journaled_effect_gave_up_over_budget: budget,
+        }) => poisoned_effect_record(
+            effect,
+            Arc::clone(envelope),
+            PoisonReason::OverBudget { budget },
+        ),
+    }
+}
+
+/// The fixed-size poison entry a pre-flight give-up puts in the journal slot.
+pub(super) fn gave_up_over_budget_entry(budget: u64) -> JournaledEffectRecord {
+    JournaledEffectRecord::GaveUp(GaveUpEntry {
+        journaled_effect_gave_up_over_budget: budget,
+    })
 }
 
 /// Give up on an effect outcome the durable journal can never accept.
@@ -140,9 +210,9 @@ pub(super) fn journalable_recorded_effect(
     effect: &str,
     payload_budget: Option<u64>,
     recorded: RecordedRuntimeEffect,
-) -> RecordedRuntimeEffect {
+) -> JournaledEffectRecord {
     let Err((exceeded, error)) = record_exceeds_budget(payload_budget, &recorded) else {
-        return recorded;
+        return JournaledEffectRecord::Recorded(recorded);
     };
     let reason = if exceeded {
         PoisonReason::OverBudget {
@@ -157,5 +227,5 @@ pub(super) fn journalable_recorded_effect(
         %error,
         "journaled effect outcome cannot be recorded; giving up with a terminal poison outcome"
     );
-    poisoned_effect_record(effect, recorded.envelope, reason)
+    JournaledEffectRecord::Recorded(poisoned_effect_record(effect, recorded.envelope, reason))
 }

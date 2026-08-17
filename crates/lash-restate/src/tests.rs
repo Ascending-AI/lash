@@ -160,11 +160,14 @@ fn self_waking_then_ready() -> impl Future<Output = u32> {
 /// terminal park and must not fuse the run - fusing it would hang the turn while
 /// holding a paid completion.
 #[test]
-fn restate_run_future_pre_completion_self_wake_does_not_fuse() {
-    let closure_completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+fn restate_run_future_closure_self_wake_does_not_fuse() {
+    let ledger = Arc::new(crate::controller::context::ClosureWakeLedger::default());
     let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
-        self_waking_then_ready(),
-        Arc::clone(&closure_completed),
+        crate::controller::context::attribute_closure_wakes(
+            self_waking_then_ready(),
+            Arc::clone(&ledger),
+        ),
+        ledger,
     ));
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
@@ -173,18 +176,20 @@ fn restate_run_future_pre_completion_self_wake_does_not_fuse() {
     assert_eq!(
         future.as_mut().poll(&mut context),
         Poll::Ready(7),
-        "an unarmed wake fuse must leave the run future pollable"
+        "a wake attributed to the run closure must leave the run future pollable"
     );
 }
 
-/// The same wake once the closure has produced its value is the SDK recording a
-/// terminal handler state, so it must fuse.
+/// The same wake shape from anywhere other than the closure's own future is the
+/// SDK recording a terminal handler state - the intercept-error `wake_by_ref`
+/// included, which is also the only wake the replay path can produce because the
+/// closure is never invoked there. It must fuse.
 #[test]
-fn restate_run_future_post_completion_self_wake_fuses() {
-    let closure_completed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+fn restate_run_future_unattributed_wake_fuses() {
+    let ledger = Arc::new(crate::controller::context::ClosureWakeLedger::default());
     let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
         self_waking_then_ready(),
-        Arc::clone(&closure_completed),
+        ledger,
     ));
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
@@ -193,7 +198,7 @@ fn restate_run_future_post_completion_self_wake_fuses() {
     assert_eq!(
         future.as_mut().poll(&mut context),
         Poll::Pending,
-        "an armed wake fuse must never re-enter the SDK future"
+        "an unattributed synchronous wake must never re-enter the SDK future"
     );
 }
 
@@ -356,6 +361,33 @@ impl<'de> serde::Deserialize<'de> for Fig1464UnjournalableEffectResult {
     }
 }
 
+/// FIG-1464 replay payload: an effect result that journals cleanly and can never
+/// be read back. That is the replay-path shape of the same SDK-level `ctx.run`
+/// failure: the SDK skips the closure entirely on an already-journaled run entry,
+/// so the failure comes out of deserializing the recorded value instead.
+#[derive(Debug)]
+struct Fig1464UnreadableJournaledResult;
+
+impl Serialize for Fig1464UnreadableJournaledResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_u32(41)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Fig1464UnreadableJournaledResult {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Err(serde::de::Error::custom(
+            "fig1464 journaled effect result cannot be read back",
+        ))
+    }
+}
+
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct Fig1464RunGuardReproInput {
     effect_name: String,
@@ -368,6 +400,9 @@ struct Fig1464RunGuardReproInput {
 #[restate_sdk::workflow]
 trait Fig1464RunGuardRepro {
     async fn repoll_failed_run(input: Json<Fig1464RunGuardReproInput>) -> HandlerResult<Json<()>>;
+
+    async fn repoll_replayed_run(input: Json<Fig1464RunGuardReproInput>)
+    -> HandlerResult<Json<()>>;
 
     async fn journaled_run(input: Json<Fig1464RunGuardReproInput>) -> HandlerResult<Json<u32>>;
 
@@ -396,6 +431,33 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
             assert!(
                 matches!(run.as_mut().poll(cx), Poll::Pending),
                 "a failed journaled run must record its handler state and park"
+            );
+            let _ = run.as_mut().poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+        Ok(Json(()))
+    }
+
+    /// The replay geometry the ticket reports: the run entry is already
+    /// journaled, so the SDK never invokes the closure. The recorded value
+    /// cannot be read back, `InterceptErrorFuture` records the handler-state
+    /// failure, wakes synchronously and returns `Pending` - with no closure to
+    /// account for that wake, the guard must fuse a run future it never once saw
+    /// the closure of.
+    async fn repoll_replayed_run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(input): Json<Fig1464RunGuardReproInput>,
+    ) -> HandlerResult<Json<()>> {
+        let mut run =
+            RestateControllerContext::run_json_send(&ctx, input.effect_name, None, async {
+                Fig1464UnreadableJournaledResult
+            });
+        std::future::poll_fn(|cx| {
+            assert!(
+                matches!(run.as_mut().poll(cx), Poll::Pending),
+                "a replayed run whose recorded value cannot be read must park"
             );
             let _ = run.as_mut().poll(cx);
             Poll::Ready(())
@@ -2336,6 +2398,63 @@ async fn fig1464_failed_journaled_run_repoll_stays_pending_without_panic() {
     );
 }
 
+/// FIG-1464: the same panic loop on the replay path, which is the interleaving
+/// the ticket actually reports. The run entry is already journaled, so the SDK
+/// skips the closure entirely; reading the recorded value back fails, and
+/// `InterceptErrorFuture` parks on the recorded failure after waking
+/// synchronously. A fuse that waited for the closure to complete would stay
+/// inert for this whole attempt, so the second poll would re-enter an
+/// already-resolved SDK future and abort the handler.
+#[tokio::test]
+async fn fig1464_replayed_unreadable_run_repoll_stays_pending_without_panic() {
+    let endpoint = Endpoint::builder()
+        .bind(Fig1464RunGuardReproImpl.serve())
+        .build();
+    let key = "fig1464-repoll-replayed-run";
+    let input = Fig1464RunGuardReproInput {
+        effect_name: "lash:fig1464-unreadable-journaled-effect".to_string(),
+    };
+    let suspended = invoke_endpoint(
+        &endpoint,
+        "Fig1464RunGuardRepro",
+        "repoll_replayed_run",
+        key,
+        &input,
+    )
+    .await
+    .expect("the first attempt must journal the run and park");
+    assert!(
+        restate_message_types(&suspended)
+            .expect("decode first-attempt frames")
+            .contains(&RESTATE_RUN_COMMAND_MESSAGE_TYPE),
+        "the effect must be journaled as a RunCommand before the replay leg"
+    );
+
+    let body = encode_run_replay(key, &input, &suspended, serde_json::json!(41))
+        .expect("encode completed journaled run replay");
+    let output = invoke_endpoint_body(
+        &endpoint,
+        "Fig1464RunGuardRepro",
+        "repoll_replayed_run",
+        body,
+    )
+    .await
+    .expect("re-polling a replayed run failure must not panic");
+
+    let message_types = restate_message_types(&output).expect("decode replayed-run frames");
+    assert!(
+        !message_types.contains(&RESTATE_OUTPUT_COMMAND_MESSAGE_TYPE)
+            && !message_types.contains(&RESTATE_END_MESSAGE_TYPE),
+        "a replayed run failure must not land a fabricated output: {message_types:?}"
+    );
+    assert!(
+        restate_error_message(&output)
+            .is_some_and(|message| message.contains("cannot be read back")),
+        "the attempt must end on the recorded replay failure, not a panic: {:?}",
+        restate_error_message(&output)
+    );
+}
+
 /// FIG-1464 contrast: fusing the terminal attempt state must not swallow a
 /// journaled run that really did produce a result.
 #[tokio::test]
@@ -2372,14 +2491,14 @@ async fn fig1464_journaled_run_still_returns_its_recorded_result() {
     assert_eq!(restate_output_json::<u32>(&output), Some(42));
 }
 
-/// FIG-1464: the run fuse must not arm while the closure's own future is still
-/// running. `LlmCall` routes to a journaled run with no task boundary between the
+/// FIG-1464: a wake the run closure's own future issued must not fuse the run.
+/// `LlmCall` routes to a journaled run with no task boundary between the
 /// streaming code and this seam, so a same-task self-wake from that code reaches
 /// the guard. Treating it as the SDK's terminal park would fuse a healthy run:
 /// the effect would never even be proposed as a `RunCommand`, and the turn would
 /// hang holding a paid completion.
 #[tokio::test]
-async fn fig1464_self_waking_run_closure_does_not_arm_the_wake_fuse() {
+async fn fig1464_self_waking_run_closure_does_not_fuse_the_run() {
     let endpoint = Endpoint::builder()
         .bind(Fig1464RunGuardReproImpl.serve())
         .build();
@@ -3731,9 +3850,11 @@ async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_terminal_fai
 /// matches on, so an envelope that is itself over budget leaves no journalable
 /// record at all. Journaling the substitute anyway would propose an entry the
 /// engine rejects, reviving the redrive loop with the give-up now silent. The
-/// seam has to decide before it journals - and before it pays for the effect.
+/// seam decides before it pays for the effect, and occupies the journal slot with
+/// the fixed-size poison entry so the journal shape does not depend on the
+/// configured budget.
 #[tokio::test]
-async fn fig1464_over_budget_envelope_gives_up_without_journaling_anything() {
+async fn fig1464_over_budget_envelope_gives_up_with_a_fixed_size_poison_entry() {
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::with_options(
         Arc::clone(&context),
@@ -3758,10 +3879,111 @@ async fn fig1464_over_budget_envelope_gives_up_without_journaling_anything() {
         error.code.is_terminal(),
         "the give-up must not be re-attempted"
     );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        ["lash:restate-wide-envelope"],
+        "the give-up must occupy its journal slot exactly once"
+    );
+}
+
+/// FIG-1464: the tool-batch and durable-process-command sites run their effect
+/// outside the run closure, so the budget give-up has to be their pre-flight
+/// gate. A give-up decided after the batch ran would discard a settled batch
+/// with no journal entry, and the next redrive would execute every child again.
+#[tokio::test]
+async fn fig1464_over_budget_tool_batch_gives_up_before_running_the_batch() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    );
+    let executed = Arc::new(AtomicBool::new(false));
+    let ran = Arc::clone(&executed);
+
+    let error = controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::ToolBatch, "fig1464-over-budget-batch"),
+                RuntimeEffectCommand::ToolBatch {
+                    batch: lash_core::PreparedToolBatch::new("batch", vec![prepared_tool_call()]),
+                },
+            ),
+            RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                ran.store(true, Ordering::SeqCst);
+                Err(lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    "an over-budget tool batch must never run",
+                ))
+            }),
+        )
+        .await
+        .expect_err("an unjournalable envelope must not be recorded as a result");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
     assert!(
-        context.runs.lock_recover().is_empty(),
-        "an over-budget record must never be proposed: {:?}",
-        context.runs.lock_recover().as_slice()
+        !executed.load(Ordering::SeqCst),
+        "the give-up must be decided before the batch runs"
+    );
+    assert_eq!(
+        context.runs.lock_recover().len(),
+        1,
+        "the give-up must occupy its journal slot exactly once"
+    );
+}
+
+/// FIG-1464 deciding risk: the give-up verdict reads a process-configured
+/// budget, so a budget change between attempts must not flip the *shape* of the
+/// journal. The give-up occupies its slot with a fixed-size poison entry, so a
+/// larger budget on redrive consumes the same slot and observes the same typed
+/// failure instead of diverging by proposing a record where the first attempt
+/// proposed nothing.
+#[tokio::test]
+async fn fig1464_over_budget_give_up_replays_identically_under_a_larger_budget() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::new())
+        as Arc<dyn lash_core::TriggerStore>;
+    let envelope =
+        || fig1464_poison_list_envelope("restate-budget-flip-session", "restate-budget-flip");
+
+    let recorded = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    )
+    .execute_effect(
+        envelope(),
+        RuntimeEffectLocalExecutor::triggers(Arc::clone(&store)),
+    )
+    .await
+    .expect_err("the over-budget envelope must give up");
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        ["lash:restate-budget-flip"],
+        "the give-up must occupy its journal slot"
+    );
+
+    context.replaying.store(true, Ordering::SeqCst);
+    let replayed = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        // The budget the redrive was configured with now clears the envelope, so
+        // an un-journaled give-up would have journaled a record here.
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
+    )
+    .execute_effect(envelope(), RuntimeEffectLocalExecutor::triggers(store))
+    .await
+    .expect_err("replaying the poison entry must reproduce the give-up");
+
+    assert_eq!(replayed.code, recorded.code);
+    assert_eq!(
+        replayed.message, recorded.message,
+        "the replayed give-up must render the journaled verdict, not the new budget"
+    );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        ["lash:restate-budget-flip", "lash:restate-budget-flip"],
+        "the redrive must consume the same journal slot, not add one"
     );
 }
 

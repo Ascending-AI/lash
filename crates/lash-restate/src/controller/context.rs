@@ -9,7 +9,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::ThreadId;
 use std::time::Duration;
@@ -47,7 +47,10 @@ use super::RestateProcessAwaitRaceOutcome;
 /// must never be polled again.
 pub(crate) struct RestateContextFuture<F> {
     future: Option<Pin<Box<F>>>,
-    wake_fuse: WakeFuseArming,
+    /// Wakes the guarded future's own run closure issued, when there is one.
+    /// They are subtracted from the wakes this guard observes, so only a wake
+    /// the closure cannot account for - the SDK's terminal park - fuses.
+    closure_wakes: Option<Arc<ClosureWakeLedger>>,
     tracked: Option<TrackedWaker>,
 }
 
@@ -67,7 +70,7 @@ impl TrackedWaker {
             parent: parent.clone(),
             polling_thread,
             polling: AtomicBool::new(false),
-            woke_during_poll: AtomicBool::new(false),
+            wakes_during_poll: AtomicUsize::new(0),
         });
         let waker = Waker::from(Arc::clone(&tracker));
         Self { tracker, waker }
@@ -78,33 +81,111 @@ impl TrackedWaker {
     }
 
     fn begin_poll(&self) {
-        self.tracker
-            .woke_during_poll
-            .store(false, Ordering::Release);
+        self.tracker.wakes_during_poll.store(0, Ordering::Release);
         self.tracker.polling.store(true, Ordering::Release);
     }
 
-    /// End the poll and report whether the guarded future woke this task
+    /// End the poll and report how many times the guarded future woke this task
     /// synchronously while it was being polled.
-    fn end_poll(&self) -> bool {
+    fn end_poll(&self) -> usize {
         self.tracker.polling.store(false, Ordering::Release);
-        self.tracker.woke_during_poll.load(Ordering::Acquire)
+        self.tracker.wakes_during_poll.load(Ordering::Acquire)
     }
 }
 
-/// When a synchronous wake is allowed to fuse the future.
+/// Wakes issued by a `ctx.run` closure's own future.
 ///
-/// `Always` suits the seams whose guarded future is pure SDK machinery (durable
-/// timers, awakeable races): every synchronous wake there is the SDK recording a
-/// terminal handler state. `AfterClosureCompleted` suits `ctx.run`, whose
-/// guarded future polls arbitrary lash code inside the run closure. A
-/// same-task self-wake from that code - `yield_now`, a `FuturesUnordered`
-/// re-arm - is benign and must not be mistaken for the SDK's park, so the wake
-/// fuse only arms once the closure's own future has returned. Fusing on `Ready`
-/// stays unconditional in both modes.
-enum WakeFuseArming {
-    Always,
-    AfterClosureCompleted(Arc<AtomicBool>),
+/// The guarded `ctx.run` future polls arbitrary lash code inside the run
+/// closure, and a same-task self-wake from that code - `yield_now`, a
+/// `FuturesUnordered` re-arm - is benign. Every such wake travels through the
+/// waker [`attribute_closure_wakes`] installs, so it lands in this ledger and
+/// the guard can subtract it from the wakes it sees. What remains is a wake the
+/// closure cannot account for: the SDK recording a terminal handler state,
+/// including the synthetic `wake_by_ref` `InterceptErrorFuture` issues after
+/// `ctx.fail`. That attribution holds on the replay path too, where the SDK
+/// never invokes the closure at all and the ledger therefore stays empty.
+#[derive(Default)]
+pub(crate) struct ClosureWakeLedger {
+    wakes: AtomicUsize,
+}
+
+impl ClosureWakeLedger {
+    fn record(&self) {
+        self.wakes.fetch_add(1, Ordering::Release);
+    }
+
+    fn count(&self) -> usize {
+        self.wakes.load(Ordering::Acquire)
+    }
+}
+
+/// The waker handed to a run closure's future, and the parent it forwards to.
+/// Rebuilt only when the parent waker changes, so the streaming-hot path does
+/// not allocate a waker per poll.
+struct AttributingWaker {
+    parent: Waker,
+    ledger: Arc<ClosureWakeLedger>,
+}
+
+impl Wake for AttributingWaker {
+    fn wake(self: Arc<Self>) {
+        self.ledger.record();
+        self.parent.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.ledger.record();
+        self.parent.wake_by_ref();
+    }
+}
+
+/// Poll a run closure's future under a waker that attributes its wakes to
+/// [`ClosureWakeLedger`].
+pub(crate) struct AttributedWakeFuture<F> {
+    future: Pin<Box<F>>,
+    ledger: Arc<ClosureWakeLedger>,
+    waker: Option<(Arc<AttributingWaker>, Waker)>,
+}
+
+impl<F> Future for AttributedWakeFuture<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let (attributing, waker) = match this.waker.take() {
+            Some((attributing, waker)) if attributing.parent.will_wake(cx.waker()) => {
+                (attributing, waker)
+            }
+            _ => {
+                let attributing = Arc::new(AttributingWaker {
+                    parent: cx.waker().clone(),
+                    ledger: Arc::clone(&this.ledger),
+                });
+                let waker = Waker::from(Arc::clone(&attributing));
+                (attributing, waker)
+            }
+        };
+        let result = this.future.as_mut().poll(&mut Context::from_waker(&waker));
+        this.waker = Some((attributing, waker));
+        result
+    }
+}
+
+pub(crate) fn attribute_closure_wakes<F>(
+    future: F,
+    ledger: Arc<ClosureWakeLedger>,
+) -> AttributedWakeFuture<F>
+where
+    F: Future,
+{
+    AttributedWakeFuture {
+        future: Box::pin(future),
+        ledger,
+        waker: None,
+    }
 }
 
 impl<F> RestateContextFuture<F> {
@@ -112,11 +193,10 @@ impl<F> RestateContextFuture<F> {
         self.future.is_none()
     }
 
-    fn wake_fuse_is_armed(&self) -> bool {
-        match &self.wake_fuse {
-            WakeFuseArming::Always => true,
-            WakeFuseArming::AfterClosureCompleted(completed) => completed.load(Ordering::Acquire),
-        }
+    fn closure_wake_count(&self) -> usize {
+        self.closure_wakes
+            .as_ref()
+            .map_or(0, |ledger| ledger.count())
     }
 }
 
@@ -133,6 +213,7 @@ where
             Some(tracked) if tracked.matches(cx.waker(), polling_thread) => tracked,
             _ => TrackedWaker::new(cx.waker(), polling_thread),
         };
+        let closure_wakes_before = this.closure_wake_count();
         let Some(future) = this.future.as_mut() else {
             return Poll::Pending;
         };
@@ -140,12 +221,17 @@ where
         let result = future
             .as_mut()
             .poll(&mut Context::from_waker(&tracked.waker));
-        let woke_during_poll = tracked.end_poll();
+        let wakes_during_poll = tracked.end_poll();
 
-        // Read the arming gate after the poll: a closure that completed during
-        // this very poll and then parked on its proposed journal entry must
-        // still fuse.
-        if result.is_ready() || (woke_during_poll && this.wake_fuse_is_armed()) {
+        // Subtract the wakes the run closure's own future issued during this
+        // very poll: what remains is the SDK's terminal park, whether it landed
+        // after the closure proposed its journal entry or on a replay where the
+        // closure was never invoked at all.
+        let unattributed_wakes = wakes_during_poll.saturating_sub(
+            this.closure_wake_count()
+                .saturating_sub(closure_wakes_before),
+        );
+        if result.is_ready() || unattributed_wakes > 0 {
             this.future = None;
         } else {
             this.tracked = Some(tracked);
@@ -163,7 +249,7 @@ struct SynchronousWakeTracker {
     parent: Waker,
     polling_thread: ThreadId,
     polling: AtomicBool,
-    woke_during_poll: AtomicBool,
+    wakes_during_poll: AtomicUsize,
 }
 
 impl Wake for SynchronousWakeTracker {
@@ -183,7 +269,7 @@ impl SynchronousWakeTracker {
         if self.polling.load(Ordering::Acquire)
             && std::thread::current().id() == self.polling_thread
         {
-            self.woke_during_poll.store(true, Ordering::Release);
+            self.wakes_during_poll.fetch_add(1, Ordering::Release);
         }
     }
 }
@@ -194,26 +280,28 @@ where
 {
     RestateContextFuture {
         future: Some(Box::pin(future)),
-        wake_fuse: WakeFuseArming::Always,
+        closure_wakes: None,
         tracked: None,
     }
 }
 
 /// Guard a `ctx.run` future whose closure polls arbitrary lash code.
 ///
-/// `closure_completed` is set by the run closure itself once its own future has
-/// returned, which is the point past which any synchronous wake belongs to the
-/// SDK's terminal park rather than to the guarded code.
+/// `closure_wakes` is the ledger the closure's own future wakes through (see
+/// [`attribute_closure_wakes`]). Those wakes are subtracted from the wakes this
+/// guard observes, so a benign self-wake from inside the closure leaves the run
+/// pollable while any other synchronous wake - the SDK's terminal park, on a
+/// live attempt or on a replay that never invokes the closure - fuses it.
 pub(crate) fn guard_restate_run_future<F>(
     future: F,
-    closure_completed: Arc<AtomicBool>,
+    closure_wakes: Arc<ClosureWakeLedger>,
 ) -> RestateContextFuture<F>
 where
     F: Future,
 {
     RestateContextFuture {
         future: Some(Box::pin(future)),
-        wake_fuse: WakeFuseArming::AfterClosureCompleted(closure_completed),
+        closure_wakes: Some(closure_wakes),
         tracked: None,
     }
 }
@@ -536,14 +624,15 @@ macro_rules! impl_restate_controller_context {
                     Fut: Future<Output = T> + Send + 'run,
                 {
                     Box::pin(async move {
-                        // Set once the closure's own future has returned, so the
-                        // guard below can tell a benign self-wake from inside
-                        // that future apart from the SDK's terminal park.
-                        let closure_completed = Arc::new(AtomicBool::new(false));
-                        let run_completed = Arc::clone(&closure_completed);
+                        // Every wake the closure's own future issues lands in this
+                        // ledger, so the guard below can subtract them and tell a
+                        // benign self-wake from inside that future apart from the
+                        // SDK's terminal park - on a live attempt and on a replay
+                        // that never invokes the closure at all.
+                        let closure_wakes = Arc::new(ClosureWakeLedger::default());
+                        let ledger = Arc::clone(&closure_wakes);
                         let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
-                            let value = future.await;
-                            run_completed.store(true, Ordering::Release);
+                            let value = attribute_closure_wakes(future, ledger).await;
                             Ok::<Json<T>, HandlerError>(Json(value))
                         });
                         let run = restate_sdk::context::RunFuture::name(run, effect_name);
@@ -559,7 +648,7 @@ macro_rules! impl_restate_controller_context {
                         // and pollers above this seam (the turn event pump, the
                         // effect races) can poll their enclosing future again,
                         // so fuse it here rather than trusting every caller.
-                        guard_restate_run_future(run, closure_completed).await
+                        guard_restate_run_future(run, closure_wakes).await
                     })
                 }
 
