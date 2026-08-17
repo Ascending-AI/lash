@@ -8,6 +8,12 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
+
+# The harness fixtures are pinned to the newest component generation. Prove they
+# still derive from SCHEMA_MIGRATIONS before spending a container on a run whose
+# refusals would be about the wrong generation.
+python3 "$repo/scripts/check_version_bump_fixtures.py"
+
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$repo/scripts/worktree-gate-env.sh"
 lash_gate_acquire version-bump-recreation-e2e
@@ -100,6 +106,20 @@ def fail(message):
     raise SystemExit(f"version-bump recreation gate failed: {message}")
 
 
+# Each phase proves one gate, and the refusal kinds are not interchangeable: a
+# non-empty refusal is not evidence for the claim its phase makes. The harness
+# classifies every refusal by the prose only that error carries and refuses any
+# other kind; these expectations keep that visible in the artifacts.
+# scripts/check_version_bump_fixtures.py holds these strings to the harness's
+# own `RefusalKind::as_str` literals, so a rename cannot go unnoticed until a
+# container gate runs.
+EXPECTED_REFUSAL_KINDS = {
+    "refused_divergent_store": "divergent_artifacts",
+    "refused_older_store": "no_applicable_migration",
+    "refused_newer_store": "no_applicable_migration",
+    "recreated_store": "no_applicable_migration",
+}
+
 seeded = checkpoint("seeded_older_deployment", "01-seed.jsonl")
 if seeded["recorded_version"] != seeded["expected_version"] - 1:
     fail(f"seed did not record the previous component version: {seeded}")
@@ -124,18 +144,25 @@ for refusal in (divergent, stale, future):
         fail(f"a mismatched store was opened: {refusal}")
 if divergent["found_version"] != divergent["expected_version"] - 1:
     fail(f"divergent-store refusal was not the migration-source version: {divergent}")
-# The named artifact is generation-pinned: the divergent fixture records the
-# predecessor version over the *current* catalog, so the refusal enumerates
-# exactly what the newest generation introduced. Every component bump that adds
-# a relation must move this name with it — see POST_FLOOR_TABLES in
-# runbooks/restate-postgres-workers/src/bin/version_bump.rs.
-for fragment in (
-    "schema artifacts newer than the recorded version",
-    "lash_attachment_condemnations",
-    "inspect and recreate",
+for refusal, checkpoint_name in (
+    (divergent, "refused_divergent_store"),
+    (stale, "refused_older_store"),
+    (future, "refused_newer_store"),
 ):
-    if fragment not in divergent["error"]:
-        fail(f"divergence refusal omitted {fragment!r}: {divergent}")
+    expected_kind = EXPECTED_REFUSAL_KINDS[checkpoint_name]
+    if refusal.get("refusal_kind") != expected_kind:
+        fail(f"refusal was not the {expected_kind!r} kind its phase proves: {refusal}")
+# The divergence refusal must enumerate the artifacts the newest generation
+# introduced, which is what tells an operator what to inspect. The list is
+# generation-pinned in the harness (`DIVERGENT_ARTIFACTS`) and derived from
+# SCHEMA_MIGRATIONS by scripts/check_version_bump_fixtures.py.
+if not divergent["divergent_artifacts"]:
+    fail(f"divergence refusal named no newer artifacts: {divergent}")
+for artifact in divergent["divergent_artifacts"]:
+    if artifact not in divergent["error"]:
+        fail(f"divergence refusal omitted {artifact!r}: {divergent}")
+if "inspect and recreate" not in divergent["error"]:
+    fail(f"divergence refusal omitted its remedy: {divergent}")
 if stale["found_version"] >= divergent["found_version"]:
     fail(f"older-store refusal was not older: {stale}")
 if stale["current_artifact_count"] != 0:
@@ -144,6 +171,8 @@ if future["found_version"] <= future["expected_version"]:
     fail(f"newer-store refusal was not newer: {future}")
 
 recreated = checkpoint("recreated_store", "03-recreation.jsonl")
+if recreated["premise_refusal_kind"] != EXPECTED_REFUSAL_KINDS["recreated_store"]:
+    fail(f"recreation ran from the wrong premise refusal: {recreated}")
 if recreated["recorded_version"] != recreated["expected_version"]:
     fail(f"recreated store is not at the expected version: {recreated}")
 if recreated["surviving_seeded_rows"] != 0:
@@ -162,7 +191,10 @@ if health["session_ids_reused"] != seeded["session_ids"]:
 if health["trigger_reservations"] != 1 or health["trigger_process_status"] != "Completed":
     fail(f"the post-bump trigger did not deliver to a finished process: {health}")
 
-print("version-bump recreation gates: seed, divergence/older/newer refusals, recreation, and health all asserted")
+print(
+    "version-bump recreation gates: seed, divergence/older/newer refusals by kind, "
+    "recreation, and health all asserted"
+)
 PY
 
 if grep -Fn 'panicked at' "$test_output" >&2; then

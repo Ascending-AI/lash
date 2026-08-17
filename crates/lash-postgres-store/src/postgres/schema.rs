@@ -43,16 +43,18 @@ const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_in
 
 /// Explicit, creation-only migrations into the current component generation.
 ///
-/// Two fixtures outside this crate are pinned to this table's newest generation
-/// and do not fail until the version-bump recreation E2E runs in CI. A bump that
-/// introduces a relation must move both:
+/// The version-bump recreation harness
+/// (`runbooks/restate-postgres-workers/src/bin/version_bump.rs`) pins its
+/// fixtures to this table's newest generation: `MIGRATION_FLOOR_VERSION` (the
+/// oldest `from` below), `POST_FLOOR_TABLES` / `POST_FLOOR_ARTIFACTS` (the floor
+/// migration's `source_missing_tables` / `introduced_relations`, dropped to
+/// rebuild the published floor catalog), and `DIVERGENT_ARTIFACTS` (the
+/// predecessor migration's `introduced_relations`, which the divergence refusal
+/// must enumerate). A bump that introduces a relation moves all of them.
 ///
-/// * `runbooks/restate-postgres-workers/src/bin/version_bump.rs` —
-///   `POST_FLOOR_TABLES` / `POST_FLOOR_ARTIFACTS` (the artifacts dropped to
-///   rebuild the published floor catalog) and `MIGRATION_FLOOR_VERSION` (the
-///   oldest `from` below).
-/// * `scripts/version-bump-recreation-e2e.sh` — the artifact name the
-///   divergence refusal must enumerate.
+/// `scripts/check_version_bump_fixtures.py` recomputes each of those from this
+/// table and fails the build when they drift, so the drift is a local check
+/// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 51,

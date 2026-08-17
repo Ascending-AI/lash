@@ -89,19 +89,24 @@ running after exit.
 
 ## Phase 1 — Both refusal directions
 
-**Setup.** `02-refusal.jsonl` records two open attempts against the same database.
+**Setup.** `02-refusal.jsonl` records three open attempts against the same database.
 
-**Action.** Read the `refused_older_store` and `refused_newer_store` checkpoints, and the
-verbatim error each carries.
+**Action.** Read the `refused_divergent_store`, `refused_older_store`, and
+`refused_newer_store` checkpoints, and the verbatim error and `refusal_kind` each carries.
 
-**Expected observable evidence.** Neither attempt opened the store. The older-store
-refusal names the seeded version as found and one higher as expected. The newer-store
-refusal names a version one above expected as found and reports the same expected value,
-which is the current binary standing in for the previous image meeting a recreated store.
+**Expected observable evidence.** No attempt opened the store. The divergent-store
+refusal is of kind `divergent_artifacts` and enumerates the artifacts its
+`divergent_artifacts` field names. The older-store refusal is of kind
+`no_applicable_migration` and names the seeded version as found and one higher as
+expected. The newer-store refusal carries the same kind, names a version one above
+expected as found, and reports the same expected value, which is the current binary
+standing in for the previous image meeting a recreated store.
 
-**Judgment — FAIL if:** either attempt succeeded, a refusal omits the found or expected
-version, the two refusals disagree about the expected version, or the newer-store
-direction is missing (the run then proves reject-and-recreate but not forward-only).
+**Judgment — FAIL if:** any attempt succeeded, a refusal omits the found or expected
+version, a refusal's `refusal_kind` is not the one its direction exists to prove (a
+non-empty refusal of the wrong kind is not evidence for that direction), the refusals
+disagree about the expected version, or the newer-store direction is missing (the run then
+proves reject-and-recreate but not forward-only).
 
 ## Phase 2 — The recreation bump
 
@@ -148,7 +153,7 @@ capture `05-bump-policy.png` with the forward-only contract and the checklist vi
 
 | Documented claim | Evidence |
 |---|---|
-| An exact-match gate refuses a store in either direction, naming found and expected | `02-refusal.jsonl` (both checkpoints) |
+| An exact-match gate refuses a store in either direction, naming found and expected | `02-refusal.jsonl` (all three checkpoints) |
 | Adopting a changed schema means recreating the store from empty | `03-recreation.jsonl` |
 | The previous binary refuses the recreated store, so there is no rollback | `02-refusal.jsonl` (`refused_newer_store`) |
 | Recreation destroys the deployment's durable state | `03-recreation.jsonl` survival counts |
@@ -176,7 +181,8 @@ and volume no longer exist.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Pre-bump deployment | Assigned PostgreSQL port live; live sessions, process, trigger, and a rewound version | | `00-*`, `01-seed.jsonl` |
-| Older-store refusal | open refused; found and expected versions named | | `02-refusal.jsonl` |
+| Divergence refusal | open refused as `divergent_artifacts`; the newer artifacts enumerated | | `02-refusal.jsonl` |
+| Older-store refusal | open refused as `no_applicable_migration`; found and expected versions named | | `02-refusal.jsonl` |
 | Forward-only refusal | a store one version ahead is refused identically | | `02-refusal.jsonl` |
 | Recreation bump | every lash table dropped; fresh open records the expected version | | `03-recreation.jsonl` |
 | Destroyed state | zero surviving seeded rows or committed nodes | | `03-recreation.jsonl` |

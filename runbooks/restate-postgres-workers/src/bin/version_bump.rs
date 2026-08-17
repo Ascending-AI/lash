@@ -12,7 +12,9 @@
 //!   prove a genuinely older version remains a reject-and-recreate boundary,
 //!   and prove a store stamped one version *ahead* is refused just as hard. The
 //!   last direction is the forward-only claim: an old binary meeting a recreated
-//!   store cannot boot.
+//!   store cannot boot. Each direction names the refusal *kind* it exists to
+//!   prove and fails on any other, so a fixture that drifts off its generation
+//!   cannot pass on someone else's refusal.
 //! * `recreate` — perform the recreation bump (drop every `lash_*` object, then
 //!   open), and record that nothing seeded survived it.
 //! * `health` — verify the three durable surfaces on the recreated store, reusing
@@ -46,23 +48,35 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// it is the ordinary reject-and-recreate boundary, which is what the
 /// older-store refusal exists to prove — so the fixture stamps a version under
 /// this floor, never one the build would happily migrate.
+///
+/// This constant and the three artifact lists below are pinned to the newest
+/// component generation. `scripts/check_version_bump_fixtures.py` derives every
+/// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
+/// component without moving them, so they are never discovered stale by a live
+/// run.
 const MIGRATION_FLOOR_VERSION: i32 = 50;
 /// Tables the component generations *above* the floor introduced, newest first
 /// (52: attachment GC fence; 51: parent-end plans and tool-intent submissions).
-/// Dropping them leaves the published floor catalog.
+/// Dropping them leaves the published floor catalog: the set is exactly the
+/// floor migration's `source_missing_tables`.
 const POST_FLOOR_TABLES: [&str; 3] = [
     "lash_attachment_condemnations",
     "lash_tool_intent_submissions",
     "lash_process_parent_end_plans",
 ];
 /// The same set plus the indexes those generations added, for proving the
-/// fixture retained none of them.
+/// fixture retained none of them: the floor migration's `introduced_relations`.
 const POST_FLOOR_ARTIFACTS: [&str; 4] = [
     "idx_lash_tool_intent_submissions_scope",
     "lash_attachment_condemnations",
     "lash_process_parent_end_plans",
     "lash_tool_intent_submissions",
 ];
+/// What the newest generation alone introduced — the `introduced_relations` of
+/// the migration out of the immediate predecessor version. The divergent fixture
+/// records that predecessor over the *current* catalog, so these are exactly the
+/// artifacts its refusal must enumerate.
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_attachment_condemnations"];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -71,6 +85,80 @@ const PROCESS_ID: &str = "version-bump-live-process";
 const WAKE_EVENT_TYPE: &str = "runbook.wake";
 const TRIGGER_SOURCE_TYPE: &str = "runbook.button.pressed";
 const TURN_PROMPT: &str = "commit one turn";
+
+/// Prose that only the divergence refusal carries
+/// (`schema_migration_divergence_error`).
+const DIVERGENT_ARTIFACTS_MARKER: &str = "schema artifacts newer than the recorded version";
+/// Prose that only the migration-source-shape refusal carries
+/// (`schema_migration_source_mismatch_error`).
+const SOURCE_MISMATCH_MARKER: &str = "does not match the published component-";
+/// Prose that only the plain exact-match refusal carries
+/// (`version_mismatch_error`).
+const NO_APPLICABLE_MIGRATION_MARKER: &str = "has no applicable migration";
+
+/// Which typed refusal the schema gate produced.
+///
+/// Every refusal phase exists to prove one specific gate, and the kinds are not
+/// interchangeable: a fixture that drifts off its intended generation can be
+/// refused for a *different* reason and still look like a pass. Each phase names
+/// the kind it exists to prove and fails on any other, so a refusal can never be
+/// counted as evidence for a claim it does not support.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefusalKind {
+    /// The recorded version has a migration, but the live catalog already holds
+    /// the relations that migration would create.
+    DivergentArtifacts,
+    /// The recorded version has a migration and the catalog does not diverge,
+    /// but the live shape is not the published source shape.
+    MigrationSourceMismatch,
+    /// No migration applies to the recorded version at all: the ordinary
+    /// reject-and-recreate boundary, in either direction.
+    NoApplicableMigration,
+}
+
+impl RefusalKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DivergentArtifacts => "divergent_artifacts",
+            Self::MigrationSourceMismatch => "migration_source_mismatch",
+            Self::NoApplicableMigration => "no_applicable_migration",
+        }
+    }
+
+    /// Classify a refusal by the marker only its own error carries. Zero or more
+    /// than one match is itself a failure: the harness never guesses which claim
+    /// a refusal supports.
+    fn classify(message: &str) -> Result<Self> {
+        let matched: Vec<Self> = [
+            (DIVERGENT_ARTIFACTS_MARKER, Self::DivergentArtifacts),
+            (SOURCE_MISMATCH_MARKER, Self::MigrationSourceMismatch),
+            (NO_APPLICABLE_MIGRATION_MARKER, Self::NoApplicableMigration),
+        ]
+        .into_iter()
+        .filter(|(marker, _)| message.contains(marker))
+        .map(|(_, kind)| kind)
+        .collect();
+        match matched.as_slice() {
+            [kind] => Ok(*kind),
+            _ => bail!(
+                "refusal matched {} known refusal kinds, not exactly one: {message}",
+                matched.len()
+            ),
+        }
+    }
+}
+
+/// Assert a refusal is the exact gate the calling phase exists to prove.
+fn refusal_kind(phase: &str, expected: RefusalKind, message: &str) -> Result<RefusalKind> {
+    let found = RefusalKind::classify(message)?;
+    anyhow::ensure!(
+        found == expected,
+        "the {phase} refusal was {}, not the {} refusal this phase exists to prove: {message}",
+        found.as_str(),
+        expected.as_str()
+    );
+    Ok(found)
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -502,9 +590,21 @@ async fn refuse(database_url: &str) -> Result<()> {
         expected_version == divergent + 1,
         "the refusal expected {expected_version}, which is not one ahead of the recorded {divergent}"
     );
+    let divergent_kind = refusal_kind("divergent-store", RefusalKind::DivergentArtifacts, &error)?;
+    // The refusal must enumerate what the newest generation introduced, not
+    // merely mention divergence: that list is what tells an operator which
+    // artifacts to inspect.
+    for artifact in DIVERGENT_ARTIFACTS {
+        anyhow::ensure!(
+            error.contains(artifact),
+            "the divergence refusal did not enumerate {artifact}: {error}"
+        );
+    }
     emit(json!({
         "checkpoint": "refused_divergent_store",
         "direction": "recorded predecessor, current schema artifacts",
+        "refusal_kind": divergent_kind.as_str(),
+        "divergent_artifacts": DIVERGENT_ARTIFACTS,
         "found_version": divergent,
         "expected_version": expected_version,
         "opened": opened,
@@ -512,12 +612,13 @@ async fn refuse(database_url: &str) -> Result<()> {
     }));
 
     // Remove every artifact introduced after the migration floor, leaving the
-    // published component-49 catalog, then stamp a non-migratable older
-    // version. This makes the next refusal and recreation exercise a genuinely
-    // older *shape* rather than merely another integer over the current
-    // catalog. These lists are generation-pinned: each component bump that
-    // introduces a relation must add it here and to `POST_FLOOR_ARTIFACTS`,
-    // or the fixture silently stops being the published floor shape.
+    // catalog the floor generation (`MIGRATION_FLOOR_VERSION`) published, then
+    // stamp a version below it. This makes the next refusal and recreation
+    // exercise a genuinely older *shape* rather than merely another integer over
+    // the current catalog. These lists are generation-pinned: each component bump
+    // that introduces a relation must add it here and to `POST_FLOOR_ARTIFACTS`,
+    // or the fixture silently stops being the published floor shape —
+    // `scripts/check_version_bump_fixtures.py` is what makes that impossible.
     for artifact in POST_FLOOR_TABLES {
         sqlx::query(&format!("DROP TABLE {artifact}"))
             .execute(&pool)
@@ -560,9 +661,18 @@ async fn refuse(database_url: &str) -> Result<()> {
         expected_version_from_refusal(&error_older)? == expected_version,
         "the older-version refusal disagrees about the version this binary expects"
     );
+    // The claim this phase exists to prove. FIG-1259's incident was exactly here:
+    // a fixture off its generation was refused for divergence instead, and the
+    // phase passed on a refusal that proves nothing about the boundary.
+    let older_kind = refusal_kind(
+        "older-store",
+        RefusalKind::NoApplicableMigration,
+        &error_older,
+    )?;
     emit(json!({
         "checkpoint": "refused_older_store",
         "direction": "new binary, non-migratable older version",
+        "refusal_kind": older_kind.as_str(),
         "found_version": older,
         "expected_version": expected_version,
         "current_artifact_count": current_artifact_count,
@@ -583,9 +693,15 @@ async fn refuse(database_url: &str) -> Result<()> {
         expected_version_from_refusal(&error_newer)? == expected_version,
         "the two refusals disagree about the version this binary expects"
     );
+    let newer_kind = refusal_kind(
+        "newer-store",
+        RefusalKind::NoApplicableMigration,
+        &error_newer,
+    )?;
     emit(json!({
         "checkpoint": "refused_newer_store",
         "direction": "older binary, recreated store",
+        "refusal_kind": newer_kind.as_str(),
         "found_version": newer,
         "expected_version": expected_version,
         "opened": opened_newer,
@@ -606,6 +722,13 @@ async fn recreate(database_url: &str) -> Result<()> {
         "the pre-bump store was not refused; the recreation step has no premise"
     );
     let expected_version = expected_version_from_refusal(&error_before)?;
+    // `refuse` left the below-floor stamp in place, so the premise for recreation
+    // is that boundary refusal and no other.
+    let premise_kind = refusal_kind(
+        "pre-bump",
+        RefusalKind::NoApplicableMigration,
+        &error_before,
+    )?;
     let seeded_sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_sessions")
         .fetch_one(&pool)
         .await
@@ -663,6 +786,7 @@ async fn recreate(database_url: &str) -> Result<()> {
 
     emit(json!({
         "checkpoint": "recreated_store",
+        "premise_refusal_kind": premise_kind.as_str(),
         "expected_version": expected_version,
         "recorded_version": recorded,
         "dropped_tables": tables.len(),
