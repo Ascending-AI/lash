@@ -41,6 +41,28 @@ use serde_json::json;
 use sqlx::PgPool;
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
+/// The oldest component version this build has an explicit migration from
+/// (`lash_postgres_store::postgres::schema::SCHEMA_MIGRATIONS`). Anything below
+/// it is the ordinary reject-and-recreate boundary, which is what the
+/// older-store refusal exists to prove — so the fixture stamps a version under
+/// this floor, never one the build would happily migrate.
+const MIGRATION_FLOOR_VERSION: i32 = 50;
+/// Tables the component generations *above* the floor introduced, newest first
+/// (52: attachment GC fence; 51: parent-end plans and tool-intent submissions).
+/// Dropping them leaves the published floor catalog.
+const POST_FLOOR_TABLES: [&str; 3] = [
+    "lash_attachment_condemnations",
+    "lash_tool_intent_submissions",
+    "lash_process_parent_end_plans",
+];
+/// The same set plus the indexes those generations added, for proving the
+/// fixture retained none of them.
+const POST_FLOOR_ARTIFACTS: [&str; 4] = [
+    "idx_lash_tool_intent_submissions_scope",
+    "lash_attachment_condemnations",
+    "lash_process_parent_end_plans",
+    "lash_tool_intent_submissions",
+];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -442,7 +464,8 @@ async fn seed(database_url: &str) -> Result<()> {
 
     // Rewind only the ledger. The catalog intentionally retains the current
     // artifacts so the next phase can prove Lash distinguishes divergence from
-    // the genuine component-50 migration source shape.
+    // a genuine migration source shape: same stamp, but a catalog carrying
+    // relations the recorded generation never had.
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
 
@@ -488,18 +511,21 @@ async fn refuse(database_url: &str) -> Result<()> {
         "error": error,
     }));
 
-    // Remove the current-only artifacts to leave the published component-50
-    // catalog, then stamp a non-migratable older version. This makes the next
-    // refusal and recreation exercise an older shape rather than merely another
-    // integer over the current catalog.
-    sqlx::query("DROP TABLE lash_tool_intent_submissions")
-        .execute(&pool)
-        .await
-        .context("remove current tool-intent artifact for older-store check")?;
-    sqlx::query("DROP TABLE lash_process_parent_end_plans")
-        .execute(&pool)
-        .await
-        .context("remove current parent-end artifact for older-store check")?;
+    // Remove every artifact introduced after the migration floor, leaving the
+    // published component-49 catalog, then stamp a non-migratable older
+    // version. This makes the next refusal and recreation exercise a genuinely
+    // older *shape* rather than merely another integer over the current
+    // catalog. These lists are generation-pinned: each component bump that
+    // introduces a relation must add it here and to `POST_FLOOR_ARTIFACTS`,
+    // or the fixture silently stops being the published floor shape.
+    for artifact in POST_FLOOR_TABLES {
+        sqlx::query(&format!("DROP TABLE {artifact}"))
+            .execute(&pool)
+            .await
+            .with_context(|| {
+                format!("remove post-floor artifact {artifact} for older-store check")
+            })?;
+    }
     let current_artifact_count: i64 = sqlx::query_scalar(
         "SELECT count(*)
            FROM pg_catalog.pg_class AS class
@@ -508,23 +534,22 @@ async fn refuse(database_url: &str) -> Result<()> {
           WHERE namespace.nspname = current_schema()
             AND class.relname = ANY($1)",
     )
-    .bind(vec![
-        "idx_lash_tool_intent_submissions_scope",
-        "lash_process_parent_end_plans",
-        "lash_tool_intent_submissions",
-    ])
+    .bind(POST_FLOOR_ARTIFACTS.to_vec())
     .fetch_one(&pool)
     .await
-    .context("count current-only artifacts in the older-store fixture")?;
+    .context("count post-floor artifacts in the older-store fixture")?;
     anyhow::ensure!(
         current_artifact_count == 0,
         "older-store fixture retained {current_artifact_count} current-only artifacts"
     );
 
-    // Versions older than the sole explicit migration remain the ordinary
-    // reject-and-recreate boundary. Leave this stamp in place after all refusal
-    // checks so the next phase exercises recreation from that path.
-    let older = divergent - 1;
+    // Versions below every explicit migration's source remain the ordinary
+    // reject-and-recreate boundary. This must stay *below* the floor, not merely
+    // one behind the divergent stamp: this build migrates from both 50 and 51,
+    // so either of those would be migrated rather than refused. Leave this stamp
+    // in place after all refusal checks so the next phase exercises recreation
+    // from that path.
+    let older = MIGRATION_FLOOR_VERSION - 1;
     stamp_version(&pool, older).await?;
     let (opened_older, error_older) = open_attempt(database_url).await;
     anyhow::ensure!(

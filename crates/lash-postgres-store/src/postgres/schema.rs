@@ -41,6 +41,18 @@ const TOOL_INTENT_SUBMISSIONS_DDL: &str = r#"CREATE TABLE lash_tool_intent_submi
 const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_intent_submissions_scope
             ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index)"#;
 
+/// Explicit, creation-only migrations into the current component generation.
+///
+/// Two fixtures outside this crate are pinned to this table's newest generation
+/// and do not fail until the version-bump recreation E2E runs in CI. A bump that
+/// introduces a relation must move both:
+///
+/// * `runbooks/restate-postgres-workers/src/bin/version_bump.rs` —
+///   `POST_FLOOR_TABLES` / `POST_FLOOR_ARTIFACTS` (the artifacts dropped to
+///   rebuild the published floor catalog) and `MIGRATION_FLOOR_VERSION` (the
+///   oldest `from` below).
+/// * `scripts/version-bump-recreation-e2e.sh` — the artifact name the
+///   divergence refusal must enumerate.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 51,

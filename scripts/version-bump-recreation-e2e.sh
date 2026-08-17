@@ -124,9 +124,14 @@ for refusal in (divergent, stale, future):
         fail(f"a mismatched store was opened: {refusal}")
 if divergent["found_version"] != divergent["expected_version"] - 1:
     fail(f"divergent-store refusal was not the migration-source version: {divergent}")
+# The named artifact is generation-pinned: the divergent fixture records the
+# predecessor version over the *current* catalog, so the refusal enumerates
+# exactly what the newest generation introduced. Every component bump that adds
+# a relation must move this name with it — see POST_FLOOR_TABLES in
+# runbooks/restate-postgres-workers/src/bin/version_bump.rs.
 for fragment in (
     "schema artifacts newer than the recorded version",
-    "lash_process_parent_end_plans",
+    "lash_attachment_condemnations",
     "inspect and recreate",
 ):
     if fragment not in divergent["error"]:
