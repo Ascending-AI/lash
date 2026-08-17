@@ -37,7 +37,7 @@ pub enum SelectedQueuedWorkBatchSatisfaction {
 ///
 /// Every distinct requested ID was either executed now or had no remaining
 /// durable row. A present ID that cannot join the exact claim returns
-/// [`EmbedError::SelectedQueuedWorkDrainRefused`](crate::EmbedError::SelectedQueuedWorkDrainRefused)
+/// [`EmbedError::SelectedQueuedWorkDrainRefused`]
 /// before selected execution.
 #[derive(Clone, Debug)]
 pub struct SelectedQueuedWorkDrainOutcome<T> {
