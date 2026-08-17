@@ -28,6 +28,27 @@ both durable geometries locally: `just agent-workbench-restate-e2e` and
 ingress, and failover behavior can differ behind the two-worker proxy even when
 the single-endpoint workbench is green.
 
+### Required checks and the merge queue
+
+`ci.yml` subscribes to `merge_group`, so a queued pull request is validated from
+its own `gh-readonly-queue/main/pr-<n>-<sha>` ref. The intended required-check
+set is every correctness leg of that workflow: `Lint`, `Test docs + build cache`,
+`Test shard 1/4` through `Test shard 4/4`, `Repository gates`, `Public API
+example coverage`, `Package feature checks`, `Runtime feature boundary`, `Test
+Postgres store (PG 14|16|18)`, `Test S3 store against MinIO`, `Stack budget`, the
+seven `Functional E2E (...)` legs, `Restate + Postgres + MinIO Workers`, the five
+`Confidence fast (...)` shards, and `Confidence fast summary`. `Build Linux
+release cache` is deliberately **not** in that set: it warms a cache for
+release.yml and perf.yml on `main` and is skipped for pull requests and queue
+entries, where the cache it writes is scoped to a ref nothing else can read.
+
+At the time of writing the repository carries no branch protection and no
+rulesets (`/branches/main/protection` returns 404 and `rulesets` returns an empty
+list), so no stale required-check name can be broken by renaming or splitting a
+job. The ruleset is created with the names above, after they exist on `main`. Any
+later split of a required job must either keep the original name on a gate job
+that needs the new sub-jobs, or update the ruleset in the same motion.
+
 ## Concurrent local gates
 
 `just push-gate`, the `just confidence*` batteries, and their container-backed

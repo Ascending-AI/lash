@@ -21,28 +21,48 @@ on:
     branches:
       - main
 
-# One live CI run per head branch, whatever event produced it. The group is
-# keyed on the branch rather than on `github.ref` because a `pull_request` run
-# carries `refs/pull/<n>/merge` while a manual recovery dispatch of the same
-# commit carries `refs/heads/<branch>`: two different groups, so the two ran
-# concurrently over an identical tree. That duplication was the single largest
-# line in the CI bill (54% of branch runner-minutes). Now a dispatch supersedes
-# the pull-request run of the same branch instead of doubling it, and the
-# dispatch trigger itself stays exactly as it was — it is still the recovery
-# path for a dropped push event.
+# One live CI run per head branch, whatever event produced it — because a
+# `pull_request` run carries `refs/pull/<n>/merge` while a manual recovery
+# dispatch of the same commit carries `refs/heads/<branch>`, so keying on
+# `github.ref` put them in different groups and ran the whole board twice over an
+# identical tree. That duplication was the single largest line in the CI bill
+# (54% of branch runner-minutes). Now a dispatch supersedes the pull-request run
+# of the same branch instead of doubling it, and the dispatch trigger itself
+# stays exactly as it was — still the recovery path for a dropped push event.
 #
-# Main pushes are never cancelled: release.yml refuses to release a commit
-# without its own successful main CI run, so a cancelled main run would strand
-# that commit as unreleasable. A dispatch on main therefore queues behind a live
-# main push run rather than killing it.
+# The key is not *only* the branch name, because a branch name is not unique
+# across repositories: a fork's pull request from a branch literally named `main`
+# would key into main's group and, being a pull-request run, would cancel a live
+# trunk run — destroying the one guarantee below. So each event class that must
+# never be collided into gets its own key, and those keys contain a colon, which
+# `git check-ref-format` forbids in a ref name. That is what makes them
+# unforgeable: no branch anyone can push, here or in a fork, can produce one.
 #
-# A `merge_group` run has no `head_ref`, so it groups by its own
-# `gh-readonly-queue/main/pr-<n>-<sha>` ref name, which is unique per queue
-# entry: two queue builds never share a group and never cancel each other. Their
-# cancellation belongs to the queue, which drops an entry's run when it dequeues
-# it, so `cancel-in-progress` stays false for the event.
+# * `push` (main only) keys on `trunk:push`, so a trunk run shares a group with
+#   nothing but another trunk push. Trunk runs are never cancelled: release.yml
+#   refuses to release a commit without its own successful main CI run, so a
+#   cancelled trunk run would strand that commit as unreleasable.
+# * a dispatch on main keys on `trunk:dispatch` for the same reason — it is the
+#   recovery path that produces exactly that release evidence. The cost is that
+#   it no longer queues behind a live trunk push run but runs beside it; two
+#   validations of main are wasteful, never wrong.
+# * a *fork* pull request keys on its PR number, which no branch name can
+#   collide with. Same-repo pull requests keep the branch key, which is what lets
+#   a dispatch dedupe with them.
+# * a `merge_group` run has no `head_ref` and falls through to its own
+#   `gh-readonly-queue/main/pr-<n>-<sha>` ref name, unique per queue entry: two
+#   queue builds never share a group and never cancel each other. Their
+#   cancellation belongs to the queue, which drops an entry's run when it
+#   dequeues it, so `cancel-in-progress` stays false for the event.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'push' && 'trunk:push'
+      || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') && 'trunk:dispatch'
+      || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && format('fork-pr:{0}', github.event.pull_request.number)
+      || github.head_ref
+      || github.ref_name
+    }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}
 
 permissions:
@@ -134,6 +154,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
@@ -307,6 +330,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 
@@ -446,16 +472,28 @@ jobs:
             --range "${merge_base}..HEAD" \
             --summary "$GITHUB_STEP_SUMMARY"
 
+      # Every event compares against the base its own tree actually sits on.
+      #
       # PRs compare with their target branch's merge-base. Main pushes compare
       # with HEAD~1 so the landed tree is independently rechecked; manual
       # workflow dispatches have no meaningful base and intentionally skip it.
+      # A merge-queue entry is neither: its head is a queue commit carrying one
+      # or more PRs on top of the base the queue chose, so HEAD~1 would check
+      # only the last commit of a multi-commit PR — passing vacuously when the
+      # change is earlier, and failing falsely when the bump is earlier. The
+      # queue states the base it built on, so use it.
       # The PR guarantee requires a current merge ref, enforced by an up-to-date
       # branch rule or merge queue; a stale merge ref has a stale merge-base.
       - name: Check versioned surface bumps
         if: github.event_name != 'workflow_dispatch'
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             base="$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)"
+          elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+            base="$MERGE_GROUP_BASE_SHA"
+            [ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }
           else
             base="HEAD~1"
           fi

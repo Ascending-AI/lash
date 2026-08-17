@@ -40,6 +40,7 @@ CONSULTED_ENV = frozenset(
 # regex stops matching, this fails loudly instead of silently isolating nothing.
 KNOWN_CONSULTED_ENV = frozenset(
     {
+        "GITHUB_EVENT_NAME",
         "GITHUB_EVENT_PATH",
         "GITHUB_HEAD_REF",
         "GITHUB_REF_NAME",
@@ -228,6 +229,7 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
                 {
                     "GITHUB_TOKEN": "token",
                     "GITHUB_REPOSITORY": "owner/repo",
+                    "GITHUB_EVENT_NAME": "merge_group",
                     "GITHUB_REF_NAME": "gh-readonly-queue/main/pr-417-0f1e2d3c4b5a",
                     "GITHUB_HEAD_REF": "",
                 },
@@ -240,12 +242,49 @@ class TranscriptDiffTests(IsolatedEnvironmentTestCase):
         self.assertTrue(seen[0].endswith("/repos/owner/repo/pulls/417"))
         self.assertEqual(body, "Transcript: durable rev bump.")
 
+    def test_only_the_queue_event_may_name_a_pull_request_by_ref(self) -> None:
+        # A ref name is a developer's choice. Outside the queue's own event,
+        # reading one as a queue ref would let a branch named after the pattern
+        # answer this gate with an unrelated PR's justification.
+        for event in ("pull_request", "workflow_dispatch", "push", ""):
+            with self.subTest(event=event):
+                with mock.patch.dict(
+                    MODULE.os.environ,
+                    {
+                        "GITHUB_EVENT_NAME": event,
+                        "GITHUB_REF_NAME": "gh-readonly-queue/main/pr-417-0f1e2d3c4b5a",
+                        "GITHUB_HEAD_REF": "",
+                    },
+                ):
+                    self.assertIsNone(MODULE.queued_pull_request_number())
+
     def test_an_ordinary_branch_is_never_read_as_a_queue_ref(self) -> None:
-        with mock.patch.dict(
-            MODULE.os.environ,
-            {"GITHUB_REF_NAME": "topic", "GITHUB_HEAD_REF": ""},
-        ):
-            self.assertIsNone(MODULE.queued_pull_request_number())
+        near_misses = (
+            "topic",
+            # No PR number to name.
+            "gh-readonly-queue/main/pr-abc-0f1e2d3c4b5a",
+            "gh-readonly-queue/main/pr--0f1e2d3c4b5a",
+            # The pattern buried under a prefix, so the ref is not the queue's.
+            "team/gh-readonly-queue/main/pr-417-0f1e2d3c4b5a",
+            # A queue sha is lowercase hex; anything else is a branch imitating one.
+            "gh-readonly-queue/main/pr-417-0F1E2D3C4B5A",
+            "gh-readonly-queue/main/pr-417-not-a-sha",
+            # The base segment is one path component, never several.
+            "gh-readonly-queue/main/extra/pr-417-0f1e2d3c4b5a",
+            # Trailing content past the sha is not the queue's shape either.
+            "gh-readonly-queue/main/pr-417-0f1e2d3c4b5a/more",
+        )
+        for branch in near_misses:
+            with self.subTest(branch=branch):
+                with mock.patch.dict(
+                    MODULE.os.environ,
+                    {
+                        "GITHUB_EVENT_NAME": "merge_group",
+                        "GITHUB_REF_NAME": branch,
+                        "GITHUB_HEAD_REF": "",
+                    },
+                ):
+                    self.assertIsNone(MODULE.queued_pull_request_number())
 
     def test_a_dispatched_run_still_fails_without_a_justification(self) -> None:
         # The fallback must not become a way through: an open PR whose body

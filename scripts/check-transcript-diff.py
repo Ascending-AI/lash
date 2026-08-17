@@ -256,7 +256,14 @@ def queued_pull_request_number() -> str | None:
     that is no branch any pull request has as its head — so the by-head query
     below finds nothing and the gate would fail a change whose PR justifies it.
     The queue writes the PR number into the ref, so ask for that PR by number.
+
+    Only the queue's own event may name a PR this way. A ref name is something a
+    developer can choose, and reading one as a queue ref outside the queue would
+    let a branch named after the pattern fetch an unrelated PR's body and answer
+    this gate with someone else's justification.
     """
+    if os.environ.get("GITHUB_EVENT_NAME") != "merge_group":
+        return None
     branch = current_branch()
     if not branch:
         return None
