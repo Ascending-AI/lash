@@ -50,6 +50,24 @@ async fn sqlite_durable_fixture_reads_with_identical_semantics() {
     fixture::assert_semantics(&handles, &expected).await;
 }
 
+/// The read-back test above proves old bytes still mean the same thing. This one
+/// proves the write side has not drifted away from them: a payload-shape change
+/// that never touches `fixtures/` passes the schema-declaration gate and decodes
+/// the old artifact unchanged, so without this law it only surfaces when someone
+/// else regenerates (FIG-1433).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_durable_fixture_expectations_match_what_this_build_writes() {
+    let temp = tempfile::tempdir().expect("SQLite write-shape tempdir");
+    let handles = open_handles(temp.path(), fixture::FIXTURE_WRITE_MS).await;
+    let written_now = fixture::seed(&handles).await;
+    drop(handles);
+    fixture::assert_committed_expectations_match_current_writes(
+        &std::fs::read(fixture_dir().join("expected.json"))
+            .expect("read committed SQLite durable-fixture expectations"),
+        &json_with_newline(&written_now),
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     let fixture_dir = fixture_dir();

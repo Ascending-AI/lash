@@ -48,6 +48,42 @@ async fn postgres_durable_fixture_reads_with_identical_semantics_when_configured
     drop_fixture_schema(&database_url).await;
 }
 
+/// The read-back test above proves old bytes still mean the same thing. This one
+/// proves the write side has not drifted away from them: a payload-shape change
+/// that never touches `fixtures/` passes the schema-declaration gate and decodes
+/// the old artifact unchanged, so without this law it only surfaces when someone
+/// else regenerates (FIG-1433).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_durable_fixture_expectations_match_what_this_build_writes_when_configured() {
+    let Some(database_url) = support::database_url() else {
+        eprintln!(
+            "skipping Postgres durable write-shape law: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
+    recreate_fixture_schema(&database_url).await;
+    let fixture_database_url = fixture_database_url(&database_url);
+    let storage = PostgresStorage::connect(&fixture_database_url)
+        .await
+        .expect("provision Postgres write-shape schema");
+    install_fixed_await_event_secret(&storage).await;
+    storage.pool().close().await;
+    let storage = PostgresStorage::connect(&fixture_database_url)
+        .await
+        .expect("reopen Postgres write-shape schema with fixed await-event secret");
+    let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
+    let written_now = fixture::seed(&handles).await;
+    drop(handles);
+    storage.pool().close().await;
+    drop_fixture_schema(&database_url).await;
+    fixture::assert_committed_expectations_match_current_writes(
+        &std::fs::read(fixture_dir().join("expected.json"))
+            .expect("read committed Postgres durable-fixture expectations"),
+        &json_with_newline(&written_now),
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_configured() {
     let Some(database_url) = support::database_url() else {
