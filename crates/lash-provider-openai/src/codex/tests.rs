@@ -2066,7 +2066,7 @@ mod conformance {
     use lash_core::provider::Provider;
     use lash_llm_transport::conformance::{
         CanonicalUsage as U, ProviderConformanceSpec, ProviderNormalizer, ProviderWire, Scenario,
-        StreamAssembly, provider_conformance, strong_replay_payload,
+        StreamAssembly, provider_conformance,
     };
     use lash_llm_transport::{
         openai_terminal_reason_from_response_value, openai_usage_from_response_value,
@@ -2182,16 +2182,12 @@ mod conformance {
                     }))
                     .with_reasoning_text("thinking about it"),
                     Scenario::ReasoningReplayRoundTrip => {
-                        let payload = strong_replay_payload("codex-responses");
-                        ProviderWire::body(json!({})).with_reasoning_replay_round_trip(
-                            vec![
-                                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_conformance"}}).to_string(),
-                                json!({"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"thinking about it"}).to_string(),
-                                json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_conformance","summary":[{"type":"summary_text","text":"thinking about it"}],"encrypted_content":payload}}).to_string(),
-                            ],
-                            payload,
-                            "/input/0/encrypted_content",
-                        )
+                        // Codex shares the Responses-API fixtures with the
+                        // OpenAI adapter; the dialect is the same wire.
+                        crate::tests::conformance::reasoning_replay_wire("codex-responses")
+                    }
+                    Scenario::ToolCallReplayRoundTrip => {
+                        crate::tests::conformance::tool_call_replay_wire()
                     }
                     Scenario::StreamingUsageMerge => {
                         ProviderWire::body(json!({})).with_usage_merge_stream(vec![
@@ -2256,7 +2252,7 @@ mod conformance {
             }
         }
 
-        fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {
+        fn build_next_request(&self, _scenario: Scenario, messages: Vec<LlmMessage>) -> Value {
             CodexProvider::new("access", "refresh", 0)
                 .build_request_body(&request(messages), false)
                 .expect("codex next request serializes")
@@ -2271,10 +2267,17 @@ mod conformance {
         }
 
         fn conformance_spec(&self) -> ProviderConformanceSpec {
-            ProviderConformanceSpec::strict()
+            ProviderConformanceSpec::with_unsupported(&[(
+                Scenario::ToolCallReplayRoundTrip,
+                "RLM history carries no native tool calls; tool use is projected into lashlang \
+                 cells, so there is no function_call item to replay",
+            )])
         }
 
         fn wire_for(&self, scenario: Scenario) -> Option<ProviderWire> {
+            if matches!(scenario, Scenario::ToolCallReplayRoundTrip) {
+                return None;
+            }
             CodexNormalizer.wire_for(scenario)
         }
 
@@ -2294,7 +2297,7 @@ mod conformance {
             CodexNormalizer.assemble_stream(scenario, sse_events)
         }
 
-        fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {
+        fn build_next_request(&self, scenario: Scenario, messages: Vec<LlmMessage>) -> Value {
             let rendered =
                 lash_protocol_rlm::project_conformance_messages_through_rlm_history(messages);
             assert!(
@@ -2303,7 +2306,7 @@ mod conformance {
                 rendered.as_ref().err().map(String::as_str).unwrap_or("")
             );
             let messages = rendered.unwrap_or_default();
-            CodexNormalizer.build_next_request(messages)
+            CodexNormalizer.build_next_request(scenario, messages)
         }
     }
 
