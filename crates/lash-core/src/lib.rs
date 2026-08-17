@@ -69,6 +69,44 @@ pub mod store_backend_support {
         claim.abandon_restore_claim_id.as_deref()
     }
 
+    /// Build the SQL predicate admitting exactly the active-turn ingress whose
+    /// minimum boundary has been reached at `checkpoint`.
+    ///
+    /// `min_boundary_expr` is the backend expression reading
+    /// `ingress_json.min_boundary` (JSON extraction differs per dialect). SQL
+    /// stores splice this in so `min_boundary` is filtered at EVERY checkpoint
+    /// from the one core rule
+    /// ([`crate::TurnInputCheckpointBoundary::admits`]) instead of a
+    /// hand-written per-checkpoint special case (FIG-1524).
+    ///
+    /// An absent field reads as the serde default (`after_work`), so a
+    /// hand-written or externally produced row cannot bypass the filter by
+    /// omitting the key. A value this build does not recognize matches no
+    /// literal and is therefore never claimed here: a node that cannot
+    /// interpret a boundary leaves the row for a peer that can, where before
+    /// FIG-1524 the final checkpoint selected such a row and the
+    /// deserialization failure failed the whole claim call.
+    pub fn admitted_min_boundary_sql(
+        min_boundary_expr: &str,
+        checkpoint: crate::CheckpointKind,
+    ) -> String {
+        let admitted = crate::TurnInputCheckpointBoundary::ALL
+            .iter()
+            .filter(|boundary| boundary.admits(checkpoint))
+            .map(|boundary| format!("'{}'", boundary.as_wire_str()))
+            .collect::<Vec<_>>();
+        if admitted.is_empty() {
+            // No boundary reaches this checkpoint: admit nothing. An empty `IN
+            // ()` list is a syntax error in both dialects.
+            return "FALSE".to_string();
+        }
+        format!(
+            "COALESCE({min_boundary_expr}, '{}') IN ({})",
+            crate::TurnInputCheckpointBoundary::default().as_wire_str(),
+            admitted.join(", ")
+        )
+    }
+
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,

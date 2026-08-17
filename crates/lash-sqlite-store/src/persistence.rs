@@ -3025,10 +3025,14 @@ async fn checkpoint_work_pending_sqlite(
             let head_candidate = sqlite_queued_work_head_candidate_cte(
                 QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
             );
+            let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql(
+                "json_extract(ingress_json, '$.min_boundary')",
+                checkpoint,
+            );
             let sql = format!(
                 "WITH {head_candidate}
                  SELECT (
-                    ?7 > 0 AND EXISTS (
+                    ?6 > 0 AND EXISTS (
                         SELECT 1
                         FROM pending_turn_inputs
                         WHERE session_id = ?1
@@ -3036,17 +3040,11 @@ async fn checkpoint_work_pending_sqlite(
                           AND (claim_token IS NULL OR claim_session_lease_generation <> ?3)
                           AND json_extract(ingress_json, '$.scope') = 'active_turn'
                           AND json_extract(ingress_json, '$.turn_id') = ?5
-                          AND (
-                              ?6 = 'before_completion'
-                              OR COALESCE(
-                                  json_extract(ingress_json, '$.min_boundary'),
-                                  'after_work'
-                              ) = 'after_work'
-                          )
+                          AND {admitted_min_boundary}
                         LIMIT 1
                     )
                 ) OR (
-                    ?8 > 0 AND EXISTS (
+                    ?7 > 0 AND EXISTS (
                         SELECT 1
                         FROM queued_work_head_candidate AS head
                         JOIN queued_work_items AS item
@@ -3065,10 +3063,6 @@ async fn checkpoint_work_pending_sqlite(
                         sql_session_lease_generation(generation)?,
                         lash_core::TurnInputState::PendingActive.as_str(),
                         turn_id,
-                        match checkpoint {
-                            lash_core::CheckpointKind::AfterWork => "after_work",
-                            lash_core::CheckpointKind::BeforeCompletion => "before_completion",
-                        },
                         max_inputs as i64,
                         max_batches as i64,
                     ],
@@ -3243,11 +3237,13 @@ fn claim_pending_turn_inputs_sqlite_conn(
                   AND json_extract(ingress_json, '$.turn_id') = ?",
             );
             values.push(turn_id.to_string().into());
-            if *checkpoint == lash_core::CheckpointKind::AfterWork {
-                sql.push_str(
-                    " AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work') = 'after_work'",
-                );
-            }
+            sql.push_str(" AND ");
+            sql.push_str(
+                &lash_core::store_backend_support::admitted_min_boundary_sql(
+                    "json_extract(ingress_json, '$.min_boundary')",
+                    *checkpoint,
+                ),
+            );
         }
         sql.push_str(" ORDER BY enqueue_seq ASC LIMIT ?");
         values.push(i64::try_from(max_inputs).unwrap_or(i64::MAX).into());
@@ -3349,15 +3345,9 @@ async fn claim_pending_turn_inputs_sqlite(
     let owner = owner.clone();
     conn.write_flow(move |tx| {
         let outcome: Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> = (|| {
-            ensure_session_execution_lease_conn(
-                tx,
-                &session_id,
-                &session_execution_lease,
-                now,
-            )?;
+            ensure_session_execution_lease_conn(tx, &session_id, &session_execution_lease, now)?;
             let generation = session_execution_lease.fencing_token;
-            let active_turn =
-                matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
+            let active_turn = matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
             let wanted_state = match &mode {
                 lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
                     lash_core::TurnInputState::PendingActive
@@ -3367,8 +3357,7 @@ async fn claim_pending_turn_inputs_sqlite(
                 }
             };
             let candidate_rows = {
-                let mut sql =
-                    "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
+                let mut sql = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                             state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                             claim_owner_id, claim_owner_incarnation_id,
                             claim_owner_liveness_json, claim_token, claim_session_lease_generation
@@ -3379,7 +3368,7 @@ async fn claim_pending_turn_inputs_sqlite(
                             claim_token IS NULL
                             OR claim_session_lease_generation <> ?
                        )"
-                    .to_string();
+                .to_string();
                 let mut values: Vec<rusqlite::types::Value> = vec![
                     session_id.clone().into(),
                     wanted_state.as_str().to_string().into(),
@@ -3396,17 +3385,17 @@ async fn claim_pending_turn_inputs_sqlite(
                           AND json_extract(ingress_json, '$.turn_id') = ?",
                     );
                     values.push(turn_id.to_string().into());
-                    if *checkpoint == lash_core::CheckpointKind::AfterWork {
-                        sql.push_str(
-                            " AND COALESCE(json_extract(ingress_json, '$.min_boundary'), 'after_work') = 'after_work'",
-                        );
-                    }
+                    sql.push_str(" AND ");
+                    sql.push_str(
+                        &lash_core::store_backend_support::admitted_min_boundary_sql(
+                            "json_extract(ingress_json, '$.min_boundary')",
+                            *checkpoint,
+                        ),
+                    );
                 }
                 sql.push_str(" ORDER BY enqueue_seq ASC LIMIT ?");
                 values.push(i64::try_from(max_inputs).unwrap_or(i64::MAX).into());
-                let mut stmt = tx
-                    .prepare(&sql)
-                    .map_err(sqlite_error)?;
+                let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
                 let rows = stmt
                     .query_map(
                         rusqlite::params_from_iter(values.iter()),
@@ -3426,9 +3415,7 @@ async fn claim_pending_turn_inputs_sqlite(
             let lease = TurnInputClaimLease::derive(head, &session_id, &owner, now, generation)?;
             let sql_fencing_tokens = sql_claim_fencing_tokens(
                 "turn_input_claim_fencing_token",
-                selected
-                    .iter()
-                    .map(|(row, _)| row.claim_fencing_token),
+                selected.iter().map(|(row, _)| row.claim_fencing_token),
             )?;
             let liveness_json: Option<&str> = None;
             let state_after_claim = match &mode {

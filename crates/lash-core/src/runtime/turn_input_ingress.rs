@@ -92,6 +92,56 @@ impl TurnInputCheckpointBoundary {
     }
 }
 
+/// Generates the boundary enumeration and its wire spelling from one variant list.
+///
+/// The generated `as_wire_str` match is exhaustive, so a new
+/// [`TurnInputCheckpointBoundary`] variant fails to compile until it is added here, and adding it
+/// here necessarily extends `ALL`. That is what keeps the SQL admission list
+/// ([`crate::store_backend_support::admitted_min_boundary_sql`]) complete: the list cannot silently
+/// omit a boundary the type can hold.
+macro_rules! turn_input_checkpoint_boundary_wire {
+    ($($variant:ident => $wire:literal),+ $(,)?) => {
+        impl TurnInputCheckpointBoundary {
+            pub(crate) const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            /// The stable snake-case value persisted in `ingress_json.min_boundary`.
+            pub(crate) fn as_wire_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire),+
+                }
+            }
+        }
+    };
+}
+
+turn_input_checkpoint_boundary_wire!(
+    AfterWork => "after_work",
+    BeforeCompletion => "before_completion",
+);
+
+/// Generates the checkpoint enumeration a claim can name, from one variant list.
+///
+/// The generated match is exhaustive, so a new [`CheckpointKind`] variant fails to compile until it
+/// is added here, which keeps `CLAIM_CHECKPOINTS` complete for the tests that sweep every
+/// checkpoint.
+macro_rules! turn_input_claim_checkpoints {
+    ($($variant:ident),+ $(,)?) => {
+        #[cfg(test)]
+        pub(crate) const CLAIM_CHECKPOINTS: &[CheckpointKind] = &[$(CheckpointKind::$variant),+];
+
+        /// Compile-time guard only: the exhaustive match below is what fails on a new variant.
+        #[cfg(test)]
+        #[allow(dead_code)]
+        fn assert_claim_checkpoints_are_exhaustive(checkpoint: CheckpointKind) {
+            match checkpoint {
+                $(CheckpointKind::$variant => ()),+
+            }
+        }
+    };
+}
+
+turn_input_claim_checkpoints!(AfterWork, BeforeCompletion);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnInputState {
@@ -611,6 +661,59 @@ pub(crate) fn ingress_message_id(input_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_boundary_wire_values_match_the_persisted_ingress_encoding() {
+        for boundary in TurnInputCheckpointBoundary::ALL.iter().copied() {
+            assert_eq!(
+                serde_json::to_value(boundary).expect("serialize boundary"),
+                serde_json::Value::String(boundary.as_wire_str().to_string()),
+                "the SQL literal a store filters on must equal the persisted wire value"
+            );
+        }
+    }
+
+    #[test]
+    fn every_checkpoint_admits_at_least_the_default_boundary() {
+        for checkpoint in CLAIM_CHECKPOINTS.iter().copied() {
+            let admitted = TurnInputCheckpointBoundary::ALL
+                .iter()
+                .filter(|boundary| boundary.admits(checkpoint))
+                .collect::<Vec<_>>();
+            assert!(
+                admitted.contains(&&TurnInputCheckpointBoundary::default()),
+                "an absent min_boundary reads as the default, which must stay admissible at {checkpoint:?}"
+            );
+            let predicate =
+                crate::store_backend_support::admitted_min_boundary_sql("min_boundary", checkpoint);
+            assert!(
+                !predicate.contains("IN ()"),
+                "an empty admitted set must not emit an `IN ()` syntax error at {checkpoint:?}"
+            );
+        }
+        assert!(
+            !TurnInputCheckpointBoundary::BeforeCompletion.admits(CheckpointKind::AfterWork),
+            "before-completion ingress must be withheld at the after-work checkpoint"
+        );
+    }
+
+    #[test]
+    fn admitted_min_boundary_sql_spells_the_current_checkpoints_exactly() {
+        assert_eq!(
+            crate::store_backend_support::admitted_min_boundary_sql(
+                "min_boundary",
+                CheckpointKind::AfterWork
+            ),
+            "COALESCE(min_boundary, 'after_work') IN ('after_work')"
+        );
+        assert_eq!(
+            crate::store_backend_support::admitted_min_boundary_sql(
+                "min_boundary",
+                CheckpointKind::BeforeCompletion
+            ),
+            "COALESCE(min_boundary, 'after_work') IN ('after_work', 'before_completion')"
+        );
+    }
 
     #[test]
     fn pending_turn_input_id_mint_preserves_the_fig_886_format() {

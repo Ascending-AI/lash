@@ -565,6 +565,7 @@ where
     concurrent_queue_and_turn_input_claims_have_one_owner(make("concurrent-queue-input")).await;
     checkpoint_work_claims_both_families_once(make("checkpoint-work")).await;
     checkpoint_budget_refusal_preserves_active_turn_input(make("checkpoint-budget-refusal")).await;
+    checkpoint_claims_honor_min_boundary_at_every_checkpoint(make("checkpoint-min-boundary")).await;
     queued_work_cancel_removes_only_unclaimed_batches(make("queued-work-cancel")).await;
     queued_work_exact_claim_uses_selected_batch_ids(make("root")).await;
     queued_work_classes_gate_command_and_turn_claims(make("root")).await;
@@ -2232,6 +2233,175 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
     assert!(
         second.0.is_none() && second.1.is_none(),
         "checkpoint claims must be granted exactly once per lease generation"
+    );
+}
+
+/// `TurnInputIngress::ActiveTurn { min_boundary }` must be honored at every
+/// checkpoint a backend can be asked about. This pins all four
+/// boundary/checkpoint cells on both the admission-probe path
+/// (`claim_checkpoint_work`) and the direct claim path
+/// (`claim_active_turn_inputs`): `BeforeCompletion` ingress is withheld at
+/// `AfterWork` and admitted at `BeforeCompletion`; `AfterWork` ingress is
+/// admitted at both (FIG-1524).
+async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = "checkpoint-min-boundary";
+    let turn_id = crate::TurnId::from("checkpoint-min-boundary:turn");
+    let owner = lease_owner("checkpoint-min-boundary-owner");
+    let before_completion = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            session_id,
+            turn_id.as_str(),
+            crate::TurnInputCheckpointBoundary::BeforeCompletion,
+            "withheld until before-completion",
+        ))
+        .await
+        .expect("enqueue before-completion input");
+    let lease = store
+        .try_claim_session_execution_lease(
+            session_id,
+            &owner,
+            "checkpoint-min-boundary-executor",
+            60_000,
+        )
+        .await
+        .expect("claim min-boundary session lease")
+        .acquired()
+        .expect("min-boundary session lease acquired");
+
+    let probed = store
+        .claim_checkpoint_work(
+            session_id,
+            &lease.fence(),
+            &owner,
+            &turn_id,
+            crate::CheckpointKind::AfterWork,
+            10,
+            crate::testing::queued_work_claim_policy(10),
+        )
+        .await
+        .expect("probe after-work checkpoint holding only before-completion ingress");
+    assert!(
+        probed.0.is_none() && probed.1.is_none(),
+        "before-completion ingress must not be admitted at the after-work checkpoint"
+    );
+    assert!(
+        store
+            .claim_active_turn_inputs(
+                session_id,
+                &lease.fence(),
+                &owner,
+                &turn_id,
+                crate::CheckpointKind::AfterWork,
+                10,
+            )
+            .await
+            .expect("direct after-work claim holding only before-completion ingress")
+            .is_none(),
+        "the direct claim path must honor min_boundary at the after-work checkpoint too"
+    );
+
+    let after_work_first = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            session_id,
+            turn_id.as_str(),
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "admitted at after-work",
+        ))
+        .await
+        .expect("enqueue first after-work input");
+    let after_work_second = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            session_id,
+            turn_id.as_str(),
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "admitted through the direct claim path",
+        ))
+        .await
+        .expect("enqueue second after-work input");
+    let after_work_third = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            session_id,
+            turn_id.as_str(),
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "still pending at before-completion",
+        ))
+        .await
+        .expect("enqueue third after-work input");
+
+    let (probe_claim, probe_queue) = store
+        .claim_checkpoint_work(
+            session_id,
+            &lease.fence(),
+            &owner,
+            &turn_id,
+            crate::CheckpointKind::AfterWork,
+            1,
+            crate::testing::queued_work_claim_policy(10),
+        )
+        .await
+        .expect("claim after-work checkpoint work");
+    assert!(probe_queue.is_none(), "no queued work was enqueued");
+    assert_eq!(
+        probe_claim
+            .expect("after-work checkpoint input claim")
+            .inputs
+            .iter()
+            .map(|input| input.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![after_work_first.input_id.as_str()],
+        "the after-work checkpoint must admit after-work ingress, skipping the earlier \
+         before-completion row rather than stalling on it"
+    );
+
+    let after_work_claim = store
+        .claim_active_turn_inputs(
+            session_id,
+            &lease.fence(),
+            &owner,
+            &turn_id,
+            crate::CheckpointKind::AfterWork,
+            1,
+        )
+        .await
+        .expect("claim after-work admitted input")
+        .expect("after-work input claim");
+    assert_eq!(
+        after_work_claim
+            .inputs
+            .iter()
+            .map(|input| input.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![after_work_second.input_id.as_str()],
+        "the direct claim path must admit after-work ingress at the after-work checkpoint"
+    );
+
+    let (input_claim, queue_claim) = store
+        .claim_checkpoint_work(
+            session_id,
+            &lease.fence(),
+            &owner,
+            &turn_id,
+            crate::CheckpointKind::BeforeCompletion,
+            10,
+            crate::testing::queued_work_claim_policy(10),
+        )
+        .await
+        .expect("claim before-completion checkpoint work");
+    assert!(queue_claim.is_none(), "no queued work was enqueued");
+    let input_claim = input_claim.expect("before-completion input claim");
+    assert_eq!(
+        input_claim
+            .inputs
+            .iter()
+            .map(|input| input.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            before_completion.input_id.as_str(),
+            after_work_third.input_id.as_str(),
+        ],
+        "the before-completion checkpoint must admit both boundaries in enqueue order"
     );
 }
 

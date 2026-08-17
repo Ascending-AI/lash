@@ -19244,7 +19244,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::applications"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3105#applications: Vec::new(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3101#applications: Vec::new(),"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::inputs"
@@ -19253,7 +19253,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3104#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3100#inputs,"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
@@ -77064,7 +77064,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3467#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3465#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::executor_id"
@@ -77072,7 +77072,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3469#executor_id: current.executor_id.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3467#executor_id: current.executor_id.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::expires_at_epoch_ms"
@@ -77088,7 +77088,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3471#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3469#fencing_token: current.fencing_token,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
@@ -77096,7 +77096,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3470#lease_token: current.lease_token.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3468#lease_token: current.lease_token.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::owner"
@@ -77104,7 +77104,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3468#owner: current.owner.as_ref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3466#owner: current.owner.as_ref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts"
@@ -77243,6 +77243,14 @@ disposition = "internal-consumed"
 usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2311#lash_core::store_backend_support::derive_pending_turn_input_id("
 
 [[api]]
+symbol = "lash_core::store_backend_support::admitted_min_boundary_sql"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2815#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
+
+[[api]]
 symbol = "lash_core::store_backend_support::queued_work_abandon_restore_claim_id"
 kind = "function"
 availability = "default+all-features"
@@ -77264,7 +77272,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3464#lash_core::store_backend_support::require_current_session_execution_lease("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3462#lash_core::store_backend_support::require_current_session_execution_lease("
 
 [[api]]
 symbol = "lash_core::store_backend_support::trace_session_execution_lease_refusal"
