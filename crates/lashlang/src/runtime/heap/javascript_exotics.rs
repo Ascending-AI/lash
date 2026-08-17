@@ -710,6 +710,15 @@ impl Heap {
                 Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
                     Value::String("[object Object]".into())
                 }
+                // A projected handle is a host-side view of a value, not an
+                // object of its own: coerce what is behind it.
+                Value::Projected(projected) => {
+                    return self.javascript_to_primitive_inner(
+                        &projected.materialize(),
+                        active,
+                        depth,
+                    );
+                }
                 other => other.clone(),
             },
         };
