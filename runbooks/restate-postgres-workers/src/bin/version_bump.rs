@@ -49,7 +49,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// older-store refusal exists to prove — so the fixture stamps a version under
 /// this floor, never one the build would happily migrate.
 ///
-/// This constant and the three artifact lists below are pinned to the newest
+/// This constant and the four artifact lists below are pinned to the newest
 /// component generation. `scripts/check_version_bump_fixtures.py` derives every
 /// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
 /// component without moving them, so they are never discovered stale by a live
@@ -64,9 +64,20 @@ const POST_FLOOR_TABLES: [&str; 3] = [
     "lash_tool_intent_submissions",
     "lash_process_parent_end_plans",
 ];
-/// The same set plus the indexes those generations added, for proving the
-/// fixture retained none of them: the floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 4] = [
+/// Indexes those generations added to tables the floor catalog already had, so
+/// dropping the post-floor tables does not take them with it (53: the
+/// ingress-family ordering pair). This list is the post-floor
+/// `introduced_relations` that are not themselves post-floor tables and do not
+/// belong to one, which is what `scripts/check_version_bump_fixtures.py` proves.
+const POST_FLOOR_INDEXES: [&str; 2] = [
+    "idx_lash_queued_work_session_command_order",
+    "idx_lash_pending_turn_input_order",
+];
+/// Every post-floor relation, for proving the fixture retained none of them: the
+/// floor migration's `introduced_relations`.
+const POST_FLOOR_ARTIFACTS: [&str; 6] = [
+    "idx_lash_pending_turn_input_order",
+    "idx_lash_queued_work_session_command_order",
     "idx_lash_tool_intent_submissions_scope",
     "lash_attachment_condemnations",
     "lash_process_parent_end_plans",
@@ -76,7 +87,10 @@ const POST_FLOOR_ARTIFACTS: [&str; 4] = [
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_attachment_condemnations"];
+const DIVERGENT_ARTIFACTS: [&str; 2] = [
+    "idx_lash_queued_work_session_command_order",
+    "idx_lash_pending_turn_input_order",
+];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -616,8 +630,10 @@ async fn refuse(database_url: &str) -> Result<()> {
     // stamp a version below it. This makes the next refusal and recreation
     // exercise a genuinely older *shape* rather than merely another integer over
     // the current catalog. These lists are generation-pinned: each component bump
-    // that introduces a relation must add it here and to `POST_FLOOR_ARTIFACTS`,
-    // or the fixture silently stops being the published floor shape —
+    // that introduces a relation must add it here — a table to
+    // `POST_FLOOR_TABLES`, an index over a table the floor already had to
+    // `POST_FLOOR_INDEXES` — and to `POST_FLOOR_ARTIFACTS`, or the fixture
+    // silently stops being the published floor shape;
     // `scripts/check_version_bump_fixtures.py` is what makes that impossible.
     for artifact in POST_FLOOR_TABLES {
         sqlx::query(&format!("DROP TABLE {artifact}"))
@@ -626,6 +642,19 @@ async fn refuse(database_url: &str) -> Result<()> {
             .with_context(|| {
                 format!("remove post-floor artifact {artifact} for older-store check")
             })?;
+    }
+    // `IF EXISTS`, because the table drops above may already have taken the index
+    // with them: the derivation that decides which indexes land in this list
+    // resolves `CREATE INDEX ... ON <table>` textually, and a DDL shape it cannot
+    // read (a quoted or schema-qualified target) resolves to no table and is
+    // conservatively listed here. The `current_artifact_count` probe below is what
+    // actually proves the floor catalog is clean, so an already-gone index must not
+    // fail the drop.
+    for index in POST_FLOOR_INDEXES {
+        sqlx::query(&format!("DROP INDEX IF EXISTS {index}"))
+            .execute(&pool)
+            .await
+            .with_context(|| format!("remove post-floor index {index} for older-store check"))?;
     }
     let current_artifact_count: i64 = sqlx::query_scalar(
         "SELECT count(*)

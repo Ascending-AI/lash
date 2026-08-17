@@ -108,7 +108,7 @@ const ANCHOR_TABLE: &str = "lash_schema_versions";
 ///
 /// - **The component version stamp.** It is normally the reject-and-recreate
 ///   boundary. Lash-managed `Enforce` can consume the explicit migrations from
-///   the published component-50 and component-51 shapes to 52 after exact
+///   the published component-50, -51, and -52 shapes to 53 after exact
 ///   source-shape preflight; an older stamp over newer artifacts is divergence
 ///   and is refused with an inspect-and-recreate remedy. Other mismatches remain
 ///   fatal, so a valve adopted for a structural false positive cannot silently
@@ -1043,8 +1043,8 @@ fn diff_paired_objects<T: PairedObject>(
 pub enum SchemaFinding {
     /// The component version stamp is absent or names another version. Ordinary
     /// open treats it as fatal unless Lash-managed `Enforce` consumes one of the
-    /// exact explicit migrations from the published component-50 or
-    /// component-51 shapes to 52 before evaluating the open report. An older
+    /// exact explicit migrations from the published component-50, -51, or
+    /// -52 shapes to 53 before evaluating the open report. An older
     /// stamp over newer artifacts is refused as ledger/schema divergence rather
     /// than migrated partially.
     VersionMismatch {

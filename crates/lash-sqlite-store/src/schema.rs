@@ -208,6 +208,9 @@ CREATE TABLE IF NOT EXISTS wake_redelivery_fences (
 CREATE INDEX IF NOT EXISTS idx_queued_work_ready
     ON queued_work_batches(session_id, available_at_ms, enqueue_seq);
 
+CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
+    ON queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);
+
 CREATE INDEX IF NOT EXISTS idx_queued_work_claim
     ON queued_work_batches(session_id, claim_id, claim_token);
 
@@ -233,6 +236,9 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
 
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_session
     ON pending_turn_inputs(session_id, state, enqueue_seq);
+
+CREATE INDEX IF NOT EXISTS idx_pending_turn_input_order
+    ON pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
 
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_claim
     ON pending_turn_inputs(session_id, claim_id, claim_token);
@@ -368,6 +374,18 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 37 adds the attachment GC fence's per-digest condemnation table.
 /// Older databases are rejected and recreated; there is no compatibility read
 /// path.
+///
+/// An additive, index-only catalog change does **not** bump this version. Every
+/// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
+/// schema, so a version-37 file written by an older binary self-heals into the
+/// newer index set on first open, and a newer file stays readable by the older
+/// binary — the two are mutually compatible on the same path. Bumping instead
+/// would reject-and-recreate live stores for a change that costs nothing to
+/// apply in place. The idle-arbitration ordering indexes
+/// (`idx_queued_work_session_command_order`,
+/// `idx_pending_turn_input_order`) are added under exactly this carve-out. It
+/// covers index-only additions and nothing else: any table, column, or
+/// semantic change bumps.
 pub(crate) const SCHEMA_VERSION: i32 = 37;
 
 pub(crate) const PROCESS_SCHEMA: &str = "

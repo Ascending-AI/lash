@@ -287,7 +287,7 @@ async fn enqueue_queued_work_with_outcome_tx(
     .bind(&batch.session_id)
     .bind(&batch.source_key)
     .bind(batch.delivery_policy.as_str())
-    .bind(batch.kind.as_str())
+    .bind(batch.kind().as_str())
     .bind(encode_json(&batch.authority)?)
     .bind(&batch.merge_key)
     .bind(sql_available_at_ms)
@@ -2177,6 +2177,78 @@ impl QueuedWorkStore for PostgresSessionStore {
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(batches)
+    }
+
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &str,
+    ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let now = postgres_transaction_epoch_ms(&mut tx).await?;
+        let (command_at, command_seq, input_at, input_seq): (
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        ) = sqlx::query_as(
+            "WITH earliest_command AS (
+                SELECT enqueued_at_ms, enqueue_seq
+                FROM lash_queued_work_batches AS queued
+                WHERE session_id = $1
+                  AND work_kind = 'control'
+                  AND (claim_token IS NULL OR NOT EXISTS (
+                       SELECT 1 FROM lash_session_execution_leases AS lease
+                       WHERE lease.session_id = $1
+                         AND lease.lease_token IS NOT NULL
+                         AND lease.lease_expires_at_ms > $2
+                         AND lease.lease_fencing_token
+                             = queued.claim_session_lease_generation
+                  ))
+                ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
+                LIMIT 1
+             ), earliest_input AS (
+                SELECT enqueued_at_ms, enqueue_seq
+                FROM lash_pending_turn_inputs AS input
+                WHERE session_id = $1
+                  AND state = $3
+                  AND (claim_token IS NULL OR NOT EXISTS (
+                       SELECT 1 FROM lash_session_execution_leases AS lease
+                       WHERE lease.session_id = $1
+                         AND lease.lease_token IS NOT NULL
+                         AND lease.lease_expires_at_ms > $2
+                         AND lease.lease_fencing_token
+                             = input.claim_session_lease_generation
+                  ))
+                ORDER BY enqueued_at_ms ASC, enqueue_seq ASC
+                LIMIT 1
+             )
+             SELECT command.enqueued_at_ms, command.enqueue_seq,
+                    input.enqueued_at_ms, input.enqueue_seq
+             FROM (SELECT 1) AS singleton
+             LEFT JOIN earliest_command AS command ON TRUE
+             LEFT JOIN earliest_input AS input ON TRUE",
+        )
+        .bind(session_id)
+        .bind(now as i64)
+        .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        let ordering_key = |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
+            at.zip(seq)
+                .map(|(at, seq)| {
+                    Ok(lash_core::store::PendingWorkOrderingKey {
+                        enqueued_at_ms: u64_from_sql(kind, "enqueued_at_ms", at)?,
+                        enqueue_seq: u64_from_sql(kind, "enqueue_seq", seq)?,
+                    })
+                })
+                .transpose()
+        };
+        Ok(lash_core::store::PendingSessionWorkOrdering {
+            session_command: ordering_key("QueuedWorkBatch", command_at, command_seq)?,
+            turn_input: ordering_key("PendingTurnInput", input_at, input_seq)?,
+        })
     }
 
     async fn list_pending_queued_work(

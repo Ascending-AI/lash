@@ -626,3 +626,65 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
         "unexpected GC validation error: {error}"
     );
 }
+
+/// A `cancel` row is not an ingress family.
+///
+/// Cancellation preempts on its own path, so the ordering projection must ignore
+/// it entirely rather than let it decide whether session commands drain before
+/// pending turn input. The row is written through the public enqueue path and
+/// then restamped, because a draft derives `control` or `turn` from its payloads
+/// and can never assert `cancel`.
+#[tokio::test]
+async fn sqlite_ordering_projection_ignores_cancel_rows() {
+    let path = unique_db_path("cancel-ordering");
+    let store = Store::open(&path).await.expect("open file store");
+    let session_id = "sqlite-cancel-ordering";
+    store
+        .enqueue_queued_work(QueuedWorkBatchDraft::new(
+            session_id,
+            lash_core::DeliveryPolicy::EarliestSafeBoundary,
+            vec![lash_core::runtime::QueuedWorkPayload::session_command(
+                lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+                    reason: "cancel-ordering".to_string(),
+                },
+            )],
+        ))
+        .await
+        .expect("enqueue session command");
+    store
+        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+            session_id,
+            TurnInputIngress::next_turn(),
+            TurnInput::text("input"),
+        ))
+        .await
+        .expect("enqueue next-turn input");
+
+    let ordering = store
+        .pending_session_work_ordering(session_id)
+        .await
+        .expect("read ordering with a control row");
+    assert!(
+        ordering.session_command.is_some() && ordering.turn_input.is_some(),
+        "both families must be visible before the row is restamped: {ordering:?}"
+    );
+
+    rusqlite::Connection::open(&path)
+        .expect("open raw SQLite connection")
+        .execute_batch("UPDATE queued_work_batches SET work_kind = 'cancel'")
+        .expect("restamp the queued row as cancellation");
+
+    let ordering = store
+        .pending_session_work_ordering(session_id)
+        .await
+        .expect("read ordering with a cancel row");
+    assert_eq!(
+        ordering.session_command, None,
+        "a cancel row must not enter the session-command family: {ordering:?}"
+    );
+    assert!(
+        ordering.turn_input.is_some(),
+        "the pending turn input must be untouched by a cancel row: {ordering:?}"
+    );
+    assert!(!ordering.session_command_precedes_turn_input());
+}

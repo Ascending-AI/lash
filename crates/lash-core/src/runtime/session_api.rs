@@ -549,7 +549,6 @@ impl LashRuntime {
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
             vec![crate::QueuedWorkPayload::session_command(command)],
         )
-        .with_kind(crate::QueuedWorkKind::Control)
         .with_source_key(source_key.clone());
         let enqueued = store.enqueue_queued_work(draft).await.map_err(|err| {
             RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())

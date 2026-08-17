@@ -774,6 +774,13 @@ impl crate::QueuedWorkStore for SeamStore {
             .await
     }
 
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &str,
+    ) -> Result<crate::store::PendingSessionWorkOrdering, StoreError> {
+        self.inner.pending_session_work_ordering(session_id).await
+    }
+
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         self.inner.list_queued_work(session_id).await
     }

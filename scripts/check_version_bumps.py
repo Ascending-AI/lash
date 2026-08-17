@@ -38,6 +38,23 @@ class Guard:
     paths: tuple[str, ...]
     symbols: tuple[str, ...] = ()
     must_cover: tuple[str, ...] = ()
+    elide: str | None = None
+
+
+# A non-unique `CREATE INDEX IF NOT EXISTS ... ;` statement, whole.
+#
+# In a catalog whose open path always executes the entire schema text, such a
+# statement is not a compatibility boundary: it reaches an existing database on
+# its next open, and a database that already has the index stays readable by a
+# binary whose schema omits it. Both directions are therefore compatible on one
+# file, which is why a guarded surface may declare `elide` and let an
+# index-only addition ship without a version bump. `UNIQUE` is deliberately not
+# matched: a unique index is a constraint, `IF NOT EXISTS` will not re-create a
+# differently-shaped one, and it must keep demanding a bump.
+IDEMPOTENT_SQL_INDEX = re.compile(
+    r"\s*CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\b.*?;", re.DOTALL | re.IGNORECASE
+)
+ELISIONS = {"sql_idempotent_index": lambda value: IDEMPOTENT_SQL_INDEX.sub("", value)}
 
 
 @dataclass(frozen=True)
@@ -164,8 +181,14 @@ def load_config(path: Path) -> tuple[Surface, ...]:
                 )
             if len(must_cover) != len(set(must_cover)):
                 raise CheckError(f"{guard_location} must_cover contains duplicates")
+            elide = raw_guard.get("elide")
+            if elide is not None and elide not in ELISIONS:
+                raise CheckError(
+                    f"{guard_location} has unsupported elide {elide!r}; known: "
+                    + ", ".join(sorted(ELISIONS))
+                )
             guards.append(
-                Guard(kind, tuple(paths), tuple(symbols), tuple(must_cover))
+                Guard(kind, tuple(paths), tuple(symbols), tuple(must_cover), elide)
             )
 
         version_regex = raw_surface.get("version_regex")
@@ -584,6 +607,7 @@ def guard_signature(
     enforce_presence: bool,
 ) -> tuple[tuple[str, str], ...]:
     paths = view.matching_paths(revision, guard.paths)
+    elide = ELISIONS[guard.elide] if guard.elide else (lambda value: value)
     signature: list[tuple[str, str]] = []
     found_symbols: set[str] = set()
     covered_shapes: set[str] = set()
@@ -593,18 +617,22 @@ def guard_signature(
         if content is None:
             continue
         if guard.kind == "file":
-            signature.append((path, content))
+            signature.append((path, elide(content)))
             covered_markers.update(
                 marker for marker in guard.must_cover if marker in content
             )
         elif guard.kind == "rust_items":
             items = named_rust_items(content, guard.symbols)
             found_symbols.update(items)
-            signature.extend((f"{path}:{name}", value) for name, value in items.items())
+            signature.extend(
+                (f"{path}:{name}", elide(value)) for name, value in items.items()
+            )
         else:
             items = serde_shapes(content)
             covered_shapes.update(name.partition("#")[0] for name in items)
-            signature.extend((f"{path}:{name}", value) for name, value in items.items())
+            signature.extend(
+                (f"{path}:{name}", elide(value)) for name, value in items.items()
+            )
 
     if guard.kind == "rust_items" and enforce_presence:
         missing = sorted(set(guard.symbols) - found_symbols)

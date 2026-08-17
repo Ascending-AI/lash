@@ -895,7 +895,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 52);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 53);
 
 
 --
@@ -1440,6 +1440,13 @@ CREATE INDEX idx_lash_graph_nodes_seq ON lash_durable_read_fixture.lash_graph_no
 
 
 --
+-- Name: idx_lash_pending_turn_input_order; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_pending_turn_input_order ON lash_durable_read_fixture.lash_pending_turn_inputs USING btree (session_id, state, enqueued_at_ms, enqueue_seq);
+
+
+--
 -- Name: idx_lash_pending_turn_inputs_claim; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1542,6 +1549,13 @@ CREATE INDEX idx_lash_queued_work_claim ON lash_durable_read_fixture.lash_queued
 --
 
 CREATE INDEX idx_lash_queued_work_ready ON lash_durable_read_fixture.lash_queued_work_batches USING btree (session_id, available_at_ms, enqueue_seq);
+
+
+--
+-- Name: idx_lash_queued_work_session_command_order; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_queued_work_session_command_order ON lash_durable_read_fixture.lash_queued_work_batches USING btree (session_id, work_kind, enqueued_at_ms, enqueue_seq);
 
 
 --

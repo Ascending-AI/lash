@@ -176,6 +176,11 @@ impl InMemorySessionStore {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    pub(crate) fn list_pending_queued_work_count(&self) -> usize {
+        self.list_pending_queued_work_count
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     pub(crate) fn fail_next_runtime_commit(&self, error: crate::StoreError) {
         *self.fail_next_runtime_commit.lock_recover() = Some(error);
     }

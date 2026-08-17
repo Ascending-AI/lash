@@ -37,10 +37,21 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         from: 50,
         to: 52,
         source_missing_tables: &["lash_fence", "lash_plans"],
-        introduced_relations: &["lash_fence", "lash_plans", "idx_lash_plans"],
-        statements: &[PLANS_DDL, FENCE_DDL],
+        introduced_relations: &[
+            "lash_fence",
+            "lash_plans",
+            "idx_lash_plans",
+            "idx_lash_sessions_order",
+        ],
+        statements: &[PLANS_DDL, PLANS_INDEX_DDL, SESSIONS_ORDER_INDEX_DDL, FENCE_DDL],
     },
 ];
+
+const PLANS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_plans
+            ON lash_plans(session_id)"#;
+
+const SESSIONS_ORDER_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_sessions_order
+            ON lash_sessions(session_id, enqueued_at_ms)"#;
 
 fn schema_migration_divergence_error(found: i32) -> StoreError {
     StoreError::Backend(format!(
@@ -67,7 +78,13 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
 FIXTURE_SOURCE = """\
 const MIGRATION_FLOOR_VERSION: i32 = 50;
 const POST_FLOOR_TABLES: [&str; 2] = ["lash_fence", "lash_plans"];
-const POST_FLOOR_ARTIFACTS: [&str; 3] = ["idx_lash_plans", "lash_fence", "lash_plans"];
+const POST_FLOOR_INDEXES: [&str; 1] = ["idx_lash_sessions_order"];
+const POST_FLOOR_ARTIFACTS: [&str; 4] = [
+    "idx_lash_plans",
+    "idx_lash_sessions_order",
+    "lash_fence",
+    "lash_plans",
+];
 const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_fence"];
 const DIVERGENT_ARTIFACTS_MARKER: &str = "schema artifacts newer than the recorded version";
 const SOURCE_MISMATCH_MARKER: &str = "does not match the published component-";
@@ -145,6 +162,73 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         self.assertFalse(valid)
         self.assertIn("POST_FLOOR_TABLES is not", message)
         self.assertIn("missing lash_fence", message)
+
+    def test_post_floor_index_the_table_drops_miss_must_be_listed(self) -> None:
+        # An index over a table the floor catalog already had survives every
+        # `DROP TABLE`, so omitting it leaves a current-only artifact — the failure
+        # the container gate reports as `current_artifact_count != 0`.
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'const POST_FLOOR_INDEXES: [&str; 1] = ["idx_lash_sessions_order"];',
+                "const POST_FLOOR_INDEXES: [&str; 0] = [];",
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("POST_FLOOR_INDEXES is not", message)
+        self.assertIn("missing idx_lash_sessions_order", message)
+
+    def test_post_floor_index_on_a_dropped_table_is_rejected(self) -> None:
+        # `DROP TABLE` already took this one, so naming it would drop a relation
+        # that no longer exists.
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'const POST_FLOOR_INDEXES: [&str; 1] = ["idx_lash_sessions_order"];',
+                'const POST_FLOOR_INDEXES: [&str; 2] = ["idx_lash_sessions_order", '
+                '"idx_lash_plans"];',
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("POST_FLOOR_INDEXES is not", message)
+        self.assertIn("stale idx_lash_plans", message)
+
+    def test_ambiguous_index_target_cannot_be_decided(self) -> None:
+        # Last-match-wins would let the second occurrence — on a table the floor
+        # drops — excuse the index from POST_FLOOR_INDEXES, so the omission would
+        # only surface as `current_artifact_count != 0` inside the container.
+        with self.assertRaises(MODULE.CheckError) as raised:
+            self.check(
+                migrations=MIGRATIONS_SOURCE
+                + 'const REBUILT_DDL: &str = r#"CREATE INDEX idx_lash_sessions_order\n'
+                '            ON lash_plans(session_id)"#;\n'
+            )
+        self.assertIn("idx_lash_sessions_order", str(raised.exception))
+        self.assertIn("over more than one table", str(raised.exception))
+
+    def test_commented_out_ddl_is_not_read_as_ddl(self) -> None:
+        # The same text as prose. A doc comment describing DDL executes nothing, so
+        # it must not enter the index map — where it would collide with the real
+        # statement and stall the check.
+        valid, message = self.check(
+            migrations=MIGRATIONS_SOURCE
+            + "/// CREATE INDEX idx_lash_sessions_order\n"
+            "///             ON lash_plans(session_id)\n"
+            "// CREATE INDEX idx_lash_plans ON lash_sessions(session_id)\n"
+        )
+        self.assertTrue(valid, message)
+
+    def test_index_target_reads_concurrently_and_only(self) -> None:
+        # `CONCURRENTLY` and `ONLY` are ordinary PostgreSQL index DDL. Failing to
+        # read either leaves the index with no resolved table, which would demand
+        # a POST_FLOOR_INDEXES entry for a relation `DROP TABLE lash_plans`
+        # already takes.
+        valid, message = self.check(
+            migrations=MIGRATIONS_SOURCE.replace(
+                "CREATE INDEX idx_lash_plans\n            ON lash_plans(session_id)",
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lash_plans\n"
+                "            ON ONLY lash_plans(session_id)",
+            )
+        )
+        self.assertTrue(valid, message)
 
     def test_stale_divergent_artifacts_fail(self) -> None:
         valid, message = self.check(

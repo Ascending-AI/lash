@@ -2061,27 +2061,11 @@ impl LashRuntime {
         &self,
         store: &dyn crate::RuntimePersistence,
     ) -> Result<bool, RuntimeError> {
-        let pending_inputs = store
-            .list_pending_turn_inputs(&self.state.session_id)
+        let ordering = store
+            .pending_session_work_ordering(&self.state.session_id)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
-        let earliest_input = pending_inputs
-            .iter()
-            .filter(|input| input.state.is_next_turn_pending())
-            .min_by_key(|input| (input.enqueued_at_ms, input.enqueue_seq));
-        let queued_work = store
-            .list_pending_queued_work(&self.state.session_id)
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
-        let earliest_command = queued_work
-            .iter()
-            .filter(|batch| batch.is_session_command_work())
-            .min_by_key(|batch| (batch.enqueued_at_ms, batch.enqueue_seq));
-        Ok(match (earliest_command, earliest_input) {
-            (Some(command), Some(input)) => command.enqueued_at_ms < input.enqueued_at_ms,
-            (Some(_), None) => true,
-            _ => false,
-        })
+        Ok(ordering.session_command_precedes_turn_input())
     }
 
     #[allow(clippy::too_many_arguments)]

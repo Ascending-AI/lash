@@ -54,13 +54,14 @@ impl InMemorySessionStore {
             *next_seq,
         )?;
         let batch_id = format!("recording-qwb-{next_seq}");
+        let kind = batch.kind();
         let stored = crate::QueuedWorkBatch {
             batch_id: batch_id.clone(),
             session_id: batch.session_id,
             enqueue_seq: *next_seq,
             source_key: batch.source_key,
             delivery_policy: batch.delivery_policy,
-            kind: batch.kind,
+            kind,
             authority: batch.authority,
             merge_key: batch.merge_key,
             available_at_ms: batch.available_at_ms,
@@ -518,10 +519,65 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         Ok(batches)
     }
 
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &str,
+    ) -> Result<crate::store::PendingSessionWorkOrdering, crate::store::StoreError> {
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        let live_generation = self.live_session_lease_generation(session_id, now);
+        let session_command = self
+            .queued_work
+            .lock_recover()
+            .iter()
+            .filter(|entry| {
+                entry.batch.session_id == session_id
+                    && (entry.claim_token.is_none()
+                        || live_generation != Some(entry.claim_session_lease_generation))
+            })
+            .filter_map(|entry| {
+                // `work_kind = 'control'` is what the SQL projections read, and
+                // `Cancel` deliberately matches neither family.
+                (entry.batch.kind == crate::QueuedWorkKind::Control).then_some(
+                    crate::store::PendingWorkOrderingKey {
+                        enqueued_at_ms: entry.batch.enqueued_at_ms,
+                        enqueue_seq: entry.batch.enqueue_seq,
+                    },
+                )
+            })
+            // Within one family the sequence is a real tiebreak: it comes from a
+            // single counter.
+            .min_by_key(|key| (key.enqueued_at_ms, key.enqueue_seq));
+        let turn_input = self
+            .pending_turn_inputs
+            .lock_recover()
+            .iter()
+            .filter(|entry| {
+                entry.input.session_id == session_id
+                    && entry.input.state.is_next_turn_pending()
+                    && (entry.claim_token.is_none()
+                        || live_generation != Some(entry.claim_session_lease_generation))
+            })
+            .map(|entry| crate::store::PendingWorkOrderingKey {
+                enqueued_at_ms: entry.input.enqueued_at_ms,
+                enqueue_seq: entry.input.enqueue_seq,
+            })
+            // Within one family the sequence is a real tiebreak: it comes from a
+            // single counter.
+            .min_by_key(|key| (key.enqueued_at_ms, key.enqueue_seq));
+        Ok(crate::store::PendingSessionWorkOrdering {
+            session_command,
+            turn_input,
+        })
+    }
+
     async fn list_pending_queued_work(
         &self,
         session_id: &str,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::store::StoreError> {
+        #[cfg(test)]
+        self.list_pending_queued_work_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         #[cfg(test)]
         self.refuse_injected_counter_defect("queued_work_claim_fencing_token")?;
         let now = self.clock.timestamp_ms();

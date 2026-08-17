@@ -73,45 +73,56 @@ kind = "rust_serde_shapes"
 paths = ["crates/lash-trace/src/*.rs"]
 must_cover = ["TraceRecord", "TraceEvent"]
 
+# Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
+# the whole schema text, so adding a non-unique index is not a compatibility
+# boundary: it reaches an existing file on its next open, and a file that already
+# has it stays readable by a binary without it. Those statements are therefore
+# elided from the guarded signature and an index-only addition ships without a
+# version bump. Everything else in the schema -- tables, columns, constraints, a
+# unique index -- still demands one.
 [[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-description = "SQLite session-store tables, indexes, and constraints"
+description = "SQLite session-store tables, columns, constraints, and unique indexes"
 
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-sqlite-store/src/schema.rs"]
 symbols = ["SCHEMA"]
+elide = "sql_idempotent_index"
 
 [[surface]]
 constant = "PROCESS_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-description = "SQLite process-registry tables, indexes, and constraints"
+description = "SQLite process-registry tables, columns, constraints, and unique indexes"
 
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-sqlite-store/src/schema.rs"]
 symbols = ["PROCESS_SCHEMA"]
+elide = "sql_idempotent_index"
 
 [[surface]]
 constant = "TRIGGER_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-description = "SQLite trigger-store tables, indexes, and constraints"
+description = "SQLite trigger-store tables, columns, constraints, and unique indexes"
 
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-sqlite-store/src/schema.rs"]
 symbols = ["TRIGGER_SCHEMA"]
+elide = "sql_idempotent_index"
 
 [[surface]]
 constant = "EFFECT_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
-description = "SQLite runtime-effect and await-event tables, indexes, and constraints"
+description = "SQLite runtime-effect and await-event tables, columns, constraints, and unique indexes"
 
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-sqlite-store/src/schema.rs"]
 symbols = ["EFFECT_SCHEMA"]
+elide = "sql_idempotent_index"
 
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"

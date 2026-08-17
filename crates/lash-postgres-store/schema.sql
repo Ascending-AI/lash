@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 52.
+-- lash-postgres-store schema, component version 53.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -181,6 +181,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_ready
     ON lash_queued_work_batches(session_id, available_at_ms, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_claim
     ON lash_queued_work_batches(session_id, claim_id, enqueue_seq);
+CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
+    ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);
 
 CREATE TABLE IF NOT EXISTS lash_queued_work_items (
     batch_id TEXT NOT NULL REFERENCES lash_queued_work_batches(batch_id) ON DELETE CASCADE,
@@ -217,6 +219,8 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_session
     ON lash_pending_turn_inputs(session_id, state, enqueue_seq);
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
+    ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_claim
     ON lash_pending_turn_inputs(session_id, claim_id, claim_token);
 
@@ -489,7 +493,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 52)
+VALUES ('lash-postgres-store', 53)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

@@ -13986,6 +13986,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::QueuedWorkStore::pending_session_work_ordering"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::QueuedWorkStore::pending_session_work_ordering"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers must project the two payload-free ordering keys used by the idle drain; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash::persistence::QueuedWorkStore::list_queued_work"
 kind = "function"
 availability = "default+all-features"
@@ -72116,27 +72125,18 @@ reason = "Concrete host class: runtime embedders and custom durable-store implem
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkBatchDraft::kind"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::kind"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete host class: runtime embedders and custom durable-store implementors configure, persist, inspect, and enforce queued-work batching semantics at the public store boundary."
+reason = "Concrete host class: custom durable-store implementors read the derived ingress family to persist the `work_kind` discriminator the ordering projection reads. Read-only on purpose -- the kind is derived from the payloads and has no setter, so a `control` row over turn work is unrepresentable rather than rejected; bundled examples use repository backends and never encode queued-work rows themselves."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkBatchDraft::with_authority"
 kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::with_authority"]
-area = "stores"
-disposition = "unused-justify"
-reason = "Concrete host class: runtime embedders and custom durable-store implementors configure, persist, inspect, and enforce queued-work batching semantics at the public store boundary."
-
-[[api]]
-symbol = "lash::persistence::QueuedWorkBatchDraft::with_kind"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::with_kind"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime embedders and custom durable-store implementors configure, persist, inspect, and enforce queued-work batching semantics at the public store boundary."
@@ -77501,3 +77501,59 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash_core::RuntimeEffectGroup::wake to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+
+[[api]]
+symbol = "lash_core::store::queued_work::PendingSessionWorkOrdering"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend-facing projection returned by custom QueuedWorkStore implementations so the runtime can arbitrate ingress families without payload hydration; repository examples use bundled stores."
+
+[[api]]
+symbol = "lash_core::store::queued_work::PendingSessionWorkOrdering::session_command"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend-facing scalar projection populated by custom QueuedWorkStore implementations and consumed by the runtime ordering decision; repository examples use bundled stores."
+
+[[api]]
+symbol = "lash_core::store::queued_work::PendingSessionWorkOrdering::session_command_precedes_turn_input"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Shared backend/runtime comparator keeps the timestamp-then-sequence rule identical across store implementations; repository examples reach it only through the idle drain."
+
+[[api]]
+symbol = "lash_core::store::queued_work::PendingSessionWorkOrdering::turn_input"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend-facing scalar projection populated by custom QueuedWorkStore implementations and consumed by the runtime ordering decision; repository examples use bundled stores."
+
+[[api]]
+symbol = "lash_core::store::queued_work::PendingWorkOrderingKey"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend-facing payload-free key that custom QueuedWorkStore implementations return to the runtime; repository examples use bundled stores."
+
+[[api]]
+symbol = "lash_core::store::queued_work::PendingWorkOrderingKey::enqueue_seq"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend-facing ordering tie-breaker populated by custom QueuedWorkStore implementations; repository examples use bundled stores."
+
+[[api]]
+symbol = "lash_core::store::queued_work::PendingWorkOrderingKey::enqueued_at_ms"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Backend-facing primary ordering value populated by custom QueuedWorkStore implementations; repository examples use bundled stores."

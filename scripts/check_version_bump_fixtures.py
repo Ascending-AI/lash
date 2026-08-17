@@ -48,6 +48,17 @@ MIGRATION_ENTRY = re.compile(r"^\s{4}SchemaMigration \{$", re.MULTILINE)
 STRING_LITERAL = re.compile(r'"([^"\\]*)"')
 LINE_CONTINUATION = re.compile(r"\\\n\s*")
 AS_STR_ARM = re.compile(r'^\s*Self::(\w+) => "([a-z_]+)",$', re.MULTILINE)
+# Which table each migration DDL puts an index on. `DROP TABLE` takes an index
+# with it, so this is what decides whether a post-floor index still needs an
+# explicit drop. The shape follows PostgreSQL's grammar:
+# `CREATE [UNIQUE] INDEX [CONCURRENTLY] [IF NOT EXISTS] name ON [ONLY] table`.
+INDEX_TARGET = re.compile(
+    r"CREATE (?:UNIQUE )?INDEX (?:CONCURRENTLY )?(?:IF NOT EXISTS )?(\w+)"
+    r"\s+ON (?:ONLY )?(\w+)"
+)
+# Rust line comments, including doc comments. Prose quoting DDL must not be read
+# as DDL.
+COMMENT_LINE = re.compile(r"^[ \t]*//.*$", re.MULTILINE)
 EXPECTED_KINDS_TABLE = re.compile(
     r"^EXPECTED_REFUSAL_KINDS = \{$(.*?)^\}$", re.MULTILINE | re.DOTALL
 )
@@ -139,6 +150,29 @@ def refusal_kind_literals(text: str, source: str) -> dict[str, str]:
     if len(set(literals.values())) != len(literals):
         raise CheckError(f"{source}: two RefusalKind variants share one wire string")
     return literals
+
+
+def index_targets(text: str, source: str) -> dict[str, str]:
+    """The table each `CREATE INDEX` in the migration DDL indexes.
+
+    Comment lines go first: this file's doc comments quote DDL in prose, and only
+    executed statement text may decide which table drop covers an index. A name
+    that resolves to more than one table is a hard error rather than a
+    last-match-wins lookup — a duplicate whose last occurrence happens to sit on
+    a `POST_FLOOR_TABLES` table would silently excuse the index from
+    `POST_FLOOR_INDEXES` and red the container gate instead.
+    """
+    targets: dict[str, set[str]] = {}
+    for index, table in INDEX_TARGET.findall(COMMENT_LINE.sub("", text)):
+        targets.setdefault(index, set()).add(table)
+    ambiguous = sorted(index for index, tables in targets.items() if len(tables) > 1)
+    if ambiguous:
+        raise CheckError(
+            f"{source}: CREATE INDEX names "
+            + ", ".join(ambiguous)
+            + " over more than one table, so which table drop covers the index is undecidable"
+        )
+    return {index: tables.pop() for index, tables in targets.items()}
 
 
 def expected_gate_kinds(text: str, source: str) -> dict[str, str]:
@@ -283,6 +317,38 @@ def check(repo: Path) -> tuple[bool, str]:
         if set(found) != set(expected):
             failures.append(named_set_failure(constant, derivation, found, expected))
 
+    # `POST_FLOOR_INDEXES` is the one fixture list nothing else can see. The
+    # older-store fixture drops the post-floor *tables*, which takes their indexes
+    # with them; every other post-floor relation has to be dropped by name or the
+    # fixture keeps a current-only artifact and the run reds on
+    # `current_artifact_count` — inside a container, after the whole seed phase.
+    # Derive that remainder from the migration DDL rather than trusting a hand-kept
+    # list, and reject names the table drops already cover: those would be a
+    # `DROP INDEX` of a relation that no longer exists.
+    indexed_table = index_targets(migrations_text, MIGRATIONS_SOURCE)
+    post_floor_tables = set(floor.source_missing_tables)
+    left_behind = tuple(
+        relation
+        for relation in floor.introduced_relations
+        if relation not in post_floor_tables
+        and indexed_table.get(relation) not in post_floor_tables
+    )
+    declared_indexes = string_array_constant(
+        fixture_text, FIXTURE_SOURCE, "POST_FLOOR_INDEXES"
+    )
+    if set(declared_indexes) != set(left_behind):
+        failures.append(
+            named_set_failure(
+                "POST_FLOOR_INDEXES",
+                f"the component-{floor.from_version} migration's introduced_relations that "
+                "dropping POST_FLOOR_TABLES leaves behind (a relation survives unless it is "
+                "one of those tables or its CREATE INDEX in "
+                f"{MIGRATIONS_SOURCE} names one)",
+                declared_indexes,
+                left_behind,
+            )
+        )
+
     # The refusal classifier decides which claim a refusal supports, and it does so
     # by selecting one of the gate's three error renderers. Presence alone is not
     # enough: a marker that also appears in a sibling's prose makes two kinds match
@@ -342,7 +408,8 @@ def check(repo: Path) -> tuple[bool, str]:
     return True, (
         f"version-bump fixture check passed: component {component_version}, floor "
         f"{floor.from_version}, {len(migrations)} explicit migrations, "
-        f"{len(renderers)} disjoint refusal kinds, {len(demanded)} asserted checkpoints"
+        f"{len(renderers)} disjoint refusal kinds, {len(declared_indexes)} explicitly "
+        f"dropped post-floor indexes, {len(demanded)} asserted checkpoints"
     )
 
 

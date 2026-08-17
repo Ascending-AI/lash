@@ -911,7 +911,7 @@ async fn apply_operation(
                 ExpectedQueuedWake {
                     wake,
                     delivery_policy: draft.delivery_policy,
-                    kind: draft.kind,
+                    kind: draft.kind(),
                     authority: draft.authority,
                     merge_key: draft.merge_key,
                     available_at_ms: draft.available_at_ms,
