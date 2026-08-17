@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_core::runtime::{
@@ -1035,6 +1035,124 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         Some(serde_json::json!({"fixture": 887})),
         "durable fixture semantic drift: runtime-effect replay payload changed"
     );
+}
+
+/// Requires the committed expectations to equal what this build writes today.
+///
+/// [`assert_semantics`] is a read-back law: it decodes the previous artifact and
+/// asserts the meaning recovered from it. A write-path payload-shape change is
+/// invisible to it, because the committed bytes keep round-tripping through the
+/// new types — an added field that is defaulted on read and skipped when absent
+/// decodes, re-encodes, and re-hashes exactly as the old writer wrote it. The
+/// schema-declaration gate cannot see it either: that gate only fires once a
+/// fixture artifact is already in the diff.
+///
+/// This is the converse law (FIG-1433). The caller re-seeds a throwaway store
+/// with the current code and hands the serialized expectations here, so a shape
+/// change fails in the diff that introduces it instead of being absorbed by the
+/// next unrelated regeneration.
+///
+/// Its reach is exactly [`ExpectedFixture`]: payloads that struct does not carry
+/// — trigger subscription/occurrence/delivery rows and process registrations —
+/// can still gain a field unflagged. The fixture README records that bound.
+pub fn assert_committed_expectations_match_current_writes(committed: &[u8], written_now: &[u8]) {
+    if committed == written_now {
+        return;
+    }
+    panic!(
+        "durable fixture write-shape drift: this build writes durable payloads the committed \
+         expectations do not carry.{}\nDecide first whether the new write shape is intended. If \
+         it is not, revert the shape change: regenerating here would absorb the drift into the \
+         committed surface, which is the failure FIG-1433 closed. Drift that appears or \
+         disappears between runs (without a code change) means nondeterminism in the fixture \
+         inputs — e.g. a non-empty HashMap reaching serialization, or a tie in the `ORDER BY \
+         generation` read — and must be fixed at the source, NOT by regenerating the fixture. \
+         Only once the change is intended, bump DURABLE_READ_FIXTURE_SCHEMA_VERSION and \
+         regenerate both backends:\n  {REGENERATION_COMMANDS}",
+        rendered_expectation_drift(committed, written_now)
+    );
+}
+
+const REGENERATION_COMMANDS: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p \
+     lash-sqlite-store --test durable_read_fixture regenerate_sqlite_durable_fixture -- \
+     --ignored --exact\n  LASH_POSTGRES_DATABASE_URL=<throwaway> \
+     LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p lash-postgres-store --test \
+     durable_read_fixture regenerate_postgres_durable_fixture -- --ignored --exact";
+
+fn rendered_expectation_drift(committed: &[u8], written_now: &[u8]) -> String {
+    let (Ok(committed), Ok(written_now)) = (
+        serde_json::from_slice::<serde_json::Value>(committed),
+        serde_json::from_slice::<serde_json::Value>(written_now),
+    ) else {
+        return String::new();
+    };
+    let mut drift = Vec::new();
+    collect_expectation_drift("", &committed, &written_now, &mut drift);
+    if drift.is_empty() {
+        return String::new();
+    }
+    drift.truncate(20);
+    format!("\n  - {}", drift.join("\n  - "))
+}
+
+fn collect_expectation_drift(
+    path: &str,
+    committed: &serde_json::Value,
+    written_now: &serde_json::Value,
+    drift: &mut Vec<String>,
+) {
+    match (committed, written_now) {
+        (serde_json::Value::Object(committed), serde_json::Value::Object(written_now)) => {
+            let keys = committed
+                .keys()
+                .chain(written_now.keys())
+                .collect::<BTreeSet<_>>();
+            for key in keys {
+                let child = format!("{path}/{key}");
+                match (committed.get(key), written_now.get(key)) {
+                    (Some(committed), Some(written_now)) => {
+                        collect_expectation_drift(&child, committed, written_now, drift)
+                    }
+                    (Some(committed), None) => drift.push(format!(
+                        "{child}: committed only ({})",
+                        rendered_drift_value(committed)
+                    )),
+                    (None, written_now) => drift.push(format!(
+                        "{child}: written by this build only ({})",
+                        written_now.map_or_else(String::new, rendered_drift_value)
+                    )),
+                }
+            }
+        }
+        (serde_json::Value::Array(committed), serde_json::Value::Array(written_now))
+            if committed.len() == written_now.len() =>
+        {
+            for (index, (committed, written_now)) in
+                committed.iter().zip(written_now.iter()).enumerate()
+            {
+                collect_expectation_drift(
+                    &format!("{path}/{index}"),
+                    committed,
+                    written_now,
+                    drift,
+                );
+            }
+        }
+        (committed, written_now) if committed != written_now => drift.push(format!(
+            "{path}: committed {} but this build writes {}",
+            rendered_drift_value(committed),
+            rendered_drift_value(written_now)
+        )),
+        _ => {}
+    }
+}
+
+fn rendered_drift_value(value: &serde_json::Value) -> String {
+    let mut rendered = value.to_string();
+    if rendered.chars().count() > 80 {
+        rendered = rendered.chars().take(77).collect::<String>() + "...";
+    }
+    rendered
 }
 
 fn assert_graph_payloads(nodes: &[lash_core::SessionNodeRecord]) {
