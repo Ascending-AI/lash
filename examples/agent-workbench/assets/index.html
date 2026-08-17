@@ -48,6 +48,12 @@
       --font-display: "Big Shoulders Display", "Helvetica Neue", sans-serif;
       --font-body:    "Spectral", "Iowan Old Style", Georgia, serif;
       --font-ui:      "Chivo Mono", ui-monospace, monospace;
+      /* aliases: inline code and code fences are machine text, so they use the
+         UI mono face and the raised panel fill rather than resolving to
+         nothing (these two were referenced but never defined). */
+      --font-mono:    var(--font-ui);
+      --panel-muted:  var(--form);
+      --raise:        oklch(0.94 0.018 90 / 0.02);
 
       color-scheme: dark;
     }
@@ -92,8 +98,8 @@
       border-right: 1px solid var(--line);
       background: var(--form);
       display: grid;
-      grid-template-rows: auto auto auto 1fr auto;
-      gap: var(--space-xl);
+      grid-template-rows: auto auto auto 1fr;
+      gap: var(--space-lg);
       padding: var(--space-lg);
       overflow: auto;
     }
@@ -223,12 +229,15 @@
     }
 
     .trigger-registration {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: baseline;
       border: 1px solid var(--line);
       border-radius: 7px;
-      padding: var(--space-2xs) var(--space-xs);
+      padding: var(--space-xs);
       background: var(--form-raised);
       font-family: var(--font-ui);
       font-size: 0.72rem;
+      row-gap: var(--space-2xs);
     }
 
     .trigger-registration[data-enabled="false"] { opacity: 0.58; }
@@ -238,26 +247,56 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .trigger-registration-name { min-width: 0; }
-    .trigger-registration-detail {
+    .trigger-registration-name {
       grid-column: 1 / -1;
+      grid-row: 1;
+      min-width: 0;
+      color: var(--chalk-mid);
+      line-height: 1.4;
+    }
+    .trigger-registration-detail {
+      grid-column: 1;
       grid-row: 2;
       color: var(--ash-text);
       font-size: 0.64rem;
     }
+    /* Expanded, the row stops hiding anything: the name wraps and the
+       truncated summary line is replaced by the full copyable identities. */
+    .trigger-registration[data-expanded="true"] .trigger-registration-name {
+      overflow: visible;
+      white-space: normal;
+    }
+    .trigger-registration[data-expanded="true"] .trigger-registration-detail { display: none; }
+    .trigger-registration:not([data-expanded="true"]) .trigger-registration-full { display: none; }
+
+    .trigger-registration-full {
+      grid-column: 1 / -1;
+      grid-row: 3;
+      display: grid;
+      gap: var(--space-2xs);
+      padding-top: var(--space-2xs);
+      border-top: 1px solid var(--line);
+    }
+
     .trigger-registration-actions {
       display: flex;
       grid-column: 2;
-      grid-row: 1;
+      grid-row: 2;
       gap: var(--space-3xs);
+      justify-content: flex-end;
     }
     .trigger-registration-actions button {
+      min-height: 1.5rem;
+      display: inline-grid;
+      place-items: center;
       border: 1px solid var(--line);
       border-radius: 5px;
       background: transparent;
       color: var(--ash-text);
       font: inherit;
-      padding: 0.2rem 0.35rem;
+      font-size: 0.66rem;
+      letter-spacing: 0.04em;
+      padding: 0 var(--space-2xs);
       cursor: pointer;
     }
     .trigger-registration-actions button:hover { color: var(--sodium); border-color: var(--sodium); }
@@ -440,6 +479,9 @@
       border-radius: 8px;
       background: var(--form-raised);
       display: grid;
+      /* auto rows in a stretched grid item absorb the leftover height, which
+         made a short card's rows drift out of line with a tall neighbour's */
+      align-content: start;
       gap: var(--space-2xs);
       padding: var(--space-sm);
     }
@@ -474,7 +516,11 @@
       border-radius: 999px;
       padding: 1px 0.5rem;
     }
-    .account-badge.zero { color: var(--ash-text); background: transparent; border: 1px solid var(--line); }
+    .account-badge {
+      border: 1px solid transparent;
+      line-height: 1.35;
+    }
+    .account-badge.zero { color: var(--ash-text); background: transparent; border-color: var(--line); }
 
     .account-authority {
       font-family: var(--font-ui);
@@ -514,13 +560,18 @@
     .inbox-msg .meta { font-family: var(--font-ui); font-size: 0.7rem; color: var(--ash-text); overflow-wrap: anywhere; }
     .msg-delete {
       flex: none;
+      display: grid;
+      place-items: center;
+      width: 1.5rem;
+      height: 1.5rem;
       border: 0;
+      border-radius: 4px;
       background: none;
       cursor: pointer;
       color: var(--ash-text);
       font-size: 1rem;
       line-height: 1;
-      padding: 0 var(--space-3xs);
+      padding: 0;
     }
     .msg-delete:hover { color: var(--error); }
     .inbox-empty { font-family: var(--font-ui); font-size: 0.74rem; color: var(--ash-text); }
@@ -587,12 +638,14 @@
       text-transform: uppercase;
       flex: none;
     }
-    .status-row span:last-child {
+    .status-row span:nth-child(2) {
+      flex: 1 1 auto;
       min-width: 0;
       color: var(--chalk-dim);
       text-align: right;
       overflow-wrap: anywhere;
     }
+    .status-row .copy-btn[hidden] { display: none; }
 
     .session-roster {
       display: grid;
@@ -719,8 +772,8 @@
     .help {
       display: grid;
       place-items: center;
-      width: 26px;
-      height: 26px;
+      width: 30px;
+      height: 30px;
       padding: 0;
       border: 1px solid var(--line);
       border-radius: 50%;
@@ -877,7 +930,8 @@
     .timeline {
       min-height: 0;
       overflow: auto;
-      padding: var(--space-md) var(--space-lg);
+      overscroll-behavior: contain;
+      padding: var(--space-md) var(--space-lg) var(--space-lg);
       scroll-behavior: smooth;
     }
 
@@ -904,18 +958,67 @@
     .message.trigger .msg-role,
     .message.error .msg-role { color: var(--error); }
 
+    /* System / process interleavings are machine facts, not conversation. They
+       get their own lane: boxed, left-aligned, mono, marked with a rule — never
+       centred prose that reads like a quiet agent reply. */
     .message.event {
       display: block;
-      padding: var(--space-xs) 0;
+      margin: var(--space-sm) 0;
+      padding: var(--space-xs) var(--space-sm);
+      border: 1px solid var(--line);
+      border-left: 2px solid var(--ash-mid);
+      border-radius: 4px;
+      background: var(--form);
     }
     .message.event .msg-role { display: none; }
     .message.event .msg-body {
       max-width: none;
-      text-align: center;
+      text-align: left;
+      white-space: normal;
       font-family: var(--font-ui);
-      font-size: 0.75rem;
-      letter-spacing: 0.04em;
+      font-size: 0.74rem;
+      letter-spacing: 0.02em;
       color: var(--ash-text);
+    }
+    .message.event.wake { border-left-color: var(--sodium); }
+    .message.event.wake .event-kind { color: var(--sodium-soft); }
+
+    .event-head {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-xs);
+      flex-wrap: wrap;
+    }
+
+    .event-kind {
+      flex: none;
+      color: var(--ash-text);
+      font-size: 0.64rem;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .event-title {
+      min-width: 0;
+      color: var(--chalk-dim);
+      overflow-wrap: anywhere;
+    }
+
+    .msg-time {
+      margin-left: auto;
+      flex: none;
+      color: var(--ash-mid);
+      font-family: var(--font-ui);
+      font-size: 0.66rem;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.04em;
+    }
+
+    .message:not(.event) .msg-time {
+      display: block;
+      margin: var(--space-3xs) 0 0;
+      text-align: left;
     }
 
     .msg-body {
@@ -1139,7 +1242,6 @@
 
     .tool-head span:last-child { color: var(--ash-text); font-size: 0.75rem; }
     .tool-summary { color: var(--chalk); overflow-wrap: anywhere; }
-    .tool details { border-top: 1px solid var(--line); padding-top: var(--space-xs); }
 
     .composer {
       border-top: 1px solid var(--line);
@@ -1160,7 +1262,7 @@
 
     .attach {
       min-width: 132px;
-      min-height: 34px;
+      min-height: 40px;
       padding: 0 var(--space-sm);
       border: 1px solid var(--line);
       border-radius: 4px;
@@ -1202,9 +1304,9 @@
     .composer textarea:focus-visible { box-shadow: var(--focus-ring); border-color: var(--line-strong); }
 
     .send {
-      min-width: 96px;
+      min-width: 132px;
       align-self: end;
-      min-height: 56px;
+      min-height: 40px;
       border: 0;
       border-radius: 4px;
       background: var(--sodium);
@@ -1284,6 +1386,7 @@
       color: var(--ash-text);
       border: 1px solid var(--line);
       border-radius: 999px;
+      min-height: 26px;
       padding: 0.2rem 0.6rem;
       cursor: pointer;
       user-select: none;
@@ -1302,7 +1405,7 @@
       overflow: auto;
       padding: var(--space-sm) var(--space-lg);
       border-bottom: 1px solid var(--line);
-      background: rgba(209, 169, 74, 0.035);
+      background: oklch(0.74 0.155 65 / 0.035);
     }
 
     .queued-work-heading {
@@ -1329,17 +1432,9 @@
       background: var(--form-deep);
     }
 
-    .queued-work-id {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      color: var(--chalk);
-    }
+    .queued-work-id .value-text { color: var(--chalk); }
 
-    .queued-work-meta { font-size: 0.75rem; color: var(--ash-text); }
+    .queued-work-meta { font-family: var(--font-ui); font-size: 0.72rem; color: var(--ash-text); }
     .queued-work-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
 
     .work-run {
@@ -1355,14 +1450,15 @@
       text-transform: uppercase;
       cursor: pointer;
     }
-    .work-run:hover { background: rgba(209, 169, 74, 0.18); }
+    .work-run:hover { background: oklch(0.74 0.155 65 / 0.18); }
     .work-run:disabled { opacity: 0.5; cursor: wait; }
 
     .work-list {
       min-width: 0;
       min-height: 0;
       overflow: auto;
-      padding: 0 var(--space-lg);
+      overscroll-behavior: contain;
+      padding: 0 var(--space-lg) var(--space-md);
     }
 
     .work-card {
@@ -1372,7 +1468,7 @@
       border-bottom: 1px solid var(--line);
     }
 
-    .work-card.selected { background: rgba(209, 169, 74, 0.08); }
+    .work-card.selected { background: oklch(0.74 0.155 65 / 0.08); }
 
     .work-top {
       display: grid;
@@ -1400,13 +1496,42 @@
       font-size: 0.92rem;
     }
 
+    /* Status is the one thing the rail must answer at a glance, so it is a
+       chip with its own colour rather than another line of ash-grey mono. */
     .work-state {
+      flex: none;
+      padding: 0.12rem 0.5rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--form-deep);
       font-family: var(--font-ui);
-      font-size: 0.75rem;
-      letter-spacing: 0.08em;
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--ash-text);
       white-space: nowrap;
+    }
+
+    .work-card.running .work-state {
+      color: var(--sodium);
+      border-color: var(--line-strong);
+      background: var(--sodium-tint);
+    }
+    .work-card.succeeded .work-state,
+    .work-card.completed .work-state,
+    .work-card.observed .work-state,
+    .work-card.done .work-state {
+      color: var(--lichen);
+      border-color: oklch(0.66 0.060 130 / 0.42);
+      background: oklch(0.66 0.060 130 / 0.10);
+    }
+    .work-card.failed .work-state,
+    .work-card.cancelled .work-state,
+    .work-card.canceled .work-state {
+      color: var(--error);
+      border-color: var(--line-danger);
+      background: var(--error-tint);
     }
 
     .work-cancel {
@@ -1430,7 +1555,7 @@
       height: 2rem;
       border: 1px solid var(--line);
       border-radius: 4px;
-      background: rgba(255, 255, 255, 0.018);
+      background: var(--raise);
       display: grid;
       place-items: center;
       cursor: pointer;
@@ -1489,6 +1614,14 @@
     }
 
     .work-events.error { color: var(--error); }
+
+    .work-ids {
+      display: grid;
+      gap: var(--space-3xs);
+      margin-top: var(--space-3xs);
+      padding-top: var(--space-2xs);
+      border-top: 1px dotted var(--line);
+    }
 
     .execution-explorer[hidden] { display: none; }
 
@@ -1582,7 +1715,7 @@
       min-height: 1.7rem;
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.018);
+      background: var(--raise);
       color: var(--ash-text);
       font-family: var(--font-ui);
       font-size: 0.68rem;
@@ -1629,7 +1762,7 @@
       min-width: 2rem;
       border: 1px solid var(--line);
       border-radius: 4px;
-      background: rgba(255, 255, 255, 0.018);
+      background: var(--raise);
       color: var(--chalk);
       cursor: pointer;
       display: grid;
@@ -1771,7 +1904,7 @@
     .diagram-node.completed,
     .diagram-node.succeeded,
     .diagram-node.done,
-    .diagram-node.observed { border-color: rgba(139, 179, 120, 0.76); }
+    .diagram-node.observed { border-color: oklch(0.66 0.060 130 / 0.76); }
     .diagram-node.failed { border-color: var(--error); }
     .diagram-node.cancelled,
     .diagram-node.canceled { border-color: var(--line-danger); }
@@ -1867,6 +2000,17 @@
       overflow-wrap: anywhere;
     }
 
+    /* The rails are narrow; a full-size empty box there reads as a broken
+       card rather than as "nothing here yet". */
+    .queued-work-list .empty,
+    .work-list .empty {
+      margin: 0;
+      padding: var(--space-sm);
+      text-align: left;
+      font-size: 0.74rem;
+    }
+    .work-list .empty { margin: var(--space-md) 0; }
+
     /* A placeholder that reports the connection, not the session, must not read
        as the settled "nothing here" box. */
     .empty.pending { border-style: solid; color: var(--chalk-dim); }
@@ -1939,6 +2083,11 @@
       overflow-wrap: anywhere;
     }
 
+    .inspector-grid > .value-row {
+      padding-top: var(--space-xs);
+      border-top: 1px solid var(--line);
+    }
+
     .inspector-links {
       display: flex;
       flex-wrap: wrap;
@@ -1949,7 +2098,7 @@
       min-height: 1.8rem;
       border: 1px solid var(--line);
       border-radius: 4px;
-      background: rgba(255, 255, 255, 0.018);
+      background: var(--raise);
       color: var(--sodium-soft);
       font-family: var(--font-ui);
       font-size: 0.7rem;
@@ -1961,6 +2110,150 @@
       border-color: var(--line-strong);
       background: var(--sodium-tint);
     }
+
+    /* ─── shared: nothing is truncated without recourse ───
+       Every abbreviated identity in the console (sha256 ids, trigger keys,
+       process ids, graph keys, session ids) renders as a value row: the full
+       string is in the DOM and in the title, the visible text is elided in the
+       middle so head *and* tail stay distinguishing, and a copy control puts
+       the untruncated value on the clipboard. Long payloads get a disclosure
+       instead, collapsed to a one-line summary. */
+
+    .value-row {
+      --value-key-width: 4.6rem;
+      display: grid;
+      /* a fixed key column so stacked identities line up instead of stepping */
+      grid-template-columns: var(--value-key-width) minmax(0, 1fr) auto;
+      align-items: baseline;
+      gap: var(--space-2xs) var(--space-xs);
+      font-family: var(--font-ui);
+      font-size: 0.68rem;
+      line-height: 1.5;
+    }
+
+    /* The rail is ~250px wide: a side-by-side key column would leave a
+       sha256 four characters per line. Stack the key over its value instead. */
+    .trigger-registration-full .value-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .trigger-registration-full .value-key { grid-column: 1 / -1; }
+    .trigger-registration-full .value-row + .value-row {
+      padding-top: var(--space-2xs);
+      border-top: 1px solid var(--line);
+    }
+    .inspector-grid > .value-row { --value-key-width: 5rem; }
+
+    .value-key {
+      min-width: 0;
+      color: var(--ash-text);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .value-text {
+      min-width: 0;
+      color: var(--chalk-mid);
+      overflow-wrap: anywhere;
+      -webkit-user-select: all;
+      user-select: all;
+    }
+
+    .copy-btn {
+      flex: none;
+      align-self: center;
+      min-width: 1.6rem;
+      min-height: 1.6rem;
+      display: inline-grid;
+      place-items: center;
+      padding: 0 var(--space-2xs);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ash-text);
+      font-family: var(--font-ui);
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: color 120ms ease-out, border-color 120ms ease-out;
+    }
+    .copy-btn:hover { color: var(--sodium); border-color: var(--line-strong); }
+    .copy-btn[data-copied="true"] { color: var(--lichen); border-color: var(--lichen); }
+    .copy-btn[data-copied="failed"] { color: var(--error); border-color: var(--line-danger); }
+
+    .payload {
+      margin: var(--space-xs) 0 0;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--form-deep);
+      font-family: var(--font-ui);
+      font-size: 0.7rem;
+    }
+
+    .payload > summary {
+      display: flex;
+      align-items: center;
+      gap: var(--space-xs);
+      padding: var(--space-2xs) var(--space-xs);
+      color: var(--ash-text);
+      cursor: pointer;
+      list-style: none;
+      letter-spacing: 0.04em;
+    }
+    .payload > summary::-webkit-details-marker { display: none; }
+    .payload > summary::before {
+      content: "▸";
+      flex: none;
+      color: var(--sodium);
+      font-size: 0.62rem;
+    }
+    .payload[open] > summary::before { content: "▾"; }
+    .payload > summary:hover { color: var(--chalk); }
+    .payload > summary .copy-btn { margin-left: auto; }
+
+    .payload pre {
+      margin: 0;
+      max-height: 22rem;
+      overflow: auto;
+      padding: var(--space-xs) var(--space-sm);
+      border-top: 1px solid var(--line);
+      color: var(--chalk-mid);
+      font-size: 0.72rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      -webkit-user-select: all;
+      user-select: all;
+    }
+
+    /* ─── scrollbars: thin and in-palette, so a scrolling column does not
+       hand the dark shell a bright system-grey slab ─── */
+
+    .timeline,
+    .work-list,
+    .left,
+    .accounts-grid,
+    .queued-work-ledger,
+    .node-inspector,
+    .execution-lineage,
+    .payload pre,
+    .reasoning pre,
+    .code-block pre,
+    .tool pre,
+    .composer textarea {
+      scrollbar-width: thin;
+      scrollbar-color: var(--ash) transparent;
+    }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: var(--ash);
+      background-clip: padding-box;
+      border: 3px solid transparent;
+      border-radius: 999px;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--ash-mid); background-clip: padding-box; }
+    ::-webkit-scrollbar-corner { background: transparent; }
 
     @media (max-width: 1180px) {
       .shell {
@@ -2017,6 +2310,9 @@
       .trigger-bay {
         justify-items: stretch;
       }
+      /* stretched, the pad must fill its row too, or the buttons hug the left
+         edge while the caption underneath centres on the full width */
+      .trigger-buttons { max-width: none; }
       .trigger-caption { justify-self: center; }
       .status-stack { align-self: stretch; }
       .topbar {
@@ -2112,11 +2408,11 @@
         </label>
       </form>
 
-      <div></div>
-
       <div class="status-stack">
         <div class="status-row"><span>web</span><span id="webState">checking</span></div>
-        <div class="status-row"><span>session</span><span id="sessionId">connecting…</span></div>
+        <div class="status-row"><span>session</span><span id="sessionId">connecting…</span><button
+                id="sessionCopy" class="copy-btn" type="button" hidden
+                title="Copy the full session id">copy</button></div>
         <div class="status-row"><span>dialect</span><span id="sessionDialect" class="session-dialect-badge">connecting…</span></div>
         <section class="session-roster" aria-label="Sessions">
           <div class="session-roster-head">sessions</div>
@@ -2203,6 +2499,8 @@
             <div class="execution-title-row">
               <div id="executionTitle" class="execution-title">Execution Explorer</div>
               <div id="executionStatus" class="execution-status">idle</div>
+              <button id="executionCopyId" class="copy-btn" type="button" hidden
+                      title="Copy the full execution graph key">copy id</button>
             </div>
             <div id="executionMeta" class="execution-meta"></div>
             <nav id="executionLineage" class="execution-lineage" aria-label="Execution lineage"></nav>
@@ -2315,6 +2613,7 @@
     // turn's inline code and floods the rail, so it starts hidden.
     const workFilters = { process: true, foreground: false };
     let lastWorkItems = [];
+    let lastWorkSignature = "";
     workFilterProcess.addEventListener("change", () => {
       workFilters.process = workFilterProcess.checked;
       renderWork(lastWorkItems);
@@ -2327,6 +2626,16 @@
     const executionTitle = document.getElementById("executionTitle");
     const executionStatus = document.getElementById("executionStatus");
     const executionMeta = document.getElementById("executionMeta");
+    const executionCopyId = document.getElementById("executionCopyId");
+
+    /* The explorer header shows an abbreviated graph key; the full one stays
+       one hover or one click away. */
+    function setExecutionIdentity(graphKey) {
+      const key = String(graphKey || "");
+      executionMeta.title = key ? "execution graph key: " + key : "";
+      executionCopyId.hidden = !key;
+      executionCopyId.dataset.copyValue = key;
+    }
     const executionLineage = document.getElementById("executionLineage");
     const executionCanvas = document.getElementById("executionCanvas");
     const nodeInspector = document.getElementById("nodeInspector");
@@ -2361,6 +2670,7 @@
     const busyText = document.getElementById("busyText");
     const webState = document.getElementById("webState");
     const sessionId = document.getElementById("sessionId");
+    const sessionCopy = document.getElementById("sessionCopy");
     const usageTotal = document.getElementById("usageTotal");
     const usageBreakdown = document.getElementById("usageBreakdown");
     const executionScorecard = document.getElementById("executionScorecard");
@@ -2802,6 +3112,14 @@
         session: knownSessionLabel,
         web: knownWebState
       }));
+      /* The session id is the value most often carried out of this console into
+         a curl or a log query, and it is long enough to wrap. Offer it whole,
+         but only once the shell actually knows one. */
+      const shownSession = sessionId.textContent || "";
+      const copyable = Boolean(knownSessionLabel)
+        && shownSession === knownSessionLabel;
+      sessionCopy.hidden = !copyable;
+      sessionCopy.dataset.copyValue = copyable ? knownSessionLabel : "";
     }
 
     const renderedMessages = new Set();
@@ -2916,6 +3234,209 @@
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
+    }
+
+    /* ── truncation with recourse ──────────────────────────────────────────
+       Every abbreviated identity in this console keeps its full value in the
+       DOM: the title carries it, a copy control puts it on the clipboard, and
+       the visible form elides the middle so two ids sharing a prefix (or a
+       suffix) stay distinguishable. Nothing is shortened destructively. */
+
+    function middleEllipsis(value, max = 30) {
+      const text = String(value ?? "");
+      if (text.length <= max) return text;
+      const head = Math.ceil((max - 1) / 2);
+      const tail = max - 1 - head;
+      return text.slice(0, head) + "…" + text.slice(text.length - tail);
+    }
+
+    function copyValueToClipboard(text) {
+      if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+      return new Promise((resolve, reject) => {
+        const scratch = document.createElement("textarea");
+        scratch.value = text;
+        scratch.setAttribute("readonly", "");
+        scratch.style.position = "fixed";
+        scratch.style.top = "-1000px";
+        document.body.appendChild(scratch);
+        scratch.select();
+        const copied = document.execCommand && document.execCommand("copy");
+        scratch.remove();
+        if (copied) resolve(); else reject(new Error("clipboard unavailable"));
+      });
+    }
+
+    function flashCopyState(button, state) {
+      const label = button.dataset.copyLabel || button.textContent || "copy";
+      button.dataset.copyLabel = label;
+      button.dataset.copied = state;
+      button.textContent = state === "true" ? "copied" : "failed";
+      clearTimeout(Number(button.dataset.copyTimer) || 0);
+      button.dataset.copyTimer = String(setTimeout(() => {
+        delete button.dataset.copied;
+        button.textContent = label;
+      }, 1400));
+    }
+
+    /* One delegated handler serves every copy control on the page, so any
+       render path can mint one from a data attribute alone — including the
+       ones whose DOM shape is pinned by a projection contract. It listens in
+       the capture phase because copy controls live inside elements that are
+       themselves clickable (a work card opens its graph, a <summary> toggles
+       its disclosure); copying must never also fire the container's action. */
+    document.addEventListener("click", event => {
+      const button = event.target.closest?.("[data-copy-value]");
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      copyValueToClipboard(button.dataset.copyValue || "").then(
+        () => flashCopyState(button, "true"),
+        () => flashCopyState(button, "failed")
+      );
+    }, true);
+
+    function copyButton(value, label = "copy") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy-btn";
+      button.textContent = label;
+      button.dataset.copyValue = String(value ?? "");
+      button.title = "Copy the full value";
+      button.setAttribute("aria-label", "Copy the full value to the clipboard");
+      return button;
+    }
+
+    function valueRow(key, value, opts = {}) {
+      const row = document.createElement("div");
+      row.className = "value-row";
+      const name = document.createElement("span");
+      name.className = "value-key";
+      name.textContent = key;
+      const text = String(value ?? "");
+      const shown = document.createElement("span");
+      shown.className = "value-text";
+      shown.textContent = opts.max === 0 ? text : middleEllipsis(text, opts.max || 30);
+      shown.title = text;
+      row.append(name, shown);
+      if (text) row.appendChild(copyButton(text));
+      return row;
+    }
+
+    function looksLikeJson(text) {
+      const trimmed = String(text || "").trim();
+      return (trimmed.startsWith("{") && trimmed.endsWith("}"))
+        || (trimmed.startsWith("[") && trimmed.endsWith("]"));
+    }
+
+    function prettyJson(text) {
+      try {
+        return JSON.stringify(JSON.parse(text), null, 2);
+      } catch (_) {
+        return String(text ?? "");
+      }
+    }
+
+    function payloadSummaryLabel(kind, body) {
+      const lines = body ? body.split("\n").length : 0;
+      return kind
+        + " · " + (looksLikeJson(body) ? "json" : "text")
+        + " · " + body.length + " chars"
+        + (lines > 1 ? " · " + lines + " lines" : "");
+    }
+
+    /* Long payloads — wake inputs, event bodies, raw errors — collapse to one
+       summary line. The body is a real, selectable, copyable block. */
+    function payloadDisclosure(kind, text, opts = {}) {
+      const body = looksLikeJson(text) ? prettyJson(text) : String(text ?? "");
+      const details = document.createElement("details");
+      details.className = "payload";
+      details.open = Boolean(opts.open);
+      const summary = document.createElement("summary");
+      summary.textContent = payloadSummaryLabel(kind, body);
+      summary.append(copyButton(body));
+      const pre = document.createElement("pre");
+      pre.textContent = body;
+      details.append(summary, pre);
+      return details;
+    }
+
+    function formatClockTime(value) {
+      if (!value) return "";
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return "";
+      /* 24h, zero-padded: a runtime console reads clocks in columns, and
+         "12:40:39 PM" is three characters of furniture per row. */
+      return parsed.toLocaleTimeString([], {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+    }
+
+    function timeStamp(value) {
+      const shown = formatClockTime(value);
+      if (!shown) return null;
+      const stamp = document.createElement("time");
+      stamp.className = "msg-time";
+      stamp.dateTime = String(value);
+      stamp.textContent = shown;
+      stamp.title = String(value);
+      return stamp;
+    }
+
+    /* A process wake reaches the transcript as one opaque blob:
+         Background process wake / Process: <id> / Event: <type> #<n> /
+         Wake input: / <payload>
+       Verbatim, that buries a 100-char process id and a JSON payload in prose.
+       Parsed, it becomes a labelled header, a copyable id and a collapsed
+       payload. */
+    function parseProcessWake(text) {
+      const lines = String(text || "").split("\n");
+      if (lines[0]?.trim() !== "Background process wake") return null;
+      const wake = { processId: "", event: "", input: "" };
+      let index = 1;
+      while (index < lines.length) {
+        const line = lines[index];
+        if (line.startsWith("Process: ")) { wake.processId = line.slice(9).trim(); index += 1; continue; }
+        if (line.startsWith("Event: ")) { wake.event = line.slice(7).trim(); index += 1; continue; }
+        if (line.startsWith("Wake input:")) { index += 1; }
+        break;
+      }
+      wake.input = lines.slice(index).join("\n");
+      return wake;
+    }
+
+    /* The one renderer for the system/process lane: a boxed, left-aligned,
+       mono row that can never be mistaken for an agent reply. */
+    function fillEventLane(node, body, kind, text, at) {
+      const wake = parseProcessWake(text);
+      const head = document.createElement("div");
+      head.className = "event-head";
+      const kindLabelNode = document.createElement("span");
+      kindLabelNode.className = "event-kind";
+      const title = document.createElement("span");
+      title.className = "event-title";
+      const raw = String(text ?? "");
+      if (wake) {
+        node.classList.add("wake");
+        kindLabelNode.textContent = "process wake";
+        title.textContent = wake.event || "process.wake";
+      } else {
+        kindLabelNode.textContent = kind || "event";
+        title.textContent = raw.split("\n")[0] || "";
+      }
+      head.append(kindLabelNode, title);
+      const stamp = timeStamp(at);
+      if (stamp) head.appendChild(stamp);
+      body.appendChild(head);
+      if (wake) {
+        if (wake.processId) body.appendChild(valueRow("process", wake.processId, { max: 34 }));
+        if (wake.input.trim()) body.appendChild(payloadDisclosure("wake input", wake.input));
+        return;
+      }
+      const rest = raw.split("\n").slice(1).join("\n");
+      if (rest.trim()) body.appendChild(payloadDisclosure("detail", rest));
     }
 
     function renderInlineMarkdown(value) {
@@ -3063,8 +3584,16 @@
       role.textContent = roleLabel(message.role);
       const body = document.createElement("div");
       body.className = "msg-body";
-      setMessageBody(body, message.role, message.text);
-      renderMessageAttachments(body, message.attachments);
+      if (message.role === "event" && typeof fillEventLane === "function") {
+        fillEventLane(node, body, "event", message.text, message.at);
+      } else {
+        setMessageBody(body, message.role, message.text);
+        if (typeof renderMessageAttachments === "function") {
+          renderMessageAttachments(body, message.attachments);
+        }
+        const stamp = typeof timeStamp === "function" ? timeStamp(message.at) : null;
+        if (stamp) role.appendChild(stamp);
+      }
       node.append(role, body);
       timeline.appendChild(node);
       scrollToEnd();
@@ -3087,7 +3616,12 @@
       role.textContent = "error";
       const body = document.createElement("div");
       body.className = "msg-body";
-      body.textContent = cleanErrorText(message);
+      const rawError = String(message || "request failed").trim();
+      const shownError = cleanErrorText(message);
+      body.textContent = shownError;
+      if (rawError && rawError !== shownError && typeof payloadDisclosure === "function") {
+        body.appendChild(payloadDisclosure("full error", rawError));
+      }
       if (opts && opts.retry && lastRequest) {
         const retry = document.createElement("button");
         retry.className = "retry";
@@ -3362,7 +3896,22 @@
         : running
         ? "Tool running"
         : (ok ? summarizeToolResult(event.name, result) : summarizeToolFailure(result));
-      el.querySelector("pre").textContent = JSON.stringify(compactToolPayload(event), null, 2);
+      const payloadText = JSON.stringify(compactToolPayload(event), null, 2);
+      if (typeof payloadDisclosure === "function") {
+        const oldPayload = el.querySelector("details, .payload");
+        const nextPayload = payloadDisclosure(
+          "JSON payload",
+          payloadText,
+          { open: oldPayload ? oldPayload.open : false }
+        );
+        if (oldPayload) {
+          oldPayload.replaceWith(nextPayload);
+        } else {
+          el.appendChild(nextPayload);
+        }
+      }
+      const pre = el.querySelector("pre");
+      if (pre) pre.textContent = payloadText;
     }
 
     function summarizeToolResult(name, result) {
@@ -3611,7 +4160,11 @@
       role.textContent = "event";
       const body = document.createElement("div");
       body.className = "msg-body";
-      body.textContent = detail ? `${label} · ${detail}` : label;
+      if (typeof fillEventLane === "function") {
+        fillEventLane(node, body, label, detail || "", Date.now());
+      } else {
+        body.textContent = detail ? `${label} · ${detail}` : label;
+      }
       node.append(role, body);
       timeline.appendChild(node);
       scrollToEnd();
@@ -4229,7 +4782,8 @@
         attachButton.classList.remove("uploading");
         attachButton.classList.add("ready");
         attachButton.textContent = "attached · " + file.name;
-        attachButton.title = file.name + " · " + uploaded.attachment.byte_len + " bytes · click to replace";
+        attachButton.title = file.name + " · " + uploaded.attachment.byte_len + " bytes · id "
+          + uploaded.attachment.id + " · click to replace";
       } catch (_) {
         renderError("the PNG could not be attached");
         clearAttachment();
@@ -4310,11 +4864,33 @@
       button.addEventListener("click", fireButtonTrigger);
     }
 
+    /* Expansion is view state the 1.4s poll must not destroy. Two guards:
+       an unchanged payload does not re-render at all, and a re-render restores
+       the rows the reader had opened. */
+    const expandedTriggerRows = new Set();
+    let lastTriggerSignature = "";
+
+    function restoreTriggerExpansion() {
+      for (const row of triggerRegistrations.querySelectorAll(".trigger-registration")) {
+        if (!expandedTriggerRows.has(row.dataset.triggerSubscriptionKey)) continue;
+        row.dataset.expanded = "true";
+        const button = row.querySelector("[data-trigger-expand]");
+        if (!button) continue;
+        button.textContent = "collapse";
+        button.setAttribute("aria-expanded", "true");
+      }
+    }
+
     async function loadTriggers() {
       try {
         const response = await fetch("/api/triggers");
         if (!response.ok) return;
-        renderTriggers(await response.json());
+        const registrations = await response.json();
+        const signature = JSON.stringify(registrations);
+        if (signature === lastTriggerSignature) return;
+        lastTriggerSignature = signature;
+        renderTriggers(registrations);
+        restoreTriggerExpansion();
       } catch (_) { /* polling retries */ }
     }
 
@@ -4422,10 +4998,23 @@
       ];
       if (registration.name) titleDetails.push(["alias", registration.name]);
       titleDetails.push(["incarnation", registration.incarnation || "unknown"]);
+      /* The untruncated projection. `detail` is the one-line convenience; this
+         is what the expanded row renders, one copyable value per line, so no
+         identity in the rail is reachable only as an ellipsis. */
+      const full = [
+        ["target", processName],
+        ["source", sourceType + (sourceSummary ? " (" + sourceSummary + ")" : "")],
+        ["id", subscriptionId],
+        ["trigger key", subscriptionKey],
+        ["scope", scope]
+      ];
+      if (registration.name) full.push(["alias", registration.name]);
+      full.push(["incarnation", registration.incarnation || "unknown"]);
       return {
         name: processName + " ← " + sourceType + (sourceSummary ? " (" + sourceSummary + ")" : ""),
         detail: details.map(([label, value]) => label + " " + value).join(" · "),
-        title: titleDetails.map(([label, value]) => label + " " + value).join(" · ")
+        title: titleDetails.map(([label, value]) => label + " " + value).join(" · "),
+        full
       };
     }
     // END WORKBENCH_TRIGGER_REGISTRATION_PROJECTION
@@ -4448,15 +5037,22 @@
         row.className = "trigger-registration";
         row.dataset.enabled = String(registration.enabled);
         row.dataset.triggerSubscriptionKey = subscriptionKey;
+        row.dataset.expanded = "false";
         const name = document.createElement("span");
         name.className = "trigger-registration-name";
         name.textContent = model.name;
+        name.title = model.name;
         const detail = document.createElement("span");
         detail.className = "trigger-registration-detail";
         detail.textContent = model.detail;
         detail.title = model.title;
         const actions = document.createElement("span");
         actions.className = "trigger-registration-actions";
+        const expand = document.createElement("button");
+        expand.type = "button";
+        expand.textContent = "expand";
+        expand.title = "Show the full, copyable registration identity";
+        expand.dataset.triggerExpand = "1";
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.textContent = registration.enabled ? "disable" : "re-enable";
@@ -4465,8 +5061,40 @@
         remove.type = "button";
         remove.textContent = "delete";
         remove.addEventListener("click", () => deleteTrigger(subscriptionKey));
-        actions.append(toggle, remove);
-        row.append(name, detail, actions);
+        actions.append(expand, toggle, remove);
+        /* The expanded panel is the whole truth about this registration: each
+           identity in full, selectable, with a copy control. The collapsed
+           summary above it is only a convenience. */
+        const full = document.createElement("div");
+        full.className = "trigger-registration-full";
+        for (const entry of model.full || []) {
+          const line = document.createElement("div");
+          line.className = "value-row";
+          const key = document.createElement("span");
+          key.className = "value-key";
+          key.textContent = entry[0];
+          const value = document.createElement("span");
+          value.className = "value-text";
+          value.textContent = entry[1];
+          value.title = entry[1];
+          const copy = document.createElement("button");
+          copy.type = "button";
+          copy.className = "copy-btn";
+          copy.textContent = "copy";
+          copy.title = "Copy the full value";
+          copy.dataset.copyValue = entry[1];
+          line.append(key, value, copy);
+          full.appendChild(line);
+        }
+        expand.addEventListener("click", () => {
+          const next = row.dataset.expanded !== "true";
+          row.dataset.expanded = String(next);
+          expand.textContent = next ? "collapse" : "expand";
+          expand.setAttribute("aria-expanded", String(next));
+          if (next) expandedTriggerRows.add(subscriptionKey);
+          else expandedTriggerRows.delete(subscriptionKey);
+        });
+        row.append(name, detail, actions, full);
         triggerRegistrations.appendChild(row);
       }
     }
@@ -5018,12 +5646,15 @@
 
     function formatTime(ms) {
       if (!ms) return "";
-      return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return formatClockTime(ms);
     }
 
+    /* Head-only truncation renders every namespaced id as the same constant
+       prefix ("process:…"). Keep both ends so two ids stay tellable apart; the
+       full value is always on the card's title and its copy control. */
     function shortId(value) {
       const text = String(value || "").replace(/^process:/, "");
-      return text.length > 12 ? text.slice(0, 8) + "..." : text;
+      return middleEllipsis(text, 16);
     }
 
     function renderQueuedWork(batches) {
@@ -5040,10 +5671,8 @@
         const card = document.createElement("article");
         card.className = "queued-work-batch";
 
-        const id = document.createElement("div");
-        id.className = "queued-work-id";
-        id.textContent = batch.batch_id;
-        id.title = batch.batch_id;
+        const id = valueRow("batch", batch.batch_id, { max: 26 });
+        id.className = "value-row queued-work-id";
 
         const payloadKind = batch.items?.[0]?.payload?.type || "queued_work";
         const meta = document.createElement("div");
@@ -5091,12 +5720,22 @@
       }
     }
 
+    /* The rails poll every 1.4s. Rebuilding their DOM on every tick cancels
+       an in-progress text selection and resets a copy control mid-flash, so an
+       unchanged payload is not re-rendered. */
+    let lastQueuedWorkSignature = "";
+
     async function refreshQueuedWork() {
       try {
         const response = await fetch("/api/queued-work");
         if (!response.ok) throw new Error("queued-work request failed");
-        renderQueuedWork(await response.json());
+        const batches = await response.json();
+        const signature = JSON.stringify(batches);
+        if (signature === lastQueuedWorkSignature) return;
+        lastQueuedWorkSignature = signature;
+        renderQueuedWork(batches);
       } catch (_) {
+        lastQueuedWorkSignature = "";
         queuedWorkCount.textContent = "updates paused";
       }
     }
@@ -5191,11 +5830,24 @@
         meta.className = "work-meta";
         meta.textContent = row.meta;
 
-        const events = document.createElement("div");
-        events.className = "work-events" + (row.error ? " error" : "");
-        events.textContent = row.detail;
+        card.append(top, meta);
+        if (row.detail) {
+          const events = document.createElement("div");
+          events.className = "work-events" + (row.error ? " error" : "");
+          events.textContent = row.detail;
+          card.appendChild(events);
+        }
 
-        card.append(top, meta, events);
+        /* The rail's labels are elided to one line; the identities behind them
+           are not. Each card carries its full graph key and process id, both
+           copyable, so a card can be correlated with a trace or an API call. */
+        const ids = document.createElement("div");
+        ids.className = "work-ids";
+        if (row.graph_key) ids.appendChild(valueRow("graph", row.graph_key, { max: 28 }));
+        if (row.process_id && row.process_id !== row.graph_key) {
+          ids.appendChild(valueRow("process", row.process_id, { max: 28 }));
+        }
+        if (ids.childElementCount) card.appendChild(ids);
         workList.appendChild(card);
       }
       if (!selectedWorkKey && rows[0]) selectedWorkKey = rows[0].key;
@@ -5221,7 +5873,11 @@
             graph.child_count ? graph.child_count + " children" : "",
             graph.scope?.session_id ? "session " + shortId(graph.scope.session_id) : ""
           ].filter(Boolean).join(" · "),
-          detail: "graph " + shortId(graph.graph_key)
+          /* the graph key is rendered as a copyable identity on the card, so
+             the detail line carries the entry point instead of repeating it */
+          detail: graph.entry_name && graph.entry_name !== graph.title
+            ? "entry " + graph.entry_name
+            : ""
         });
       }
       for (const item of workItems || []) {
@@ -5266,6 +5922,7 @@
       executionTitle.textContent = "Execution Explorer";
       executionStatus.textContent = "loading";
       executionMeta.textContent = "id " + shortId(graphKey);
+      setExecutionIdentity(graphKey);
       renderLineage(graphKey);
       renderDiagramEmpty("loading");
       if (!opts.keepFocus) executionClose.focus();
@@ -5273,6 +5930,7 @@
     }
 
     function closeExecutionExplorer() {
+      setExecutionIdentity("");
       saveExecutionViewState();
       executionExplorer.hidden = true;
       mainPanel.classList.remove("explorer-open");
@@ -5305,6 +5963,7 @@
       const nodes = normalizedDiagramNodes(graph);
       const edges = normalizedDiagramEdges(graph, nodes);
       executionTitle.textContent = executionTitleForGraph(graph);
+      executionTitle.title = executionTitle.textContent;
       executionStatus.textContent = statusLabel(graph.status || "observed");
       executionMeta.textContent = [
         kindLabel(graphKind(graph)),
@@ -5313,6 +5972,7 @@
         (graph.children || []).length ? (graph.children || []).length + " child links" : "",
         graph.graph_key ? shortId(graph.graph_key) : ""
       ].filter(Boolean).join(" · ");
+      setExecutionIdentity(graph.graph_key || activeExecutionGraphKey || "");
       renderLineage(graph.graph_key);
 
       if (!nodes.length) {
@@ -5614,6 +6274,7 @@
         const label = document.createElement("div");
         label.className = "diagram-edge-label" + (edgeClass ? " " + edgeClass : "");
         label.textContent = edge.label;
+        label.title = edge.label;
         label.style.left = geometry.labelX + "px";
         label.style.top = geometry.labelY + "px";
         stage.appendChild(label);
@@ -5704,10 +6365,6 @@
         ["kind", kindLabel(node.kind)],
         ["duration", node.duration_ms !== null && node.duration_ms !== undefined ? node.duration_ms + "ms" : "—"],
         ["occurrence", node.occurrence || "—"],
-        ["node id", node.id],
-        ["bridge", node.bridge_graph_key || "—"],
-        ["session", node.child_session_id || executionView.graph?.scope?.session_id || "—"],
-        ["error", node.latest_error || "—"],
       ];
       for (const [key, value] of rows) {
         const row = document.createElement("div");
@@ -5719,7 +6376,21 @@
         row.append(k, v);
         grid.appendChild(row);
       }
+      /* Identities are what an operator carries out of the inspector into a
+         trace or a curl, so they are elided but never lost. */
+      const identities = [
+        ["node id", node.id],
+        ["bridge", node.bridge_graph_key || ""],
+        ["session", node.child_session_id || executionView.graph?.scope?.session_id || ""]
+      ];
+      for (const [key, value] of identities) {
+        if (!value) continue;
+        grid.appendChild(valueRow(key, value, { max: 28 }));
+      }
       nodeInspector.append(title, description, grid);
+      if (node.latest_error) {
+        nodeInspector.appendChild(payloadDisclosure("error", node.latest_error, { open: true }));
+      }
       const links = inspectorGraphLinks(node);
       if (links.length) {
         const linkWrap = document.createElement("div");
@@ -6092,12 +6763,14 @@
           const bridge = document.createElement("span");
           bridge.className = "lineage-bridge";
           bridge.textContent = entry.label;
+          bridge.title = "bridge · " + entry.label;
           executionLineage.appendChild(bridge);
         } else {
           const button = document.createElement("button");
           button.className = "lineage-item" + (entry.graphKey === graphKey ? " current" : "");
           button.type = "button";
           button.textContent = entry.label;
+          button.title = entry.label + " · " + entry.graphKey;
           button.addEventListener("click", () => openExecutionGraph(entry.graphKey, { keepFocus: true }));
           executionLineage.appendChild(button);
         }
@@ -6130,6 +6803,7 @@
         if (generation !== workRefreshGeneration || activeExecutionGraphKey !== graphKey) return;
         executionStatus.textContent = "unavailable";
         executionMeta.textContent = "id " + shortId(graphKey);
+      setExecutionIdentity(graphKey);
         renderDiagramEmpty("no diagram data yet");
       }
     }
@@ -6148,7 +6822,13 @@
         if (generation !== workRefreshGeneration) return;
         graphIndex = nextGraphIndex;
         graphIndexByKey = new Map((graphIndex.graphs || []).map(graph => [graph.graph_key, graph]));
-        renderWork(items);
+        const signature = JSON.stringify(items) + "|" + JSON.stringify(nextGraphIndex);
+        if (signature === lastWorkSignature) {
+          lastWorkItems = items;
+        } else {
+          lastWorkSignature = signature;
+          renderWork(items);
+        }
         if (activeExecutionGraphKey) {
           renderLineage(activeExecutionGraphKey);
           refreshExecutionGraph(activeExecutionGraphKey);
@@ -6157,6 +6837,7 @@
         if (generation !== workRefreshGeneration) return;
         if (!workStale) {
           workStale = true;
+          lastWorkSignature = "";
           workCount.textContent = "updates paused — retry";
           workCount.title = "couldn't reach the execution index. polling continues; click to retry now.";
           workCount.classList.add("stale");
