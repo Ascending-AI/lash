@@ -7,11 +7,11 @@
 //! through lives in [`context`].
 
 pub(crate) mod context;
+mod journal_budget;
+mod journaled_effect;
 
 use std::fmt;
-use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -27,8 +27,7 @@ use lash_core::{
 };
 use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
-use restate_sdk::serde::Json;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 
 use crate::durable_wait::{
     RestateAwaitEventRaceOutcome, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
@@ -51,6 +50,7 @@ pub struct RestateEffectControllerOptions {
     run_retry_policy: Option<RunRetryPolicy>,
     segment_duration_cap: Option<Duration>,
     segment_effect_budget: u64,
+    journaled_effect_byte_budget: Option<u64>,
 }
 
 impl Default for RestateEffectControllerOptions {
@@ -59,6 +59,7 @@ impl Default for RestateEffectControllerOptions {
             run_retry_policy: None,
             segment_duration_cap: None,
             segment_effect_budget: 10_000,
+            journaled_effect_byte_budget: None,
         }
     }
 }
@@ -93,6 +94,36 @@ impl RestateEffectControllerOptions {
         self.segment_effect_budget = effects.max(1);
         self
     }
+
+    /// Refuse to journal a recorded effect whose payload exceeds `bytes`.
+    ///
+    /// An effect outcome the engine will not accept fails the same way on every
+    /// redrive, which leaves the turn uncommitted forever. Deciding the same
+    /// verdict here instead turns that poison into a terminal effect failure the
+    /// host can see. Set this at or below the deployment's Restate journal-entry
+    /// limit; unset, only outcomes that cannot be serialized at all are refused.
+    ///
+    /// # Enabling or disabling this is a drain-only config change
+    ///
+    /// Effects that must run outside the run closure - a durable process command
+    /// and a tool batch - journal their budget verdict in a slot of their own
+    /// ahead of the effect, so that a redrive honours the recorded give-up
+    /// instead of running the effect again. That slot exists only while a budget
+    /// is configured, so turning the budget on or off changes the journal's slot
+    /// sequence: drain in-flight invocations across such a change. An invocation
+    /// that spans the toggle replays against a sequence it was not recorded
+    /// with, which Restate reports as a journal mismatch - a loud terminal
+    /// failure for that invocation, never a silent re-execution or a wrong
+    /// result.
+    ///
+    /// Changing the *value* is safe at any time, in either direction: the
+    /// verdict is decided from the budget in force when it was journaled and
+    /// replays from the journal, so the slot sequence never depends on the
+    /// number.
+    pub fn journaled_effect_byte_budget(mut self, bytes: u64) -> Self {
+        self.journaled_effect_byte_budget = Some(bytes);
+        self
+    }
 }
 
 impl fmt::Debug for RestateEffectControllerOptions {
@@ -101,6 +132,10 @@ impl fmt::Debug for RestateEffectControllerOptions {
             .field("run_retry_policy", &self.run_retry_policy)
             .field("segment_duration_cap", &self.segment_duration_cap)
             .field("segment_effect_budget", &self.segment_effect_budget)
+            .field(
+                "journaled_effect_byte_budget",
+                &self.journaled_effect_byte_budget,
+            )
             .finish()
     }
 }
@@ -367,32 +402,6 @@ where
         scope.validate()?;
         ScopedEffectController::borrowed(self, scope)
     }
-
-    async fn record_effect<'run, T>(
-        &'run self,
-        metadata: &RuntimeInvocation,
-        // Keep the full journaled-effect executor behind one allocation. The
-        // Restate SDK stores this future in its ctx.run state machine, so
-        // accepting it inline here makes every composed turn carry the whole
-        // executor frame through the durable adapter.
-        future: Pin<Box<dyn Future<Output = T> + Send + 'run>>,
-    ) -> Result<T, RestateEffectError>
-    where
-        'ctx: 'run,
-        T: Serialize + DeserializeOwned + Send + 'static,
-    {
-        let effect_name = restate_effect_name(metadata);
-        let run_retry_policy = self.options.run_retry_policy.clone();
-        let Json(value) = self
-            .context
-            .run_json_send(effect_name.clone(), run_retry_policy, future)
-            .await
-            .map_err(|source| RestateEffectError::Terminal {
-                effect: effect_name,
-                terminal: source,
-            })?;
-        Ok(value)
-    }
 }
 
 impl<C> fmt::Debug for RestateRuntimeEffectController<'_, C> {
@@ -625,34 +634,50 @@ where
                     },
                 );
                 let reconstructed_envelope = envelope.canonical_form()?;
-                let outcome = execute_restate_process_command(
-                    &self.context,
-                    &invocation,
-                    *command,
-                    local_executor,
-                    |_| {},
-                    |_, _| {},
-                )
-                .await
-                .map(|result| RuntimeEffectOutcome::Process { result });
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
-                let recorded = self
-                    .record_effect(
-                        &invocation,
-                        Box::pin(async move {
-                            RecordedRuntimeEffect {
-                                envelope: recorded_envelope,
-                                outcome,
-                            }
-                        }),
-                    )
+                // The process command runs outside the run closure so its own
+                // journal commands stay at the handler's journal level, which
+                // makes the budget give-up this seam's own pre-flight duty: a
+                // give-up decided afterwards would discard a completed process
+                // command with no journal entry, and the next redrive would run
+                // it again. The verdict is journaled ahead of the command so a
+                // budget change between attempts cannot make a replay run it.
+                let recorded = match self
+                    .journaled_budget_give_up(&invocation, &recorded_envelope)
                     .await
-                    .map_err(|error| {
-                        RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RestateEffectController,
-                            error.to_string(),
+                {
+                    Some(gave_up) => gave_up,
+                    None => {
+                        let outcome = execute_restate_process_command(
+                            &self.context,
+                            &invocation,
+                            *command,
+                            local_executor,
+                            |_| {},
+                            |_, _| {},
                         )
-                    })?;
+                        .await
+                        .map(|result| RuntimeEffectOutcome::Process { result });
+                        let journaled_envelope = Arc::clone(&recorded_envelope);
+                        self.record_effect(
+                            &invocation,
+                            &recorded_envelope,
+                            Box::pin(async move {
+                                RecordedRuntimeEffect {
+                                    envelope: journaled_envelope,
+                                    outcome,
+                                }
+                            }),
+                        )
+                        .await
+                    }
+                }
+                .map_err(|error| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RestateEffectController,
+                        error.to_string(),
+                    )
+                })?;
                 validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
             }
             RestateEffectExecution::DirectLocal { envelope } => {
@@ -664,25 +689,40 @@ where
                 // teardown reconstructs exclusively from this durable outcome.
                 let reconstructed_envelope = envelope.canonical_form()?;
                 let invocation = envelope.invocation.clone();
-                let outcome = local_executor.execute(envelope).await;
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
-                let recorded = self
-                    .record_effect(
-                        &invocation,
-                        Box::pin(async move {
-                            RecordedRuntimeEffect {
-                                envelope: recorded_envelope,
-                                outcome,
-                            }
-                        }),
-                    )
+                // The child attempts run outside the run closure, so the budget
+                // give-up has to be decided before they run: giving up afterwards
+                // would discard a settled batch that was never journaled and let
+                // the next redrive re-execute every child. The verdict is
+                // journaled ahead of the batch so a budget change between
+                // attempts cannot make a replay run the children again.
+                let recorded = match self
+                    .journaled_budget_give_up(&invocation, &recorded_envelope)
                     .await
-                    .map_err(|error| {
-                        RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RestateEffectController,
-                            error.to_string(),
+                {
+                    Some(gave_up) => gave_up,
+                    None => {
+                        let outcome = local_executor.execute(envelope).await;
+                        let journaled_envelope = Arc::clone(&recorded_envelope);
+                        self.record_effect(
+                            &invocation,
+                            &recorded_envelope,
+                            Box::pin(async move {
+                                RecordedRuntimeEffect {
+                                    envelope: journaled_envelope,
+                                    outcome,
+                                }
+                            }),
                         )
-                    })?;
+                        .await
+                    }
+                }
+                .map_err(|error| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RestateEffectController,
+                        error.to_string(),
+                    )
+                })?;
                 validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
             }
             RestateEffectExecution::Timer {
@@ -834,14 +874,16 @@ where
                     }
                 });
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
+                let journaled_envelope = Arc::clone(&recorded_envelope);
                 let recorded = self
                     .record_effect(
                         &invocation,
+                        &recorded_envelope,
                         Box::pin(async move {
                             let outcome =
                                 execute_restate_journaled_effect(envelope, local_executor).await;
                             RecordedRuntimeEffect {
-                                envelope: recorded_envelope,
+                                envelope: journaled_envelope,
                                 outcome,
                             }
                         }),

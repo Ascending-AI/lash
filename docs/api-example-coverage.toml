@@ -47877,6 +47877,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
 
 [[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RestateJournaledEffectPoisoned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to recognise a journaled effect that gave up because its outcome can never be recorded, instead of retrying an attempt that will fail identically forever."
+
+[[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RestateProcessAwait"
 kind = "variant"
 availability = "default+all-features"
