@@ -275,6 +275,103 @@ fn start_and_await_process_execute_through_shared_process_effects() {
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(6.0)));
 }
 
+#[derive(Default)]
+struct ProcessHandleIdInspectionHost {
+    status_checked_process_id: std::sync::Mutex<Option<String>>,
+}
+
+impl ExecutionHost for ProcessHandleIdInspectionHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::StartProcess(start) => {
+                assert_eq!(start.process_name, "worker");
+                assert_eq!(start.args.get("input"), Some(&Value::Number(42.0)));
+                Ok(AbilityResult::Value(lashlang::from_json(
+                    serde_json::json!({ "__handle__": "process", "id": "process-test-42" }),
+                )))
+            }
+            AbilityOp::ResourceOperation(call) => {
+                let alias = match &call.receiver {
+                    Value::Resource(handle) => handle.alias.clone(),
+                    other => format!("{other:?}"),
+                };
+                if alias == "inspection" && call.operation == "status" {
+                    let [Value::Record(fields)] = call.args.as_slice() else {
+                        return Err(ExecutionHostError::new("expected record args"));
+                    };
+                    let pid = fields
+                        .iter()
+                        .find(|(k, _)| *k == "process_id")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.to_string()),
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            ExecutionHostError::new("missing process_id in status args")
+                        })?;
+                    *self.status_checked_process_id.lock().unwrap() = Some(pid);
+                    Ok(AbilityResult::Value(Value::String("status-ok".into())))
+                } else {
+                    Err(ExecutionHostError::new("unexpected resource operation"))
+                }
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected ability")),
+        }
+    }
+}
+
+#[test]
+fn process_handle_exposes_id_member_for_subsequent_operations() {
+    let source = r#"
+        const worker = defineProcess({
+          name: "worker", signals: {},
+          run: async (input: unknown) => { return input; }
+        });
+        const handle = start(worker, { input: 42 });
+        const processId = handle.id;
+        const result = await inspection.status({ process_id: processId });
+        finish({ processId: processId, result: result });
+    "#;
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_binding(
+            ["inspection"],
+            "InspectionModule",
+            "status",
+            "tool:inspection/status",
+            lashlang::ResourceOperationBinding {
+                input_ty: lashlang::TypeExpr::Any,
+                output_ty: lashlang::TypeExpr::Str,
+                output_from_input: None,
+            },
+        )
+        .expect("operation binding");
+    let environment = lashlang::LashlangHostEnvironment::new(
+        catalog,
+        lashlang::LashlangAbilities::default().with_processes(),
+    );
+    let linked = lash_typescript::link(source, &environment).expect("TypeScript should link");
+    let host = ProcessHandleIdInspectionHost::default();
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &host,
+    ))
+    .expect("execution should succeed");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({
+            "processId": "process-test-42",
+            "result": "status-ok"
+        })))
+    );
+    assert_eq!(
+        *host.status_checked_process_id.lock().unwrap(),
+        Some("process-test-42".to_string())
+    );
+}
+
 #[test]
 fn promise_aggregates_reuse_await_shape_and_tools_require_await() {
     let program = lash_typescript::parse(
