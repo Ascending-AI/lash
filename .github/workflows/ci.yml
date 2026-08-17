@@ -317,6 +317,7 @@ jobs:
       # that wiring.
       - name: Test provider response-normalization conformance
         run: |
+          cargo test -p lash-llm-transport --features testing --locked conformance
           cargo test -p lash-provider-openai --features testing --locked conformance
           cargo test -p lash-provider-anthropic --features testing --locked conformance
           cargo test -p lash-provider-google --features testing --locked conformance
