@@ -80,9 +80,19 @@ orphaned under the prior key.
 - Session-owned effect rows retire by session id. Process-owner incarnation
   fencing and replay-stream incarnation ids are separate concepts and remain.
 - Hosts and third-party stores must implement the admission seam and preserve
-  host-facing tombstones permanently. Lash detects reuse at creation rather
-  than relying on every downstream identity preimage to carry a lifetime
-  discriminator.
+  every deletion tombstone permanently — host-facing ids and lash-minted
+  runtime-internal process session ids alike, whichever delete path wrote it.
+  A store that keeps only the host-facing half satisfies the reuse fence but
+  breaks reclaim: the delete arm reads the same set to decide which owners are
+  gone. Lash detects reuse at creation rather than relying on every downstream
+  identity preimage to carry a lifetime discriminator.
+- A pruned process id is permanently unbindable as a session owner, and stays
+  so after `compact_process_tombstones` removes the process tombstone that
+  fenced its re-registration. Compaction frees registry rows, never ids:
+  re-registering a compacted process id starts a process whose derived session
+  stores cannot be created, failing with `StoreError::SessionDeleted` naming an
+  internal id the host never chose (`process-env:<id>` or
+  `process-session-turn:<id>`). Process ids are single-use for the store's life.
 - Fork materialization followed by observer publication spans transaction
   domains. The fork relation retains the selected process ids as durable apply
   intent until every idempotent observer event commits. A crash burns no
