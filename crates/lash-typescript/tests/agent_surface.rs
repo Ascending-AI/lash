@@ -294,6 +294,287 @@ fn promise_aggregates_reuse_await_shape_and_tools_require_await() {
     assert_eq!(error.code, lash_typescript::DiagnosticCode::AwaitRequired);
 }
 
+struct ToolCallRecordingHost {
+    dispatched: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+impl ExecutionHost for ToolCallRecordingHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::ResourceOperation(call) => {
+                let alias = match &call.receiver {
+                    Value::Resource(handle) => handle.alias.clone(),
+                    other => format!("{other:?}"),
+                };
+                self.dispatched
+                    .lock()
+                    .expect("dispatched lock")
+                    .push((alias, call.operation));
+                Ok(AbilityResult::Value(Value::String("tool-ok".into())))
+            }
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected tool call ability")),
+        }
+    }
+}
+
+fn find_receiver_call(expr: &Expr) -> Option<(Vec<&str>, &str)> {
+    match expr {
+        Expr::ReceiverCall {
+            receiver,
+            operation,
+            ..
+        } => {
+            if let Expr::ResourceRef(resource_ref) = receiver.as_ref() {
+                Some((
+                    resource_ref.path.iter().map(|s| s.as_str()).collect(),
+                    operation.as_str(),
+                ))
+            } else {
+                None
+            }
+        }
+        _ => expr.children().find_map(find_receiver_call),
+    }
+}
+
+#[test]
+fn tool_operations_colliding_with_instance_stdlib_names_lower_and_dispatch() {
+    let cases = [
+        (
+            r#"finish(await web.search({ query: "lash" }));"#,
+            vec!["web"],
+            "search",
+        ),
+        (
+            r#"finish(await tools.search({ query: "lash" }));"#,
+            vec!["tools"],
+            "search",
+        ),
+        (
+            r#"finish(await inbox.alpha.delete({ id: "msg_123" }));"#,
+            vec!["inbox", "alpha"],
+            "delete",
+        ),
+    ];
+
+    for (source, expected_path, expected_op) in cases {
+        let program = lash_typescript::parse(source)
+            .unwrap_or_else(|error| panic!("failed to parse {source}: {error}"));
+        let (path, op) = find_receiver_call(&program.main)
+            .unwrap_or_else(|| panic!("expected ReceiverCall in {source}"));
+        assert_eq!(path, expected_path);
+        assert_eq!(op, expected_op);
+
+        let compiled = lash_typescript::compile(source)
+            .unwrap_or_else(|error| panic!("failed to compile {source}: {error}"));
+        let host = ToolCallRecordingHost {
+            dispatched: std::sync::Mutex::new(Vec::new()),
+        };
+        let outcome =
+            futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &host))
+                .expect("execution should succeed");
+        assert_eq!(
+            outcome,
+            ExecutionOutcome::Finished(Value::String("tool-ok".into()))
+        );
+        let dispatched = host.dispatched.lock().expect("dispatched lock").clone();
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(dispatched[0].1, expected_op);
+
+        // Also verify linked dispatch through host catalog
+        let mut catalog = lashlang::LashlangHostCatalog::new();
+        catalog
+            .add_module_operation_binding(
+                expected_path.clone(),
+                "ToolModule",
+                expected_op,
+                format!("tool:{}", expected_path.join("/")),
+                lashlang::ResourceOperationBinding {
+                    input_ty: lashlang::TypeExpr::Any,
+                    output_ty: lashlang::TypeExpr::Any,
+                    output_from_input: None,
+                },
+            )
+            .expect("operation binding");
+        let environment =
+            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+        let linked = lash_typescript::link(source, &environment).expect("TypeScript should link");
+        let host_linked = ToolCallRecordingHost {
+            dispatched: std::sync::Mutex::new(Vec::new()),
+        };
+        let linked_outcome = futures::executor::block_on(lashlang::execute(
+            &lash_typescript::compile_linked(&linked),
+            &mut State::new(),
+            &host_linked,
+        ))
+        .expect("linked execution should succeed");
+        assert_eq!(
+            linked_outcome,
+            ExecutionOutcome::Finished(Value::String("tool-ok".into()))
+        );
+        let expected_alias = expected_path.join(".");
+        let linked_dispatched = host_linked
+            .dispatched
+            .lock()
+            .expect("dispatched lock")
+            .clone();
+        assert_eq!(
+            linked_dispatched,
+            vec![(expected_alias, expected_op.to_string())]
+        );
+    }
+}
+
+#[test]
+fn bound_instance_stdlib_methods_still_lower_to_stdlib() {
+    let cases = [
+        (
+            r#"const s = "hello world"; finish(s.search(/world/));"#,
+            Value::Number(6.0),
+        ),
+        (
+            r#"const m = new Map([["k", 1]]); const removed = m.delete("k"); finish([removed, m.has("k")]);"#,
+            Value::List(vec![Value::Bool(true), Value::Bool(false)].into()),
+        ),
+        (
+            r#"const s = new Set([1, 2]); const removed = s.delete(1); finish([removed, s.has(1)]);"#,
+            Value::List(vec![Value::Bool(true), Value::Bool(false)].into()),
+        ),
+        (
+            r#"const arr = [1, 2, 3, 4]; finish(arr.filter((x: number) => x > 2));"#,
+            Value::List(vec![Value::Number(3.0), Value::Number(4.0)].into()),
+        ),
+        (
+            r#"const arr = [1, 2]; finish(arr.map((x: number) => x * 2));"#,
+            Value::List(vec![Value::Number(2.0), Value::Number(4.0)].into()),
+        ),
+        (
+            r#"const s = "abc"; finish(s.replace("b", "x"));"#,
+            Value::String("axc".into()),
+        ),
+        (
+            r#"const m = new Map([["a", 1]]); finish([...m.keys()]);"#,
+            Value::List(vec![Value::String("a".into())].into()),
+        ),
+        (
+            r#"const s = "hello"; finish(s.slice(1, 4));"#,
+            Value::String("ell".into()),
+        ),
+    ];
+
+    for (source, expected_value) in cases {
+        assert_eq!(finished(source), expected_value, "failed for {source}");
+    }
+}
+
+#[test]
+fn instance_stdlib_collision_matrix_guard_sweeps_all_stdlib_methods() {
+    let methods = lash_typescript::accepted_instance_methods();
+    assert_eq!(
+        methods.len(),
+        89,
+        "the collision matrix must sweep every accepted instance method"
+    );
+
+    for method in methods {
+        // 1. Single-segment module authority: `await tools.<method>({})`
+        let source_single = format!(r#"finish(await tools.{method}({{ payload: 1 }}));"#);
+        let program_single = lash_typescript::parse(&source_single)
+            .unwrap_or_else(|error| panic!("tools.{method} should parse: {error}"));
+        let (path_single, op_single) = find_receiver_call(&program_single.main)
+            .unwrap_or_else(|| panic!("expected ReceiverCall for tools.{method}"));
+        assert_eq!(path_single, &["tools"], "tools.{method} path");
+        assert_eq!(op_single, *method, "tools.{method} op");
+
+        // 2. Dotted module authority: `await inbox.alpha.<method>({})`
+        let source_dotted = format!(r#"finish(await inbox.alpha.{method}({{ payload: 1 }}));"#);
+        let program_dotted = lash_typescript::parse(&source_dotted)
+            .unwrap_or_else(|error| panic!("inbox.alpha.{method} should parse: {error}"));
+        let (path_dotted, op_dotted) = find_receiver_call(&program_dotted.main)
+            .unwrap_or_else(|| panic!("expected ReceiverCall for inbox.alpha.{method}"));
+        assert_eq!(
+            path_dotted,
+            &["inbox", "alpha"],
+            "inbox.alpha.{method} path"
+        );
+        assert_eq!(op_dotted, *method, "inbox.alpha.{method} op");
+    }
+
+    // Counter-case: an ECMA global namespace root with an instance-stdlib method
+    // (globalThis.missing.get) must NOT lower as a tool call.
+    let counter_source = "finish(globalThis.missing.get('k'));";
+    let counter_program = lash_typescript::parse(counter_source)
+        .expect("globalThis.missing.get should parse without requiring await");
+    assert!(
+        find_receiver_call(&counter_program.main).is_none(),
+        "globalThis.missing.get must not lower as a tool call"
+    );
+}
+
+#[test]
+fn sibling_receiver_branches_pin_regexp_and_unsupported_checks() {
+    // Branch :447 — RegExp methods on bound values lower to stdlib, while
+    // unbound module authorities lower to tool calls.
+    assert_eq!(
+        finished(r#"const r = /abc/; finish(r.test("abcdef"));"#),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        finished(r#"finish(/abc/.test("abcdef"));"#),
+        Value::Bool(true)
+    );
+    let test_tool = lash_typescript::parse(r#"finish(await tools.test({ pattern: "abc" }));"#)
+        .expect("tools.test should lower as tool call");
+    let (path, op) = find_receiver_call(&test_tool.main).expect("ReceiverCall for tools.test");
+    assert_eq!(path, &["tools"]);
+    assert_eq!(op, "test");
+
+    let exec_tool = lash_typescript::parse(r#"finish(await tools.exec({ command: "ls" }));"#)
+        .expect("tools.exec should lower as tool call");
+    let (path, op) = find_receiver_call(&exec_tool.main).expect("ReceiverCall for tools.exec");
+    assert_eq!(path, &["tools"]);
+    assert_eq!(op, "exec");
+
+    // Branch :775 — Unbound ECMA globals and unsupported methods on bound
+    // receivers refuse with TS_METHOD_UNSUPPORTED, while unawaited tool
+    // operations refuse with TS_AWAIT_REQUIRED.
+    let ecma_err = lash_typescript::compile("finish(Error.isError(new Error('x')));")
+        .expect_err("ECMA static namespace method must refuse");
+    assert_eq!(
+        ecma_err.code,
+        lash_typescript::DiagnosticCode::MethodUnsupported
+    );
+
+    let bound_err = lash_typescript::compile("const x = { a: 1 }; finish(x.nonExistentMethod());")
+        .expect_err("unsupported method on bound receiver must refuse");
+    assert_eq!(
+        bound_err.code,
+        lash_typescript::DiagnosticCode::MethodUnsupported
+    );
+
+    let unawaited_web = lash_typescript::parse("web.search({ query: 'x' });")
+        .expect_err("unawaited web.search must require await");
+    assert_eq!(
+        unawaited_web.code,
+        lash_typescript::DiagnosticCode::AwaitRequired
+    );
+
+    let unawaited_tools = lash_typescript::parse("tools.search({ query: 'x' });")
+        .expect_err("unawaited tools.search must require await");
+    assert_eq!(
+        unawaited_tools.code,
+        lash_typescript::DiagnosticCode::AwaitRequired
+    );
+
+    let unawaited_inbox = lash_typescript::parse("inbox.alpha.delete({ id: '1' });")
+        .expect_err("unawaited inbox.alpha.delete must require await");
+    assert_eq!(
+        unawaited_inbox.code,
+        lash_typescript::DiagnosticCode::AwaitRequired
+    );
+}
+
 struct AggregateHost;
 
 impl ExecutionHost for AggregateHost {

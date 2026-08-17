@@ -440,13 +440,14 @@ impl Lowerer {
             }
             let receiver_is_module_authority = module_path(object)
                 .and_then(|path| path.first().cloned())
-                .is_some_and(|root| !self.has_binding(&root));
+                .is_some_and(|root| !self.has_binding(&root) && !is_ecma_global_namespace(&root));
             if !receiver_is_module_authority
                 && let Some(lowered) = self.lower_regexp_method(object, method, args)?
             {
                 return Ok(lowered);
             }
-            if matches!(method.as_str(), "entries" | "keys" | "values")
+            if !receiver_is_module_authority
+                && matches!(method.as_str(), "entries" | "keys" | "values")
                 && static_stdlib_owner(object).is_none()
                 && self.iterable_sink_depth > 0
             {
@@ -537,7 +538,8 @@ impl Lowerer {
                     array,
                 ]));
             }
-            if matches!(method.as_str(), "entries" | "keys" | "values")
+            if !receiver_is_module_authority
+                && matches!(method.as_str(), "entries" | "keys" | "values")
                 && static_stdlib_owner(object).is_none()
                 && self.iterable_sink_depth == 0
             {
@@ -596,7 +598,7 @@ impl Lowerer {
                     ],
                 });
             }
-            if method == "hasOwnProperty" {
+            if !receiver_is_module_authority && method == "hasOwnProperty" {
                 let [key] = args else {
                     return Err(Diagnostic::defect(
                         DiagnosticCode::UnsupportedExpression,
@@ -614,7 +616,8 @@ impl Lowerer {
                     ],
                 });
             }
-            if method == "replace"
+            if !receiver_is_module_authority
+                && method == "replace"
                 && let [needle, callback @ Expr::Function(_)] = args
             {
                 return self.lower_string_replace_callback(object, needle, callback);
@@ -672,7 +675,10 @@ impl Lowerer {
             // Callback methods stay entirely inside the VM. The synchronous
             // family shares the effect-rejecting callback frame; async `map`
             // retains the durable sequential async-map path.
-            if method == "map" && matches!(args, [Expr::Function(function)] if function.is_async) {
+            if !receiver_is_module_authority
+                && method == "map"
+                && matches!(args, [Expr::Function(function)] if function.is_async)
+            {
                 return self.lower_array_map(object, args);
             }
             let receiver_is_callback_exotic = method == "forEach"
@@ -689,31 +695,32 @@ impl Lowerer {
                         }),
                     _ => false,
                 };
-            if !receiver_is_callback_exotic
-                && matches!(
-                    method.as_str(),
-                    "map"
-                        | "filter"
-                        | "reduce"
-                        | "reduceRight"
-                        | "find"
-                        | "findIndex"
-                        | "findLast"
-                        | "findLastIndex"
-                        | "some"
-                        | "every"
-                        | "forEach"
-                        | "flatMap"
-                )
-                || !receiver_is_callback_exotic
-                    && matches!(method.as_str(), "sort" | "toSorted")
-                    && args
-                        .first()
-                        .is_some_and(|argument| !matches!(argument, Expr::Undefined))
+            if !receiver_is_module_authority
+                && (!receiver_is_callback_exotic
+                    && matches!(
+                        method.as_str(),
+                        "map"
+                            | "filter"
+                            | "reduce"
+                            | "reduceRight"
+                            | "find"
+                            | "findIndex"
+                            | "findLast"
+                            | "findLastIndex"
+                            | "some"
+                            | "every"
+                            | "forEach"
+                            | "flatMap"
+                    )
+                    || !receiver_is_callback_exotic
+                        && matches!(method.as_str(), "sort" | "toSorted")
+                        && args
+                            .first()
+                            .is_some_and(|argument| !matches!(argument, Expr::Undefined)))
             {
                 return self.lower_array_callback_method(method, object, args);
             }
-            if is_instance_stdlib_method(method) {
+            if !receiver_is_module_authority && is_instance_stdlib_method(method) {
                 let mut builtin_args = vec![
                     LashExpr::String(method.as_str().into()),
                     self.lower_expr(object)?,
@@ -730,9 +737,7 @@ impl Lowerer {
             }
 
             if method.starts_with(|character: char| character.is_ascii_uppercase())
-                && module_path(object)
-                    .and_then(|path| path.first().cloned())
-                    .is_some_and(|root| !self.has_binding(&root))
+                && receiver_is_module_authority
             {
                 return Ok(LashExpr::ReceiverCall {
                     receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
@@ -756,9 +761,6 @@ impl Lowerer {
             // unadvertised method there is a missing method and must say so.
             // Falling through reported it as a tool call needing `await`, and
             // under `await` it lowered and failed at the host untyped.
-            let receiver_is_module_authority = module_path(object)
-                .and_then(|path| path.first().cloned())
-                .is_some_and(|root| !self.has_binding(&root));
             let ecma_owner = match object.as_ref() {
                 Expr::Ident(owner)
                     if is_ecma_global_namespace(owner) && !self.has_binding(owner) =>
@@ -791,13 +793,13 @@ impl Lowerer {
                     None,
                 ));
             }
-            let receiver = if let Some(path) = module_path(object)
-                && path
-                    .first()
-                    .is_some_and(|root| !self.has_binding(root.as_str()))
-            {
+            let receiver = if receiver_is_module_authority {
                 LashExpr::ResourceRef(ResourceRefExpr::unresolved(
-                    path.into_iter().map(Into::into).collect(),
+                    module_path(object)
+                        .expect("checked by receiver_is_module_authority")
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
                 ))
             } else {
                 self.lower_expr(object)?

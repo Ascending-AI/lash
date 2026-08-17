@@ -96,6 +96,7 @@ pub(super) fn is_ecma_global_namespace(name: &str) -> bool {
                 | "Float64Array"
                 | "BigInt64Array"
                 | "BigUint64Array"
+                | "globalThis"
         )
 }
 
