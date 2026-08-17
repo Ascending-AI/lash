@@ -6,6 +6,23 @@ impl<'de> Deserialize<'de> for VmContinuation {
     where
         D: Deserializer<'de>,
     {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        if let Some(version_val) = raw.get("format_version") {
+            if let Some(version) = version_val.as_u64() {
+                if version != VM_CONTINUATION_FORMAT_VERSION as u64 {
+                    return Err(serde::de::Error::custom(format!(
+                        "continuation format version {} is incompatible with version {}",
+                        version, VM_CONTINUATION_FORMAT_VERSION
+                    )));
+                }
+            } else if let Some(version) = version_val.as_i64() {
+                return Err(serde::de::Error::custom(format!(
+                    "continuation format version {} is incompatible with version {}",
+                    version, VM_CONTINUATION_FORMAT_VERSION
+                )));
+            }
+        }
+
         #[derive(Deserialize)]
         struct Wire {
             format_version: u32,
@@ -35,13 +52,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
             heap: VmHeapContinuation,
         }
 
-        let wire = Wire::deserialize(deserializer)?;
-        if wire.format_version != VM_CONTINUATION_FORMAT_VERSION {
-            return Err(serde::de::Error::custom(format!(
-                "continuation format version {} is incompatible with version {}",
-                wire.format_version, VM_CONTINUATION_FORMAT_VERSION
-            )));
-        }
+        let wire = Wire::deserialize(raw).map_err(serde::de::Error::custom)?;
         let continuation = Self {
             format_version: wire.format_version,
             reference_semantics: wire.reference_semantics,
