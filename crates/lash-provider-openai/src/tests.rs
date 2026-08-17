@@ -13,7 +13,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 mod attachment_tests;
 #[cfg(feature = "testing")]
-mod conformance;
+pub(crate) mod conformance;
 mod driver_stream_tests;
 mod error_classification_tests;
 mod generation_tests;

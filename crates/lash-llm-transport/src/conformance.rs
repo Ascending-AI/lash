@@ -60,13 +60,22 @@ pub enum Scenario {
     /// A turn whose reasoning/thinking output is surfaced as an
     /// `LlmOutputPart::Reasoning` (distinct from assistant text).
     ReasoningExtraction,
-    /// A streamed reasoning item carrying opaque provider replay state. The
+    /// Streamed reasoning items carrying opaque provider replay state. The
     /// scenario normalizes the stream, commits the result to durable history,
     /// projects the next LLM request, and asks the provider to serialize it.
     /// Losing the opaque field is invisible in the response turn itself, but
     /// makes the *next* request invalid or semantically discontinuous because
-    /// the provider cannot verify or resume its earlier reasoning item.
+    /// the provider cannot verify or resume its earlier reasoning item. The
+    /// fixture carries ≥2 reasoning items with distinct payloads, so a provider
+    /// that preserves the first and drops the rest fails.
     ReasoningReplayRoundTrip,
+    /// Streamed tool calls carrying opaque provider replay state (e.g. Gemini's
+    /// `functionCall` `thoughtSignature`, the Responses API's `fc_…` item id
+    /// that chains a call to its sibling reasoning item). Same obligation as
+    /// [`Scenario::ReasoningReplayRoundTrip`], on the tool-call seam: normalize
+    /// the stream, commit to durable history, project and serialize the next
+    /// request, and find each payload byte-faithfully at its pointer.
+    ToolCallReplayRoundTrip,
     /// Usage tokens that arrive split across two streaming events (input in
     /// one, output in a later one). The assembled usage must carry both —
     /// i.e. the provider merges incremental usage rather than overwriting it.
@@ -86,6 +95,7 @@ impl Scenario {
         Scenario::UsageReasoning,
         Scenario::ReasoningExtraction,
         Scenario::ReasoningReplayRoundTrip,
+        Scenario::ToolCallReplayRoundTrip,
         Scenario::StreamingUsageMerge,
     ];
 }
@@ -93,6 +103,8 @@ impl Scenario {
 /// Checked-in inventory of acknowledged conformance gaps. Validation is
 /// bidirectional: adding or removing a declaration requires editing this list.
 const UNSUPPORTED_DECLARATION_INVENTORY: &[(&str, Scenario)] = &[
+    ("anthropic", Scenario::ToolCallReplayRoundTrip),
+    ("codex-rlm-history", Scenario::ToolCallReplayRoundTrip),
     ("google-gemini", Scenario::StreamingToolArgumentMerge),
     ("google-gemini", Scenario::StreamingUsageMerge),
 ];
@@ -176,6 +188,44 @@ impl ProviderConformanceSpec {
     }
 }
 
+/// One replayed item's opaque payload plus the provider-dialect JSON Pointer
+/// where that payload must reappear in the serialized next request. The replay
+/// scenarios take an ordered list of these — one per replayed item — so a
+/// provider that round-trips the first item and drops later ones fails.
+#[derive(Clone, Debug)]
+pub struct ReplayItemExpectation {
+    /// The exact opaque replay bytes, as the wire string carrying them.
+    pub payload: String,
+    /// JSON Pointer locating that payload in the serialized next request.
+    pub request_json_pointer: String,
+    /// Optional sibling fact — a JSON Pointer and the string it must hold —
+    /// proving the payload landed with the item it belongs to. Pointer equality
+    /// alone would still pass if a builder emitted both payloads in the right
+    /// slots but reordered the calls they sign.
+    pub request_association: Option<(String, String)>,
+}
+
+impl ReplayItemExpectation {
+    pub fn new(payload: impl Into<String>, request_json_pointer: impl Into<String>) -> Self {
+        Self {
+            payload: payload.into(),
+            request_json_pointer: request_json_pointer.into(),
+            request_association: None,
+        }
+    }
+
+    /// Pin the identity of the item this payload replays alongside, e.g. the
+    /// `call_id` of the tool call the signature belongs to.
+    pub fn associated_with(
+        mut self,
+        request_json_pointer: impl Into<String>,
+        expected: impl Into<String>,
+    ) -> Self {
+        self.request_association = Some((request_json_pointer.into(), expected.into()));
+        self
+    }
+}
+
 /// One provider's wire-format encoding of a [`Scenario`], plus the few facts
 /// the suite needs to drive assertions. The provider produces this; the suite
 /// owns what "correct" normalization means.
@@ -209,13 +259,16 @@ pub struct ProviderWire {
     /// encode. The suite asserts an `LlmOutputPart::Reasoning` carrying it.
     pub expected_reasoning_text: Option<String>,
     /// For `Scenario::ReasoningReplayRoundTrip`: the provider stream carrying
-    /// a reasoning item with opaque replay state. Streaming providers must use
+    /// ≥2 reasoning items with opaque replay state. Streaming providers must use
     /// this path rather than relying on their batch parser.
     pub reasoning_replay_sse: Option<Vec<String>>,
-    /// The exact opaque replay bytes represented as a wire string.
-    pub expected_replay_payload: Option<String>,
-    /// JSON Pointer locating that payload in the serialized next request.
-    pub request_replay_json_pointer: Option<String>,
+    /// The reasoning items that stream encodes, in emission order.
+    pub reasoning_replay_expectations: Vec<ReplayItemExpectation>,
+    /// For `Scenario::ToolCallReplayRoundTrip`: the provider stream carrying
+    /// tool calls with opaque replay state.
+    pub tool_call_replay_sse: Option<Vec<String>>,
+    /// The tool calls that stream encodes, in emission order.
+    pub tool_call_replay_expectations: Vec<ReplayItemExpectation>,
     /// For `Scenario::StreamingUsageMerge`: SSE events that carry usage split
     /// across ≥2 chunks (e.g. input in one, output in a later one). The suite
     /// feeds them to [`ProviderNormalizer::assemble_stream`] and asserts the
@@ -235,8 +288,9 @@ impl ProviderWire {
             expected_tool_name: None,
             expected_reasoning_text: None,
             reasoning_replay_sse: None,
-            expected_replay_payload: None,
-            request_replay_json_pointer: None,
+            reasoning_replay_expectations: Vec::new(),
+            tool_call_replay_sse: None,
+            tool_call_replay_expectations: Vec::new(),
             usage_merge_sse: None,
         }
     }
@@ -277,17 +331,29 @@ impl ProviderWire {
         self
     }
 
-    /// Configure the streamed reasoning-replay round-trip fixture and the
-    /// provider-dialect request location where its opaque value must reappear.
+    /// Configure the streamed reasoning-replay round-trip fixture and, in
+    /// emission order, the provider-dialect request location where each item's
+    /// opaque value must reappear.
     pub fn with_reasoning_replay_round_trip(
         mut self,
         sse: Vec<String>,
-        expected_payload: impl Into<String>,
-        request_json_pointer: impl Into<String>,
+        expectations: Vec<ReplayItemExpectation>,
     ) -> Self {
         self.reasoning_replay_sse = Some(sse);
-        self.expected_replay_payload = Some(expected_payload.into());
-        self.request_replay_json_pointer = Some(request_json_pointer.into());
+        self.reasoning_replay_expectations = expectations;
+        self
+    }
+
+    /// Configure the streamed tool-call-replay round-trip fixture and, in
+    /// emission order, the provider-dialect request location where each call's
+    /// opaque value must reappear.
+    pub fn with_tool_call_replay_round_trip(
+        mut self,
+        sse: Vec<String>,
+        expectations: Vec<ReplayItemExpectation>,
+    ) -> Self {
+        self.tool_call_replay_sse = Some(sse);
+        self.tool_call_replay_expectations = expectations;
         self
     }
 
@@ -342,9 +408,14 @@ pub trait ProviderNormalizer {
 
     /// Commit normalized response parts to this path's durable history,
     /// project the next LLM request, and serialize it with the real provider
-    /// request builder. The replay scenario then inspects the returned wire
-    /// value at its provider-specific JSON Pointer.
-    fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value;
+    /// request builder. The replay scenarios then inspect the returned wire
+    /// value at their provider-specific JSON Pointers.
+    ///
+    /// `scenario` is supplied so a provider serving several request dialects
+    /// (OpenAI speaks both Chat Completions and Responses) builds the dialect
+    /// the scenario's fixture belongs to, chosen by scenario identity exactly as
+    /// [`ProviderNormalizer::assemble_stream`] chooses its parser.
+    fn build_next_request(&self, scenario: Scenario, messages: Vec<LlmMessage>) -> Value;
 }
 
 /// Commit a normalized response to Standard-protocol history and project the
@@ -682,37 +753,33 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
             let sse = wire.reasoning_replay_sse.as_ref().unwrap_or_else(|| {
                 panic!("[{who}] {scenario:?}: streaming providers must supply reasoning_replay_sse")
             });
-            assert!(
-                sse.len() >= 2,
-                "[{who}] {scenario:?}: reasoning replay must traverse a meaningful stream of at \
-                 least two events, got {}",
-                sse.len()
+            assert_replay_round_trip(
+                n,
+                scenario,
+                sse,
+                &wire.reasoning_replay_expectations,
+                // A single reasoning item cannot distinguish "kept the payload"
+                // from "kept the first payload and dropped the rest".
+                2,
+                "Reasoning",
+                reasoning_replay_payload,
             );
-            let parts = n.assemble_stream(scenario, sse).parts;
-            let expected = wire.expected_replay_payload.as_deref().unwrap_or_else(|| {
-                panic!("[{who}] {scenario:?}: must supply expected_replay_payload")
+        }
+        Scenario::ToolCallReplayRoundTrip => {
+            let sse = wire.tool_call_replay_sse.as_ref().unwrap_or_else(|| {
+                panic!("[{who}] {scenario:?}: streaming providers must supply tool_call_replay_sse")
             });
-            let normalized_payload = parts.iter().find_map(reasoning_replay_payload);
-            assert_eq!(
-                normalized_payload.as_deref(),
-                Some(expected),
-                "[{who}] {scenario:?}: streaming normalization must attach the opaque replay \
-                 payload byte-faithfully to the Reasoning part; got {parts:?}"
-            );
-
-            let request = n.build_next_request(standard_next_request_messages(&parts));
-            let pointer = wire
-                .request_replay_json_pointer
-                .as_deref()
-                .unwrap_or_else(|| {
-                    panic!("[{who}] {scenario:?}: must supply request_replay_json_pointer")
-                });
-            let request_payload = request.pointer(pointer).and_then(Value::as_str);
-            assert_eq!(
-                request_payload,
-                Some(expected),
-                "[{who}] {scenario:?}: normalized replay payload must survive durable history \
-                 and reappear byte-faithfully at next-request path {pointer}; request = {request}"
+            assert_replay_round_trip(
+                n,
+                scenario,
+                sse,
+                &wire.tool_call_replay_expectations,
+                // Same floor as reasoning: one call cannot distinguish "kept the
+                // payload" from "kept the first and dropped the rest", and every
+                // dialect that carries tool-call replay at all can carry two.
+                2,
+                "ToolCall",
+                tool_call_replay_payload,
             );
         }
         Scenario::StreamingUsageMerge => {
@@ -742,6 +809,123 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
     }
 }
 
+/// The shared round-trip check behind both replay scenarios: normalize the
+/// provider stream, assert every item's opaque payload survives normalization
+/// in emission order, then project and serialize the next request and assert
+/// each payload reappears byte-faithfully at *its own* pointer. Checking one
+/// pointer would leave a provider that keeps the first payload and drops the
+/// rest passing green.
+fn assert_replay_round_trip(
+    n: &dyn ProviderNormalizer,
+    scenario: Scenario,
+    sse: &[String],
+    expectations: &[ReplayItemExpectation],
+    minimum_items: usize,
+    part_kind: &str,
+    payload_of: fn(&LlmOutputPart) -> Option<String>,
+) {
+    let who = n.name();
+    assert!(
+        sse.len() >= 2,
+        "[{who}] {scenario:?}: replay must traverse a meaningful stream of at least two events, \
+         got {}",
+        sse.len()
+    );
+    assert!(
+        expectations.len() >= minimum_items,
+        "[{who}] {scenario:?}: fixture must declare at least {minimum_items} replayed item(s), got \
+         {}",
+        expectations.len()
+    );
+    for (index, expectation) in expectations.iter().enumerate() {
+        assert!(
+            expectations[..index]
+                .iter()
+                .all(|earlier| earlier.payload != expectation.payload),
+            "[{who}] {scenario:?}: item {index} repeats an earlier payload; fixture payloads must \
+             be distinct or a dropped item is masked by its identical sibling"
+        );
+    }
+
+    let assembled = n.assemble_stream(scenario, sse);
+    let parts = assembled.parts;
+    let normalized = parts.iter().filter_map(payload_of).collect::<Vec<_>>();
+    let expected = expectations
+        .iter()
+        .map(|expectation| expectation.payload.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        normalized, expected,
+        "[{who}] {scenario:?}: streaming normalization must attach every opaque replay payload \
+         byte-faithfully, in order, to its own {part_kind} part; got {parts:?}"
+    );
+
+    // Parts the adapter emitted live carry the same obligation: a turn aborted
+    // mid-stream commits exactly these, so replay missing here is lost durably
+    // even when the end-of-stream assembly would have carried it. An adapter
+    // that emits no parts for this fixture is not asserted against.
+    let emitted_parts = assembled
+        .stream_events
+        .iter()
+        .filter_map(|event| match event {
+            LlmStreamEvent::Part(part) => Some(part),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !emitted_parts.is_empty() {
+        let emitted = emitted_parts
+            .iter()
+            .filter_map(|part| payload_of(part))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            emitted, expected,
+            "[{who}] {scenario:?}: parts emitted while streaming must carry the same replay \
+             payloads as the assembled {part_kind} parts; got {emitted_parts:?}"
+        );
+    }
+
+    let request = n.build_next_request(scenario, standard_next_request_messages(&parts));
+    for (index, expectation) in expectations.iter().enumerate() {
+        let pointer = expectation.request_json_pointer.as_str();
+        let (found, expected) = replayed_payload_at(&request, pointer, &expectation.payload);
+        assert_eq!(
+            found.as_deref(),
+            Some(expected.as_str()),
+            "[{who}] {scenario:?}: replay payload for item {index} must survive durable history \
+             and reappear byte-faithfully at next-request path {pointer}; request = {request}"
+        );
+        if let Some((association_pointer, expected_identity)) = &expectation.request_association {
+            let found_identity = request.pointer(association_pointer).and_then(Value::as_str);
+            assert_eq!(
+                found_identity,
+                Some(expected_identity.as_str()),
+                "[{who}] {scenario:?}: item {index}'s payload must be replayed alongside the item \
+                 it belongs to; {association_pointer} identifies a different item; \
+                 request = {request}"
+            );
+        }
+    }
+}
+
+/// Read the replayed payload at `pointer` and pair it with the form of
+/// `payload` it must equal. A dialect either carries the opaque bytes as a JSON
+/// string, or replays the JSON document those bytes encode — OpenAI's Chat
+/// Completions dialect stores a whole `reasoning.encrypted` detail object in
+/// `replay.opaque` and re-emits it as an object in `reasoning_details`. Both are
+/// compared in the payload's own encoding, so neither loses byte-faithfulness.
+fn replayed_payload_at(request: &Value, pointer: &str, payload: &str) -> (Option<String>, String) {
+    match request.pointer(pointer) {
+        Some(Value::String(found)) => (Some(found.clone()), payload.to_string()),
+        Some(document) => (
+            Some(document.to_string()),
+            serde_json::from_str::<Value>(payload)
+                .map(|expected| expected.to_string())
+                .unwrap_or_else(|_| payload.to_string()),
+        ),
+        None => (None, payload.to_string()),
+    }
+}
+
 fn reasoning_replay_payload(part: &LlmOutputPart) -> Option<String> {
     let LlmOutputPart::Reasoning {
         replay: Some(replay),
@@ -754,6 +938,20 @@ fn reasoning_replay_payload(part: &LlmOutputPart) -> Option<String> {
         .encrypted_content
         .clone()
         .or_else(|| replay.signature.clone())
+}
+
+fn tool_call_replay_payload(part: &LlmOutputPart) -> Option<String> {
+    let LlmOutputPart::ToolCall {
+        replay: Some(replay),
+        ..
+    } = part
+    else {
+        return None;
+    };
+    // Providers carry tool-call replay either as an opaque blob (Gemini's
+    // `thoughtSignature`) or as the provider item id that chains the call to
+    // its sibling reasoning item (Responses `fc_…`).
+    replay.opaque.clone().or_else(|| replay.item_id.clone())
 }
 
 #[allow(clippy::too_many_arguments)]

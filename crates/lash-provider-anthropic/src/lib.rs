@@ -1330,8 +1330,9 @@ mod tests {
     mod conformance {
         use super::*;
         use lash_llm_transport::conformance::{
-            CanonicalUsage as U, ProviderNormalizer, ProviderWire, Scenario, StreamAssembly,
-            provider_conformance, strong_replay_payload,
+            CanonicalUsage as U, ProviderConformanceSpec, ProviderNormalizer, ProviderWire,
+            ReplayItemExpectation, Scenario, StreamAssembly, provider_conformance,
+            strong_replay_payload,
         };
         use serde_json::Value;
 
@@ -1379,6 +1380,14 @@ mod tests {
         impl ProviderNormalizer for AnthropicNormalizer {
             fn name(&self) -> &str {
                 "anthropic"
+            }
+
+            fn conformance_spec(&self) -> ProviderConformanceSpec {
+                ProviderConformanceSpec::with_unsupported(&[(
+                    Scenario::ToolCallReplayRoundTrip,
+                    "Anthropic tool_use blocks carry no opaque replay state; the dialect has \
+                     nowhere to put one",
+                )])
             }
 
             fn wire_for(&self, scenario: Scenario) -> Option<ProviderWire> {
@@ -1470,20 +1479,35 @@ mod tests {
                     ]))
                     .with_reasoning_text("thinking about it"),
                     Scenario::ReasoningReplayRoundTrip => {
-                        let payload = strong_replay_payload("anthropic");
+                        // Two signed thinking blocks: a provider that keeps the
+                        // first signature and drops the second must fail.
+                        let first = strong_replay_payload("anthropic/thinking-0");
+                        let second = strong_replay_payload("anthropic/thinking-1");
+                        let mut sse = vec![
+                            json!({ "type": "message_start", "message": { "usage": { "input_tokens": U::BASE_INPUT } } }).to_string(),
+                        ];
+                        for (index, signature) in [&first, &second].into_iter().enumerate() {
+                            sse.push(json!({ "type": "content_block_start", "index": index, "content_block": { "type": "thinking" } }).to_string());
+                            sse.push(json!({ "type": "content_block_delta", "index": index, "delta": { "type": "thinking_delta", "thinking": format!("thinking about it {index}") } }).to_string());
+                            sse.push(json!({ "type": "content_block_delta", "index": index, "delta": { "type": "signature_delta", "signature": signature } }).to_string());
+                            sse.push(json!({ "type": "content_block_stop", "index": index }).to_string());
+                        }
+                        sse.push(json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" } }).to_string());
                         ProviderWire::body(Value::Null).with_reasoning_replay_round_trip(
+                            sse,
                             vec![
-                                json!({ "type": "message_start", "message": { "usage": { "input_tokens": U::BASE_INPUT } } }).to_string(),
-                                json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "thinking" } }).to_string(),
-                                json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "thinking_delta", "thinking": "thinking about it" } }).to_string(),
-                                json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "signature_delta", "signature": payload } }).to_string(),
-                                json!({ "type": "content_block_stop", "index": 0 }).to_string(),
-                                json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" } }).to_string(),
+                                ReplayItemExpectation::new(
+                                    first,
+                                    "/messages/0/content/0/signature",
+                                ),
+                                ReplayItemExpectation::new(
+                                    second,
+                                    "/messages/0/content/1/signature",
+                                ),
                             ],
-                            payload,
-                            "/messages/0/content/0/signature",
                         )
                     }
+                    Scenario::ToolCallReplayRoundTrip => return None,
                     Scenario::StreamingUsageMerge => ProviderWire::body(Value::Null)
                         .with_usage_merge_stream(vec![
                             // input arrives in message_start
@@ -1539,7 +1563,7 @@ mod tests {
                 }
             }
 
-            fn build_next_request(&self, messages: Vec<LlmMessage>) -> Value {
+            fn build_next_request(&self, _scenario: Scenario, messages: Vec<LlmMessage>) -> Value {
                 AnthropicProvider::new("test")
                     .build_request_body(&request(messages))
                     .expect("anthropic next request serializes")
