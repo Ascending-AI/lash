@@ -188,6 +188,15 @@ SQLITE_SCHEMA_INDEX_ADDED = SQLITE_SCHEMA_BASE.replace(
     'CREATE INDEX IF NOT EXISTS idx_sessions_order\n'
     '    ON sessions(session_id, enqueued_at_ms);\n',
 )
+SQLITE_SCHEMA_INDEX_REDEFINED = SQLITE_SCHEMA_BASE.replace(
+    '    ON sessions(enqueued_at_ms);\n',
+    '    ON sessions(session_id, enqueued_at_ms);\n',
+)
+SQLITE_SCHEMA_INDEX_REMOVED = SQLITE_SCHEMA_BASE.replace(
+    '\nCREATE INDEX IF NOT EXISTS idx_sessions_enqueued\n'
+    '    ON sessions(enqueued_at_ms);\n',
+    '',
+)
 # Not the carve-out: a unique index is a constraint, and `IF NOT EXISTS` will not
 # replace a differently-shaped one already in the file.
 SQLITE_SCHEMA_UNIQUE_INDEX_ADDED = SQLITE_SCHEMA_BASE.replace(
@@ -232,7 +241,7 @@ class FixtureRepository:
 
     def commit(self, message: str) -> str:
         run(self.root, "git", "add", ".")
-        run(self.root, "git", "commit", "-q", "-m", message)
+        run(self.root, "git", "commit", "--allow-empty", "-q", "-m", message)
         return run(self.root, "git", "rev-parse", "HEAD")
 
     def close(self) -> None:
@@ -425,6 +434,36 @@ class VersionBumpFixtureTest(unittest.TestCase):
 
         self.assertEqual(result.errors, ())
         self.assertEqual(result.failures, ())
+
+    def test_idempotent_index_byte_identical_reemission_needs_no_bump(self) -> None:
+        # Negative control: re-emitting an existing elided index with a
+        # byte-identical definition demands no bump.
+        result = self.sqlite_check(SQLITE_SCHEMA_BASE)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.failures, ())
+
+    def test_idempotent_index_redefinition_still_needs_a_bump(self) -> None:
+        # Redefining an existing index under the same name with a changed column
+        # list must demand a bump because SQLite's `IF NOT EXISTS` will not
+        # replace an existing index with a different shape on an opened database.
+        result = self.sqlite_check(SQLITE_SCHEMA_INDEX_REDEFINED)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(result.failures[0].head_version, 37)
+
+    def test_idempotent_index_removal_demands_a_bump_by_rule(self) -> None:
+        # Deliberate mechanical rule: elision applies only to statements that
+        # introduce NEW index names relative to the base revision. Existing
+        # indexes on the base side are not elided, so index removal leaves base
+        # and head signatures differing and demands a bump explicitly by design
+        # rather than via regex whitespace artifact.
+        result = self.sqlite_check(SQLITE_SCHEMA_INDEX_REMOVED)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(result.failures[0].head_version, 37)
 
     def test_unique_index_addition_still_needs_a_bump(self) -> None:
         result = self.sqlite_check(SQLITE_SCHEMA_UNIQUE_INDEX_ADDED)
