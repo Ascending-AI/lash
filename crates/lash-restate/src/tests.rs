@@ -161,13 +161,13 @@ fn self_waking_then_ready() -> impl Future<Output = u32> {
 /// holding a paid completion.
 #[test]
 fn restate_run_future_closure_self_wake_does_not_fuse() {
-    let ledger = Arc::new(crate::controller::context::ClosureWakeLedger::default());
+    let relay = Arc::new(crate::controller::context::ClosureWakeRelay::default());
     let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
-        crate::controller::context::attribute_closure_wakes(
+        crate::controller::context::relay_closure_wakes(
             self_waking_then_ready(),
-            Arc::clone(&ledger),
+            Arc::clone(&relay),
         ),
-        ledger,
+        relay,
     ));
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
@@ -186,10 +186,10 @@ fn restate_run_future_closure_self_wake_does_not_fuse() {
 /// closure is never invoked there. It must fuse.
 #[test]
 fn restate_run_future_unattributed_wake_fuses() {
-    let ledger = Arc::new(crate::controller::context::ClosureWakeLedger::default());
+    let relay = Arc::new(crate::controller::context::ClosureWakeRelay::default());
     let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
         self_waking_then_ready(),
-        ledger,
+        relay,
     ));
     let waker = Waker::noop();
     let mut context = Context::from_waker(waker);
@@ -199,6 +199,83 @@ fn restate_run_future_unattributed_wake_fuses() {
         future.as_mut().poll(&mut context),
         Poll::Pending,
         "an unattributed synchronous wake must never re-enter the SDK future"
+    );
+}
+
+/// A closure-side future that is woken from another thread while the guard is
+/// mid-poll - the shape a provider stream woken by the tokio I/O driver
+/// produces. The wake is joined before returning, so it is guaranteed to land
+/// inside this very poll.
+fn cross_thread_woken_closure_future() -> impl Future<Output = u32> {
+    let mut woke = false;
+    std::future::poll_fn(move |cx: &mut Context<'_>| {
+        if woke {
+            return Poll::Ready(11);
+        }
+        woke = true;
+        let waker = cx.waker().clone();
+        std::thread::spawn(move || waker.wake())
+            .join()
+            .expect("cross-thread closure wake");
+        Poll::Pending
+    })
+}
+
+/// An SDK-shaped future that parks terminally: it polls its inner future, wakes
+/// the task synchronously on the polling thread and returns `Pending`, exactly
+/// as `InterceptErrorFuture` does after `ctx.fail`. Being already resolved, a
+/// second poll is the bug this guard exists to prevent.
+struct SdkTerminalPark<F> {
+    inner: Pin<Box<F>>,
+    parked: bool,
+}
+
+impl<F> Future for SdkTerminalPark<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        assert!(
+            !this.parked,
+            "the resolved SDK future must never be polled again"
+        );
+        let _ = this.inner.as_mut().poll(cx);
+        this.parked = true;
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
+}
+
+/// FIG-1464 round 3, residual A: a cross-thread wake from inside the run closure
+/// landing during the same poll as the SDK's terminal park must not mask that
+/// park. Attributing by arithmetic did exactly that - the closure wake was
+/// invisible to the tracker's same-thread gate yet still counted against it, so
+/// the two cancelled out, the guard stayed unfused and the next poll re-entered
+/// the resolved SDK future.
+#[test]
+fn restate_run_future_cross_thread_closure_wake_does_not_mask_the_terminal_park() {
+    let relay = Arc::new(crate::controller::context::ClosureWakeRelay::default());
+    let mut future = Box::pin(crate::controller::context::guard_restate_run_future(
+        SdkTerminalPark {
+            inner: Box::pin(crate::controller::context::relay_closure_wakes(
+                cross_thread_woken_closure_future(),
+                Arc::clone(&relay),
+            )),
+            parked: false,
+        },
+        relay,
+    ));
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+
+    assert_eq!(future.as_mut().poll(&mut context), Poll::Pending);
+    assert_eq!(
+        future.as_mut().poll(&mut context),
+        Poll::Pending,
+        "a cross-thread closure wake must not cancel out the SDK's terminal park"
     );
 }
 
@@ -3984,6 +4061,68 @@ async fn fig1464_over_budget_give_up_replays_identically_under_a_larger_budget()
         context.runs.lock_recover().as_slice(),
         ["lash:restate-budget-flip", "lash:restate-budget-flip"],
         "the redrive must consume the same journal slot, not add one"
+    );
+}
+
+/// FIG-1464 round 3, residual B: at the tool-batch and process-command sites the
+/// effect runs outside the run closure, so nothing but this seam's own journal
+/// slot can stop a replay from running it again. Re-deciding the give-up from
+/// live config was not enough: a redrive configured with a larger budget cleared
+/// the envelope, ran the batch, and only then replayed the poison entry and threw
+/// the settled batch away - an at-least-once execution of every child. The
+/// verdict is journaled ahead of the batch, so the journaled verdict is what
+/// decides on replay and the batch never runs.
+#[tokio::test]
+async fn fig1464_over_budget_tool_batch_replay_under_a_larger_budget_never_runs_the_batch() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let batch_envelope = || {
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::ToolBatch, "fig1464-budget-flip-batch"),
+            RuntimeEffectCommand::ToolBatch {
+                batch: lash_core::PreparedToolBatch::new("batch", vec![prepared_tool_call()]),
+            },
+        )
+    };
+    let never_runs = || {
+        RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            panic!("a batch whose give-up is already journaled must never run");
+        })
+    };
+
+    let recorded = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    )
+    .execute_effect(batch_envelope(), never_runs())
+    .await
+    .expect_err("the over-budget batch must give up before running");
+
+    context.replaying.store(true, Ordering::SeqCst);
+    let replayed = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        // Big enough that a give-up re-decided from live config would proceed,
+        // run the batch, and only then meet the journaled give-up.
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
+    )
+    .execute_effect(batch_envelope(), never_runs())
+    .await
+    .expect_err("the journaled verdict must still give up");
+
+    assert_eq!(
+        replayed.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
+    assert_eq!(
+        replayed.message, recorded.message,
+        "the replayed give-up must render the journaled verdict, not the new budget"
+    );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        [
+            "lash:session:turn:1:0:tool_batch:fig1464-budget-flip-batch.journal-budget",
+            "lash:session:turn:1:0:tool_batch:fig1464-budget-flip-batch.journal-budget"
+        ],
+        "the redrive must consume the same verdict slot and add none"
     );
 }
 

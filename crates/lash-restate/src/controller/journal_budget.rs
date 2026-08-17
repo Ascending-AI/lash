@@ -45,6 +45,35 @@ pub(super) struct GaveUpEntry {
     journaled_effect_gave_up_over_budget: u64,
 }
 
+/// The pre-flight budget verdict for an effect that runs outside the run
+/// closure.
+///
+/// Those effects cannot be executed inside `ctx.run` - their own journal
+/// commands have to stay at the handler's journal level - so nothing else stops
+/// a replay from running them again. The verdict therefore occupies a journal
+/// slot of its own ahead of the effect, unconditionally: whatever budget the
+/// replaying attempt is configured with, the journaled verdict is what decides,
+/// so a replayed give-up never executes the effect first and a replayed
+/// `Proceed` never turns into a give-up that discards finished work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) enum JournaledBudgetVerdict {
+    Proceed,
+    GaveUpOverBudget { budget: u64 },
+}
+
+/// Decide, from the envelope and the budget in force right now, whether an
+/// eagerly-executed effect may run. Journal the result before acting on it.
+pub(super) fn budget_verdict(
+    effect: &str,
+    payload_budget: Option<u64>,
+    envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+) -> JournaledBudgetVerdict {
+    match unjournalable_envelope_give_up(effect, payload_budget, envelope) {
+        Some(budget) => JournaledBudgetVerdict::GaveUpOverBudget { budget },
+        None => JournaledBudgetVerdict::Proceed,
+    }
+}
+
 /// Measure a recorded effect's journal payload without allocating it, and stop
 /// serializing as soon as it cannot be journaled.
 struct JournalPayloadMeter {
