@@ -43,6 +43,18 @@ durable child completion and replay-deterministic selection natively — Tempora
 as per-completion history events, Restate as durable futures with per-completion
 journal entries — so the missing piece was contract wording, not machinery.
 
+One caveat on that reading, because it understates what the contract asks of
+Restate. The normative cursor rule below requires serving rank `consumed + 1`
+*idempotently after a fresh invocation*: the handle is the sole cursor of record,
+so a host must be able to re-read the settled children of a group by rank rather
+than consume the next completion as it arrives. That is a random-access read over
+settled children, strictly stronger than "durable futures with per-completion
+journal entries", which gives replay-deterministic *arrival* order and nothing
+addressable. The Restate host spec must account for it — a group's settled ranks
+have to be recoverable in a new invocation that holds none of the original
+futures — and it is the reason the cursor lives on the caller's handle rather
+than in a host-side position.
+
 ## Decision
 
 **Concurrent settlement is a structured, durable group at the effect-host seam.**
@@ -61,14 +73,52 @@ caller has moved on.
   per call. The group path is the only tool-batch path, so a controller
   answering `false` has no batch path at all, and a host wiring one should learn
   that at startup rather than mid-turn on its first `Promise.all`. It gates
-  admission, not dispatch.
-- `open_effect_group(group, executors)` — returns once the group is durably
-  recorded, **not** when a child settles. `executors` is a per-child *factory*
-  rather than a borrowed executor because a child must outlive its caller's
-  future under `RunToCompletion`; the borrow-scoped executor taken by
-  `execute_effect` carries the one lifetime this contract exists to break.
+  admission, not dispatch. A host may answer `true` **only if it can also supply
+  `'static` executors** for the children: a child must be able to outlive its
+  caller to honor `RunToCompletion`, and `EffectHost::scoped_static` is
+  explicitly not universally available. The two capabilities are one question and
+  must not drift apart.
+- `open_effect_group(group)` — returns once the group is durably recorded, **not**
+  when a child settles. Its one parameter is a `CheckedEffectGroup`: the group
+  paired with one `'static` executor per child, positionally aligned with the
+  group's children. **That pairing type is the mechanism, and it is normative.**
+  `CheckedEffectGroup::try_new` is its only constructor and runs the alignment
+  check, and `open_effect_group` accepts nothing else, so an unaligned pair cannot
+  reach a host at all — the check is a property of the argument rather than an
+  obligation each implementation is asked to remember, which is what "positionally
+  aligned" degenerates to in a two-parameter signature. A child must outlive its
+  caller's future under `RunToCompletion`; the borrow-scoped executor taken by
+  `execute_effect` carries the one lifetime this contract exists to break. The
+  `'static` break is the ratified property; a checked `Vec` rather than a factory
+  closure keeps it while making arity mismatch and double construction
+  unrepresentable. Each executor is single-execution — `execute` consumes it, and
+  a host takes ownership through `CheckedEffectGroup::into_parts` — so a host that
+  retries a child takes a fresh executor from `EffectHost::scoped_static`. A
+  reopen must be **fenced on
+  group shape** — a recorded group whose child count or wake rule differs from
+  the group passed in is refused, because a shrunk child vec under one key
+  silently renumbers every rank above the truncation and the per-child hash fence
+  cannot see it.
 - `await_next_settlement(handle, cancel)` — delivers settlements one at a time.
-- `close_effect_group(handle, disposition)` — releases the caller's interest.
+  The handle is taken by `&mut` and is **the sole cursor of record**: the host
+  advances it on exactly the settlements it returns and keeps no per-caller
+  consumption state, so awaiting rank `consumed + 1` twice — once before a crash
+  and once after — yields the same settlement. It follows that a host must not
+  implement the await as "take the next journal entry", which would advance
+  regardless of the cursor. On reopen the **caller's** cursor wins: a host knows
+  how many children settled, only the caller knows how many it consumed, so open
+  returns `consumed = 0` and a restored frame supplies the cursor it saved.
+  Cancellation leaves cursor and durable rank untouched; exhaustion is the
+  caller's arithmetic, not a host round trip. Both sides of the cursor are fenced,
+  not just the read: a handle takes its child count from the group so the two
+  cannot disagree, and advancing past the last child is **refused rather than
+  clamped**, so a host serving a rank it cannot have fails at the slip instead of
+  writing a continuation that turns out to be unresumable when it is loaded.
+- `close_effect_group(handle, disposition)` — releases the caller's interest, and
+  is **idempotent**: the handle is deserializable, so a crash between a
+  successful close and the continuation commit means a replayed frame closes the
+  same group again by construction. `disposition` may only **narrow** the one the
+  group declared at open (see "Loser disposition is declared at open").
 
 The three group methods keep defaults that error loudly with
 `RuntimeErrorCode::EffectGroupUnsupported`, following
@@ -198,6 +248,34 @@ one journaled entry to n children, are covered by the other standing rule: per
 ADR 0055 there is no migration decoder, so deployments drain before the format
 bump.
 
+### Normative: a group's copies are made to agree by construction
+
+Every durability claim here reduces to three copies agreeing: the group key (on
+the group row and in each child's membership), the wake rule and disposition (the
+same two homes), and each child's position (its index and its membership's
+`position`). Disagreement's only symptom is a `ReplayMismatch` in someone's
+production journal, so it is made unrepresentable rather than documented: a group
+has exactly one constructor, which stamps unstamped children from their own index
+and refuses any child that disagrees with the group it claims — a foreign key, a
+permuted position, a drifted wake rule, or a drifted disposition. Hosts therefore
+never recover group identity from `children[0]`.
+
+Empty groups are refused. `Promise.all([])` resolves immediately with `[]` and
+`Promise.race([])` never settles; neither has a child to journal, so neither is a
+durable fact and neither reaches this seam — the dialect resolves the first
+locally, and the second is a never-settling program that must not become an
+unbounded durable await.
+
+A grouped child that reaches a dispatch path with no slot for its membership is a
+typed refusal, never a silent strip. Restate's timer, await-event, and process
+executions record no canonical envelope at all, so on that tier those commands
+have no hash to fold a wake rule into; dropping the membership there would remove
+the only fence the engine tiers have. That the two arms concerned are `Sleep` and
+`AwaitEvent` — precisely the children of the deadline/signal select — is the
+reason this is a refusal rather than a note: the first real consumer lands on
+them, and the Restate layer must convert the refusal into real child invocations
+rather than discover it.
+
 ### Group identity carries an occurrence discriminator
 
 A group's key is `{scope_id}:group:{batch_id}:{occurrence}`.
@@ -217,7 +295,36 @@ straddling a park would both derive occurrence 0 and collide exactly as the
 content hash does. ADR 0025 already enumerates occurrence counters among the
 continuation's contents.
 
-### Loser disposition
+### Loser disposition is declared at open
+
+**The disposition is a per-group durable fact, declared when the group is opened
+and journaled with the group row — not an argument chosen at close.** It is
+statically known at open, so nothing is lost by requiring it there, and leaving
+it at close was a real hole: a caller that crashed after `open_effect_group` and
+before `close_effect_group` left the host no record of which disposition applied,
+so the group-drain path below had to invent one. Inventing meant running *every*
+abandoned group's losers to completion, silently downgrading a deadline arm's
+`Cancel` to `RunToCompletion` on exactly the failure path this ADR exists for —
+and each backend would have invented differently (Restate: the engine owns the
+losers and never cancels them; SQL: the drain completes them; in-memory: process
+death cancels them implicitly), which is the ADR 0062 divergence shape.
+
+It is the same class of fact as the wake rule, and it is treated the same way: it
+is folded into every child's envelope hash as well as the group row, so a replay
+under a drifted disposition is refused on engine tiers that keep no group row.
+Shipping it late was impossible for the same reason a fourth wake policy is —
+it would change the identity of groups already recorded.
+
+`close_effect_group` may therefore only **narrow**: a declared
+`RunToCompletion` may be tightened to `Cancel` by a caller that has learned it no
+longer wants the losers, but a declared `Cancel` may not be widened back, and the
+attempt is a typed refusal. Widening would make the losers' fate depend on
+whether the caller happened to reach its close at all, which is precisely the
+divergence declaring at open removes.
+
+Phase-1 consumers fix the disposition at the combinator: `all` and `allSettled`
+declare `RunToCompletion`; `race` and `any` declare per the ratified race
+semantics below.
 
 `LoserDisposition::RunToCompletion` is the default for `race`/`any` because it
 is what ECMA-262 specifies: a losing promise keeps running and its side effects
@@ -231,7 +338,11 @@ arm, where the losing arm should not run on.
 Under `RunToCompletion` on the SQL tiers, ownership of unfinished children
 transfers to the queued-work driver as a group-drain item keyed by the group,
 claiming each unfinished child through its own existing lease and reusing
-lease-expiry takeover rather than inventing loser-specific recovery. On Restate
+lease-expiry takeover rather than inventing loser-specific recovery. **The drain
+reads the disposition declared on the group row and applies it; it never invents
+a policy at drain time.** A group whose row declares `Cancel` therefore has its
+losers cancelled by the drain even though the crashed caller never reached its
+close — which is the whole point of moving the declaration to open. On Restate
 and Temporal the transfer is a no-op — the engine owns it. The drain is a second
 concurrent allocator against the group counter, which is safe only because of
 the single-row atomic bump above; with a read-then-max allocator it would have
@@ -239,8 +350,10 @@ been an active corruption source rather than a passive one.
 
 ### Tier split
 
-`supports_effect_groups()` is `true` on every in-tree tier, and groups add **no
-second durability flag**. The durability claim stays the existing
+`supports_effect_groups()` is `true` on every in-tree tier **as target state** —
+no controller answers `true` in the contract layer that introduces these types,
+and each tier flips its own flag as it lands. Groups add **no second durability
+flag**. The durability claim stays the existing
 `replay_ownership` / journal-addressing fact, which the contract already warns
 is only a routing fact and not an end-to-end durability claim.
 

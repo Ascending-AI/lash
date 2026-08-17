@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::executor::RuntimeEffectControllerError;
-use super::group::{EffectGroupMembership, GroupWakePolicy};
+use super::group::{EffectGroupMembership, GroupWakePolicy, LoserDisposition};
 
 const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 
@@ -312,24 +312,32 @@ impl RuntimeEffectEnvelope {
         })
     }
 
-    /// Marks this envelope as child `position` of the group `group_key` under
-    /// `wake`, for effect-host implementors building a
+    /// Marks this envelope as child `position` of the group `group_key`, for
+    /// effect-host implementors building a
     /// [`RuntimeEffectGroup`](super::group::RuntimeEffectGroup).
     ///
+    /// Prefer
+    /// [`RuntimeEffectGroup::try_new`](super::group::RuntimeEffectGroup::try_new),
+    /// which stamps every child from its own index and checks agreement; reach
+    /// for this only to build a child whose membership you then hand to that
+    /// constructor for validation.
+    ///
     /// The membership folds into [`stable_hash`](Self::stable_hash), so a replay
-    /// whose wake rule or position drifted is refused by the existing
-    /// envelope-hash fence rather than executed under the new rule.
+    /// whose wake rule, loser disposition, or position drifted is refused by the
+    /// existing envelope-hash fence rather than executed under the new rule.
     #[must_use]
     pub fn in_effect_group(
         mut self,
         group_key: impl Into<String>,
         position: usize,
         wake: GroupWakePolicy,
+        loser_disposition: LoserDisposition,
     ) -> Self {
         self.group = Some(Box::new(EffectGroupMembership {
             group_key: group_key.into(),
             position,
             wake,
+            loser_disposition,
         }));
         self
     }

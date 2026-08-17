@@ -142,6 +142,14 @@ pub enum RuntimeErrorCode {
     RuntimeEffectEnvelopeCanonicalDecode,
     RuntimeEffectEnvelopeCanonicalHashInvariant,
     RuntimeEffectEnvelopeHash,
+    /// A grouped settlement await was cancelled by its cancellation token. The
+    /// group's durable rank is untouched, so a later await resumes at the same
+    /// rank.
+    RuntimeEffectGroupAwaitCancelled,
+    /// A durable effect group was assembled with children that disagree with the
+    /// group they claim to belong to, or an effect carrying group membership
+    /// reached a command shape that cannot honor it.
+    RuntimeEffectGroupShape,
     RuntimeEffectInvocationKind,
     RuntimeEffectInvocationSubject,
     RuntimeEffectLocalExecutorMismatch,
@@ -329,6 +337,8 @@ impl RuntimeErrorCode {
                 "runtime_effect_envelope_canonical_hash_invariant"
             }
             Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
+            Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
+            Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::RuntimeEffectInvocationKind => "runtime_effect_invocation_kind",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
             Self::RuntimeEffectLocalExecutorMismatch => "runtime_effect_local_executor_mismatch",
@@ -508,6 +518,8 @@ impl RuntimeErrorCode {
                 | Self::RuntimeEffectEnvelopeCanonicalDecode
                 | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
                 | Self::RuntimeEffectEnvelopeHash
+                | Self::RuntimeEffectGroupAwaitCancelled
+                | Self::RuntimeEffectGroupShape
                 | Self::RuntimeEffectInvocationKind
                 | Self::RuntimeEffectInvocationSubject
                 | Self::RuntimeEffectLocalExecutorMismatch
@@ -668,6 +680,8 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectEnvelopeCanonicalHashInvariant
             }
             "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
+            "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
+            "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "runtime_effect_invocation_kind" => Self::RuntimeEffectInvocationKind,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
             "runtime_effect_local_executor_mismatch" => Self::RuntimeEffectLocalExecutorMismatch,
@@ -1007,6 +1021,8 @@ mod tests {
             | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode
             | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
             | RuntimeErrorCode::RuntimeEffectEnvelopeHash
+            | RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
+            | RuntimeErrorCode::RuntimeEffectGroupShape
             | RuntimeErrorCode::RuntimeEffectInvocationKind
             | RuntimeErrorCode::RuntimeEffectInvocationSubject
             | RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch
@@ -1171,6 +1187,8 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
             RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
             RuntimeErrorCode::RuntimeEffectEnvelopeHash,
+            RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+            RuntimeErrorCode::RuntimeEffectGroupShape,
             RuntimeErrorCode::RuntimeEffectInvocationKind,
             RuntimeErrorCode::RuntimeEffectInvocationSubject,
             RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,

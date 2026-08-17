@@ -4151,11 +4151,47 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
 
     for (command, expected) in cases {
         let kind = command.kind();
+        // A grouped child on an arm that rebuilds the envelope into a target with
+        // no membership slot must be refused, not silently stripped: those arms
+        // record no canonical envelope, so the wake rule has no hash to fold
+        // into and the group's identity fence would simply vanish.
+        let grouped =
+            RuntimeEffectEnvelope::new(runtime_invocation(kind, "classification"), command.clone())
+                .in_effect_group(
+                    "scope:group:batch:0",
+                    0,
+                    lash_core::GroupWakePolicy::First,
+                    lash_core::LoserDisposition::RunToCompletion,
+                );
+        let grouped_result = restate_effect_execution(grouped);
+        let carries_membership = matches!(
+            expected,
+            "direct_local" | "durable_tool_batch" | "journaled_run"
+        );
+        match grouped_result {
+            Ok(_) => assert!(
+                carries_membership,
+                "the {expected} arm drops group membership silently; it must refuse instead"
+            ),
+            Err(error) => {
+                assert!(
+                    !carries_membership,
+                    "the {expected} arm can carry membership and must not refuse it: {error}"
+                );
+                assert_eq!(
+                    error.code,
+                    lash_core::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    "an unhonored membership must be a typed group-shape refusal"
+                );
+            }
+        }
+
         let execution = restate_effect_execution(RuntimeEffectEnvelope {
             invocation: runtime_invocation(kind, "classification"),
             command,
             group: None,
-        });
+        })
+        .expect("an ungrouped effect classifies");
         let actual = match execution {
             RestateEffectExecution::DirectProcess { .. } => "direct_process",
             RestateEffectExecution::DurableProcessCommand { .. } => "durable_process_command",

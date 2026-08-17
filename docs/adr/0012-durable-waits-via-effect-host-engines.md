@@ -16,6 +16,15 @@ The inline substrate owns no replay journal. The session commit store does not a
 this responsibility: effect replay and settled session history remain separate seams
 joined by stable operation identity.
 
+Amended by ADR 0065 (FIG-1416): the "exactly one primitive" claim above is now
+"exactly one *wait* primitive". Durable effect **groups** add a second, distinct
+primitive — a structured set of independently journaled children with a durable
+wake rule and a settlement order that is a journal fact. Groups are the
+composition *above* attempts and add no new command variant, so the reasoning
+here about keyed promises and their occurrence-sequenced keys is unchanged; only
+the claim of singularity is narrowed. See ADR 0065 for the group contract and its
+normative obligations.
+
 As originally accepted, this ADR said that lash never journals effect outcomes itself,
 while both SQL substrates already did. The code had diverged from the record, and the
 record was wrong. FIG-655 corrected it to the contract/substrate split above rather

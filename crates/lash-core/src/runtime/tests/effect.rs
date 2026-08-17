@@ -7,6 +7,7 @@ mod controller_doubles;
 pub(in crate::runtime::tests) use controller_doubles::RejectingEffectController;
 use controller_doubles::{SerialOnlyEffectController, WrongOutcomeEffectController};
 mod fig1127;
+mod fig1416;
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,

@@ -295,20 +295,20 @@ pub use clock::{Clock, SystemClock};
 pub(crate) use effect::RuntimeEffectControllerHandle;
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
-    BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet,
-    EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalIdentity,
-    EffectJournalRetirement, ExecutionScope, ExternalCompletionError, GroupSettlement,
-    GroupWakePolicy, InlineEffectHost, InlineRuntimeEffectController, LlmAttachmentSpec,
-    LlmRequestSpec, LoserDisposition, ProcessCommand, ProcessEffectOutcome, ProcessOutcomeObserver,
-    ProcessTurnCancellation, Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome,
-    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
-    RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
+    BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckedEffectGroup,
+    CheckpointClaimSet, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
+    GroupSettlement, GroupWakePolicy, InlineEffectHost, InlineRuntimeEffectController,
+    LlmAttachmentSpec, LlmRequestSpec, LoserDisposition, ProcessCommand, ProcessEffectOutcome,
+    ProcessOutcomeObserver, ProcessTurnCancellation, Resolution, ResolveOutcome,
+    RuntimeAssistantResponseHooksOutcome, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace,
+    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeScope, RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
     ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
-    validate_replayed_effect_envelope,
+    refuse_unhonored_group_membership, validate_replayed_effect_envelope,
 };
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};

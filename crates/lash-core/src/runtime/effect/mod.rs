@@ -26,8 +26,8 @@ pub use executor::{
     ScopedEffectController, SegmentProgress,
 };
 pub use group::{
-    EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserDisposition,
-    RuntimeEffectGroup,
+    CheckedEffectGroup, EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy,
+    LoserDisposition, RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
 pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;

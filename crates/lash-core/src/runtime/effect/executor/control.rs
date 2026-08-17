@@ -10,7 +10,7 @@ use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{
-    EffectGroupHandle, GroupSettlement, LoserDisposition, RuntimeEffectGroup,
+    CheckedEffectGroup, EffectGroupHandle, GroupSettlement, LoserDisposition,
 };
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor};
 
@@ -1008,12 +1008,39 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     ///
     /// Returns once the group is durably recorded, **not** when a child settles.
     ///
-    /// `executors` is a per-child *factory* rather than a borrowed executor
-    /// precisely because children must outlive the caller's future under
-    /// [`LoserDisposition::RunToCompletion`] — the borrow-scoped
-    /// `RuntimeEffectLocalExecutor<'_>` taken by
+    /// The single [`CheckedEffectGroup`] parameter carries the group together
+    /// with one `'static` executor per child, positionally aligned with
+    /// [`RuntimeEffectGroup::children`](crate::RuntimeEffectGroup::children) — an
+    /// alignment [`CheckedEffectGroup::try_new`] has already established, since it
+    /// is the type's only constructor and this method takes nothing else. That is
+    /// deliberate: "executor `i` runs child `i`" is the load-bearing claim, and a
+    /// two-parameter signature would leave checking it an obligation on every
+    /// implementation rather than a property of the argument.
+    ///
+    /// The `'static` lifetime is the ratified property: children must outlive the
+    /// caller's future under [`LoserDisposition::RunToCompletion`], and the
+    /// borrow-scoped `RuntimeEffectLocalExecutor<'_>` taken by
     /// [`execute_effect`](Self::execute_effect) carries the one lifetime this
-    /// contract exists to break.
+    /// contract exists to break. A checked `Vec` rather than a factory closure
+    /// keeps that property while making an out-of-range position, a second
+    /// executor for one child, and an arity mismatch unrepresentable instead of
+    /// resolved by panic or convention. A child with no runnable executor is
+    /// expressed as [`RuntimeEffectLocalExecutor::unavailable`], not as a missing
+    /// element.
+    ///
+    /// Each executor is **single-execution**:
+    /// [`RuntimeEffectLocalExecutor::execute`] consumes `self`, so the vec funds
+    /// one attempt per child and no retry. A host that retries a child obtains a
+    /// fresh executor from [`EffectHost::scoped_static`] — the same source the
+    /// capability flag's `'static` requirement points at, and the mechanism by
+    /// which the group-drain path runs or cancels losers after the caller is
+    /// gone. Take ownership through [`CheckedEffectGroup::into_parts`].
+    ///
+    /// A reopen must be fenced on group shape: a host that finds a recorded group
+    /// under this key whose child count or wake rule differs from the group
+    /// passed here must refuse rather than reopen, because a shrunk child vec
+    /// under one key silently renumbers every rank above the truncation and the
+    /// per-child envelope-hash fence cannot see it.
     ///
     /// The default errors loudly rather than mis-executing a group, matching
     /// [`AwaitEventResolver::cancel_await_events_for_session`]: an out-of-tree
@@ -1021,8 +1048,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// error.
     async fn open_effect_group(
         &self,
-        _group: RuntimeEffectGroup,
-        _executors: Arc<dyn Fn(usize) -> RuntimeEffectLocalExecutor<'static> + Send + Sync>,
+        _group: CheckedEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         Err(RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::EffectGroupUnsupported,
@@ -1039,11 +1065,25 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// row, a Restate journal entry, a Temporal history event.
     ///
     /// Settlements are served by *rank* — the child holding the
-    /// `(consumed + 1)`-th smallest sequence — never by literal sequence
+    /// `(handle.consumed() + 1)`-th smallest sequence — never by literal sequence
     /// equality, because sequences are monotonic without being gapless.
+    ///
+    /// The handle is the sole cursor of record and is taken by `&mut`: an
+    /// implementation calls [`EffectGroupHandle::advance`] on exactly the
+    /// settlements it returns and keeps no per-caller consumption state of its
+    /// own, which is what makes consumption exactly-once across a crash. See
+    /// [`EffectGroupHandle`] for the full normative rule.
+    ///
+    /// Cancellation returns
+    /// [`RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled`](crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled)
+    /// and leaves the cursor and the durable rank untouched, so a later await
+    /// resumes at the same rank. Exhaustion has no code because it is the
+    /// caller's arithmetic: check
+    /// [`EffectGroupHandle::is_exhausted`] rather than awaiting past the last
+    /// child.
     async fn await_next_settlement(
         &self,
-        _handle: &EffectGroupHandle,
+        _handle: &mut EffectGroupHandle,
         _cancel: CancellationToken,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         Err(RuntimeEffectControllerError::new(
@@ -1059,6 +1099,20 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// owns their redrive. Under [`LoserDisposition::Cancel`] the host cancels
     /// them and journals each cancellation as that child's terminal. Either way
     /// the caller may not observe further settlements.
+    ///
+    /// `disposition` may only **narrow** the one the group declared at open:
+    /// resolve it through
+    /// [`LoserDisposition::resolve_close`] and refuse a widening request. The
+    /// declared disposition is authoritative — it is journaled with the group
+    /// row, so a group abandoned by a crash before its close is drained under it
+    /// too, and no policy is invented at drain time.
+    ///
+    /// Close is **idempotent**, and its failure is retryable. Taking the handle
+    /// by value blocks reuse only in-process: the handle is `Deserialize`, so a
+    /// crash between a successful close and the continuation commit means a
+    /// replayed frame closes the same group again by construction. A second close
+    /// under the same disposition must therefore succeed rather than raise on a
+    /// healthy replay path.
     async fn close_effect_group(
         &self,
         _handle: EffectGroupHandle,
