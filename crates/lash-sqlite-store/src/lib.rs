@@ -749,7 +749,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        delete_session_from_catalog(&self.root, session_id, true).await?;
+        delete_session_from_catalog(&self.root, session_id).await?;
         if let Some(process_registry_path) = self.process_registry_path.as_deref() {
             delete_wake_allocation_floors_from_process_registry(process_registry_path, session_id)
                 .await?;
@@ -895,11 +895,7 @@ fn warn_process_registry_not_wired() {
     );
 }
 
-async fn delete_session_from_catalog(
-    root: &Path,
-    session_id: &str,
-    tombstone_host_facing_id: bool,
-) -> Result<(), String> {
+async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<(), String> {
     let path = root.join("durable-core.db");
     if !path.exists() {
         return Ok(());
@@ -923,10 +919,13 @@ async fn delete_session_from_catalog(
                 .optional()
                 .map_err(sqlite_error)?
                 .is_some();
-            if tombstone_host_facing_id && existed {
-                // Permanent identity evidence for host-facing ids only.
-                // Runtime-internal process session ids are lash-minted and
-                // reclaimed without a tombstone.
+            if existed {
+                // Permanent identity evidence for every deleted session id,
+                // host-facing and runtime-internal alike. The deleted set is
+                // also the reclaim frontier for the delete arm below: a
+                // process-owned session id that never entered it would leave
+                // its tombstoned rows unreachable forever, because the id is
+                // just as unbindable as a host-facing one once deleted.
                 tx.execute(
                     "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
                     params![session_id],

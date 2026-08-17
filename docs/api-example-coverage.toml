@@ -53755,6 +53755,22 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::process_prune_deletes_owned_session_stores to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::process_prune_reclaims_tombstones_owned_by_deleted_sessions"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::process_prune_reclaims_tombstones_owned_by_deleted_sessions to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::testing::conformance::process_prune_records_deletions_for_later_reclaim"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash::testing::conformance::process_prune_records_deletions_for_later_reclaim to the agent-workbench durable process flow example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::testing::conformance::process_prune_scoped_by_originator"
 kind = "function"
 availability = "all-features"

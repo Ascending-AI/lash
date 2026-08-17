@@ -28,11 +28,16 @@ tombstone. Creating or forking to a deleted id fails with
 `StoreError::SessionDeleted`, whose message states that the id was used and
 deleted. Retention and vacuum never remove this identity evidence.
 
-Runtime-internal process session ids are different: Lash mints them, hosts
-cannot address them, and process pruning reclaims them without a tombstone.
-This prevents permanent identity evidence from growing by two rows for every
-pruned process. Host-facing ids are used once; runtime-internal session ids are
-lash-minted and reclaimed without tombstone.
+Runtime-internal process session ids are lash-minted and hosts cannot address
+them, but they are used once on the same terms: process pruning deletes them,
+and a delete writes the same permanent tombstone. Pruning them without one was
+tried and does not hold. The deleted set is not only a reuse fence, it is the
+frontier a delete reads to reclaim tombstoned history rows whose owner is
+already gone — a node can be tombstoned after its owner's delete, and no
+session-scoped vacuum can reach it, because the owning id is unbindable either
+way. An untombstoned process id therefore strands rows in the store forever.
+Two rows of identity evidence per pruned process is the price of a store that
+drains; the alternative was unbounded leaked history.
 
 Creating an already-live id remains idempotent. Opening an existing id remains
 an explicit operation. `fork_at` already takes the new host-provided session id

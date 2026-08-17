@@ -619,10 +619,26 @@ pub async fn process_prune_deletes_owned_session_stores(
             "process prune left session store {} behind",
             request.session_id
         );
-        factory
-            .create_store(&request)
-            .await
-            .expect("runtime-internal session id must be reclaimable without tombstone");
+        // A pruned process-owned id joins the permanent deleted set exactly like
+        // a host-facing one. The set is the reclaim frontier a later delete
+        // reads to drain tombstones orphaned under a gone owner, so an id the
+        // prune omitted would strand rows forever.
+        assert!(
+            factory
+                .session_was_deleted(&request.session_id)
+                .await
+                .expect("probe the deleted set for a pruned process session"),
+            "process prune must record session {} as deleted",
+            request.session_id
+        );
+        let reuse_error = match factory.create_store(&request).await {
+            Ok(_) => panic!(
+                "a pruned process-owned session id must stay unbindable: {}",
+                request.session_id
+            ),
+            Err(error) => error,
+        };
+        assert_session_id_was_used_and_deleted(reuse_error, &request.session_id);
     }
 }
 
