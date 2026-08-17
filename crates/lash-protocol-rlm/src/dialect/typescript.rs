@@ -382,7 +382,7 @@ Write one script inside standalone `<typescript>` and `</typescript>` lines. Top
 
 ```typescript
 interface ProcessDefinition<Input, Output> { readonly name: string }
-interface ProcessHandle<Output> extends PromiseLike<Output> {}
+interface ProcessHandle<Output> extends PromiseLike<Output> { readonly id: string }
 declare const console: {
   log(...values: unknown[]): void;
   warn(...values: unknown[]): void;
