@@ -57,6 +57,7 @@ pub enum ToolIntent {
     SignalProcess(SignalProcessIntent),
     CancelProcess(CancelProcessIntent),
     EmitProcessEvent(EmitProcessEventIntent),
+    EmitTrigger(EmitTriggerIntent),
 }
 
 impl ToolIntent {
@@ -67,6 +68,7 @@ impl ToolIntent {
             Self::SignalProcess(_) => ToolIntentKind::SignalProcess,
             Self::CancelProcess(_) => ToolIntentKind::CancelProcess,
             Self::EmitProcessEvent(_) => ToolIntentKind::EmitProcessEvent,
+            Self::EmitTrigger(_) => ToolIntentKind::EmitTrigger,
         }
     }
 
@@ -77,6 +79,7 @@ impl ToolIntent {
             Self::SignalProcess(intent) => &intent.session_id,
             Self::CancelProcess(intent) => &intent.session_id,
             Self::EmitProcessEvent(intent) => &intent.session_id,
+            Self::EmitTrigger(intent) => &intent.session_id,
         }
     }
 }
@@ -184,6 +187,41 @@ pub struct EmitProcessEventIntent {
     pub event_type: String,
     /// Event payload validated by the process registry.
     pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Trigger declaration consumed by protocol and process-engine implementors.
+///
+/// A leaf attempt cannot emit a trigger synchronously on ordinal-addressed
+/// journal tiers: an emission that outlives a failed attempt would advertise a
+/// cause that never committed. Declaring this intent instead moves the emission
+/// behind the attempt's own commit, where the recorded occurrence's
+/// `idempotency_key` is the exactly-once backstop for redrive.
+///
+/// Three consequences of carrying a whole [`crate::TriggerOccurrenceRequest`]:
+///
+/// - A submission's payload hash covers this struct's entire serde shape.
+///   Adding a field to `TriggerOccurrenceRequest` without
+///   `skip_serializing_if` changes the hash of an unchanged declaration, so a
+///   submission recorded before the change is refused as `DuplicateIdentity`
+///   after it. New fields belong behind `skip_serializing_if` unless a
+///   deliberate identity break is the point.
+/// - `request.idempotency_key` is caller-supplied, unlike the replay keys Lash
+///   derives for the process kinds. Two distinct declarations that share a key
+///   collapse into one occurrence at the store and both report success, so the
+///   key must be a function of the committed cause — the attempt's replay key
+///   plus whatever the tool made durable.
+/// - `session_id` here is the authority the intent executor validates the
+///   declaration against; `request.session_id` is the occurrence's own routing
+///   scope, which the router carries onto the occurrence record and never
+///   checks against it.
+pub struct EmitTriggerIntent {
+    /// Session whose authority owns the emission. Validated: a declaration
+    /// naming another session is refused before it reaches the router.
+    pub session_id: String,
+    /// Complete durable trigger-occurrence request handed to the router. Its
+    /// own `session_id` is the occurrence's routing scope, not an authority.
+    pub request: crate::TriggerOccurrenceRequest,
 }
 
 /// The single identity seam for the v1 protocol.

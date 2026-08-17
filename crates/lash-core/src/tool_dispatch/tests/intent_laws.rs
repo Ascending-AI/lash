@@ -714,3 +714,347 @@ async fn empty_v1_batch_without_a_recorded_call_id_is_a_noop() {
     .await;
     assert!(outcomes.is_empty());
 }
+
+async fn register_trigger_intent_subscription(
+    store: &crate::facade_support::InMemoryTriggerStore,
+) -> crate::TriggerSubscriptionRecord {
+    register_trigger_intent_subscription_with_schema(store, crate::LashSchema::any()).await
+}
+
+async fn register_trigger_intent_subscription_with_schema(
+    store: &crate::facade_support::InMemoryTriggerStore,
+    payload_schema: crate::LashSchema,
+) -> crate::TriggerSubscriptionRecord {
+    use crate::TriggerStore as _;
+    let draft = crate::TriggerSubscriptionDraft::for_process(
+        "test/intent-trigger-delivery",
+        crate::ProcessExecutionEnvRef::new("process-env:intent-trigger-delivery"),
+        "intent.trigger.emitted",
+        "intent-law-source",
+        crate::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: json!({"process": "intent-trigger-delivery"}),
+        },
+        crate::ProcessIdentity::new("test-engine").with_label(Some("intent-trigger-delivery")),
+    )
+    .with_payload_schema(payload_schema);
+    let outcome = store
+        .execute_command(
+            "intent-trigger-subscription",
+            crate::TriggerCommand::Register {
+                owner_scope: crate::TriggerOwnerScope::host("intent-law").expect("owner scope"),
+                actor: crate::ProcessOriginator::host_scoped("intent-law"),
+                draft,
+            },
+        )
+        .await
+        .expect("execute the intent-law trigger registration")
+        .expect("register the intent-law trigger subscription");
+    let crate::TriggerCommandOutcome::Mutation { receipt } = outcome else {
+        panic!("registration must return a mutation receipt")
+    };
+    receipt.record_snapshot
+}
+
+fn recorded_trigger_intents() -> crate::ToolIntents {
+    crate::ToolIntents::v1(vec![crate::ToolIntent::EmitTrigger(
+        crate::EmitTriggerIntent {
+            session_id: "session".to_string(),
+            request: crate::TriggerOccurrenceRequest::new(
+                "intent.trigger.emitted",
+                "intent-law-source",
+                json!({"declared": true}),
+                "intent-law-occurrence",
+            ),
+        },
+    )])
+}
+
+/// Builds a dispatch context whose single recorded intent is the trigger
+/// declaration, routed at a router over `store` with a process registry so the
+/// reserved delivery actually starts.
+fn trigger_intent_dispatch_context(
+    controller: Arc<IntentReplayController>,
+    store: &Arc<crate::facade_support::InMemoryTriggerStore>,
+    calls: Arc<AtomicUsize>,
+) -> ToolDispatchContext<'static> {
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let mut context = fixed_intent_dispatch_context(
+        controller,
+        Arc::clone(&registry),
+        recorded_trigger_intents(),
+        calls,
+    );
+    context.trigger_router = Some(crate::TriggerRouter::new(
+        Arc::clone(store) as Arc<dyn crate::TriggerStore>,
+        Some(registry as Arc<dyn crate::ProcessRegistry>),
+        None,
+    ));
+    context
+}
+
+/// Drives one recorded `EmitTrigger` declaration, crashes the coordinator at
+/// `pause`, and redrives it. Returns the store, the registered subscription and
+/// the redriven outcome so each half of the exactly-once law can assert on the
+/// state its crash point leaves behind.
+async fn crashed_trigger_intent_redrive(
+    pause: IntentPausePoint,
+    at_crash: impl AsyncFnOnce(&crate::facade_support::InMemoryTriggerStore),
+) -> (
+    Arc<crate::facade_support::InMemoryTriggerStore>,
+    crate::TriggerSubscriptionRecord,
+    Box<crate::tool_dispatch::ToolDispatchOutcome>,
+) {
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    let subscription = register_trigger_intent_subscription(&store).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(Some(pause)));
+    let context = trigger_intent_dispatch_context(controller.clone(), &store, Arc::clone(&calls));
+
+    let crashed_context = context.clone();
+    let crashed =
+        crate::task::spawn(async move { run_fixed_intent_attempt(&crashed_context).await });
+    controller.wait_until_paused().await;
+    crashed.abort();
+    assert!(
+        crashed
+            .await
+            .expect_err("the injected crash aborts the first drain")
+            .is_cancelled(),
+        "the first coordinator task must stop at the injected crash point"
+    );
+    at_crash(store.as_ref()).await;
+
+    let redriven = run_fixed_intent_attempt(&context).await;
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the attempt result replays instead of re-running the provider"
+    );
+    (store, subscription, redriven)
+}
+
+/// Reads the single executed trigger outcome and its occurrence id.
+fn executed_trigger_outcome(
+    outcome: &crate::tool_dispatch::ToolDispatchOutcome,
+) -> (&serde_json::Value, String) {
+    let [crate::ToolIntentExecutionOutcome::Executed {
+        kind: crate::ToolIntentKind::EmitTrigger,
+        result,
+        ..
+    }] = outcome.intent_outcomes.as_slice()
+    else {
+        panic!(
+            "the drain must execute the recorded trigger declaration: {:?}",
+            outcome.intent_outcomes
+        )
+    };
+    let occurrence_id = result["occurrence_id"]
+        .as_str()
+        .expect("the executed outcome reports its occurrence")
+        .to_string();
+    (result, occurrence_id)
+}
+
+/// The at-least-once half of the atomic-emission law: a recorded `EmitTrigger`
+/// declaration reaches the trigger router only after the attempt result
+/// commits, so a crash in between emits nothing, and the redrive still ingests
+/// the occurrence and reserves its delivery.
+#[tokio::test]
+async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
+    use crate::TriggerStore as _;
+    let (store, subscription, redriven) =
+        crashed_trigger_intent_redrive(IntentPausePoint::AfterToolAttemptCommit, async |store| {
+            assert_eq!(
+                store
+                    .list_occurrences(crate::TriggerOccurrenceFilter::default())
+                    .await
+                    .expect("read occurrences after the crash")
+                    .len(),
+                0,
+                "no occurrence may exist before the recorded declaration drains"
+            );
+        })
+        .await;
+
+    let (_, occurrence_id) = executed_trigger_outcome(&redriven);
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read occurrences after the redrive");
+    assert_eq!(occurrences.len(), 1, "redrive must not duplicate the emission");
+    assert_eq!(occurrences[0].occurrence_id, occurrence_id);
+    let deliveries = store
+        .list_deliveries_by_occurrence_id(&occurrence_id)
+        .await
+        .expect("read the reserved deliveries");
+    assert_eq!(deliveries.len(), 1, "exactly one delivery is reserved");
+    assert_eq!(
+        deliveries[0].subscription.subscription_id,
+        subscription.subscription_id
+    );
+}
+
+/// A delivery that never started is the declaration's own refusal, not a
+/// failure buried inside a successful outcome. Its reason is a live error
+/// string the next drive need not reproduce, so letting it reach
+/// `Executed { result }` would both call a start that did not happen a success
+/// and put replay-varying bytes on the durable wire.
+#[tokio::test]
+async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    register_trigger_intent_subscription_with_schema(
+        &store,
+        crate::LashSchema::new(json!({"type": "string"})),
+    )
+    .await;
+    let controller = Arc::new(IntentReplayController::new(None));
+    let context = trigger_intent_dispatch_context(
+        controller,
+        &store,
+        Arc::new(AtomicUsize::new(0)),
+    );
+
+    let outcome = run_fixed_intent_attempt(&context).await;
+
+    let [
+        crate::ToolIntentExecutionOutcome::Refused {
+            kind: crate::ToolIntentKind::EmitTrigger,
+            refusal: crate::ToolIntentRefusalReason::CommandFailed { message, .. },
+            ..
+        },
+    ] = outcome.intent_outcomes.as_slice()
+    else {
+        panic!(
+            "a declaration whose delivery did not start must refuse: {:?}",
+            outcome.intent_outcomes
+        )
+    };
+    assert!(
+        message.contains("did not start") && message.contains("invalid payload for trigger"),
+        "the refusal must name the unstarted delivery and why: {message}"
+    );
+}
+
+/// The trigger arm of the public byte-stability law: two clean drives of the
+/// same recorded declaration hand the caller identical bytes, even though the
+/// second drive re-ingests an occurrence that already exists and re-starts a
+/// delivery the store now reads back as `AlreadyReserved` (FIG-806).
+#[tokio::test]
+async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emission() {
+    use crate::TriggerStore as _;
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    let subscription = register_trigger_intent_subscription(&store).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None));
+    let context = trigger_intent_dispatch_context(Arc::clone(&controller), &store, Arc::clone(&calls));
+
+    let first = run_fixed_intent_attempt(&context).await;
+    // Rendered rather than raw bytes: this is the same byte equality, with a
+    // readable diff when a live read leaks into the recorded outcome.
+    let first_rendered = serde_json::to_string(&first).expect("serialize the first public outcome");
+    let (_, occurrence_id) = executed_trigger_outcome(&first);
+    assert_eq!(
+        store
+            .list_deliveries_by_occurrence_id(&occurrence_id)
+            .await
+            .expect("read the deliveries the first drive reserved")
+            .len(),
+        1,
+        "the first drive must reserve the delivery the second one reads back as already reserved"
+    );
+
+    let redriven = run_fixed_intent_attempt(&context).await;
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "the attempt body replays");
+    assert_eq!(
+        serde_json::to_string(&redriven).expect("serialize the redriven public outcome"),
+        first_rendered,
+        "the recorded trigger outcome is byte-stable across drives"
+    );
+    let deliveries = store
+        .list_deliveries_by_occurrence_id(&occurrence_id)
+        .await
+        .expect("read the deliveries after the redrive");
+    assert_eq!(deliveries.len(), 1, "the redrive reserves nothing new");
+    assert_eq!(
+        deliveries[0].subscription.subscription_id,
+        subscription.subscription_id
+    );
+    for (key, sightings) in controller.frame_sightings() {
+        assert!(
+            sightings.iter().all(|frame| frame == &sightings[0]),
+            "public-caller redrive changed the frame for {key}"
+        );
+    }
+}
+
+/// The at-most-once half: a crash after the occurrence is ingested and its
+/// delivery start commits leaves durable state the redrive must not add to. The
+/// redrive re-ingests the same idempotency key, replays the same delivery start
+/// from the journal, and reports the same bytes — the reservation reads back as
+/// `AlreadyReserved` on the second drive, which is exactly the live-state read a
+/// recorded outcome may not expose.
+#[tokio::test]
+async fn crash_after_delivery_start_neither_re_emits_nor_changes_the_recorded_outcome() {
+    use crate::TriggerStore as _;
+    let (store, subscription, redriven) = crashed_trigger_intent_redrive(
+        IntentPausePoint::AfterProcessCommandCommit(1),
+        async |store| {
+            let occurrences = store
+                .list_occurrences(crate::TriggerOccurrenceFilter::default())
+                .await
+                .expect("read occurrences after the crash");
+            assert_eq!(
+                occurrences.len(),
+                1,
+                "the crash lands after the occurrence is ingested"
+            );
+            assert_eq!(
+                store
+                    .list_deliveries_by_occurrence_id(&occurrences[0].occurrence_id)
+                    .await
+                    .expect("read deliveries after the crash")
+                    .len(),
+                1,
+                "the crash lands after the delivery start commits"
+            );
+        },
+    )
+    .await;
+
+    let (result, occurrence_id) = executed_trigger_outcome(&redriven);
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read occurrences after the redrive");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "a redrive past a committed emission may not ingest a second occurrence"
+    );
+    assert_eq!(occurrences[0].occurrence_id, occurrence_id);
+    let deliveries = store
+        .list_deliveries_by_occurrence_id(&occurrence_id)
+        .await
+        .expect("read the reserved deliveries");
+    assert_eq!(
+        deliveries.len(),
+        1,
+        "a redrive may not reserve a second delivery"
+    );
+    assert_eq!(
+        deliveries[0].subscription.subscription_id,
+        subscription.subscription_id
+    );
+    assert_eq!(
+        result["deliveries"],
+        json!([{
+            "occurrence_id": occurrence_id,
+            "subscription_id": subscription.subscription_id,
+            "process_id": deliveries[0].process_id,
+            "outcome": "started",
+        }]),
+        "the recorded outcome states what every drive did, not which drive reserved first"
+    );
+}

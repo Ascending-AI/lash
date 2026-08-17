@@ -1152,7 +1152,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 38, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 39, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1561,7 +1561,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 38,
+            expected: 39,
         })
     ));
 }
@@ -1601,7 +1601,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             ensure_protocol_version(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 38,
+                expected: 39,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1609,6 +1609,42 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
 
     let error = serde_json::from_value::<Protocol37RuntimeEffectKind>(kind)
         .expect_err("without the version gate, the new kind is unknown to a 37 peer");
+    assert!(error.to_string().contains("unknown variant"), "{error}");
+}
+
+/// The tool-intent kinds a protocol-38 peer knew, as a closed decoder.
+///
+/// Version 39 adds `emit_trigger`; a 38 peer has no name for it, so the
+/// version gate has to refuse the envelope before this decoder ever sees the
+/// value.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Protocol38ToolIntentKind {
+    StartProcess,
+    SignalProcess,
+    CancelProcess,
+    EmitProcessEvent,
+}
+
+#[test]
+fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode() {
+    let kind = serde_json::to_value(RemoteToolIntentKind::EmitTrigger)
+        .expect("serialize the version 39 intent kind");
+    assert_eq!(kind, serde_json::json!("emit_trigger"));
+
+    assert!(
+        matches!(
+            ensure_protocol_version(38),
+            Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                actual: 38,
+                expected: 39,
+            })
+        ),
+        "the version gate refuses a 38 peer before any payload is interpreted"
+    );
+
+    let error = serde_json::from_value::<Protocol38ToolIntentKind>(kind)
+        .expect_err("without the version gate, the new kind is unknown to a 38 peer");
     assert!(error.to_string().contains("unknown variant"), "{error}");
 }
 

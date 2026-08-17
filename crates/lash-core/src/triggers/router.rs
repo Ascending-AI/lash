@@ -470,6 +470,17 @@ fn trigger_delivery_process_preimage(
     identity.finish()
 }
 
+const DELIVERY_REQUIRES_REGISTRY: &str = "trigger delivery requires a process registry";
+
+/// The refusal a recorded emission raises when one of its deliveries did not
+/// start. See [`TriggerRouter::emit_recorded`] for why this is an error rather
+/// than a `Failed` entry in an otherwise successful report.
+fn unstarted_delivery(subscription_id: &str, reason: &str) -> PluginError {
+    PluginError::Session(format!(
+        "trigger delivery for subscription `{subscription_id}` did not start: {reason}"
+    ))
+}
+
 #[derive(Clone)]
 pub struct TriggerRouter {
     store: Arc<dyn TriggerStore>,
@@ -494,6 +505,68 @@ impl TriggerRouter {
         Arc::clone(&self.store)
     }
 
+    /// Emits a recorded [`crate::ToolIntent::EmitTrigger`] declaration and
+    /// settles the report so redriving that one declaration returns the same
+    /// bytes.
+    ///
+    /// [`Self::emit`] reports each delivery's live reservation status, which is
+    /// committed outside the effect journal and flips `Reserved` to
+    /// `AlreadyReserved` once the first drive has run (FIG-806). A recorded
+    /// declaration cannot carry that read: its report becomes the durable,
+    /// wire-visible `ToolIntentExecutionOutcome::Executed` result, and on a
+    /// runtime-owned host there is no journal to replay it from, so the drain
+    /// must recompute the identical value. Every drive starts each reserved
+    /// delivery under the same deterministic journal key, so `Started` is the
+    /// statement that holds on the first drive and every redrive.
+    ///
+    /// A delivery that did not start carries no such statement: its reason is a
+    /// live error string, and the next drive may well start it. Reporting that
+    /// inside a successful outcome would both call a failure a success and put
+    /// replay-varying bytes on the wire, so a failed start fails the whole
+    /// declaration instead — the caller turns the error into the intent's own
+    /// refusal, which is where a command that did not happen belongs. Missing a
+    /// process registry is the same case: nothing starts, so nothing is
+    /// reported as started.
+    ///
+    /// A host whose registry is present on one drive and absent on the next
+    /// changes from executing to refusing. That is a host configuration change
+    /// between drives, not a redrive divergence; the same host answers the same
+    /// way every time.
+    ///
+    /// This is deliberately not a journaled wrapper around [`Self::emit`]:
+    /// delivery starts are themselves effects, and nesting them inside an outer
+    /// effect is what [`crate::ToolContext::triggers`] refuses on
+    /// ordinal-addressed journal tiers.
+    #[doc(hidden)]
+    pub async fn emit_recorded(
+        &self,
+        request: TriggerOccurrenceRequest,
+        effect_controller: &dyn crate::RuntimeEffectController,
+    ) -> Result<TriggerEmitReport, PluginError> {
+        let report = self.emit(request, effect_controller).await?;
+        let deliverable = self.process_registry.is_some();
+        let mut deliveries = Vec::with_capacity(report.deliveries.len());
+        for mut delivery in report.deliveries {
+            delivery.outcome = match delivery.outcome {
+                TriggerDeliveryEmitOutcome::AlreadyReserved if deliverable => {
+                    TriggerDeliveryEmitOutcome::Started
+                }
+                TriggerDeliveryEmitOutcome::AlreadyReserved => {
+                    return Err(unstarted_delivery(
+                        &delivery.subscription_id,
+                        DELIVERY_REQUIRES_REGISTRY,
+                    ));
+                }
+                TriggerDeliveryEmitOutcome::Failed { reason } => {
+                    return Err(unstarted_delivery(&delivery.subscription_id, &reason));
+                }
+                outcome => outcome,
+            };
+            deliveries.push(delivery);
+        }
+        Ok(TriggerEmitReport::new(report.occurrence_id, deliveries))
+    }
+
     pub async fn emit(
         &self,
         request: TriggerOccurrenceRequest,
@@ -510,7 +583,7 @@ impl TriggerRouter {
                     let outcome = match reservation.reservation_status {
                         TriggerDeliveryReservationStatus::Reserved => {
                             TriggerDeliveryEmitOutcome::Failed {
-                                reason: "trigger delivery requires a process registry".to_string(),
+                                reason: DELIVERY_REQUIRES_REGISTRY.to_string(),
                             }
                         }
                         TriggerDeliveryReservationStatus::AlreadyReserved => {

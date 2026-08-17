@@ -32,6 +32,10 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 39: `RemoteToolIntentKind` gains `EmitTrigger`, the fifth durable
+// tool-intent declaration. A version 38 peer has no name for that kind, so it
+// would refuse or misread a recorded declaration instead of emitting the
+// occurrence the committed attempt owes.
 // Bumped to 38: `RemoteRuntimeEffectKind` gains `LanguageRuntimeValue`, the
 // journaled sample a language runtime draws for a nondeterministic builtin. A
 // version 37 peer has no name for that kind and would reject or misread the
@@ -80,7 +84,7 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 38;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 39;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

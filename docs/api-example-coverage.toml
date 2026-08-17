@@ -54247,8 +54247,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:616#.executable_for(&manifest.name)"
-assertion = "examples/agent-workbench/src/mail.rs:618#assert_eq!(surface.call_path(), \"inbox.work.send\");"
+usage = "examples/agent-workbench/src/mail.rs:757#.executable_for(&manifest.name)"
+assertion = "examples/agent-workbench/src/mail.rs:759#assert_eq!(surface.call_path(), \"inbox.work.send\");"
 
 [[api]]
 symbol = "lash::tools::LashlangToolBinding::module_path"
@@ -54314,7 +54314,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:370#LashlangToolBinding::new([\"inbox\", slug], operation).with_authority_type(\"Inbox\"),"
+usage = "examples/agent-workbench/src/mail.rs:408#LashlangToolBinding::new([\"inbox\", slug], operation).with_authority_type(\"Inbox\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56597,7 +56597,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolProvider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:31#ToolManifest, ToolProvider, ToolResult,"
+usage = "examples/agent-workbench/src/mail.rs:31#ToolDefinition, ToolDefinitionLashlangExt, ToolIntent, ToolIntents, ToolManifest, ToolProvider,"
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57012,7 +57012,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Idempotent"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:354#\"delete\" => ToolRetryPolicy::Idempotent {"
+usage = "examples/agent-workbench/src/mail.rs:392#\"delete\" => ToolRetryPolicy::Idempotent {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57022,7 +57022,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Idempotent::base_delay_ms"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:356#base_delay_ms: 25,"
+usage = "examples/agent-workbench/src/mail.rs:394#base_delay_ms: 25,"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/mail.rs:362, inside `definition_for`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/mail.rs:507 asserts an unrelated expression in `slugify_normalizes_names`, and `definition_for` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -57032,7 +57032,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Idempotent::max_attempts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:355#max_attempts: 3,"
+usage = "examples/agent-workbench/src/mail.rs:393#max_attempts: 3,"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/mail.rs:361, inside `definition_for`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/mail.rs:507 asserts an unrelated expression in `slugify_normalizes_names`, and `definition_for` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -57042,7 +57042,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Idempotent::max_delay_ms"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:357#max_delay_ms: 250,"
+usage = "examples/agent-workbench/src/mail.rs:395#max_delay_ms: 250,"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/mail.rs:363, inside `definition_for`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/mail.rs:507 asserts an unrelated expression in `slugify_normalizes_names`, and `definition_for` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -57052,8 +57052,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Never"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:582#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
-assertion = "examples/agent-workbench/src/mail.rs:582#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+usage = "examples/agent-workbench/src/mail.rs:723#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+assertion = "examples/agent-workbench/src/mail.rs:723#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57063,7 +57063,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Safe"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:589#ToolRetryPolicy::Safe {"
+usage = "examples/agent-workbench/src/mail.rs:730#ToolRetryPolicy::Safe {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57073,8 +57073,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Safe::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:356#base_delay_ms: 25,"
-assertion = "examples/agent-workbench/src/mail.rs:576#assert_eq!(names.len(), 6);"
+usage = "examples/agent-workbench/src/mail.rs:394#base_delay_ms: 25,"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_attempts"
@@ -57083,8 +57083,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Safe::max_attempts"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:355#max_attempts: 3,"
-assertion = "examples/agent-workbench/src/mail.rs:576#assert_eq!(names.len(), 6);"
+usage = "examples/agent-workbench/src/mail.rs:393#max_attempts: 3,"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_delay_ms"
@@ -57093,8 +57093,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Safe::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:357#max_delay_ms: 250,"
-assertion = "examples/agent-workbench/src/mail.rs:576#assert_eq!(names.len(), 6);"
+usage = "examples/agent-workbench/src/mail.rs:395#max_delay_ms: 250,"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::safe"
@@ -57103,8 +57103,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::safe"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:353#\"list\" => ToolRetryPolicy::safe(3, 25, 250),"
-assertion = "examples/agent-workbench/src/mail.rs:576#assert_eq!(names.len(), 6);"
+usage = "examples/agent-workbench/src/mail.rs:391#\"list\" => ToolRetryPolicy::safe(3, 25, 250),"
+assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolSourceHandle"
@@ -61629,7 +61629,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:33#use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};"
+usage = "examples/agent-workbench/src/mail.rs:34#use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};"
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -61658,7 +61658,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::new"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:467#TriggerOccurrenceRequest::new("
+usage = "examples/agent-workbench/src/mail.rs:268#TriggerOccurrenceRequest::new("
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::payload"
@@ -61712,7 +61712,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::with_source"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:473#.with_source(json!({})),"
+usage = "examples/agent-workbench/src/mail.rs:274#.with_source(json!({})),"
 
 [[api]]
 symbol = "lash::triggers::TriggerOperationError"
@@ -70279,7 +70279,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:146#.read_recover()"
+usage = "examples/agent-workbench/src/mail.rs:147#.read_recover()"
 reason = "The workbench host reads its in-memory mail store through the public poison-recovering facade."
 
 [[api]]
@@ -70472,7 +70472,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:129#let mut accounts = self.inner.write_recover();"
+usage = "examples/agent-workbench/src/mail.rs:130#let mut accounts = self.inner.write_recover();"
 reason = "The workbench host mutates its in-memory mail store through the public poison-recovering facade."
 
 [[api]]
@@ -70591,8 +70591,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:435#definition_for(&slug, &summary.display_name, operation).contract(),"
-assertion = "examples/agent-workbench/src/mail.rs:607#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
+usage = "examples/agent-workbench/src/mail.rs:473#definition_for(&slug, &summary.display_name, operation).contract(),"
+assertion = "examples/agent-workbench/src/mail.rs:748#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
 
 [[api]]
 symbol = "lash::tools::ToolDefinition::manifest"
@@ -72632,6 +72632,39 @@ disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
+symbol = "lash::tools::EmitTriggerIntent"
+kind = "struct"
+aliases = ["lash_core::EmitTriggerIntent"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:660#assert_eq!(declared.session_id, \"session-1\");"
+reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
+
+[[api]]
+symbol = "lash::tools::EmitTriggerIntent::request"
+kind = "field"
+aliases = ["lash_core::EmitTriggerIntent::request"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/mail.rs:268#request: TriggerOccurrenceRequest::new("
+assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
+
+[[api]]
+symbol = "lash::tools::EmitTriggerIntent::session_id"
+kind = "field"
+aliases = ["lash_core::EmitTriggerIntent::session_id"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/mail.rs:267#session_id: session_id.to_string(),"
+assertion = "examples/agent-workbench/src/mail.rs:660#assert_eq!(declared.session_id, \"session-1\");"
+reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
+
+[[api]]
 symbol = "lash::tools::ProcessParentEndPolicy"
 kind = "enum"
 aliases = ["lash_core::ProcessParentEndPolicy"]
@@ -72939,6 +72972,28 @@ disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1294_ingress.rs:44#lash::tools::ToolIntent::EmitProcessEvent(lash::tools::EmitProcessEventIntent {"
 assertion = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::EmitTrigger"
+kind = "variant"
+aliases = ["lash_core::ToolIntent::EmitTrigger"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
+
+[[api]]
+symbol = "lash::tools::ToolIntent::EmitTrigger::0"
+kind = "field"
+aliases = ["lash_core::ToolIntent::EmitTrigger::0"]
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/mail.rs:266#let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {"
+assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
 symbol = "lash::tools::ToolIntent::SignalProcess"
@@ -73347,6 +73402,16 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
+
+[[api]]
+symbol = "lash_core::ToolIntentKind::EmitTrigger"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
 symbol = "lash_core::ToolIntentKind::SignalProcess"

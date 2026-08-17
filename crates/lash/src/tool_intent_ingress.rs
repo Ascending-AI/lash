@@ -108,6 +108,15 @@ pub enum ToolIntentIngressOutcome {
     },
 }
 
+/// One realized host submission, before it is projected to a typed outcome.
+///
+/// Four of the five intent kinds are process commands; the fifth is a trigger
+/// emission owned by the trigger router, which has no `ProcessEffectOutcome`.
+enum RealizedIntent {
+    Process(lash_core::ProcessEffectOutcome),
+    Trigger(lash_core::facade_support::TriggerEmitReport),
+}
+
 /// Session-and-scope-bound host front door for durable intent realization.
 ///
 /// This is the sanctioned way for a host to submit a `ToolIntent` outside a
@@ -593,6 +602,29 @@ impl ToolIntentIngress {
             .realize_inner(identity, intent)
             .await
             .map_err(|error| RealizationFailure::Command(kind, error))?;
+        let result = match result {
+            RealizedIntent::Trigger(report) => {
+                let value = serde_json::to_value(report).unwrap_or(serde_json::Value::Null);
+                // `realize_inner` dispatches on the submitted intent, so this
+                // pairing only breaks if an admitted submission row carries a
+                // kind its own payload contradicts. The trigger route has no
+                // journal replay to cross-check, so the row is the only place
+                // that corruption can come from; refuse rather than report a
+                // trigger outcome under another kind.
+                if kind != lash_core::ToolIntentKind::EmitTrigger {
+                    return Err(RealizationFailure::Refused(
+                        ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                            recorded_kind: lash_core::ToolIntentKind::EmitTrigger,
+                            submitted_kind: kind,
+                        },
+                    ));
+                }
+                self.complete_runtime_owned_submission(identity, kind, &value, None)
+                    .await?;
+                return Ok(((kind, value), None, replayed));
+            }
+            RealizedIntent::Process(result) => result,
+        };
         let recorded_kind = match &result {
             lash_core::ProcessEffectOutcome::Start { .. } => {
                 lash_core::ToolIntentKind::StartProcess
@@ -681,20 +713,38 @@ impl ToolIntentIngress {
                 return Err(Self::outside_protocol_outcome("parent_end"));
             }
         };
-        if runtime_owned {
-            let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
-                identity: identity.clone(),
-                kind,
-                result: value.clone(),
-                parent_end: parent_end.clone(),
-            };
-            self.process_registry()
-                .map_err(|error| RealizationFailure::Command(kind, error))?
-                .complete_tool_intent_submission(&identity.replay_key, outcome)
-                .await
-                .map_err(|error| RealizationFailure::Command(kind, error.into()))?;
-        }
+        self.complete_runtime_owned_submission(identity, kind, &value, parent_end.clone())
+            .await?;
         Ok(((kind, value), parent_end, replayed))
+    }
+
+    /// Record the first typed outcome for a runtime-owned submission. Every
+    /// realized intent kind lands here so the durable submission row and the
+    /// returned outcome never disagree.
+    async fn complete_runtime_owned_submission(
+        &self,
+        identity: &lash_core::ToolIntentIdentity,
+        kind: lash_core::ToolIntentKind,
+        value: &serde_json::Value,
+        parent_end: Option<lash_core::ToolIntentParentEnd>,
+    ) -> std::result::Result<(), RealizationFailure> {
+        if self.core.env.core.control.effect_host.replay_ownership()
+            != lash_core::EffectReplayOwnership::Runtime
+        {
+            return Ok(());
+        }
+        let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
+            identity: identity.clone(),
+            kind,
+            result: value.clone(),
+            parent_end,
+        };
+        self.process_registry()
+            .map_err(|error| RealizationFailure::Command(kind, error))?
+            .complete_tool_intent_submission(&identity.replay_key, outcome)
+            .await
+            .map_err(|error| RealizationFailure::Command(kind, error.into()))?;
+        Ok(())
     }
 
     fn outside_protocol_outcome(recorded: &str) -> RealizationFailure {
@@ -710,7 +760,7 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
     ) -> crate::Result<(
-        lash_core::ProcessEffectOutcome,
+        RealizedIntent,
         Option<lash_core::ProcessParentEndPolicy>,
         bool,
     )> {
@@ -764,9 +814,52 @@ impl ToolIntentIngress {
                     request,
                 }
             }
+            lash_core::ToolIntent::EmitTrigger(intent) => {
+                let report = self.emit_recorded_trigger(intent.request).await?;
+                // The occurrence's idempotency key, not an effect-journal key,
+                // is the dedupe point for a re-submitted trigger emission, so
+                // this route never reports a journal replay.
+                return Ok((RealizedIntent::Trigger(report), None, false));
+            }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
-        Ok((result, parent_end_policy, replayed))
+        Ok((RealizedIntent::Process(result), parent_end_policy, replayed))
+    }
+
+    /// Emit one recorded trigger declaration through the same router the
+    /// runtime intent executor uses.
+    async fn emit_recorded_trigger(
+        &self,
+        request: lash_core::TriggerOccurrenceRequest,
+    ) -> crate::Result<lash_core::facade_support::TriggerEmitReport> {
+        let store = self
+            .core
+            .env
+            .trigger_store
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                    "trigger store is unavailable in this runtime".to_string(),
+                ))
+            })?;
+        let drivers = self.core.work_driver.drivers().await;
+        let router = lash_core::facade_support::TriggerRouter::new(
+            store,
+            self.core.env.process_registry.clone(),
+            drivers.process,
+        );
+        let scoped = self
+            .core
+            .env
+            .core
+            .control
+            .effect_host
+            .scoped(self.scope.clone())?;
+        router
+            .emit_recorded(request, scoped.controller())
+            .await
+            .map_err(Into::into)
     }
 
     fn process_registry(&self) -> crate::Result<std::sync::Arc<dyn lash_core::ProcessRegistry>> {

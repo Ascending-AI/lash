@@ -99,9 +99,26 @@ list, not by sleeping blind.
 ## Phase 4 — The agent operates an inbox
 
 Back in the chat tab, ask the agent to send a message into the **work** inbox with a
-title you choose (e.g. `Standup notes`). Gates: `GET /api/accounts/work/inbox` contains a
-message with exactly that title; the work inbox card shows it. This proves the
-`inbox.work` authority is live in the session. Screenshot `04-agent-mail.png`.
+title you choose (e.g. `Standup notes`). Gates:
+
+1. `GET /api/accounts/work/inbox` contains a message with exactly that title, and the
+   work inbox card shows it. This proves the `inbox.work` authority is live in the
+   session.
+2. **The turn's tool outcome agrees.** Read the send turn in `GET /api/state`
+   (transcript) and require its tool row for the send to report `success`. The inbox
+   row alone is not the gate: `send` runs only on the leaf attempt route, which
+   commits the delivery and declares its `mail.received` emission as one outcome, so a
+   row whose turn shows a failed send — or no send call at all — is a finding.
+   The emission itself has no surface to check here: nothing subscribes to
+   `mail.received` until Phase 5, so this occurrence reserves no delivery and leaves
+   no trace, and neither `GET /api/state` nor any other route projects trigger
+   occurrences or intent outcomes. What gets accepted later is the *route*, not this
+   occurrence: in Phase 6 the concierge's own `inbox.personal.send` runs this same
+   leaf attempt route, and gate 2's forwarded copy is what proves the route commits
+   its row. That send's declared `mail.received` is the one with a subscriber, and
+   gate 3's extra concierge run is it executing.
+
+Screenshot `04-agent-mail.png`.
 
 ## Phase 5 — Register the forwarding concierge
 

@@ -56,7 +56,7 @@ uuid = { workspace = true, features = ["v4"] }
 lash-lashlang-runtime = { workspace = true }
 lash-llm-tools = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }
-lash-core = { workspace = true }
+lash-core = { workspace = true, features = ["testing"] }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-sim = { path = "../../crates/lash-sim" }
 lash-typescript = { workspace = true }

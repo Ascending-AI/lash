@@ -37,6 +37,7 @@ pub enum ToolIntentKind {
     SignalProcess,
     CancelProcess,
     EmitProcessEvent,
+    EmitTrigger,
 }
 
 impl ToolIntentKind {
@@ -46,6 +47,7 @@ impl ToolIntentKind {
             Self::SignalProcess => "signal_process",
             Self::CancelProcess => "cancel_process",
             Self::EmitProcessEvent => "emit_process_event",
+            Self::EmitTrigger => "emit_trigger",
         }
     }
 }
