@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+
+SCRIPT = Path(__file__).with_name("check_version_bump_fixtures.py")
+SPEC = importlib.util.spec_from_file_location("check_version_bump_fixtures", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+
+
+VERSION_SOURCE = "const SCHEMA_VERSION: i32 = 52;\n"
+
+MIGRATIONS_SOURCE = """\
+const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        from: 51,
+        to: 52,
+        source_missing_tables: &["lash_fence"],
+        introduced_relations: &["lash_fence"],
+        statements: &[
+            FENCE_DDL,
+            r#"UPDATE lash_schema_versions
+               SET version = 52
+             WHERE component = 'lash-postgres-store' AND version = 51"#,
+        ],
+    },
+    SchemaMigration {
+        from: 50,
+        to: 52,
+        source_missing_tables: &["lash_fence", "lash_plans"],
+        introduced_relations: &["lash_fence", "lash_plans", "idx_lash_plans"],
+        statements: &[PLANS_DDL, FENCE_DDL],
+    },
+];
+
+fn schema_migration_divergence_error(found: i32) -> StoreError {
+    StoreError::Backend(format!(
+        "component has version {found} but contains schema artifacts newer than the \\
+         recorded version: {}. Inspect and recreate."
+    ))
+}
+
+fn schema_migration_source_mismatch_error(found: i32) -> StoreError {
+    StoreError::Backend(format!(
+        "component has version {found} but the live schema does not match the published \\
+         component-{found} migration source shape."
+    ))
+}
+
+pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
+    StoreError::Backend(format!(
+        "component is at {found:?}. This mismatch \\
+         has no applicable migration. Recreate the trust domain."
+    ))
+}
+"""
+
+FIXTURE_SOURCE = """\
+const MIGRATION_FLOOR_VERSION: i32 = 50;
+const POST_FLOOR_TABLES: [&str; 2] = ["lash_fence", "lash_plans"];
+const POST_FLOOR_ARTIFACTS: [&str; 3] = ["idx_lash_plans", "lash_fence", "lash_plans"];
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_fence"];
+const DIVERGENT_ARTIFACTS_MARKER: &str = "schema artifacts newer than the recorded version";
+const SOURCE_MISMATCH_MARKER: &str = "does not match the published component-";
+const NO_APPLICABLE_MIGRATION_MARKER: &str = "has no applicable migration";
+
+impl RefusalKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DivergentArtifacts => "divergent_artifacts",
+            Self::MigrationSourceMismatch => "migration_source_mismatch",
+            Self::NoApplicableMigration => "no_applicable_migration",
+        }
+    }
+}
+"""
+
+GATE_SOURCE = """\
+python3 - "$artifact_dir" <<'PY'
+EXPECTED_REFUSAL_KINDS = {
+    "refused_divergent_store": "divergent_artifacts",
+    "refused_older_store": "no_applicable_migration",
+    "refused_newer_store": "no_applicable_migration",
+    "recreated_store": "no_applicable_migration",
+}
+PY
+"""
+
+
+class VersionBumpFixtureCheckTest(unittest.TestCase):
+    def check(
+        self,
+        *,
+        version: str = VERSION_SOURCE,
+        migrations: str = MIGRATIONS_SOURCE,
+        fixture: str = FIXTURE_SOURCE,
+        gate: str = GATE_SOURCE,
+    ) -> tuple[bool, str]:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            for relative, text in (
+                (MODULE.VERSION_SOURCE, version),
+                (MODULE.MIGRATIONS_SOURCE, migrations),
+                (MODULE.FIXTURE_SOURCE, fixture),
+                (MODULE.GATE_SOURCE, gate),
+            ):
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            return MODULE.check(repo)
+
+    def test_coherent_fixtures_pass(self) -> None:
+        valid, message = self.check()
+        self.assertTrue(valid, message)
+        self.assertIn("component 52, floor 50", message)
+
+    def test_stale_floor_fails(self) -> None:
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                "MIGRATION_FLOOR_VERSION: i32 = 50", "MIGRATION_FLOOR_VERSION: i32 = 51"
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("MIGRATION_FLOOR_VERSION is 51", message)
+        # The FIG-1259 wrong-refusal cause: the stamp one below a stale floor is a
+        # version this build migrates rather than refuses.
+        self.assertIn("would be migrated instead of refused", message)
+
+    def test_stale_post_floor_lists_fail(self) -> None:
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'const POST_FLOOR_TABLES: [&str; 2] = ["lash_fence", "lash_plans"];',
+                'const POST_FLOOR_TABLES: [&str; 1] = ["lash_plans"];',
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("POST_FLOOR_TABLES is not", message)
+        self.assertIn("missing lash_fence", message)
+
+    def test_stale_divergent_artifacts_fail(self) -> None:
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_fence"];',
+                'const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_plans"];',
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("DIVERGENT_ARTIFACTS is not", message)
+        self.assertIn("stale lash_plans", message)
+
+    def test_bump_without_a_predecessor_migration_fails(self) -> None:
+        valid, message = self.check(version="const SCHEMA_VERSION: i32 = 53;\n")
+        self.assertFalse(valid)
+        self.assertIn("not the current component version 53", message)
+
+    def test_predecessor_generation_must_be_migratable(self) -> None:
+        valid, message = self.check(
+            version="const SCHEMA_VERSION: i32 = 52;\n",
+            migrations=MIGRATIONS_SOURCE.replace("from: 51,", "from: 49,").replace(
+                "AND version = 51", "AND version = 49"
+            ),
+        )
+        self.assertFalse(valid)
+        self.assertIn("no migration from component 51", message)
+
+    def test_missing_refusal_marker_fails(self) -> None:
+        valid, message = self.check(
+            migrations=MIGRATIONS_SOURCE.replace(
+                "has no applicable migration", "cannot be migrated"
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("NO_APPLICABLE_MIGRATION_MARKER", message)
+        self.assertIn("no longer appears", message)
+
+    def test_overlapping_refusal_markers_fail(self) -> None:
+        # Presence alone is not enough: a marker carried by a sibling renderer
+        # makes two kinds match at once, which the harness rejects mid-run.
+        valid, message = self.check(
+            migrations=MIGRATIONS_SOURCE.replace(
+                "recorded version: {}. Inspect and recreate.",
+                "recorded version: {}. This mismatch has no applicable migration.",
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("must select only version_mismatch_error", message)
+        self.assertIn("schema_migration_divergence_error", message)
+
+    def test_marker_selecting_the_wrong_renderer_fails(self) -> None:
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'const DIVERGENT_ARTIFACTS_MARKER: &str = "schema artifacts newer than '
+                'the recorded version";',
+                'const DIVERGENT_ARTIFACTS_MARKER: &str = "migration source shape";',
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("must select only schema_migration_divergence_error", message)
+        self.assertIn("schema_migration_source_mismatch_error", message)
+
+    def test_renamed_kind_literal_fails(self) -> None:
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'Self::DivergentArtifacts => "divergent_artifacts",',
+                'Self::DivergentArtifacts => "divergence",',
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("demands 'divergent_artifacts'", message)
+        self.assertIn("no RefusalKind variant", message)
+
+    def test_gate_demanding_an_unemitted_kind_fails(self) -> None:
+        valid, message = self.check(
+            gate=GATE_SOURCE.replace(
+                '"refused_older_store": "no_applicable_migration",',
+                '"refused_older_store": "reject_and_recreate",',
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("demands 'reject_and_recreate'", message)
+
+    def test_unparseable_sources_are_undecided(self) -> None:
+        with self.assertRaises(MODULE.CheckError):
+            self.check(migrations="const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[];\n")
+        with self.assertRaises(MODULE.CheckError):
+            self.check(fixture=FIXTURE_SOURCE.replace("[&str; 2]", "[&str; 9]"))
+        with self.assertRaises(MODULE.CheckError):
+            self.check(version="// no version here\n")
+        # A renderer the classifier must select cannot simply vanish.
+        with self.assertRaises(MODULE.CheckError):
+            self.check(
+                migrations=MIGRATIONS_SOURCE.replace(
+                    "pub(crate) fn version_mismatch_error", "fn renamed_error"
+                )
+            )
+        # Nor can the two kind tables lose their parseable shape.
+        with self.assertRaises(MODULE.CheckError):
+            self.check(fixture=FIXTURE_SOURCE.replace("Self::", "RefusalKind::"))
+        with self.assertRaises(MODULE.CheckError):
+            self.check(gate=GATE_SOURCE.replace("EXPECTED_REFUSAL_KINDS", "KINDS"))
+        # Two variants may not share one wire string.
+        with self.assertRaises(MODULE.CheckError):
+            self.check(
+                fixture=FIXTURE_SOURCE.replace(
+                    'Self::MigrationSourceMismatch => "migration_source_mismatch",',
+                    'Self::MigrationSourceMismatch => "divergent_artifacts",',
+                )
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

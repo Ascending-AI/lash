@@ -193,6 +193,7 @@ jobs:
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_version_bumps.py
+          python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
@@ -573,6 +574,11 @@ jobs:
         run: |
           python3 scripts/check-postgres-json-carrier-coverage.py
           python3 scripts/check-postgres-payload-shape-version.py
+
+      # The recreation E2E's fixtures are pinned to the newest component
+      # generation. Catch a stale pin here rather than one container gate later.
+      - name: Check version-bump recreation fixtures
+        run: python3 scripts/check_version_bump_fixtures.py
 
       # Exercise every database-free runtime and Lashlang measurement path and
       # enforce the cheap budget/phase inventory before release.

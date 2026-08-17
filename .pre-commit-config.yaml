@@ -106,6 +106,17 @@ repos:
         files: '^(crates/lash-postgres-store/(?:schema-shape|payload-schema-fingerprints)\.txt|crates/lash-postgres-store/src/lib\.rs|crates/lash-sqlite-store/src/schema\.rs)$'
         pass_filenames: false
 
+      # The recreation E2E's fixtures are projections of SCHEMA_MIGRATIONS. A
+      # component bump that leaves them behind produces refusals about a
+      # generation the build no longer has, so it fails here rather than one
+      # container gate later.
+      - id: version-bump-recreation-fixtures
+        name: Version-bump recreation fixtures
+        language: system
+        entry: python3 scripts/check_version_bump_fixtures.py
+        files: '^(crates/lash-postgres-store/src/(?:lib\.rs|postgres/schema\.rs)|runbooks/restate-postgres-workers/src/bin/version_bump\.rs|scripts/(?:check_version_bump_fixtures\.py|version-bump-recreation-e2e\.sh))$'
+        pass_filenames: false
+
       # Mirrors CI Lint "Clippy (workspace, all targets)". Warm-cache this is
       # tens of seconds; run at push so commits stay instant.
       - id: cargo-clippy-workspace
