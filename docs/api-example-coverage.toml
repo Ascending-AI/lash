@@ -77485,7 +77485,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:63#pending_message_nodes.extend(node.children);"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:67#pending_message_nodes.extend(node.children);"
 reason = "The agent-workbench settled-reconciliation route walks the tree through this field; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
@@ -77494,7 +77494,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:59#node.message.origin.as_ref()"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:63#node.message.origin.as_ref()"
 reason = "The agent-workbench settled-reconciliation route reads each node's message to recover the turn that produced it; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
@@ -89230,7 +89230,7 @@ availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/execution_modes.rs:137#.set_rlm_config_if_unset(RlmSessionConfig::new().dialect(RlmDialect::Lashlang))"
-assertion = "examples/docs-snippets/src/execution_modes.rs:139#assert_eq!(conflict.field(), \"dialect\");"
+assertion = "examples/docs-snippets/src/execution_modes.rs:143#assert_eq!(conflict.field(), \"dialect\");"
 
 [[api]]
 symbol = "lash::rlm::RlmSessionConfig::termination"

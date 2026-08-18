@@ -387,7 +387,7 @@ finish "done through raw activities"
             // The scripted provider in this fixture answers with a
             // `<lashlang>` cell, so the fixture is a Lashlang one by
             // construction rather than by omission.
-            lash::rlm::RlmDialect::Lashlang,
+            Some(lash::rlm::RlmDialect::Lashlang),
             None,
         );
         state

@@ -620,7 +620,7 @@ finish "done via Restate E2E"
             AgentServiceDurability::Restate,
             // The scripted provider answers with a `<lashlang>` cell, so this
             // fixture is Lashlang by construction rather than by omission.
-            lash::rlm::RlmDialect::Lashlang,
+            Some(lash::rlm::RlmDialect::Lashlang),
             std::env::var("RESTATE_INGRESS_URL").ok(),
         );
         LiveRestateTestHarness {
