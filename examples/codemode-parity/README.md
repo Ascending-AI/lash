@@ -11,5 +11,6 @@ the accepted surfaces.
   returns. The process artifact retains the source dialect across worker
   restarts.
 
-Hosts select the pair at session creation with
-`RlmSessionBuilderExt::rlm_dialect`; absence selects Lashlang.
+Hosts state the pair at session creation through the plugin options seam
+(`RLM_PROTOCOL_PLUGIN_ID` with `RlmCreateExtras { dialect, .. }`), applied as a
+guarded set-if-unset write; absence selects Lashlang.

@@ -93,7 +93,7 @@ impl AppState {
         // write decide: it lands on a chat that recorded nothing, is a no-op on
         // one that recorded the same dialect, and refuses on one that recorded
         // another. A refusal reaches the operator — there is no catch-and-reopen
-        // that would quietly run the chat in its old dialect (ADR 0064).
+        // that would quietly run the chat in its old dialect (ADR 0066).
         let session = self
             .core
             .session(chat_id)

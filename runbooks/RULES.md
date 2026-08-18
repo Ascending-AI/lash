@@ -59,19 +59,20 @@ v1, and children inherit the parent's, so a TypeScript row whose child session r
 Lashlang prompt is the same violation. Letting a host pick a different dialect per child
 is future work.
 
-The data directory must be fresh per row, not merely per scenario, and this is the rule
-most likely to be silently violated. A session's dialect is durably pinned at its **first
-commit**, and the recorded pin always wins: both shipped hosts ask for the ambient
-`LASH_RUNBOOK_DIALECT` on every session open, and a session that already recorded a
-different one keeps its own — the workbench falls back to the recorded dialect, and
-`agent-service` catches the same conflict and reopens. So reopening a carried-over store
-under the other row's `LASH_RUNBOOK_DIALECT` does **not** fail: every route stays green and
-serves the *recorded* dialect while the environment claims the other one. Green routes are
-therefore no evidence at all that the store is clean, and the row's whole bundle is
-mislabeled evidence — the exact defect this matrix exists to catch. A fresh data directory
-is the only thing that makes the environment variable and the served dialect the same fact.
-Confirm the served dialect from the row's own evidence (prompt, cell tag, execution events),
-never from the environment.
+The data directory must be fresh per row, not merely per scenario. A session's dialect is
+durably pinned at its **first commit**, and the recorded pin always wins: both shipped
+hosts *state* the ambient `LASH_RUNBOOK_DIALECT` on every session open, and that statement
+is a guarded set-if-unset write (ADR 0066) — it lands on a session that recorded nothing,
+is a no-op on one that recorded the same dialect, and **refuses** on one that recorded
+another. Nothing catches that refusal. So reopening a carried-over store under the other
+row's `LASH_RUNBOOK_DIALECT` fails the open loudly, rather than serving the recorded
+dialect behind green routes while the environment claims the other one — the mislabeled
+evidence this matrix exists to catch.
+
+A failed open on a carried-over store is a harness error, not a finding: fix the data
+directory and rerun the row. A fresh data directory per row is what makes the environment
+variable and the served dialect the same fact. Confirm the served dialect from the row's
+own evidence (prompt, cell tag, execution events), never from the environment.
 
 Runbook prose predating the parity matrix may say “Lashlang cell/program/source.” Read
 that as “the active dialect's cell/program/source” unless it names a stable product API,

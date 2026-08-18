@@ -159,7 +159,7 @@ impl std::fmt::Display for RlmSessionConfigDecodeError {
 
 impl std::error::Error for RlmSessionConfigDecodeError {}
 
-/// The guarded set-if-unset write for the durable RLM bag (ADR 0064).
+/// The guarded set-if-unset write for the durable RLM bag (ADR 0066).
 ///
 /// Every field the request states is written only while the session has
 /// recorded nothing for it. Restating the value already recorded is a no-op

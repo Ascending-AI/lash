@@ -31,7 +31,7 @@ impl RlmTurnBuilderExt for TurnBuilder {
     }
 }
 
-/// Reads the durable RLM facts a session actually recorded (ADR 0064).
+/// Reads the durable RLM facts a session actually recorded (ADR 0066).
 ///
 /// Every field is `Option`-shaped: `None` is "this session has stated nothing",
 /// which is a different answer from the value the default resolves to. Anything
@@ -86,7 +86,7 @@ impl From<EmbedError> for RlmSessionConfigError {
 }
 
 /// The durable RLM facts of an opened session: a typed read and a guarded
-/// set-if-unset write (ADR 0064).
+/// set-if-unset write (ADR 0066).
 ///
 /// There is no RLM-specific *request* API for any of these. A host that wants a
 /// fact *asserted* compares [`RlmSessionExt::rlm_config`] against what it

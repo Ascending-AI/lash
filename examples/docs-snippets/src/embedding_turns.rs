@@ -308,7 +308,7 @@ async fn finish_schema(core: &lash::LashCore) -> anyhow::Result<()> {
     };
 
     // Durable session facts are stated once through the plugin options seam and
-    // applied as a guarded set-if-unset write (ADR 0064).
+    // applied as a guarded set-if-unset write (ADR 0066).
     let session = core
         .session("analysis")
         .plugin_option(

@@ -243,7 +243,7 @@ pub struct RlmCreateExtras {
     /// Absence is a distinct statement from an explicit `Natural`: options that
     /// say nothing about termination must leave a recorded `FinishRequired`
     /// alone, and only a value that is genuinely stated participates in the
-    /// set-if-unset guard (ADR 0064).
+    /// set-if-unset guard (ADR 0066).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination: Option<RlmTermination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -264,7 +264,7 @@ impl RlmCreateExtras {
 /// resolves to. A host that cannot tell those apart has to peek at raw payload
 /// keys to label a fresh session honestly — the hack this type replaces.
 ///
-/// This is the read half of the ADR 0064 pair; the write half is a guarded
+/// This is the read half of the ADR 0066 pair; the write half is a guarded
 /// set-if-unset that refuses with [`RlmSessionConfigConflict`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RlmSessionConfig {

@@ -130,7 +130,7 @@ impl AppStateData {
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
             });
-        // A durable fact is stated, not requested (ADR 0064). The statement is
+        // A durable fact is stated, not requested (ADR 0066). The statement is
         // a guarded set-if-unset write: it lands on a chat that recorded
         // nothing, is a no-op on a chat that recorded the same dialect, and
         // refuses on one that recorded another. The refusal reaches the

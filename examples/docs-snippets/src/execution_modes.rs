@@ -100,6 +100,43 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         RlmDialect::registered_language_ids(),
         "`lashlang`, `typescript`"
     );
+
+    // Durable session facts are read as recorded and written set-if-unset
+    // (ADR 0066). Absence is a distinct answer from the default: this session
+    // never stated a termination, so it reads as `None` rather than `Natural`.
+    use lash::rlm::{RlmSessionConfig, RlmSessionConfigError, RlmSessionExt as _, RlmTermination};
+
+    let recorded = typescript.rlm_config();
+    assert_eq!(recorded.dialect, Some(RlmDialect::Typescript));
+    assert_eq!(recorded.termination, None);
+
+    // `assert` is host code: compare the read against what you require.
+    if recorded.dialect != Some(RlmDialect::Typescript) {
+        anyhow::bail!("this session is not the one this job was written for");
+    }
+
+    // `prefer` is the guarded write: it lands on a fact the session has not
+    // recorded, and restating a recorded fact is a no-op.
+    let written = typescript
+        .set_rlm_config_if_unset(
+            RlmSessionConfig::new().termination(RlmTermination::FinishRequired { schema: None }),
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    assert_eq!(
+        written.termination,
+        Some(RlmTermination::FinishRequired { schema: None })
+    );
+
+    // Disagreeing with a recorded fact is a typed refusal, never a fallback:
+    // the host reads the two values off the error instead of its prose.
+    let refused = typescript
+        .set_rlm_config_if_unset(RlmSessionConfig::new().dialect(RlmDialect::Lashlang))
+        .await;
+    let Err(RlmSessionConfigError::Conflict(conflict)) = refused else {
+        anyhow::bail!("a recorded dialect must refuse a different one");
+    };
+    assert_eq!(conflict.field(), "dialect");
     // docs:end:rlm-core
     Ok(())
 }

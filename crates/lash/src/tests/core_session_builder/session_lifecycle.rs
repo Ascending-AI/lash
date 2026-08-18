@@ -2,7 +2,7 @@ use lash_sansio::sync::MutexExt;
 use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::{
-    RlmDialect, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionExt as _, RlmTurnBuilderExt as _,
+    RlmDialect, RlmFinalAnswerFormat, RlmTurnBuilderExt as _,
 };
 #[cfg(feature = "rlm")]
 use lash_lashlang_runtime::LashlangArtifactStore as _;

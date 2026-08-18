@@ -11,7 +11,7 @@ impl AppState {
     /// The dialect this session *recorded*, which is the one every label reads.
     ///
     /// A session that has recorded nothing reads as `None` from the typed
-    /// config (ADR 0064) — no raw-payload peek needed to tell absence from the
+    /// config (ADR 0066) — no raw-payload peek needed to tell absence from the
     /// Lashlang default — and what it will be pinned to is the honest answer
     /// for it, so that is what a fresh session's badge shows.
     async fn recorded_dialect(&self, session_id: &str) -> lash::rlm::RlmDialect {
@@ -43,7 +43,7 @@ impl AppState {
     /// A builder that *states* the dialect this session is meant to run.
     ///
     /// The statement rides the plugin-agnostic options seam and is applied as a
-    /// guarded set-if-unset write (ADR 0064): it lands on a session that
+    /// guarded set-if-unset write (ADR 0066): it lands on a session that
     /// recorded nothing, is a no-op on one that recorded the same dialect, and
     /// refuses on one that recorded another. Nothing catches that refusal.
     fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
