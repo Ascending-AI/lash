@@ -837,8 +837,23 @@ async fn closures_obey_the_complete_host_boundary_matrix() {
     );
 }
 
+/// A closure does not outlive the execution that allocated it (FIG-1562).
+///
+/// This test used to assert the opposite — that a closure bound to a global
+/// survived a snapshot round trip and was callable by a later execution. The
+/// index in a closure is program-scoped, and nothing tied a state to the
+/// program that filled it, so the same mechanism handed the next *different*
+/// program a closure it had never compiled: on RLM, where every cell is its own
+/// program, that failed every cell after the first one to allocate a function.
+/// A closure is now dropped at the boundary, and the state that survives an
+/// execution carries only values.
+///
+/// The one place a closure still crosses a serialization boundary is a VM
+/// continuation, checked by `continuation_round_trip_mid_recursion_preserves_frames_heap_and_meter`
+/// below: a checkpoint is resumed against the
+/// very program it parked in, so its indices still mean what they meant.
 #[tokio::test(flavor = "current_thread")]
-async fn closure_heap_objects_round_trip_through_state_snapshot_v3() {
+async fn a_closure_does_not_survive_the_execution_that_allocated_it() {
     let program = Program::block(vec![Expr::If {
         condition: Box::new(variable("initialize")),
         then_block: Box::new(Expr::Block(vec![
@@ -865,21 +880,31 @@ async fn closure_heap_objects_round_trip_through_state_snapshot_v3() {
             .expect("store closure"),
         ExecutionOutcome::Continued
     );
+
+    // The closure binding is gone from both views of the state, and the plain
+    // values the same execution bound are not.
+    assert_eq!(state.globals().get("closure"), None);
+    assert_eq!(state.runtime_globals.get("closure"), None);
+    assert_eq!(state.globals().get("initialize"), Some(&Value::Bool(false)));
+
+    // The state that survives is program-independent, which is the property
+    // the next cell needs: a different program — here one with no functions at
+    // all, so every stale closure index would be out of range — runs on it.
     let bytes = state
         .snapshot()
         .to_canonical_bytes()
-        .expect("serialize closure heap");
-    let restored = Snapshot::from_canonical_bytes(&bytes).expect("restore closure heap");
-    assert_eq!(
-        restored.to_canonical_bytes().expect("redump closure heap"),
-        bytes
-    );
+        .expect("serialize heap");
+    let restored = Snapshot::from_canonical_bytes(&bytes).expect("restore heap");
+    assert_eq!(restored.to_canonical_bytes().expect("redump heap"), bytes);
+    let next_cell = compile_program_internal(&Program::block(vec![Expr::Finish(Box::new(
+        Expr::Number(42.0),
+    ))]));
     let mut restored_state = State::from_snapshot(restored);
     assert_eq!(
-        execute_compiled(&compiled, &mut restored_state, &Host)
+        execute_compiled(&next_cell, &mut restored_state, &Host)
             .await
-            .expect("call restored closure"),
-        ExecutionOutcome::Finished(Value::List(vec![Value::Number(7.0)].into()))
+            .expect("a later program must not inherit an earlier program's closures"),
+        ExecutionOutcome::Finished(Value::Number(42.0))
     );
 }
 

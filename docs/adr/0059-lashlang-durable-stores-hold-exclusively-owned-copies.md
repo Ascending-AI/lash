@@ -103,11 +103,17 @@ A dialect that wants reference semantics — a future TypeScript lowering, for
 instance — omits the isolation lowering. The heap primitives stay
 reference-preserving; the decision lives in the compiler.
 
-Function values are VM-private durable values, not host values. Snapshot and
-continuation checkpoints retain closures, but materializing runtime globals for
-a host omits an entire binding if a closure occurs anywhere below it. This is a
-deliberate silent-omission policy: a host that round-trips only its materialized
-globals drops those closure-bearing bindings. Direct host-boundary uses such as
+Function values are VM-private durable values, not host values, and they never
+leave the execution that allocated them. A closure's function index only means
+something inside the program that compiled it, so a binding that reaches a
+closure is dropped from the runtime roots when an execution installs its result,
+and the closure becomes garbage the next collection reclaims. A snapshot
+therefore carries no closure. Only a VM continuation retains them, because a
+continuation is resumed against the very program it parked in. Materializing
+runtime globals for a host omits an entire binding on the same rule — if a
+closure occurs anywhere below it — so both views agree on what a global means.
+This is a deliberate silent-omission policy: closure-bearing bindings do not
+survive an execution boundary in either view. Direct host-boundary uses such as
 effect arguments, formatting, projection, JSON conversion, and validation fail
 with the typed `FunctionValueAtHostBoundary` error instead.
 

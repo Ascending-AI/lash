@@ -201,25 +201,35 @@ impl State {
         }
     }
 
-    pub(crate) fn validate_program(&self, program: &CompiledProgram) -> Result<(), RuntimeError> {
+    pub(crate) fn validate_program(
+        &mut self,
+        program: &CompiledProgram,
+    ) -> Result<(), RuntimeError> {
+        // The heap outlives the program that filled it: an RLM cell compiles
+        // its own `CompiledProgram` while the state — heap included — carries
+        // over to the next cell. Everything the previous cell left unreachable
+        // is therefore still resident here, and validating it against this
+        // program's function table judges garbage. Collecting against the live
+        // roots first narrows validation to the graph this program can actually
+        // observe, so a dead closure from the previous cell cannot fail the
+        // next one with `UnknownFunction` or `ClosureCaptureCountMismatch`.
+        let root_values = self.runtime_globals.values().cloned().collect::<Vec<_>>();
+        self.heap.collect(root_values.iter());
         self.heap.validate_closures(&program.chunk.functions)?;
         if program.dialect == super::CompilationDialect::Lashlang {
-            let mut heap = self.heap.clone();
-            let root_values = self.runtime_globals.values().cloned().collect::<Vec<_>>();
-            heap.collect(root_values.iter());
             let mut roots = PersistedRoots::default();
             roots.durable_all(
                 self.runtime_globals
                     .iter()
                     .map(|(name, value)| (name.to_string(), value)),
             );
-            heap.validate_persisted_forest(&roots).map_err(|reason| {
-                RuntimeError::ValidationFailed {
+            self.heap
+                .validate_persisted_forest(&roots)
+                .map_err(|reason| RuntimeError::ValidationFailed {
                     reason: format!(
                         "Lashlang state cannot contain a shared TypeScript heap graph: {reason}"
                     ),
-                }
-            })?;
+                })?;
         }
         Ok(())
     }
@@ -238,9 +248,26 @@ impl State {
 
     pub(super) fn install_runtime(
         &mut self,
-        runtime_globals: Record,
+        mut runtime_globals: Record,
         mut heap: Heap,
     ) -> Result<(), RuntimeError> {
+        // Closures do not cross a program boundary. Their function indices are
+        // program-scoped, and the next cell compiles its own program, so a
+        // rooted closure would survive collection only to fail that program's
+        // closure validation. `materialize_runtime_globals` already drops these
+        // globals from the exported view for the same reason; the runtime roots
+        // drop them too, which keeps both views agreeing on what a global
+        // means and leaves the closure as garbage the next collection reclaims.
+        let closure_reach = heap.closure_reach();
+        let closure_rooted = runtime_globals
+            .entries
+            .iter()
+            .filter(|entry| closure_reach.covers(&entry.value))
+            .map(|entry| entry.symbol)
+            .collect::<Vec<_>>();
+        for symbol in closure_rooted {
+            runtime_globals.remove_symbol(symbol);
+        }
         let globals = materialize_runtime_globals(&runtime_globals, &mut heap)?;
         self.globals = globals;
         self.runtime_globals = runtime_globals;
