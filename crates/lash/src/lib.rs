@@ -571,19 +571,20 @@ pub mod runtime {
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
     pub use lash_core::runtime::{
-        AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver, CheckpointClaimSet,
-        DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient, EmbeddedRuntimeHost,
-        EventSink, ExecutionScope, InlineRuntimeEffectController, LashRuntime, LlmAttachmentSpec,
-        LlmRequestSpec, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver, QueuedWorkExecutionConcurrencyError,
-        QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress,
-        QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkWakeContended,
-        QueuedWorkWakeDisposition, QueuedWorkWakeFailure, RuntimeEffectCommand,
-        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEffectReplayMismatchSummary, RuntimeEnvironmentBuilder, RuntimeError,
-        RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeObservation, RuntimeScope,
-        RuntimeTurnPhase, RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
+        AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver, CheckedEffectGroup,
+        CheckpointClaimSet, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient,
+        EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope,
+        GroupSettlement, GroupWakePolicy, InlineRuntimeEffectController, LashRuntime,
+        LlmAttachmentSpec, LlmRequestSpec, LoserDisposition, NoopEventSink, NoopTurnActivitySink,
+        ProcessCommand, ProcessEffectOutcome, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,
+        QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
+        QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
+        QueuedWorkWakeContended, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
+        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary, RuntimeEnvironmentBuilder,
+        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeObservation,
+        RuntimeScope, RuntimeTurnPhase, RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for

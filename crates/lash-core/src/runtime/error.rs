@@ -150,6 +150,10 @@ pub enum RuntimeErrorCode {
     /// group's durable rank is untouched, so a later await resumes at the same
     /// rank.
     RuntimeEffectGroupAwaitCancelled,
+    /// A durable effect group's child was cancelled because the group's loser
+    /// disposition resolved to `Cancel`. The cancellation is that child's
+    /// terminal, not a transient failure to retry.
+    RuntimeEffectGroupChildCancelled,
     /// A durable effect group was assembled with children that disagree with the
     /// group they claim to belong to, or an effect carrying group membership
     /// reached a command shape that cannot honor it.
@@ -344,6 +348,7 @@ impl RuntimeErrorCode {
             }
             Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
             Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
+            Self::RuntimeEffectGroupChildCancelled => "runtime_effect_group_child_cancelled",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::RuntimeEffectInvocationKind => "runtime_effect_invocation_kind",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
@@ -527,6 +532,7 @@ impl RuntimeErrorCode {
                 | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
                 | Self::RuntimeEffectEnvelopeHash
                 | Self::RuntimeEffectGroupAwaitCancelled
+                | Self::RuntimeEffectGroupChildCancelled
                 | Self::RuntimeEffectGroupShape
                 | Self::RuntimeEffectInvocationKind
                 | Self::RuntimeEffectInvocationSubject
@@ -691,6 +697,7 @@ impl RuntimeErrorCode {
             }
             "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
             "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
+            "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "runtime_effect_invocation_kind" => Self::RuntimeEffectInvocationKind,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
@@ -1034,6 +1041,7 @@ mod tests {
             | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
             | RuntimeErrorCode::RuntimeEffectEnvelopeHash
             | RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
+            | RuntimeErrorCode::RuntimeEffectGroupChildCancelled
             | RuntimeErrorCode::RuntimeEffectGroupShape
             | RuntimeErrorCode::RuntimeEffectInvocationKind
             | RuntimeErrorCode::RuntimeEffectInvocationSubject
@@ -1202,6 +1210,7 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
             RuntimeErrorCode::RuntimeEffectEnvelopeHash,
             RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+            RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
             RuntimeErrorCode::RuntimeEffectGroupShape,
             RuntimeErrorCode::RuntimeEffectInvocationKind,
             RuntimeErrorCode::RuntimeEffectInvocationSubject,
