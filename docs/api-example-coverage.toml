@@ -2519,7 +2519,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::shutdown"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot.rs:242#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
+usage = "examples/slack-clone/src/bot.rs:246#let shutdown_result = core.shutdown().await.context(\"shut down Lash plugins\");"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -3476,7 +3476,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ModelSpec::with_capability", "lash_core::ModelSpec::with_capability"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot/runtime.rs:366#.with_capability(lash::provider::ModelCapability {"
+usage = "examples/slack-clone/src/bot/runtime.rs:367#.with_capability(lash::provider::ModelCapability {"
 
 [[api]]
 symbol = "lash::ModelSpec::with_limits"
@@ -9389,7 +9389,7 @@ availability = "default+all-features"
 aliases = ["lash_core::direct::DirectRequest::text", "lash_core::facade_support::DirectRequest::text"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot/mcp_client.rs:90#let mut direct = DirectRequest::text(&self.model.id, \"\");"
+usage = "examples/slack-clone/src/bot/mcp_client.rs:91#let mut direct = DirectRequest::text(&self.model.id, \"\");"
 reason = "The Slack-clone sampling bridge builds its direct request with this constructor before overriding the fields the MCP request carries; the example host runs it, but no executed assertion observes the constructed request directly."
 
 [[api]]
@@ -10171,7 +10171,7 @@ availability = "default+all-features"
 aliases = ["lash_core::NonNegativeFiniteF64::new"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot/mcp_client.rs:99#.map(NonNegativeFiniteF64::new)"
+usage = "examples/slack-clone/src/bot/mcp_client.rs:100#.map(NonNegativeFiniteF64::new)"
 
 [[api]]
 symbol = "lash::direct::NonNegativeFiniteF64Error"
@@ -14050,7 +14050,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LeaseOwnerIdentity"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/slack-clone/src/bot/runtime.rs:146#pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {"
+usage = "examples/slack-clone/src/bot/runtime.rs:147#pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {"
 
 [[api]]
 symbol = "lash::persistence::LeaseOwnerIdentity::incarnation_id"

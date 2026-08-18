@@ -2,6 +2,7 @@
 
 use std::num::NonZeroUsize;
 
+use crate::log_out;
 use async_trait::async_trait;
 use lash::ModelSpec;
 use lash::direct::{
@@ -189,7 +190,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
                 let mut content = Map::new();
                 for name in requested_schema.properties.keys() {
                     let Some(answer) = answer_book(message, name) else {
-                        println!(
+                        log_out!(
                             "slack-clone-bot has no answer on file for MCP form field `{name}` \
                              of prompt {message:?}; declining"
                         );
@@ -205,7 +206,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
                 match request.accept(Value::Object(content)) {
                     Ok(result) => Ok(result),
                     Err(error) => {
-                        println!(
+                        log_out!(
                             "slack-clone-bot declined an MCP form its answer book cannot satisfy: {}",
                             error.message()
                         );
@@ -232,7 +233,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
     }
 
     async fn url_elicitation_complete(&self, notification: McpUrlElicitationComplete<'_>) {
-        println!(
+        log_out!(
             "slack-clone-bot MCP URL elicitation completed: server={}, elicitation_id={}",
             notification.context.server_name(),
             notification.elicitation_id

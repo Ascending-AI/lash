@@ -11,6 +11,7 @@ use serde_json::json;
 
 use super::channel::{self, ChannelBot, Disposition};
 use crate::wire::events::{ChallengeResponse, EventRequest, RETRY_NUM_HEADER, RETRY_REASON_HEADER};
+use crate::{log_err, log_out};
 
 /// Path the bot registers as its Events API request URL.
 pub const EVENTS_PATH: &str = "/slack/events";
@@ -34,7 +35,7 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
     let request = match serde_json::from_str::<EventRequest>(&body) {
         Ok(request) => request,
         Err(error) => {
-            eprintln!("slack-clone-bot rejected an unparseable event: {error}");
+            log_err!("slack-clone-bot rejected an unparseable event: {error}");
             return (StatusCode::BAD_REQUEST, "unparseable event").into_response();
         }
     };
@@ -60,7 +61,7 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
             // rather than 200 so a genuinely misconfigured sender learns, and
             // rather than a retryable 5xx so a forger gains nothing by repeating.
             if !bot.accepts_token(&envelope.token) {
-                eprintln!(
+                log_err!(
                     "slack-clone-bot rejected event {} with a bad verification token",
                     envelope.event_id
                 );
@@ -74,7 +75,7 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
                 .get(RETRY_REASON_HEADER)
                 .and_then(|value| value.to_str().ok())
             {
-                eprintln!(
+                log_err!(
                     "slack-clone-bot redelivery of {} because {reason}",
                     envelope.event_id
                 );
@@ -88,12 +89,12 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
                         // landing inside the previous boot's lease TTL. Slack's own
                         // retries are bounded and would all fall inside that
                         // window, so the bot owns this retry.
-                        println!("slack-clone-bot deferred {event_id}; retrying in the background");
+                        log_out!("slack-clone-bot deferred {event_id}; retrying in the background");
                         if let Err(error) = bot
                             .retry_deferred(event_id.clone(), channel::DEFERRED_RETRY_DEADLINE)
                             .await
                         {
-                            eprintln!(
+                            log_err!(
                                 "slack-clone-bot deferred retry of {event_id} failed: {error:#}"
                             );
                         }
@@ -104,20 +105,20 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
                         // budget so a long-running root can land without another
                         // Slack delivery or a process restart.
                         let deadline = bot.recoverable_retry_deadline();
-                        println!(
+                        log_out!(
                             "slack-clone-bot waiting on the root for {event_id}; retrying in the background"
                         );
                         if let Err(error) = bot.retry_deferred(event_id.clone(), deadline).await {
-                            eprintln!("slack-clone-bot root retry of {event_id} failed: {error:#}");
+                            log_err!("slack-clone-bot root retry of {event_id} failed: {error:#}");
                         }
                     }
                     Ok(disposition) => {
-                        println!("slack-clone-bot handled {event_id}: {disposition:?}");
+                        log_out!("slack-clone-bot handled {event_id}: {disposition:?}");
                     }
                     Err(error) => {
                         // The ledger row stays unfinished, so boot recovery or a
                         // later redelivery picks the event back up.
-                        eprintln!("slack-clone-bot failed to handle {event_id}: {error:#}");
+                        log_err!("slack-clone-bot failed to handle {event_id}: {error:#}");
                     }
                 }
             });

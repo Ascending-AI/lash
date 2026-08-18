@@ -31,6 +31,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::log_err;
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
@@ -269,7 +270,7 @@ impl ServerHandler for WorkspaceHttpMcpServer {
                 .map(|root| root.name.unwrap_or(root.uri))
                 .collect(),
             Err(error) => {
-                eprintln!("slack-clone HTTP MCP server could not re-list roots: {error}");
+                log_err!("slack-clone HTTP MCP server could not re-list roots: {error}");
                 Vec::new()
             }
         };

@@ -1099,6 +1099,13 @@ impl TraceSink for JsonlTraceSink {
 
 /// Writes each trace record as one JSON line to stderr — handy for `cargo run`
 /// debugging without a trace file.
+///
+/// The newline is appended to the serialized record so both leave in one
+/// `write_all`: stderr is unbuffered and `eprintln!` emits one syscall per
+/// format fragment, so a host logging from another task could land between a
+/// record and its newline and sever the line for anything reading the merged
+/// output a line at a time. The buffering that fixes it is the `String`, not
+/// the handle.
 #[derive(Default)]
 pub struct StderrTraceSink {
     lock: Mutex<()>,
@@ -1106,15 +1113,27 @@ pub struct StderrTraceSink {
 
 impl TraceSink for StderrTraceSink {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let line = serde_json::to_string(record)?;
+        let mut line = serde_json::to_string(record)?;
+        line.push('\n');
         let _guard = self.lock.lock_recover();
-        eprintln!("{line}");
-        Ok(())
+        let mut stderr = io::stderr().lock();
+        stderr
+            .write_all(line.as_bytes())
+            .and_then(|()| stderr.flush())
+            .map_err(|source| TraceSinkError::Write {
+                path: PathBuf::from("<stderr>"),
+                source,
+            })
     }
 }
 
 /// Fans each trace record out to several sinks in order (e.g. stderr + a JSONL
-/// file). Stops at the first sink that errors.
+/// file).
+///
+/// Every sink runs on every call and the first error is returned once they all
+/// have: the sinks are independent destinations, so a stderr that a supervisor
+/// closed must not cost the run its durable JSONL file. Only the first error is
+/// carried — a caller acts on "tracing degraded", not on a list.
 pub struct TeeTraceSink {
     sinks: Vec<Arc<dyn TraceSink>>,
 }
@@ -1129,18 +1148,24 @@ impl TeeTraceSink {
 
 impl TraceSink for TeeTraceSink {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+        let mut first_error = None;
         for sink in &self.sinks {
-            sink.append(record)?;
+            if let Err(error) = sink.append(record) {
+                first_error.get_or_insert(error);
+            }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
-    /// Flush every wrapped sink, stopping at the first that errors.
+    /// Flush every wrapped sink, then report the first error.
     fn flush(&self) -> Result<(), TraceSinkError> {
+        let mut first_error = None;
         for sink in &self.sinks {
-            sink.flush()?;
+            if let Err(error) = sink.flush() {
+                first_error.get_or_insert(error);
+            }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 }
 
@@ -1157,6 +1182,57 @@ pub fn json_hash(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sink that fails every call, standing in for a closed stderr.
+    struct FailingSink;
+
+    impl TraceSink for FailingSink {
+        fn append(&self, _record: &TraceRecord) -> Result<(), TraceSinkError> {
+            Err(TraceSinkError::Write {
+                path: PathBuf::from("<failing>"),
+                source: io::Error::from(io::ErrorKind::BrokenPipe),
+            })
+        }
+
+        fn flush(&self) -> Result<(), TraceSinkError> {
+            Err(TraceSinkError::Write {
+                path: PathBuf::from("<failing>"),
+                source: io::Error::from(io::ErrorKind::BrokenPipe),
+            })
+        }
+    }
+
+    #[test]
+    fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
+        // The bot tees stderr first and its durable JSONL file second, so a
+        // supervisor closing stderr must not cost the run its trace file.
+        let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("trace.jsonl");
+        let tee = TeeTraceSink::new([
+            Arc::new(FailingSink) as Arc<dyn TraceSink>,
+            Arc::new(JsonlTraceSink::new(&path)),
+        ]);
+
+        let append = tee.append(&TraceRecord::new(
+            TraceContext::default().for_session("root"),
+            TraceEvent::Custom {
+                name: "test.event".to_string(),
+                payload: serde_json::json!({"ok": true}),
+            },
+        ));
+
+        assert!(
+            append.is_err(),
+            "the first sink's failure is still reported"
+        );
+        assert!(tee.flush().is_err(), "a failing flush is reported too");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("\"type\":\"custom\""),
+            "the later sink still received the record"
+        );
+    }
 
     #[test]
     fn jsonl_sink_writes_record() {

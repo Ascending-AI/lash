@@ -17,6 +17,7 @@ use lash::provider::{LlmResponse, ProviderHandle};
 use lash::{ModelSpec, sync::MutexExt as _};
 use serde_json::json;
 
+use crate::log_err;
 use crate::mcp_http_server::WORKSPACE_BADGE_TOOL;
 use crate::mcp_server::{
     ELICIT_CONFIRMATION_TOOL, LIST_HOST_ROOTS_TOOL, SAMPLE_SUMMARY_TOOL, URL_ELICITATION_TOOL,
@@ -53,7 +54,7 @@ pub(super) fn scripted_provider_from_env() -> Result<(ProviderHandle, ModelSpec)
         .context_window_tokens(200_000)
         .build()
         .context("build deterministic E2E model metadata")?;
-    eprintln!(
+    log_err!(
         "slack-clone-bot TEST-ONLY deterministic provider active; evidence: {}",
         state_path_for_log(&state.root).display()
     );

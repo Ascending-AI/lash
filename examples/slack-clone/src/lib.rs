@@ -17,6 +17,11 @@
 //! timestamps, and [`store`] is the tiny SQLite helper each side uses for its own
 //! durable state.
 //!
+//! Every process logs through [`log`], whose `log_out!`/`log_err!` macros emit
+//! each line as one atomic write so concurrent tasks cannot sever one another's
+//! lines in the merged `stdout`+`stderr` stream operators and the full-host E2E
+//! judge read.
+//!
 //! See `README.md` for the Slack-fidelity statement, the session-mapping
 //! doctrine, and the migration notes for pointing the bot at real Slack.
 
@@ -24,6 +29,7 @@ pub mod bot;
 pub mod ids;
 #[cfg(feature = "live-e2e")]
 pub mod live_e2e;
+pub mod log;
 pub mod mcp_http_server;
 pub mod mcp_server;
 pub mod platform;
