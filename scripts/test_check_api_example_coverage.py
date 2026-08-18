@@ -24,6 +24,7 @@ from check_api_example_coverage import (
     api_items,
     binds_receiver,
     cfg_gates_test,
+    evaluate_cfg,
     feature_gated_test_home,
     parse_cfg,
     declared_test_modules,
@@ -983,6 +984,27 @@ class OutOfLineTestModuleTests(unittest.TestCase):
         self.assertFalse(cfg_gates_test("#[cfg(all(not(test), unix))]"))
         self.assertFalse(cfg_gates_test('#[cfg(feature = "testing")]'))
         self.assertFalse(cfg_gates_test("fn test_helper() {}"))
+
+    def test_inverts_a_negated_predicate_through_the_evaluator(self):
+        # `not` is the one operator that changes the answer of everything under
+        # it, so it is asserted against the evaluator directly rather than only
+        # through the gate spellings above.
+        self.assertTrue(evaluate_cfg(parse_cfg("not(test)"), set()))
+        self.assertFalse(evaluate_cfg(parse_cfg("not(test)"), {"test"}))
+        self.assertTrue(
+            evaluate_cfg(parse_cfg('not(any(test, feature = "sim"))'), {"unix"})
+        )
+        self.assertFalse(
+            evaluate_cfg(parse_cfg('not(any(test, feature = "sim"))'), {"test"})
+        )
+        # A `cfg` that only ever compiles without tests is shipped code, and one
+        # that demands tests *and* the absence of a feature is not.
+        self.assertFalse(cfg_gates_test('#[cfg(not(feature = "sim"))]'))
+        self.assertTrue(cfg_gates_test('#[cfg(all(test, not(feature = "sim")))]'))
+        # Rust's `not` takes one predicate; a malformed `not(a, b)` is refused
+        # rather than read as "not both".
+        with self.assertRaises(AssertionError):
+            evaluate_cfg(parse_cfg("not(test, unix)"), set())
 
     def test_reads_an_any_gate_as_the_shipped_code_it_compiles_to(self):
         # FIG-1533: `any(test, ...)` ships whenever the other arm is on, so the

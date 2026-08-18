@@ -1873,6 +1873,13 @@ def gate_release_text(line: str) -> str:
     tests only.` -- would otherwise end the item at a word, and a `"{"` in a
     string would open a body that is not there.  Lifetimes keep their quote: `'`
     starts a literal only in the two shapes a char literal has.
+
+    Only `//` is blanked here; a `/* .. */` comment is handled a line at a time
+    by `CFG_GATE_CONTINUATION` instead, which reads a line opening or continuing
+    a block comment as not-yet-the-item and leaves the gate pending.  The
+    continuation therefore covers the common shape -- a block comment on its own
+    lines between gate and item -- and not the rare one where code shares the
+    line that closes the comment, which no `cfg`-gated item here writes.
     """
     kept: list[str] = []
     index, length = 0, len(line)
@@ -1968,6 +1975,13 @@ def test_regions(lines: list[str]) -> list[tuple[int, int]]:
                 regions.append([gate, 0, gate_depth])
                 gate = None
             elif semicolon != -1:
+                # Known case, named rather than guarded: a braced signature can
+                # carry a `;` ahead of its `{` -- `fn f(b: [u8; 4]) {` -- and
+                # this branch then closes the region at the signature and reads
+                # the body as shipped code. Positions are compared, so only a
+                # semicolon *before* the brace does it, and no `cfg`-gated item
+                # in the workspace has one; parsing types to rule it out would
+                # cost more than the case is worth. Revisit if one appears.
                 regions.append([gate, number, gate_depth])
                 gate = None
         for region in regions:
