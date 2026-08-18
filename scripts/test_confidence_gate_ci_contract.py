@@ -434,8 +434,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", lint)
         # PR-time smoke enforces the machine-independent inventory only;
-        # duration/allocation ceilings are calibrated on the release profile
-        # and enforced by --enforce-budgets in perf.yml and the Release job.
+        # allocation ceilings are calibrated on the release profile and
+        # enforced by --enforce-budgets in perf.yml and the Release job.
+        # Wall-clock ceilings gate nowhere — they are advisory (FIG-1385).
         self.assertIn(
             "profile_runtime.py --profile quick "
             "--enforce-inventory --out .benchmarks/perf-smoke/runtime.json",

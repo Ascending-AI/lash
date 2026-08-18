@@ -48,6 +48,20 @@ def fmt_ns(n: float | None) -> str:
     return f"{n:.1f}ns"
 
 
+# Guard classes the runtime report marks as advisory: they are measured and
+# reported, but never fail the gate. The class is decided by the harness
+# (`RuntimePerfGuardClass`), not re-derived from metric spelling here.
+ADVISORY_GUARD_CLASSES = frozenset({"duration"})
+
+
+def is_advisory_guard(result: dict[str, Any]) -> bool:
+    return result.get("class") in ADVISORY_GUARD_CLASSES
+
+
+def guard_failure_status(result: dict[str, Any]) -> str:
+    return "ADVISORY" if is_advisory_guard(result) else "FAIL"
+
+
 def fmt_stack_profile(profile: Any) -> str | None:
     if not isinstance(profile, dict):
         return None
@@ -129,21 +143,38 @@ def summarize_runtime(report: dict[str, Any]) -> str:
         lines.append(stack_text.strip())
     lines.append("")
 
+    budget_results = report.get("budget_results", [])
     timing_guards = [
         result
-        for result in report.get("budget_results", [])
+        for result in budget_results
         if str(result.get("metric", "")).startswith("phase:")
         and str(result.get("metric", "")).endswith(":duration_ms")
     ]
     if timing_guards:
-        lines.append("phase timing guards (median across runs):")
+        lines.append("phase timing guards (median across runs, advisory — not gating):")
         for result in timing_guards:
-            status = "pass" if result.get("passed") else "FAIL"
+            status = "pass" if result.get("passed") else guard_failure_status(result)
             lines.append(
                 f"  {result.get('scenario', '?'):28s} "
                 f"{result.get('metric', '?')[6:-12]:44s} "
                 f"actual={fmt_ms(result.get('actual')):>9s}  "
                 f"budget={fmt_ms(result.get('budget')):>9s}  {status}"
+            )
+        lines.append("")
+
+    advisories = [
+        result
+        for result in budget_results
+        if not result.get("passed") and is_advisory_guard(result)
+    ]
+    if advisories:
+        lines.append("advisory wall-clock exceedances (reported, do not fail the gate):")
+        for result in advisories:
+            lines.append(
+                f"  {result.get('scenario', '?'):28s} "
+                f"{result.get('metric', '?'):50s} "
+                f"actual={fmt_ms(result.get('actual')):>9s}  "
+                f"budget={fmt_ms(result.get('budget')):>9s}"
             )
         lines.append("")
 

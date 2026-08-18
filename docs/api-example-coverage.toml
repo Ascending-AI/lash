@@ -1070,7 +1070,7 @@ kind = "assoc_const"
 availability = "all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs:60#for phase in lash_core::runtime::RuntimeTurnPhase::ALL {"
+usage = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs:61#for phase in lash_core::runtime::RuntimeTurnPhase::ALL {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]

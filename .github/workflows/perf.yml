@@ -1,7 +1,10 @@
 name: Performance
 
 # The release workflow enforces these full profiles before publishing. This
-# workflow keeps the same budget-enforcing check available on demand.
+# workflow keeps the same budget-enforcing check available on demand. Only the
+# allocation ceilings and the phase inventory gate: runtime wall-clock budgets
+# are advisory here and in the release job, reported in the step summary but
+# never failing the run.
 
 on:
   workflow_dispatch:

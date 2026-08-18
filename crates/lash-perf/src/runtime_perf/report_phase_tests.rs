@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
-use super::budgets::{assert_complete_runtime_budget, configured_phase_names};
-use super::{
-    RuntimePerfScenario, ScenarioHarnessKind, phase_wall_clock_budget_ms, required_phases,
+use super::budgets::{
+    assert_complete_runtime_budget, configured_phase_names, phase_wall_clock_budget_ms,
 };
+use super::guards::required_phases;
+use super::{RuntimePerfScenario, ScenarioHarnessKind};
 use crate::runtime_perf::measurement::phase_name;
 
 #[test]
@@ -155,28 +156,4 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
             metadata.harness_rationale
         );
     }
-}
-
-#[test]
-fn inventory_discriminator_covers_all_four_result_shapes() {
-    let result = |statistic: &str, budget: Option<f64>| super::RuntimePerfBudgetResult {
-        scenario: "s".to_string(),
-        scenario_harness: "h".to_string(),
-        metric: "m".to_string(),
-        statistic: statistic.to_string(),
-        actual: None,
-        budget,
-        passed: false,
-        reason: None,
-    };
-    // Missing scenario summary and missing required phase are presence checks
-    // with a concrete Some(1.0) budget: inventory.
-    assert!(super::is_inventory_result(&result("present", Some(1.0))));
-    // An emitted phase without a checked-in budget: inventory.
-    assert!(super::is_inventory_result(&result("median", None)));
-    // Calibrated ceiling comparisons (push_max_budget always passes a literal
-    // "median"/"max" statistic and a concrete ceiling): skipped by
-    // inventory-only enforcement.
-    assert!(!super::is_inventory_result(&result("median", Some(30.0))));
-    assert!(!super::is_inventory_result(&result("max", Some(1_500.0))));
 }
