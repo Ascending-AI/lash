@@ -504,11 +504,11 @@ impl crate::AttachmentSourcePolicy for DenyBorrowedIngress {
         &self,
         producer: &crate::AttachmentProducer,
         source: &crate::AttachmentSource,
-    ) -> Result<(), crate::AttachmentSourcePolicyError> {
+    ) -> Result<(), crate::test_support::AttachmentSourcePolicyError> {
         if matches!(producer, crate::AttachmentProducer::TurnIngress)
             && matches!(source, crate::AttachmentSource::ExternalUrl { .. })
         {
-            return Err(crate::AttachmentSourcePolicyError {
+            return Err(crate::test_support::AttachmentSourcePolicyError {
                 producer: producer.clone(),
                 reason: "borrowed ingress disabled".to_string(),
             });

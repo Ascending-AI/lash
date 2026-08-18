@@ -2716,9 +2716,9 @@ async fn checkpoint_attachment_failure_leaves_active_input_pending_without_appli
             &self,
             producer: &crate::AttachmentProducer,
             _source: &crate::AttachmentSource,
-        ) -> Result<(), crate::AttachmentSourcePolicyError> {
+        ) -> Result<(), crate::test_support::AttachmentSourcePolicyError> {
             if matches!(producer, crate::AttachmentProducer::Host) {
-                return Err(crate::AttachmentSourcePolicyError {
+                return Err(crate::test_support::AttachmentSourcePolicyError {
                     producer: producer.clone(),
                     reason: "checkpoint attachment denied for test".to_string(),
                 });
@@ -3929,8 +3929,8 @@ async fn claimed_normalization_failure_commits_and_settles_input() {
             &self,
             producer: &crate::AttachmentProducer,
             _source: &crate::AttachmentSource,
-        ) -> Result<(), crate::AttachmentSourcePolicyError> {
-            Err(crate::AttachmentSourcePolicyError {
+        ) -> Result<(), crate::test_support::AttachmentSourcePolicyError> {
+            Err(crate::test_support::AttachmentSourcePolicyError {
                 producer: producer.clone(),
                 reason: "claimed attachment denied for test".to_string(),
             })
@@ -7839,7 +7839,7 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
                                     )
                                     .await
                                     .map_err(|err| {
-                                        crate::PluginOperationFailure::new(err.to_string())
+                                        crate::test_support::PluginOperationFailure::new(err.to_string())
                                     });
                                 match handle {
                                     Ok(handle) => {
@@ -7848,7 +7848,7 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
                                             .snapshot_session(&handle.session_id)
                                             .await
                                             .map_err(|err| {
-                                                crate::PluginOperationFailure::new(err.to_string())
+                                                crate::test_support::PluginOperationFailure::new(err.to_string())
                                             });
                                         match snapshot {
                                             Ok(snapshot) => Ok(crate::plugin::ErasedPluginCommandOutcome {

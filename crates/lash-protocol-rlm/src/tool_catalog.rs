@@ -408,8 +408,8 @@ mod tests {
     use super::*;
     use crate::dialect::lashlang_test_dialect;
     use lash_core::{
-        ToolContract, ToolDefinition, facade_support::ToolCatalogBuildInput,
-        facade_support::build_tool_catalog,
+        ToolContract, ToolDefinition, facade_support::build_tool_catalog,
+        test_support::ToolCatalogBuildInput,
     };
     use lash_lashlang_runtime::{LashlangSurface, LashlangToolBinding, ToolDefinitionLashlangExt};
     use serde_json::json;

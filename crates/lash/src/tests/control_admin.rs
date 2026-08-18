@@ -534,7 +534,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
             lash_core::facade_support::PluginSpec::new()
                 .with_plugin_query_typed::<NonblockingObservationQuery, _, _>(
                     |_ctx, _args| async move {
-                        Ok::<_, lash_core::facade_support::PluginOperationFailure>(
+                        Ok::<_, lash_core::test_support::PluginOperationFailure>(
                             serde_json::json!({ "ok": true }),
                         )
                     },
@@ -941,9 +941,9 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
         assert_eq!(child.session_id, child_session_id);
         assert_eq!(
             child.observed_processes,
-            vec![lash_core::facade_support::SessionObservedProcessResult {
+            vec![lash_core::test_support::SessionObservedProcessResult {
                 process_id: create_process_id.clone(),
-                outcome: lash_core::facade_support::SessionObservedProcessOutcome::Observed,
+                outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed,
             }]
         );
         assert!(

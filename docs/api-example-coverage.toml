@@ -18,7 +18,7 @@ schema_version = 1
 # attribute, makes both directions of drift explicit -- a new hidden support
 # module cannot carry paths until it is added, and un-hiding one does not drop
 # the paths it already published.
-gated_core_modules = ["facade_support", "store_backend_support"]
+gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
@@ -70105,90 +70105,90 @@ disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentProducer"
+symbol = "lash_core::test_support::AttachmentProducer"
 kind = "enum"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/logical_turn.rs:511#producer: &lash_core::facade_support::AttachmentProducer,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-sim/tests/logical_turn.rs:511#producer: &lash_core::test_support::AttachmentProducer,"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentProducer::Host"
+symbol = "lash_core::test_support::AttachmentProducer::Host"
 kind = "variant"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentProducer::Tool"
+symbol = "lash_core::test_support::AttachmentProducer::Tool"
 kind = "variant"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentProducer::Tool::tool_name"
+symbol = "lash_core::test_support::AttachmentProducer::Tool::tool_name"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/tests/turn_streaming.rs:784 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentProducer::TurnIngress"
+symbol = "lash_core::test_support::AttachmentProducer::TurnIngress"
 kind = "variant"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentSourcePolicy"
+symbol = "lash_core::test_support::AttachmentSourcePolicy"
 kind = "trait"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/logical_turn.rs:180#attachment_source_policy: Arc<dyn lash_core::facade_support::AttachmentSourcePolicy>,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-sim/tests/logical_turn.rs:180#attachment_source_policy: Arc<dyn lash_core::test_support::AttachmentSourcePolicy>,"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentSourcePolicy::authorize"
+symbol = "lash_core::test_support::AttachmentSourcePolicy::authorize"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "internal-test-only"
 usage = "crates/lash-sim/tests/logical_turn.rs:509#fn authorize("
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentSourcePolicyError"
+symbol = "lash_core::test_support::AttachmentSourcePolicyError"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/logical_turn.rs:513#) -> Result<(), lash_core::facade_support::AttachmentSourcePolicyError> {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-sim/tests/logical_turn.rs:513#) -> Result<(), lash_core::test_support::AttachmentSourcePolicyError> {"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentSourcePolicyError::producer"
+symbol = "lash_core::test_support::AttachmentSourcePolicyError::producer"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "internal-test-only"
 usage = "crates/lash-sim/tests/logical_turn.rs:515#producer: producer.clone(),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::AttachmentSourcePolicyError::reason"
+symbol = "lash_core::test_support::AttachmentSourcePolicyError::reason"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "internal-test-only"
 usage = "crates/lash-sim/tests/logical_turn.rs:516#reason: \"attachment denied for logical-turn settlement test\".to_string(),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::BorrowedChronologicalEntry"
@@ -70628,13 +70628,13 @@ disposition = "internal-consumed"
 usage = "crates/lash-plugin-tool-output-budget/src/lib.rs:314#return vec![ModelToolReturnPart::text(render_projected_model_value("
 
 [[api]]
-symbol = "lash_core::facade_support::OpenAttachmentSourcePolicy"
+symbol = "lash_core::test_support::OpenAttachmentSourcePolicy"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "attachments"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/logical_turn.rs:172#Arc::new(lash_core::facade_support::OpenAttachmentSourcePolicy),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-sim/tests/logical_turn.rs:172#Arc::new(lash_core::test_support::OpenAttachmentSourcePolicy),"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestratingToolDef"
@@ -70919,18 +70919,18 @@ disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/tests/control_admin.rs:30 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationFailure"
+symbol = "lash_core::test_support::PluginOperationFailure"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "plugins"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/control_admin.rs:537#Ok::<_, lash_core::facade_support::PluginOperationFailure>("
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash/src/tests/control_admin.rs:537#Ok::<_, lash_core::test_support::PluginOperationFailure>("
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationFailure::new"
+symbol = "lash_core::test_support::PluginOperationFailure::new"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/tests/control_admin.rs:22 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
@@ -71476,51 +71476,51 @@ disposition = "internal-consumed"
 usage = "crates/lash-sim/src/runner/standard_contracts.rs:459#results: calls"
 
 [[api]]
-symbol = "lash_core::facade_support::RuntimeServices"
+symbol = "lash_core::test_support::RuntimeServices"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-subagents/src/tests.rs:1127#RuntimeServices::new(plugins),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::RuntimeServices::attachment_store"
+symbol = "lash_core::test_support::RuntimeServices::attachment_store"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::RuntimeServices::clock"
+symbol = "lash_core::test_support::RuntimeServices::clock"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::RuntimeServices::new"
+symbol = "lash_core::test_support::RuntimeServices::new"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-subagents/src/tests.rs:1127#RuntimeServices::new(plugins),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::RuntimeServices::plugins"
+symbol = "lash_core::test_support::RuntimeServices::plugins"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-subagents/src/tests.rs:1035 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::RuntimeServices::process_env_store"
+symbol = "lash_core::test_support::RuntimeServices::process_env_store"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-subagents/src/tests.rs:986 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
@@ -71574,147 +71574,147 @@ disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/tests.rs:104 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect"
+symbol = "lash_core::test_support::SchemaDialect"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:190#lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:190#lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::ANTHROPIC_OUTPUT_CONFIG_JSON_SCHEMA"
+symbol = "lash_core::test_support::SchemaDialect::ANTHROPIC_OUTPUT_CONFIG_JSON_SCHEMA"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::ANTHROPIC_TOOL_INPUT"
+symbol = "lash_core::test_support::SchemaDialect::ANTHROPIC_TOOL_INPUT"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::BEDROCK_CLAUDE_OUTPUT_CONFIG_JSON_SCHEMA"
+symbol = "lash_core::test_support::SchemaDialect::BEDROCK_CLAUDE_OUTPUT_CONFIG_JSON_SCHEMA"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::GOOGLE_SCHEMA"
+symbol = "lash_core::test_support::SchemaDialect::GOOGLE_SCHEMA"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::JSON_PROMPT_SCHEMA"
+symbol = "lash_core::test_support::SchemaDialect::JSON_PROMPT_SCHEMA"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::OPENAI_STRICT_TOOL_PARAMETERS"
+symbol = "lash_core::test_support::SchemaDialect::OPENAI_STRICT_TOOL_PARAMETERS"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::OPENAI_STRUCTURED_OUTPUT"
+symbol = "lash_core::test_support::SchemaDialect::OPENAI_STRUCTURED_OUTPUT"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS"
+symbol = "lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS"
 kind = "assoc_const"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:190#lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:190#lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::anthropic_output_config_json_schema"
+symbol = "lash_core::test_support::SchemaDialect::anthropic_output_config_json_schema"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::anthropic_tool_input"
+symbol = "lash_core::test_support::SchemaDialect::anthropic_tool_input"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::as_str"
+symbol = "lash_core::test_support::SchemaDialect::as_str"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-remote-protocol/src/core_conversions_tests.rs:163 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::bedrock_claude_output_config_json_schema"
+symbol = "lash_core::test_support::SchemaDialect::bedrock_claude_output_config_json_schema"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::google_schema"
+symbol = "lash_core::test_support::SchemaDialect::google_schema"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::new"
+symbol = "lash_core::test_support::SchemaDialect::new"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-remote-protocol/src/core_conversions_tests.rs:10 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::openai_strict_tool_parameters"
+symbol = "lash_core::test_support::SchemaDialect::openai_strict_tool_parameters"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::openai_structured_output"
+symbol = "lash_core::test_support::SchemaDialect::openai_structured_output"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SchemaDialect::openai_tool_parameters"
+symbol = "lash_core::test_support::SchemaDialect::openai_tool_parameters"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "protocol"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
@@ -72162,97 +72162,97 @@ disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome"
 kind = "enum"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/control_admin.rs:946#outcome: lash_core::facade_support::SessionObservedProcessOutcome::Observed,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash/src/tests/control_admin.rs:946#outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed,"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::NoLongerRetained"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::NoLongerRetained"
 kind = "variant"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::NoLongerRetained::pruned_at_ms"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::NoLongerRetained::pruned_at_ms"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-remote-protocol/src/processes.rs:292 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::NoLongerRetained::terminal_label"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::NoLongerRetained::terminal_label"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-remote-protocol/src/processes.rs:291 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::NotFound"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::NotFound"
 kind = "variant"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/tests/control_admin.rs:363 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::Observed"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::Observed"
 kind = "variant"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/control_admin.rs:946#outcome: lash_core::facade_support::SessionObservedProcessOutcome::Observed,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash/src/tests/control_admin.rs:946#outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed,"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::Unavailable"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::Unavailable"
 kind = "variant"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::Unavailable::message"
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::Unavailable::message"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-plugin-mcp/src/policy_tests.rs:504 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessResult"
+symbol = "lash_core::test_support::SessionObservedProcessResult"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/control_admin.rs:944#vec![lash_core::facade_support::SessionObservedProcessResult {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash/src/tests/control_admin.rs:944#vec![lash_core::test_support::SessionObservedProcessResult {"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessResult::outcome"
+symbol = "lash_core::test_support::SessionObservedProcessResult::outcome"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/control_admin.rs:946#outcome: lash_core::facade_support::SessionObservedProcessOutcome::Observed,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash/src/tests/control_admin.rs:946#outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed,"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionObservedProcessResult::process_id"
+symbol = "lash_core::test_support::SessionObservedProcessResult::process_id"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash/src/tests/control_admin.rs:945#process_id: create_process_id.clone(),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent"
@@ -72828,40 +72828,40 @@ disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::ToolCatalogBuildInput"
+symbol = "lash_core::test_support::ToolCatalogBuildInput"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "plugins"
 disposition = "internal-test-only"
 usage = "crates/lash-protocol-rlm/src/tool_catalog.rs:470#let catalog = build_tool_catalog(ToolCatalogBuildInput {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::ToolCatalogBuildInput::contributions"
+symbol = "lash_core::test_support::ToolCatalogBuildInput::contributions"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "plugins"
 disposition = "internal-test-only"
 usage = "crates/lash-protocol-rlm/src/tool_catalog.rs:473#contributions: vec![contribution],"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::ToolCatalogBuildInput::resolve_contract"
+symbol = "lash_core::test_support::ToolCatalogBuildInput::resolve_contract"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "plugins"
 disposition = "internal-test-only"
 usage = "crates/lash-protocol-rlm/src/tool_catalog.rs:472#resolve_contract: Some(Arc::new(move |name| contracts.get(name).cloned())),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::facade_support::ToolCatalogBuildInput::tools"
+symbol = "lash_core::test_support::ToolCatalogBuildInput::tools"
 kind = "field"
-availability = "default+all-features"
+availability = "all-features"
 area = "plugins"
 disposition = "internal-test-only"
 usage = "crates/lash-protocol-rlm/src/tool_catalog.rs:471#tools: manifests,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::ToolRegistryFacadeOps"
@@ -73100,13 +73100,13 @@ disposition = "internal-consumed"
 usage = "crates/lash/src/turn.rs:1214#opts.with_turn_events(turn_events)"
 
 [[api]]
-symbol = "lash_core::facade_support::UnavailableProcessService"
+symbol = "lash_core::test_support::UnavailableProcessService"
 kind = "struct"
-availability = "default+all-features"
+availability = "all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-tools/src/files/read_file.rs:934#Arc::new(lash_core::facade_support::UnavailableProcessService),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-tools/src/files/read_file.rs:934#Arc::new(lash_core::test_support::UnavailableProcessService),"
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::append_assistant_text_part"
@@ -74994,13 +74994,13 @@ disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-restate/src/controller/mod.rs:26 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::validate_tool_input"
+symbol = "lash_core::test_support::validate_tool_input"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-tools/src/files/edit.rs:586#let error = lash_core::facade_support::validate_tool_input("
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+usage = "crates/lash-tools/src/files/edit.rs:586#let error = lash_core::test_support::validate_tool_input("
+reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::validate_trigger_occurrence_request"
@@ -86711,7 +86711,7 @@ reason = "678d567bf internalized this export behind the doc-hidden facade_suppor
 symbol = "lash_core::RuntimeServices"
 kind = "struct"
 superseded_by = "internal-test-only"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-test-only at lash_core::facade_support::RuntimeServices."
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-test-only at lash_core::test_support::RuntimeServices."
 
 [[removal_verdict]]
 symbol = "lash_core::RuntimeServices::clock"
@@ -86721,7 +86721,7 @@ kind = "field"
 symbol = "lash_core::RuntimeServices::new"
 kind = "function"
 superseded_by = "internal-test-only"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-test-only at lash_core::facade_support::RuntimeServices::new."
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-test-only at lash_core::test_support::RuntimeServices::new."
 
 [[removal_verdict]]
 symbol = "lash_core::RuntimeSleepOptions"
@@ -88076,18 +88076,6 @@ symbol = "lash_core::facade_support::AgentFrameRun::turns"
 kind = "field"
 
 [[removal_verdict]]
-symbol = "lash_core::facade_support::AttachmentProducer::Host"
-kind = "variant"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::AttachmentProducer::Tool"
-kind = "variant"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::AttachmentProducer::TurnIngress"
-kind = "variant"
-
-[[removal_verdict]]
 symbol = "lash_core::facade_support::BorrowedChronologicalMessage::is_transient"
 kind = "function"
 
@@ -88188,71 +88176,7 @@ symbol = "lash_core::facade_support::ResolvedSchema::schema"
 kind = "field"
 
 [[removal_verdict]]
-symbol = "lash_core::facade_support::RuntimeServices::attachment_store"
-kind = "field"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::RuntimeServices::clock"
-kind = "field"
-
-[[removal_verdict]]
 symbol = "lash_core::facade_support::RuntimeSessionStateFacadeOps::process_execution_env_spec"
-kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::ANTHROPIC_OUTPUT_CONFIG_JSON_SCHEMA"
-kind = "assoc_const"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::ANTHROPIC_TOOL_INPUT"
-kind = "assoc_const"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::BEDROCK_CLAUDE_OUTPUT_CONFIG_JSON_SCHEMA"
-kind = "assoc_const"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::GOOGLE_SCHEMA"
-kind = "assoc_const"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::JSON_PROMPT_SCHEMA"
-kind = "assoc_const"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::OPENAI_STRICT_TOOL_PARAMETERS"
-kind = "assoc_const"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::OPENAI_STRUCTURED_OUTPUT"
-kind = "assoc_const"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::anthropic_output_config_json_schema"
-kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::anthropic_tool_input"
-kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::bedrock_claude_output_config_json_schema"
-kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::google_schema"
-kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::openai_strict_tool_parameters"
-kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::openai_structured_output"
-kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SchemaDialect::openai_tool_parameters"
 kind = "function"
 
 [[removal_verdict]]
@@ -88270,14 +88194,6 @@ kind = "function"
 [[removal_verdict]]
 symbol = "lash_core::facade_support::SessionNodeRecordFacadeOps::plugin"
 kind = "function"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::NoLongerRetained"
-kind = "variant"
-
-[[removal_verdict]]
-symbol = "lash_core::facade_support::SessionObservedProcessOutcome::Unavailable"
-kind = "variant"
 
 [[removal_verdict]]
 symbol = "lash_core::facade_support::SessionStreamEvent::ChildTokenUsage"
@@ -88768,6 +88684,90 @@ kind = "function"
 [[removal_verdict]]
 symbol = "lash_core::terminal_append_request"
 kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::AttachmentProducer::Host"
+kind = "variant"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::AttachmentProducer::Tool"
+kind = "variant"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::AttachmentProducer::TurnIngress"
+kind = "variant"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::RuntimeServices::attachment_store"
+kind = "field"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::RuntimeServices::clock"
+kind = "field"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::ANTHROPIC_OUTPUT_CONFIG_JSON_SCHEMA"
+kind = "assoc_const"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::ANTHROPIC_TOOL_INPUT"
+kind = "assoc_const"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::BEDROCK_CLAUDE_OUTPUT_CONFIG_JSON_SCHEMA"
+kind = "assoc_const"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::GOOGLE_SCHEMA"
+kind = "assoc_const"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::JSON_PROMPT_SCHEMA"
+kind = "assoc_const"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::OPENAI_STRICT_TOOL_PARAMETERS"
+kind = "assoc_const"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::OPENAI_STRUCTURED_OUTPUT"
+kind = "assoc_const"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::anthropic_output_config_json_schema"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::anthropic_tool_input"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::bedrock_claude_output_config_json_schema"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::google_schema"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::openai_strict_tool_parameters"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::openai_structured_output"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SchemaDialect::openai_tool_parameters"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::NoLongerRetained"
+kind = "variant"
+
+[[removal_verdict]]
+symbol = "lash_core::test_support::SessionObservedProcessOutcome::Unavailable"
+kind = "variant"
 
 [[removal_verdict]]
 symbol = "lash_core::trigger_command_hash"

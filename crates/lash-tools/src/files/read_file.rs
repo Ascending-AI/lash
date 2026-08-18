@@ -931,7 +931,7 @@ mod tests {
             host.clone(),
             host.clone(),
             host,
-            Arc::new(lash_core::facade_support::UnavailableProcessService),
+            Arc::new(lash_core::test_support::UnavailableProcessService),
             store.clone(),
             lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
                 Err(lash_core::PluginError::Session(

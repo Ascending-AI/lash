@@ -47,6 +47,8 @@ lash-provider-openai = { path = ".", features = ["testing"] }
 # The runtime facade, so the Codex WebSocket path is proven end-to-end through
 # a normal `LashCore` turn in `tests/codex_websocket_runtime.rs`.
 lash = { workspace = true }
+# `lash_core::test_support` holds the core items whose only consumers are tests.
+lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

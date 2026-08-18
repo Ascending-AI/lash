@@ -1921,7 +1921,7 @@ fn empty_request() -> LlmRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{facade_support::ToolCatalogBuildInput, facade_support::build_tool_catalog};
+    use lash_core::{facade_support::build_tool_catalog, test_support::ToolCatalogBuildInput};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
