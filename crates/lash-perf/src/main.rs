@@ -30,6 +30,10 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug, Parser)]
 #[command(name = "lash-perf", version)]
 struct Args {
+    /// Read-only companion commands. Omitted, the binary runs the benchmark.
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// Write the runtime benchmark JSON report to this file
     #[arg(long, value_name = "OUT.json")]
     runtime_perf_out: Option<std::path::PathBuf>,
@@ -76,6 +80,34 @@ struct Args {
     /// enforced by --runtime-perf-enforce-budgets at release time.
     #[arg(long)]
     runtime_perf_enforce_inventory: bool,
+
+    /// Append this run's per-scenario median wall clock to an append-only
+    /// duration history and print the trend table. Advisory in every context:
+    /// drift is warned about, never enforced (FIG-1385).
+    #[arg(long, value_name = "HISTORY.jsonl")]
+    runtime_perf_duration_history: Option<std::path::PathBuf>,
+
+    /// Benchmark size preset recorded with each history entry. Durations are
+    /// only comparable within one preset, so it keys the trend series.
+    #[arg(long, value_name = "PROFILE", default_value = "custom")]
+    runtime_perf_duration_profile: String,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum Command {
+    /// Print the advisory duration trend table for an existing history file
+    /// without running the benchmark.
+    DurationTrend {
+        /// Append-only JSONL history written by
+        /// `--runtime-perf-duration-history`.
+        #[arg(long, value_name = "HISTORY.jsonl")]
+        history: std::path::PathBuf,
+
+        /// Limit the table to one benchmark size preset. Default: every preset
+        /// present in the file, each as its own series.
+        #[arg(long, value_name = "PROFILE")]
+        profile: Option<String>,
+    },
 }
 
 fn tokio_thread_stack_bytes(args: &Args) -> usize {
@@ -90,6 +122,10 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    if let Some(Command::DurationTrend { history, profile }) = &args.command {
+        // Pure history reading: no runtime, no measurement, no exit code.
+        return lash_perf::runtime_perf::run_duration_trend_cli(history, profile.as_deref());
+    }
     let worker_stack_bytes = tokio_thread_stack_bytes(&args);
     let mut runtime = tokio::runtime::Builder::new_multi_thread();
     runtime.enable_all();
@@ -106,6 +142,8 @@ fn main() -> anyhow::Result<()> {
         args.runtime_perf_turns,
         args.runtime_perf_enforce_budgets,
         args.runtime_perf_enforce_inventory,
+        args.runtime_perf_duration_history,
+        args.runtime_perf_duration_profile,
         APP_VERSION,
     ))
 }

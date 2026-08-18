@@ -49,8 +49,20 @@ time (`scripts/release_version.py stamp`, `scripts/publish_workspace.py
    the allocation ceilings and the phase inventory; the runtime leg's
    wall-clock budgets are advisory, printed with their measured value against
    the budget but never failing the run, because shared runners move them by
-   more than an order of magnitude. If either gate fails, nothing is published
-   and no tag is created. Then:
+   more than an order of magnitude. Wall-clock movement is instead watched over
+   time by CI's quick-profile perf smoke: every push to `main` appends its
+   per-scenario median wall clock to an append-only duration history (kept in
+   an Actions cache) and the harness warns when a scenario has sat more than
+   50% above its own trailing 20-run median for five consecutive main runs.
+   That signal is advisory everywhere too, it is a transition detector rather
+   than a level check (a step change is loud for six or seven main runs and
+   then becomes the new baseline), and the release and dispatch-only perf runs
+   contribute nothing to it — only the quick profile records history today.
+   Run `cargo run -p lash-perf -- duration-trend --history <FILE>` to read a
+   history locally, and `gh cache delete` on the
+   `perf-duration-history-quick-*` keys to reset the series after a scenario is
+   redefined. If either gate fails, nothing is published and no tag is created.
+   Then:
    - `publish-crates` runs
      `python3 .release-tools/scripts/publish_workspace.py --version <version>`,
      which stamps the manifests + lockfile and publishes every crate in
