@@ -18,9 +18,10 @@ use crate::*;
 
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
-    EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectLeaseFence,
-    EffectLeaseStamp, EffectReplayDriver, EffectReplayPersistence, EffectReplayVocabulary,
-    EffectRowDefect, EffectRowStatus, EffectTerminal, StoredEffectRow, decide_effect_claim,
+    EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectFinalizeOutcome,
+    EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayDriver,
+    EffectReplayPersistence, EffectReplayVocabulary, EffectRowDefect, EffectRowStatus,
+    EffectTerminal, StoredEffectRow, StoredGroupSettlement, decide_effect_claim,
 };
 
 use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
@@ -336,12 +337,32 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
         observation
     }
 
+    /// Writes the terminal and, for a grouped child, allocates its settlement
+    /// rank — in the normative order (N1), in one transaction.
+    ///
+    /// The fenced `UPDATE` runs first and `RETURNING group_key` is what makes
+    /// "bump only on rowcount 1" structural rather than remembered: no row
+    /// returned is no bump, and the group bumped is the one the child's own row
+    /// records rather than one passed in beside it.
+    ///
+    /// `UPDATE … SET next_seq = next_seq + 1` on a single row takes that row's
+    /// lock and is correct under `READ COMMITTED`: no lost update, and no read
+    /// of unfenced sibling state. It is also the group's serialization point —
+    /// every sibling's finalize queues behind it — which ADR 0065 accepts with a
+    /// pre-identified, backend-local escape (a per-group sequence generator or a
+    /// sharded counter) that needs no contract movement.
+    ///
+    /// The lock order here is child row then group row, and the group row is
+    /// created in its own committed transaction by
+    /// [`open_group`](Self::open_group), so nothing ever takes them the other
+    /// way round (N2).
     async fn finalize(
         &self,
         fence: &EffectLeaseFence,
         terminal: &EffectTerminal,
-    ) -> Result<bool, RuntimeEffectControllerError> {
-        let changed = sqlx::query(
+    ) -> Result<EffectFinalizeOutcome, RuntimeEffectControllerError> {
+        let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
+        let claimed: Option<Option<String>> = sqlx::query_scalar(
             "UPDATE lash_runtime_effect_replay
              SET status = $6,
                  outcome_json = $7,
@@ -356,7 +377,8 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
                AND lease_owner_id = $4
                AND lease_token = $5
                AND status = 'in_progress'
-               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             RETURNING group_key",
         )
         .bind(&fence.scope_id)
         .bind(&fence.replay_key)
@@ -366,11 +388,111 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
         .bind(terminal.status().column())
         .bind(terminal.outcome_json())
         .bind(terminal.error_json())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(effect_store_error)?;
+
+        let Some(group_key) = claimed else {
+            // The fence moved. Roll back rather than commit, and allocate
+            // nothing: a taken-over driver that burned a number here would
+            // advance a group it no longer owns, and the unique index cannot
+            // catch it because the burned number never reaches a child row.
+            // Rolled back explicitly rather than by drop, so the statement that
+            // discards the work is the one an implementor reads — and so a
+            // rollback failure is reported instead of swallowed by a destructor.
+            tx.rollback().await.map_err(effect_store_error)?;
+            return Ok(EffectFinalizeOutcome::FenceMoved);
+        };
+        let settlement_seq = match group_key {
+            None => None,
+            Some(group_key) => {
+                let allocated: Option<i64> = sqlx::query_scalar(
+                    "UPDATE lash_runtime_effect_group
+                     SET next_seq = next_seq + 1
+                     WHERE group_key = $1
+                     RETURNING next_seq",
+                )
+                .bind(&group_key)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(effect_store_error)?;
+                let allocated = allocated.ok_or_else(|| missing_group_row(&group_key))?;
+                sqlx::query(
+                    "UPDATE lash_runtime_effect_replay
+                     SET settlement_seq = $3
+                     WHERE scope_id = $1 AND replay_key = $2",
+                )
+                .bind(&fence.scope_id)
+                .bind(&fence.replay_key)
+                .bind(allocated)
+                .execute(&mut *tx)
+                .await
+                .map_err(effect_store_error)?;
+                Some(u64::try_from(allocated).map_err(|_| {
+                    effect_store_message(
+                        StoreError::StoredDataCorrupt {
+                            record_kind: "RuntimeEffectGroup",
+                            message: format!("next_seq must be non-negative, got {allocated}"),
+                        }
+                        .to_string(),
+                    )
+                })?)
+            }
+        };
+        tx.commit().await.map_err(effect_store_error)?;
+        Ok(EffectFinalizeOutcome::Written { settlement_seq })
+    }
+
+    async fn open_group(
+        &self,
+        record: &EffectGroupRecord,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        // One statement, so one transaction, committed before any child of this
+        // group claims (N2). `DO NOTHING` rather than an upsert: reopening a
+        // group must not reset `next_seq`, which would re-seat recorded children
+        // at ranks a caller has already consumed.
+        sqlx::query(
+            "INSERT INTO lash_runtime_effect_group (
+                group_key, scope_id, session_id, wake, loser_disposition,
+                children, next_seq, created_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, 0, $7)
+             ON CONFLICT (group_key) DO NOTHING",
+        )
+        .bind(&record.group_key)
+        .bind(&record.scope_id)
+        .bind(record.session_id.as_deref())
+        .bind(record.wake.column())
+        .bind(record.loser_disposition.column())
+        .bind(record.children as i64)
+        .bind(record.created_at_ms as i64)
         .execute(&self.pool)
         .await
-        .map_err(effect_store_error)?
-        .rows_affected();
-        Ok(changed == 1)
+        .map_err(effect_store_error)?;
+        Ok(())
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: usize,
+    ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError> {
+        let Some(offset) = rank.checked_sub(1) else {
+            return Ok(None);
+        };
+        let row = sqlx::query(
+            "SELECT settlement_seq, replay_key, status, outcome_json, error_json
+             FROM lash_runtime_effect_replay
+             WHERE group_key = $1 AND settlement_seq IS NOT NULL
+             ORDER BY settlement_seq
+             LIMIT 1 OFFSET $2",
+        )
+        .bind(group_key)
+        .bind(offset as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(effect_store_error)?;
+        row.map(stored_group_settlement).transpose()
     }
 
     async fn renew(
@@ -403,34 +525,59 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
         Ok(changed == 1)
     }
 
+    /// Deletes the named children **and their groups in the same transaction**
+    /// (N3), so no partially-retired group is ever visible.
+    ///
+    /// A settlement rank counts a group's recorded children, and it survives
+    /// gaps only because allocation is monotonic and therefore appends above a
+    /// consumed rank. A deletion *below* a consumed rank would shift ranks even
+    /// though allocation never does, which is why the group row and its children
+    /// go together or not at all. Both predicates select the same set: a group
+    /// and its children are opened under one journal identity.
+    ///
+    /// The reported count stays the children, which is what this method has
+    /// always reported and what a caller prunes against.
     async fn retire_journal(
         &self,
         retirement: &lash_core::EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        let result = match retirement {
-            lash_core::EffectJournalRetirement::Session { session_id } => {
-                sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE session_id = $1")
-                    .bind(session_id)
-                    .execute(&self.pool)
-                    .await
-            }
-            lash_core::EffectJournalRetirement::Process { process_id } => {
-                let identity = ExecutionScope::process(process_id.clone())
-                    .journal_identity()
-                    .expect("process scopes always form durable journal identities");
-                sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1")
-                    .bind(identity.key())
-                    .execute(&self.pool)
-                    .await
-            }
-        }
-        .map_err(|error| {
+        let retirement_error = |error: sqlx::Error| {
             RuntimeError::new(
                 lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
                 error.to_string(),
             )
-        })?;
-        Ok(result.rows_affected() as usize)
+        };
+        let (children_sql, groups_sql, key) = match retirement {
+            lash_core::EffectJournalRetirement::Session { session_id } => (
+                "DELETE FROM lash_runtime_effect_replay WHERE session_id = $1",
+                "DELETE FROM lash_runtime_effect_group WHERE session_id = $1",
+                session_id.clone(),
+            ),
+            lash_core::EffectJournalRetirement::Process { process_id } => {
+                let identity = ExecutionScope::process(process_id.clone())
+                    .journal_identity()
+                    .expect("process scopes always form durable journal identities");
+                (
+                    "DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1",
+                    "DELETE FROM lash_runtime_effect_group WHERE scope_id = $1",
+                    identity.key().to_string(),
+                )
+            }
+        };
+        let mut tx = self.pool.begin().await.map_err(retirement_error)?;
+        let children = sqlx::query(children_sql)
+            .bind(&key)
+            .execute(&mut *tx)
+            .await
+            .map_err(retirement_error)?
+            .rows_affected();
+        sqlx::query(groups_sql)
+            .bind(&key)
+            .execute(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
+        tx.commit().await.map_err(retirement_error)?;
+        Ok(children as usize)
     }
 }
 
@@ -552,9 +699,10 @@ async fn insert_claimed_row(
         "INSERT INTO lash_runtime_effect_replay (
             scope_id, session_id, replay_key, envelope_hash,
             envelope_json, status, outcome_json, error_json, lease_owner_id,
-            lease_token, lease_expires_at_ms, due_at_ms, created_at_ms, updated_at_ms
+            lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+            created_at_ms, updated_at_ms
          )
-         VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $11, $12)
+         VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $13, NULL, $11, $12)
          ON CONFLICT (scope_id, replay_key) DO NOTHING",
     )
     .bind(&request.scope_id)
@@ -569,6 +717,7 @@ async fn insert_claimed_row(
     .bind(stamp.due_at_ms.map(|value| value as i64))
     .bind(stamp.now_ms as i64)
     .bind(stamp.now_ms as i64)
+    .bind(request.group_key.as_deref())
     .execute(&mut **tx)
     .await
     .map_err(effect_store_error)?
@@ -603,6 +752,43 @@ async fn take_over_expired_lease(
     Ok(())
 }
 
+fn stored_group_settlement(
+    row: PgRow,
+) -> Result<StoredGroupSettlement, RuntimeEffectControllerError> {
+    let sequence = row.get::<i64, _>("settlement_seq");
+    Ok(StoredGroupSettlement {
+        sequence: u64::try_from(sequence).map_err(|_| {
+            effect_store_message(
+                StoreError::StoredDataCorrupt {
+                    record_kind: "RuntimeEffectReplay",
+                    message: format!("settlement_seq must be non-negative, got {sequence}"),
+                }
+                .to_string(),
+            )
+        })?,
+        replay_key: row.get("replay_key"),
+        status: row.get("status"),
+        outcome_json: row.get("outcome_json"),
+        error_json: row.get("error_json"),
+    })
+}
+
+/// A grouped child whose group row is gone is a corrupt journal, not a silently
+/// ungrouped settlement: the rank it should have taken can never be served, so
+/// reporting success would hide a group no caller can finish consuming.
+fn missing_group_row(group_key: &str) -> RuntimeEffectControllerError {
+    effect_store_message(
+        StoreError::StoredDataCorrupt {
+            record_kind: "RuntimeEffectGroup",
+            message: format!(
+                "grouped effect child finalized against missing group row `{group_key}`; \
+                 its settlement rank can never be served"
+            ),
+        }
+        .to_string(),
+    )
+}
+
 fn effect_store_error(err: sqlx::Error) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(VOCABULARY.store_code(), err.to_string())
 }
@@ -611,23 +797,13 @@ fn effect_store_message(message: String) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(VOCABULARY.store_code(), message)
 }
 
+// `#[path]` is load-bearing, not redundant: this file is itself reached by
+// `#[path = "postgres/effect_replay.rs"]` from `lib.rs`, and Rust resolves a
+// path-ed module's children against the *directory holding that file* rather
+// than a directory named for the module. Without this, `mod tests;` looks for
+// `src/postgres/tests.rs`. The SQLite sibling needs no attribute because its
+// parent is an ordinary `mod effect_replay;`. `schema_shape.rs` carries the same
+// workaround for the same reason.
+#[path = "effect_replay/tests.rs"]
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stored_effect_corruption_is_non_retryable() {
-        let error = effect_store_message(
-            StoreError::StoredDataCorrupt {
-                record_kind: "RuntimeEffectReplay",
-                message: "lease_expires_at_ms must be non-negative, got -1".to_string(),
-            }
-            .to_string(),
-        );
-        assert_eq!(
-            error.code,
-            lash_core::RuntimeErrorCode::PostgresEffectReplayStore
-        );
-        assert!(!error.code.is_retryable());
-    }
-}
+mod tests;

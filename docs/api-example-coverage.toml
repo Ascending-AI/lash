@@ -1072,7 +1072,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::testing"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:274#RuntimeEffectLocalExecutor::testing(move |_| async move { settled }),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:275#RuntimeEffectLocalExecutor::testing(move |_| async move { settled }),"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation"
@@ -2092,7 +2092,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::effect::executor::control::ExternalCompletionError::message"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::ExternalCompletionError::message` directly; the gate reaches the same item a second time through `lash_core::Resolution::Err`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/effect/mod.rs:401, crates/lash-core/src/runtime/effect/mod.rs:402, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::ExternalCompletionError::message` directly; the gate reaches the same item a second time through `lash_core::Resolution::Err`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/effect/mod.rs:402, crates/lash-core/src/runtime/effect/mod.rs:402, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::ExternalCompletionError::new"
@@ -10668,7 +10668,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimingsError::TtlRenewRatioTooSmall::renew_interval", "lash_core::store::lease_timings::LeaseTimingsError::TtlRenewRatioTooSmall::renew_interval"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::LeaseTimingsError::TtlRenewRatioTooSmall::renew_interval` directly; the gate reaches the same item a second time through `lash_core::store::lease_timings::LeaseTimings::new`. Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:955, crates/lash-core/src/runtime/process_worker/mod.rs:1354 and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::LeaseTimingsError::TtlRenewRatioTooSmall::renew_interval` directly; the gate reaches the same item a second time through `lash_core::store::lease_timings::LeaseTimings::new`. Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:1046, crates/lash-core/src/runtime/process_worker/mod.rs:1354 and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
 
 [[api]]
 symbol = "lash::durability::LeaseTimingsError::TtlRenewRatioTooSmall::ttl"
@@ -16313,7 +16313,7 @@ availability = "default+all-features"
 aliases = ["lash_core::store::SessionCheckpoint::new"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::new` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the Postgres store adapter -- this function is exercised in-repo at crates/lash-postgres-store/src/lib.rs:325, crates/lash-postgres-store/src/lib.rs:588, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionCheckpoint::new` directly; the gate reaches the same item a second time through `lash_core::store::runtime_commit::RuntimeCommitResult::manifest`. Consumer class: the Postgres store adapter -- this function is exercised in-repo at crates/lash-postgres-store/src/lib.rs:332, crates/lash-postgres-store/src/lib.rs:595, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::SessionCheckpoint::plugin_snapshot_revision"
@@ -48132,7 +48132,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectControllerError"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Internal integrator seam: `lash_core::RuntimeEffectControllerError` is consumed inside the workspace at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:167. The `lash` facade is built on lash-core, so that caller cannot migrate to the `lash` facade -- the core path is the seam itself, not a pending migration. Host-facing projection: `lash::runtime::RuntimeEffectControllerError`."
+reason = "Internal integrator seam: `lash_core::RuntimeEffectControllerError` is consumed inside the workspace at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:173. The `lash` facade is built on lash-core, so that caller cannot migrate to the `lash` facade -- the core path is the seam itself, not a pending migration. Host-facing projection: `lash::runtime::RuntimeEffectControllerError`."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectControllerError::cause"
@@ -66244,7 +66244,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:411#lash_core::EffectJournalRetirement::Session { session_id } => {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:551#            lash_core::EffectJournalRetirement::Session { session_id } => ("
 
 [[api]]
 symbol = "lash_core::EffectJournalRetirement::Session::session_id"
@@ -66252,7 +66252,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:411#lash_core::EffectJournalRetirement::Session { session_id } => {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:551#            lash_core::EffectJournalRetirement::Session { session_id } => ("
 
 [[api]]
 symbol = "lash_core::EffectJournalRetirement::process"
@@ -73552,7 +73552,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:455#EffectClaimDecision::Insert(stamp) => {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:602#EffectClaimDecision::Insert(stamp) => {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimDecision::Insert"
@@ -73560,7 +73560,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:455#EffectClaimDecision::Insert(stamp) => {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:602#EffectClaimDecision::Insert(stamp) => {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimDecision::Insert::0"
@@ -73568,7 +73568,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:455#EffectClaimDecision::Insert(stamp) => {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:602#EffectClaimDecision::Insert(stamp) => {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimDecision::Report"
@@ -73576,7 +73576,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:476#EffectClaimDecision::Report(observation) => return Ok(observation),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:623#EffectClaimDecision::Report(observation) => return Ok(observation),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimDecision::Report::0"
@@ -73584,7 +73584,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:476#EffectClaimDecision::Report(observation) => return Ok(observation),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:623#EffectClaimDecision::Report(observation) => return Ok(observation),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimDecision::TakeOver"
@@ -73592,7 +73592,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:475#EffectClaimDecision::TakeOver(stamp) => stamp,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:622#EffectClaimDecision::TakeOver(stamp) => stamp,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimDecision::TakeOver::0"
@@ -73600,7 +73600,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:475#EffectClaimDecision::TakeOver(stamp) => stamp,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:622#EffectClaimDecision::TakeOver(stamp) => stamp,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimObservation"
@@ -73608,7 +73608,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:457#return Ok(EffectClaimObservation::Claimed {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:604#return Ok(EffectClaimObservation::Claimed {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimObservation::Busy"
@@ -73632,7 +73632,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:457#return Ok(EffectClaimObservation::Claimed {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:604#return Ok(EffectClaimObservation::Claimed {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimObservation::Claimed::due_at_ms"
@@ -73640,7 +73640,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:458#due_at_ms: stamp.due_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:605#due_at_ms: stamp.due_at_ms,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimObservation::Completed"
@@ -73672,7 +73672,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:470#return Ok(EffectClaimObservation::CorruptRow {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:617#return Ok(EffectClaimObservation::CorruptRow {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimObservation::CorruptRow::defect"
@@ -73680,7 +73680,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:471#defect: EffectRowDefect::VanishedUnderClaim,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:618#defect: EffectRowDefect::VanishedUnderClaim,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimObservation::Failed"
@@ -73736,7 +73736,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:326#request: &EffectClaimRequest,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:327#request: &EffectClaimRequest,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::envelope_hash"
@@ -73744,7 +73744,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:563#.bind(&request.envelope_hash)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:711#.bind(&request.envelope_hash)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::envelope_json"
@@ -73752,7 +73752,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:564#.bind(&request.envelope_json)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:712#.bind(&request.envelope_json)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::lease_token"
@@ -73760,7 +73760,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:567#.bind(&request.lease_token)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:715#.bind(&request.lease_token)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::lease_ttl_ms"
@@ -73768,7 +73768,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-postgres-store/src/postgres/effect_replay.rs:379 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash-postgres-store/src/postgres/effect_replay.rs:501 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::owner_id"
@@ -73776,7 +73776,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:566#.bind(&request.owner_id)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:714#.bind(&request.owner_id)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::replay_key"
@@ -73784,7 +73784,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:452#let row = select_effect_row_for_update(tx, &request.scope_id, &request.replay_key).await?;"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:599#let row = select_effect_row_for_update(tx, &request.scope_id, &request.replay_key).await?;"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::scope_id"
@@ -73792,7 +73792,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:452#let row = select_effect_row_for_update(tx, &request.scope_id, &request.replay_key).await?;"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:599#let row = select_effect_row_for_update(tx, &request.scope_id, &request.replay_key).await?;"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::session_id"
@@ -73800,7 +73800,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:561#.bind(request.session_id.as_deref())"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:709#.bind(request.session_id.as_deref())"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::sleep_duration_ms"
@@ -73819,12 +73819,140 @@ disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectClaimRequest::group_key"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:808#            request.group_key.as_deref(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome"
+kind = "enum"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:533#                    return Ok(EffectFinalizeOutcome::FenceMoved);"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome::FenceMoved"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:533#                    return Ok(EffectFinalizeOutcome::FenceMoved);"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome::Written"
+kind = "variant"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:570#                Ok(EffectFinalizeOutcome::Written {"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome::Written::settlement_seq"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:543#                        settlement_seq: None,"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupColumn"
+kind = "trait"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:603#                        record.wake.column(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupColumn::column"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:603#                        record.wake.column(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord"
+kind = "struct"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:584#        record: &EffectGroupRecord,"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::group_key"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:600#                        record.group_key.as_str(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::scope_id"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:601#                        record.scope_id.as_str(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:602#                        record.session_id.as_deref(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::wake"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:603#                        record.wake.column(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::loser_disposition"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:604#                        record.loser_disposition.column(),"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::children"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:605#                        record.children as i64,"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::created_at_ms"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:606#                        record.created_at_ms as i64,"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::from_group"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Blessed construction path, deliberately landed with the durable shape rather than with its first caller (FIG-1534, ADR 0065). `wake` and `loser_disposition` are folded into every child's envelope hash, so a hand-stamped record can disagree with what its own children hashed -- a disagreement invisible until a production replay refuses. Deriving the record from the `RuntimeEffectGroup` closes that path structurally. The store backends this layer ships consume `EffectGroupRecord` (see the struct's own anchor) but do not build one: the driver-side caller that will is FIG-1535's `open_effect_group`, and adding the constructor after that caller exists would mean shipping the hand-stamped path first."
+
+[[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseFence"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:341#fence: &EffectLeaseFence,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:361#fence: &EffectLeaseFence,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseFence::envelope_hash"
@@ -73832,7 +73960,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:363#.bind(&fence.envelope_hash)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:385#.bind(&fence.envelope_hash)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseFence::lease_token"
@@ -73840,7 +73968,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:365#.bind(&fence.lease_token)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:387#.bind(&fence.lease_token)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseFence::owner_id"
@@ -73848,7 +73976,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:364#.bind(&fence.owner_id)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:386#.bind(&fence.owner_id)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseFence::replay_key"
@@ -73856,7 +73984,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:362#.bind(&fence.replay_key)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:384#.bind(&fence.replay_key)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseFence::scope_id"
@@ -73864,7 +73992,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:361#.bind(&fence.scope_id)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:383#.bind(&fence.scope_id)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseStamp"
@@ -73872,7 +74000,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:549#stamp: &EffectLeaseStamp,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:696#stamp: &EffectLeaseStamp,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseStamp::due_at_ms"
@@ -73880,7 +74008,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:569#.bind(stamp.due_at_ms.map(|value| value as i64))"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:717#.bind(stamp.due_at_ms.map(|value| value as i64))"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseStamp::lease_expires_at_ms"
@@ -73888,7 +74016,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:568#.bind(stamp.lease_expires_at_ms as i64)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:716#.bind(stamp.lease_expires_at_ms as i64)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectLeaseStamp::now_ms"
@@ -73896,7 +74024,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:570#.bind(stamp.now_ms as i64)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:718#.bind(stamp.now_ms as i64)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver"
@@ -73904,7 +74032,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:301#EffectReplayDriver::new("
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:302#EffectReplayDriver::new("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::await_await_event"
@@ -73912,7 +74040,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:126#self.inner.await_await_event(key, cancel, deadline).await"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:127#self.inner.await_await_event(key, cancel, deadline).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::await_event_key"
@@ -73920,7 +74048,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:102#self.inner.await_event_key(scope, wait).await"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:103#self.inner.await_event_key(scope, wait).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::cancel_await_events_for_session"
@@ -73928,7 +74056,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:134#self.inner.cancel_await_events_for_session(session_id).await"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:135#self.inner.cancel_await_events_for_session(session_id).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::execute_effect"
@@ -73936,7 +74064,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:271#return Box::pin(self.inner.execute_effect("
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:272#return Box::pin(self.inner.execute_effect("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::new"
@@ -73944,7 +74072,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:301#EffectReplayDriver::new("
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:302#EffectReplayDriver::new("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::peek_await_event"
@@ -73952,7 +74080,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:117#self.inner.peek_await_event(key).await"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:118#self.inner.peek_await_event(key).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::resolve_await_event"
@@ -73960,7 +74088,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:110#self.inner.resolve_await_event(key, resolution).await"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:111#self.inner.resolve_await_event(key, resolution).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::retire_effect_journal"
@@ -73968,7 +74096,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:171#self.inner.retire_effect_journal(retirement).await"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:172#self.inner.retire_effect_journal(retirement).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::revoke_await_events_for_session"
@@ -73976,7 +74104,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:130#self.inner.revoke_await_events_for_session(session_id).await"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:131#self.inner.revoke_await_events_for_session(session_id).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::start_replay"
@@ -73984,7 +74112,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:79#self.inner.start_replay();"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:80#self.inner.start_replay();"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence"
@@ -73992,7 +74120,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:319#impl EffectReplayPersistence for PostgresEffectReplayPersistence {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:320#impl EffectReplayPersistence for PostgresEffectReplayPersistence {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::claim"
@@ -74000,7 +74128,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:324#async fn claim("
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:325#async fn claim("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::finalize"
@@ -74008,7 +74136,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:339#async fn finalize("
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:359#async fn finalize("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::renew"
@@ -74016,7 +74144,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:376#async fn renew("
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:498#async fn renew("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::retire_journal"
@@ -74024,7 +74152,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:406#async fn retire_journal("
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:540#async fn retire_journal("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::vocabulary"
@@ -74032,7 +74160,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:320#fn vocabulary(&self) -> EffectReplayVocabulary {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:321#fn vocabulary(&self) -> EffectReplayVocabulary {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayVocabulary"
@@ -74040,7 +74168,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:28#const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:29#const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayVocabulary::postgres"
@@ -74048,7 +74176,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:28#const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:29#const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayVocabulary::sqlite"
@@ -74056,7 +74184,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:35#const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:36#const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayVocabulary::store_code"
@@ -74064,7 +74192,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-sqlite-store/src/effect_replay.rs:686 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash-sqlite-store/src/effect_replay.rs:855 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectRowDefect"
@@ -74072,7 +74200,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:471#defect: EffectRowDefect::VanishedUnderClaim,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:618#defect: EffectRowDefect::VanishedUnderClaim,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectRowDefect::MissingError"
@@ -74112,7 +74240,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:471#defect: EffectRowDefect::VanishedUnderClaim,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:618#defect: EffectRowDefect::VanishedUnderClaim,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectRowStatus"
@@ -74120,7 +74248,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:565#.bind(EffectRowStatus::InProgress.column())"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:713#.bind(EffectRowStatus::InProgress.column())"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectRowStatus::Completed"
@@ -74144,7 +74272,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:565#.bind(EffectRowStatus::InProgress.column())"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:713#.bind(EffectRowStatus::InProgress.column())"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectRowStatus::column"
@@ -74152,7 +74280,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:366#.bind(terminal.status().column())"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:388#.bind(terminal.status().column())"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectTerminal"
@@ -74160,7 +74288,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:342#terminal: &EffectTerminal,"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:362#terminal: &EffectTerminal,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectTerminal::Completed"
@@ -74200,7 +74328,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:368#.bind(terminal.error_json())"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:390#.bind(terminal.error_json())"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectTerminal::outcome_json"
@@ -74208,7 +74336,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:367#.bind(terminal.outcome_json())"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:389#.bind(terminal.outcome_json())"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectTerminal::status"
@@ -74216,7 +74344,71 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:366#.bind(terminal.status().column())"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:388#.bind(terminal.status().column())"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::open_group"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:582#    async fn open_group("
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::read_group_settlement"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:615#    async fn read_group_settlement("
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement"
+kind = "struct"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:635#                            Ok(StoredGroupSettlement {"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::sequence"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:636#                                sequence: u64_from_sql("
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::replay_key"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:641#                                replay_key: row.get(1)?,"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::status"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:642#                                status: row.get(2)?,"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::outcome_json"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:643#                                outcome_json: row.get(3)?,"
+
+[[api]]
+symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::error_json"
+kind = "field"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:644#                                error_json: row.get(4)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow"
@@ -74224,7 +74416,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:519#fn stored_effect_row(row: PgRow) -> Result<StoredEffectRow, RuntimeEffectControllerError> {"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:666#fn stored_effect_row(row: PgRow) -> Result<StoredEffectRow, RuntimeEffectControllerError> {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow::due_at_ms"
@@ -74232,7 +74424,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:539#due_at_ms: due_at_ms"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:686#due_at_ms: due_at_ms"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow::envelope_hash"
@@ -74240,7 +74432,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:532#envelope_hash: row.get(\"envelope_hash\"),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:679#envelope_hash: row.get(\"envelope_hash\"),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow::envelope_json"
@@ -74248,7 +74440,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:533#envelope_json: row.get(\"envelope_json\"),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:680#envelope_json: row.get(\"envelope_json\"),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow::error_json"
@@ -74256,7 +74448,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:536#error_json: row.get(\"error_json\"),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:683#error_json: row.get(\"error_json\"),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow::lease_expires_at_ms"
@@ -74264,7 +74456,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:537#lease_expires_at_ms: u64::try_from(lease_expires_at_ms)"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:684#lease_expires_at_ms: u64::try_from(lease_expires_at_ms)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow::outcome_json"
@@ -74272,7 +74464,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:535#outcome_json: row.get(\"outcome_json\"),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:682#outcome_json: row.get(\"outcome_json\"),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow::status"
@@ -74280,7 +74472,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:534#status: row.get(\"status\"),"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:681#status: row.get(\"status\"),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::decide_effect_claim"
@@ -74288,7 +74480,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-postgres-store/src/postgres/effect_replay.rs:453 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash-postgres-store/src/postgres/effect_replay.rs:600 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::sealed::EffectReplayBackend"
@@ -74296,7 +74488,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:316#impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayPersistence {}"
+usage = "crates/lash-postgres-store/src/postgres/effect_replay.rs:317#impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayPersistence {}"
 
 [[api]]
 symbol = "lash_core::facade_support::epoch_ms_from_system_time"
@@ -76398,7 +76590,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::effect::executor::RuntimeAwaitEventOptions"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeEffectLocalExecutor::into_await_event_options` hands `RuntimeAwaitEventOptions` to hosts (runtime embedders). Consumer class: the Restate durable effect-host adapter -- this type is exercised in-repo at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:988, crates/lash-core/src/runtime/effect/executor.rs:864, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeEffectLocalExecutor::into_await_event_options` hands `RuntimeAwaitEventOptions` to hosts (runtime embedders). Consumer class: the Restate durable effect-host adapter -- this type is exercised in-repo at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:1079, crates/lash-core/src/runtime/effect/executor.rs:864, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeAwaitEventOptions::cancellation"
@@ -76495,7 +76687,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ExecutionScope::journal_identity` hands `EffectJournalIdentity` to hosts (runtime embedders). Consumer class: the SQLite and Postgres store adapters -- this function is exercised at crates/lash-sqlite-store/src/effect_replay.rs:573 and crates/lash-postgres-store/src/postgres/effect_replay.rs:422, not by any example, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ExecutionScope::journal_identity` hands `EffectJournalIdentity` to hosts (runtime embedders). Consumer class: the SQLite and Postgres store adapters -- this function is exercised at crates/lash-sqlite-store/src/effect_replay.rs:715 and crates/lash-postgres-store/src/postgres/effect_replay.rs:563, not by any example, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::runtime::effect::executor::control::EffectJournalIdentity::session_id"
@@ -76537,7 +76729,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::effect::validation::CanonicalRuntimeEffectEnvelope::hash"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeEffectEnvelope::canonical_form` hands `CanonicalRuntimeEffectEnvelope` to hosts (runtime embedders). Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:783, crates/lash-core/src/runtime/effect/effect_replay_driver.rs:783, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeEffectEnvelope::canonical_form` hands `CanonicalRuntimeEffectEnvelope` to hosts (runtime embedders). Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/effect/effect_replay_driver.rs:867, crates/lash-core/src/runtime/effect/effect_replay_driver.rs:867, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeEffectReplayTrace"

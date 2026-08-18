@@ -25,6 +25,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         from: 51,
         to: 52,
         source_missing_tables: &["lash_fence"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
         introduced_relations: &["lash_fence"],
         statements: &[
             FENCE_DDL,
@@ -37,6 +39,12 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         from: 50,
         to: 52,
         source_missing_tables: &["lash_fence", "lash_plans"],
+        source_missing_columns: &[("lash_sessions", "enqueued_at_ms")],
+        source_missing_guards: &[DeclaredGuard {
+            table: "lash_sessions",
+            columns: &["session_id", "enqueued_at_ms"],
+            predicate: "(enqueued_at_ms is not null)",
+        }],
         introduced_relations: &[
             "lash_fence",
             "lash_plans",
@@ -79,6 +87,7 @@ FIXTURE_SOURCE = """\
 const MIGRATION_FLOOR_VERSION: i32 = 50;
 const POST_FLOOR_TABLES: [&str; 2] = ["lash_fence", "lash_plans"];
 const POST_FLOOR_INDEXES: [&str; 1] = ["idx_lash_sessions_order"];
+const POST_FLOOR_COLUMNS: [(&str, &str); 1] = [("lash_sessions", "enqueued_at_ms")];
 const POST_FLOOR_ARTIFACTS: [&str; 4] = [
     "idx_lash_plans",
     "idx_lash_sessions_order",
@@ -139,6 +148,7 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         valid, message = self.check()
         self.assertTrue(valid, message)
         self.assertIn("component 52, floor 50", message)
+        self.assertIn("1 explicitly dropped post-floor columns", message)
 
     def test_stale_floor_fails(self) -> None:
         valid, message = self.check(
@@ -190,6 +200,65 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         self.assertFalse(valid)
         self.assertIn("POST_FLOOR_INDEXES is not", message)
         self.assertIn("stale idx_lash_plans", message)
+
+    def test_post_floor_column_the_table_drops_miss_must_be_listed(self) -> None:
+        # A nullable column added to a table the floor catalog already had survives
+        # every `DROP TABLE` and every `DROP INDEX`, so omitting it leaves the
+        # older-store fixture carrying a current-generation column: the refusal it
+        # then proves is not the one a genuinely older store gets.
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'const POST_FLOOR_COLUMNS: [(&str, &str); 1] = '
+                '[("lash_sessions", "enqueued_at_ms")];',
+                "const POST_FLOOR_COLUMNS: [(&str, &str); 0] = [];",
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("POST_FLOOR_COLUMNS is not", message)
+        self.assertIn("missing lash_sessions.enqueued_at_ms", message)
+
+    def test_post_floor_column_naming_a_column_the_floor_never_lost_is_rejected(
+        self,
+    ) -> None:
+        # The mirror failure: dropping a column the published floor catalog never
+        # had is a `DROP COLUMN` of something that is not there, which reds the
+        # container run rather than the fixture check.
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                'const POST_FLOOR_COLUMNS: [(&str, &str); 1] = '
+                '[("lash_sessions", "enqueued_at_ms")];',
+                'const POST_FLOOR_COLUMNS: [(&str, &str); 2] = ['
+                '("lash_sessions", "enqueued_at_ms"), ("lash_sessions", "invented")];',
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("POST_FLOOR_COLUMNS is not", message)
+        self.assertIn("stale lash_sessions.invented", message)
+
+    def test_a_migration_entry_without_a_column_axis_is_refused(self) -> None:
+        # The field is required rather than defaulted: a migration that adds a
+        # column and forgets to declare it would silently leave the rewind with no
+        # column to drop, which is the whole defect this axis exists for.
+        with self.assertRaises(MODULE.CheckError) as raised:
+            self.check(
+                migrations=MIGRATIONS_SOURCE.replace(
+                    'source_missing_columns: &[("lash_sessions", "enqueued_at_ms")],\n',
+                    "",
+                )
+            )
+        self.assertIn("no source_missing_columns", str(raised.exception))
+
+    def test_a_column_axis_that_is_not_pairs_is_refused(self) -> None:
+        # `(table, column)` is the shape the derivation reads. A bare list of names
+        # would parse as half as many pairs, silently shrinking the set.
+        with self.assertRaises(MODULE.CheckError) as raised:
+            self.check(
+                migrations=MIGRATIONS_SOURCE.replace(
+                    '&[("lash_sessions", "enqueued_at_ms")]',
+                    '&["lash_sessions", "enqueued_at_ms", "extra"]',
+                )
+            )
+        self.assertIn("does not list (table, column) pairs", str(raised.exception))
 
     def test_ambiguous_index_target_cannot_be_decided(self) -> None:
         # Last-match-wins would let the second occurrence — on a table the floor

@@ -49,9 +49,15 @@ use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::await_event_coordinator::{AwaitEventBackend, AwaitEventCoordinator};
 use super::envelope::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome};
+
 use super::executor::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectJournalRetirement, ExecutionScope, Resolution,
     ResolveOutcome, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
+};
+/// The durable group shape this port's backends implement, re-exported so a
+/// backend imports the whole effect-journal vocabulary from one place.
+pub use super::group_journal::{
+    EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord, StoredGroupSettlement,
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
@@ -243,6 +249,20 @@ pub struct EffectClaimRequest {
     /// `Some` only for `Sleep` effects: how long past the claim instant the
     /// effect is due.
     pub sleep_duration_ms: Option<u64>,
+    /// `Some` only for a child of a durable effect group: the group whose
+    /// counter this child's finalize will allocate a settlement rank from
+    /// (FIG-1416).
+    ///
+    /// Derived from the envelope's own
+    /// [`EffectGroupMembership`](super::group::EffectGroupMembership), never
+    /// passed alongside it, so a child's row cannot record a group its
+    /// canonical envelope does not hash. It needs no separate claim-time check:
+    /// membership is inside the hash, so a row whose `envelope_hash` matches
+    /// necessarily agrees about the group, and a row whose hash disagrees is
+    /// already refused as a [replay
+    /// mismatch](EffectClaimObservation::ReplayMismatch) before any status is
+    /// read.
+    pub group_key: Option<String>,
     /// Strict replay: a missing row is an error instead of a fresh claim.
     pub strict_replay: bool,
 }
@@ -562,19 +582,72 @@ pub trait EffectReplayPersistence: sealed::EffectReplayBackend + Send + Sync {
         request: &EffectClaimRequest,
     ) -> Result<EffectClaimObservation, RuntimeEffectControllerError>;
 
-    /// Write `terminal` and release the lease, guarded by `fence`.
+    /// Write `terminal` and release the lease, guarded by `fence`, allocating a
+    /// settlement rank when the row belongs to a durable effect group.
     ///
     /// Atomically, and only while the row still matches all five fence columns,
     /// is `in_progress`, and has not expired against the substrate's lease
     /// clock: set the terminal's status and payload column, clear the lease
-    /// owner and token, and zero the lease expiry. Report `false` when the
-    /// guarded write matched no row — the fence moved and this driver no longer
-    /// owns the effect.
+    /// owner and token, and zero the lease expiry. Report
+    /// [`EffectFinalizeOutcome::FenceMoved`] when the guarded write matched no
+    /// row — the fence moved and this driver no longer owns the effect.
+    ///
+    /// # Normative ordering (N1)
+    ///
+    /// One transaction, in this order:
+    ///
+    /// 1. Perform the fenced `UPDATE` above.
+    /// 2. **If its rowcount is 0: roll back and report `FenceMoved`.** No
+    ///    counter bump.
+    /// 3. Only on rowcount 1, and only when the row records a `group_key`:
+    ///    `UPDATE lash_runtime_effect_group SET next_seq = next_seq + 1 WHERE
+    ///    group_key = $g RETURNING next_seq`, and write the returned value into
+    ///    this child's `settlement_seq`.
+    /// 4. Commit, reporting [`EffectFinalizeOutcome::Written`] with the rank.
+    ///
+    /// The group is read from the child's own row rather than passed in, so a
+    /// finalize cannot bump a group the row does not belong to. Bumping before
+    /// the fenced write, or bumping unconditionally and committing while
+    /// reporting the miss, lets a driver whose lease was taken over permanently
+    /// advance a live group's counter — and the `UNIQUE (group_key,
+    /// settlement_seq)` index cannot catch it, because the burned number never
+    /// reaches a child row. See [`EffectFinalizeOutcome`] for the full argument,
+    /// and the `fence-miss-allocates-nothing` conformance test in each store
+    /// crate for what holds a backend to it.
     async fn finalize(
         &self,
         fence: &EffectLeaseFence,
         terminal: &EffectTerminal,
-    ) -> Result<bool, RuntimeEffectControllerError>;
+    ) -> Result<EffectFinalizeOutcome, RuntimeEffectControllerError>;
+
+    /// Record `record` as an open durable effect group, idempotently.
+    ///
+    /// **In its own transaction, committed before any of the group's children
+    /// claim** (N2): the open path must never hold a group-row lock while
+    /// acquiring a child-row lock, because [`finalize`](Self::finalize) takes
+    /// them the other way round and the two together would be an ABBA deadlock.
+    ///
+    /// Idempotent because open is replayed: a redriven caller reopens the group
+    /// it already opened, and re-inserting must neither fail nor reset
+    /// `next_seq` — resetting it would re-seat already-recorded children at
+    /// ranks another caller has consumed. An existing row for the same key is
+    /// left exactly as it is.
+    async fn open_group(
+        &self,
+        record: &EffectGroupRecord,
+    ) -> Result<(), RuntimeEffectControllerError>;
+
+    /// Read the group's settled child at `rank`, counting from 1.
+    ///
+    /// Rank is the position of a child's `settlement_seq` in the ascending order
+    /// of the group's recorded sequences — never a lookup by literal sequence
+    /// value, which gaps would break. `None` means fewer than `rank` children
+    /// have settled yet.
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: usize,
+    ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError>;
 
     /// Extend the lease by `lease_ttl_ms`, guarded by `fence`.
     ///
@@ -588,6 +661,14 @@ pub trait EffectReplayPersistence: sealed::EffectReplayBackend + Send + Sync {
     ) -> Result<bool, RuntimeEffectControllerError>;
 
     /// Delete the journal rows `retirement` names, reporting how many went.
+    ///
+    /// **Group-atomic** (N3): a group's own row and every one of its children go
+    /// in the same transaction, so no partially-retired group is ever visible.
+    /// Rank counts a group's recorded children, and it is stable only because
+    /// allocation is monotonic and therefore appends *above* any consumed rank;
+    /// a deletion *below* a consumed rank would shift ranks even though
+    /// allocation never does. The count reports children, matching what the
+    /// method has always reported.
     async fn retire_journal(
         &self,
         retirement: &EffectJournalRetirement,
@@ -739,6 +820,9 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
     }
 
     /// Delete the journal rows `retirement` names, reporting how many went.
+    ///
+    /// Group-atomic: a retired group's row and its children go together, so no
+    /// partially-retired group exists for a settlement rank to be computed over.
     pub async fn retire_effect_journal(
         &self,
         retirement: EffectJournalRetirement,
@@ -839,6 +923,10 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             lease_token: self.next_lease_token(),
             lease_ttl_ms: self.lease_timings.ttl_ms(),
             sleep_duration_ms: sleep_duration_ms(envelope),
+            group_key: envelope
+                .group
+                .as_deref()
+                .map(|membership| membership.group_key.clone()),
             strict_replay: self.replay_mode.load(Ordering::SeqCst),
         };
 
@@ -914,7 +1002,10 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
                     .map_err(|err| vocabulary.encode_error(err))?,
             },
         };
-        if self.persistence.finalize(fence, &terminal).await? {
+        if matches!(
+            self.persistence.finalize(fence, &terminal).await?,
+            EffectFinalizeOutcome::Written { .. }
+        ) {
             return Ok(());
         }
         Err(vocabulary.error(
@@ -1037,388 +1128,4 @@ fn sleep_duration_ms(envelope: &RuntimeEffectEnvelope) -> Option<u64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const NOW: u64 = 1_000_000;
-    const TTL: u64 = 30_000;
-
-    fn request() -> EffectClaimRequest {
-        EffectClaimRequest {
-            scope_id: "session:s1".to_string(),
-            session_id: Some("s1".to_string()),
-            replay_key: "k1".to_string(),
-            envelope_hash: "hash-1".to_string(),
-            envelope_json: "{\"envelope\":1}".to_string(),
-            owner_id: "owner-1".to_string(),
-            lease_token: "owner-1:1".to_string(),
-            lease_ttl_ms: TTL,
-            sleep_duration_ms: None,
-            strict_replay: false,
-        }
-    }
-
-    fn row(status: &str) -> StoredEffectRow {
-        StoredEffectRow {
-            envelope_hash: "hash-1".to_string(),
-            envelope_json: "{\"envelope\":1}".to_string(),
-            status: status.to_string(),
-            outcome_json: None,
-            error_json: None,
-            lease_expires_at_ms: 0,
-            due_at_ms: None,
-        }
-    }
-
-    #[test]
-    fn status_columns_are_the_persisted_journal_bytes() {
-        for status in [
-            EffectRowStatus::InProgress,
-            EffectRowStatus::Completed,
-            EffectRowStatus::Failed,
-        ] {
-            assert_eq!(EffectRowStatus::parse(status.column()), Some(status));
-        }
-        assert_eq!(EffectRowStatus::InProgress.column(), "in_progress");
-        assert_eq!(EffectRowStatus::Completed.column(), "completed");
-        assert_eq!(EffectRowStatus::Failed.column(), "failed");
-        assert_eq!(EffectRowStatus::parse("cancelled"), None);
-    }
-
-    #[test]
-    fn a_missing_row_is_claimed_by_insert() {
-        assert_eq!(
-            decide_effect_claim(None, &request(), NOW),
-            EffectClaimDecision::Insert(EffectLeaseStamp {
-                lease_expires_at_ms: NOW + TTL,
-                due_at_ms: None,
-                now_ms: NOW,
-            })
-        );
-    }
-
-    #[test]
-    fn a_missing_row_under_strict_replay_is_refused_without_writing() {
-        let request = EffectClaimRequest {
-            strict_replay: true,
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(None, &request, NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::StrictReplayMiss)
-        );
-    }
-
-    #[test]
-    fn a_fresh_sleep_claim_derives_its_due_time_from_the_claim_instant() {
-        let request = EffectClaimRequest {
-            sleep_duration_ms: Some(5_000),
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(None, &request, NOW),
-            EffectClaimDecision::Insert(EffectLeaseStamp {
-                lease_expires_at_ms: NOW + TTL,
-                due_at_ms: Some(NOW + 5_000),
-                now_ms: NOW,
-            })
-        );
-    }
-
-    #[test]
-    fn an_envelope_hash_mismatch_outranks_every_status() {
-        for status in ["in_progress", "completed", "failed", "nonsense"] {
-            let mut stored = row(status);
-            stored.envelope_hash = "hash-2".to_string();
-            stored.envelope_json = "{\"envelope\":2}".to_string();
-            stored.lease_expires_at_ms = NOW + TTL;
-            stored.outcome_json = Some("{}".to_string());
-            stored.error_json = Some("{}".to_string());
-            assert_eq!(
-                decide_effect_claim(Some(&stored), &request(), NOW),
-                EffectClaimDecision::Report(EffectClaimObservation::ReplayMismatch {
-                    recorded_envelope_json: "{\"envelope\":2}".to_string(),
-                    stored_envelope_hash: "hash-2".to_string(),
-                }),
-                "status `{status}` must not outrank a canonical envelope mismatch"
-            );
-        }
-    }
-
-    #[test]
-    fn a_completed_row_replays_its_outcome_and_recorded_due_time() {
-        let mut stored = row("completed");
-        stored.outcome_json = Some("{\"kind\":\"sleep\"}".to_string());
-        stored.due_at_ms = Some(NOW + 90);
-        assert_eq!(
-            decide_effect_claim(Some(&stored), &request(), NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::Completed {
-                outcome_json: "{\"kind\":\"sleep\"}".to_string(),
-                due_at_ms: Some(NOW + 90),
-            })
-        );
-    }
-
-    #[test]
-    fn a_failed_row_replays_its_error() {
-        let mut stored = row("failed");
-        stored.error_json = Some("{\"code\":\"boom\"}".to_string());
-        assert_eq!(
-            decide_effect_claim(Some(&stored), &request(), NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::Failed {
-                error_json: "{\"code\":\"boom\"}".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn terminal_rows_missing_their_payload_are_corrupt() {
-        assert_eq!(
-            decide_effect_claim(Some(&row("completed")), &request(), NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
-                defect: EffectRowDefect::MissingOutcome,
-            })
-        );
-        assert_eq!(
-            decide_effect_claim(Some(&row("failed")), &request(), NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
-                defect: EffectRowDefect::MissingError,
-            })
-        );
-    }
-
-    #[test]
-    fn an_unknown_status_is_corrupt_rather_than_claimable() {
-        let stored = row("half_done");
-        assert_eq!(
-            decide_effect_claim(Some(&stored), &request(), NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
-                defect: EffectRowDefect::UnknownStatus {
-                    status: "half_done".to_string(),
-                },
-            })
-        );
-    }
-
-    #[test]
-    fn a_live_lease_is_busy_and_an_expired_one_is_taken_over() {
-        let mut live = row("in_progress");
-        live.lease_expires_at_ms = NOW + 1;
-        assert_eq!(
-            decide_effect_claim(Some(&live), &request(), NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::Busy {
-                retry_at_ms: NOW + 1,
-            })
-        );
-
-        let mut expired = row("in_progress");
-        expired.lease_expires_at_ms = NOW;
-        assert_eq!(
-            decide_effect_claim(Some(&expired), &request(), NOW),
-            EffectClaimDecision::TakeOver(EffectLeaseStamp {
-                lease_expires_at_ms: NOW + TTL,
-                due_at_ms: None,
-                now_ms: NOW,
-            }),
-            "a lease expiring exactly now is expired, not live"
-        );
-    }
-
-    #[test]
-    fn a_takeover_keeps_the_recorded_due_time_instead_of_restarting_the_sleep() {
-        let mut expired = row("in_progress");
-        expired.lease_expires_at_ms = NOW - 1;
-        expired.due_at_ms = Some(NOW + 10);
-        let request = EffectClaimRequest {
-            sleep_duration_ms: Some(5_000),
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(Some(&expired), &request, NOW),
-            EffectClaimDecision::TakeOver(EffectLeaseStamp {
-                lease_expires_at_ms: NOW + TTL,
-                due_at_ms: Some(NOW + 10),
-                now_ms: NOW,
-            })
-        );
-    }
-
-    #[test]
-    fn a_takeover_of_a_sleep_without_a_recorded_due_time_derives_one() {
-        let mut expired = row("in_progress");
-        expired.lease_expires_at_ms = NOW - 1;
-        let request = EffectClaimRequest {
-            sleep_duration_ms: Some(5_000),
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(Some(&expired), &request, NOW),
-            EffectClaimDecision::TakeOver(EffectLeaseStamp {
-                lease_expires_at_ms: NOW + TTL,
-                due_at_ms: Some(NOW + 5_000),
-                now_ms: NOW,
-            })
-        );
-    }
-
-    #[test]
-    fn strict_replay_never_refuses_a_row_that_exists() {
-        let mut stored = row("completed");
-        stored.outcome_json = Some("{}".to_string());
-        let request = EffectClaimRequest {
-            strict_replay: true,
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(Some(&stored), &request, NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::Completed {
-                outcome_json: "{}".to_string(),
-                due_at_ms: None,
-            })
-        );
-    }
-
-    #[test]
-    fn strict_replay_takes_over_an_expired_in_progress_row() {
-        let mut expired = row("in_progress");
-        expired.lease_expires_at_ms = NOW - 1;
-        expired.due_at_ms = Some(NOW + 10);
-        let request = EffectClaimRequest {
-            strict_replay: true,
-            sleep_duration_ms: Some(5_000),
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(Some(&expired), &request, NOW),
-            EffectClaimDecision::TakeOver(EffectLeaseStamp {
-                lease_expires_at_ms: NOW + TTL,
-                due_at_ms: Some(NOW + 10),
-                now_ms: NOW,
-            }),
-            "strict replay redriving a crashed-mid-execution effect must take the \
-             abandoned lease over, not report the effect missing"
-        );
-    }
-
-    #[test]
-    fn strict_replay_reports_a_live_lease_as_busy() {
-        let mut live = row("in_progress");
-        live.lease_expires_at_ms = NOW + 1;
-        let request = EffectClaimRequest {
-            strict_replay: true,
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(Some(&live), &request, NOW),
-            EffectClaimDecision::Report(EffectClaimObservation::Busy {
-                retry_at_ms: NOW + 1,
-            }),
-            "strict replay must wait behind the live owner, not report the effect missing"
-        );
-    }
-
-    #[test]
-    fn lease_stamps_saturate_instead_of_overflowing() {
-        let request = EffectClaimRequest {
-            lease_ttl_ms: u64::MAX,
-            sleep_duration_ms: Some(u64::MAX),
-            ..request()
-        };
-        assert_eq!(
-            decide_effect_claim(None, &request, NOW),
-            EffectClaimDecision::Insert(EffectLeaseStamp {
-                lease_expires_at_ms: u64::MAX,
-                due_at_ms: Some(u64::MAX),
-                now_ms: NOW,
-            })
-        );
-    }
-
-    #[test]
-    fn vocabularies_reproduce_each_backends_shipped_codes() {
-        let sqlite = EffectReplayVocabulary::sqlite();
-        let postgres = EffectReplayVocabulary::postgres();
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::LeaseLost),
-            RuntimeErrorCode::SqliteEffectReplayLeaseLost
-        );
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::HashConflict),
-            RuntimeErrorCode::SqliteEffectReplayHashConflict
-        );
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::KeyMissing),
-            RuntimeErrorCode::SqliteEffectReplayKeyMissing
-        );
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::Missing),
-            RuntimeErrorCode::SqliteEffectReplayMissing
-        );
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::CorruptRow),
-            RuntimeErrorCode::SqliteEffectReplayCorruptRow
-        );
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::Store),
-            RuntimeErrorCode::SqliteEffectReplayStore
-        );
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::Encode),
-            RuntimeErrorCode::SqliteEffectReplayEncode
-        );
-        assert_eq!(
-            sqlite.code(EffectReplayFailure::Decode),
-            RuntimeErrorCode::SqliteEffectReplayDecode
-        );
-        assert_eq!(
-            postgres.code(EffectReplayFailure::LeaseLost),
-            RuntimeErrorCode::PostgresEffectReplayLeaseLost
-        );
-        assert_eq!(
-            postgres
-                .error(EffectReplayFailure::CorruptRow, "boom")
-                .message,
-            "boom".to_string()
-        );
-    }
-
-    #[test]
-    fn row_defects_render_the_messages_hosts_already_see() {
-        assert_eq!(
-            EffectRowDefect::MissingOutcome.message(),
-            "completed runtime effect row is missing outcome_json"
-        );
-        assert_eq!(
-            EffectRowDefect::MissingError.message(),
-            "failed runtime effect row is missing error_json"
-        );
-        assert_eq!(
-            EffectRowDefect::UnknownStatus {
-                status: "x".to_string()
-            }
-            .message(),
-            "unknown runtime effect replay status `x`"
-        );
-        assert_eq!(
-            EffectRowDefect::VanishedUnderClaim.message(),
-            "effect replay insert conflicted but no row could be selected"
-        );
-    }
-
-    #[test]
-    fn terminals_write_exactly_one_payload_column() {
-        let completed = EffectTerminal::Completed {
-            outcome_json: "{\"ok\":true}".to_string(),
-        };
-        assert_eq!(completed.status(), EffectRowStatus::Completed);
-        assert_eq!(completed.outcome_json(), Some("{\"ok\":true}"));
-        assert_eq!(completed.error_json(), None);
-
-        let failed = EffectTerminal::Failed {
-            error_json: "{\"code\":\"boom\"}".to_string(),
-        };
-        assert_eq!(failed.status(), EffectRowStatus::Failed);
-        assert_eq!(failed.outcome_json(), None);
-        assert_eq!(failed.error_json(), Some("{\"code\":\"boom\"}"));
-    }
-}
+mod tests;

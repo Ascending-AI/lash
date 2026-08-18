@@ -17,9 +17,10 @@ use std::time::Instant;
 
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
-    EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectLeaseFence,
-    EffectLeaseStamp, EffectReplayDriver, EffectReplayPersistence, EffectReplayVocabulary,
-    EffectRowStatus, EffectTerminal, StoredEffectRow, decide_effect_claim,
+    EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectFinalizeOutcome,
+    EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayDriver,
+    EffectReplayPersistence, EffectReplayVocabulary, EffectRowStatus, EffectTerminal,
+    StoredEffectRow, StoredGroupSettlement, decide_effect_claim,
 };
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
@@ -475,11 +476,19 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
             .map_err(effect_sqlite_error)
     }
 
+    /// Writes the terminal and, for a grouped child, allocates its settlement
+    /// rank — in the normative order (N1).
+    ///
+    /// The fenced `UPDATE` runs first and the counter is bumped only on rowcount
+    /// 1, so a driver whose lease was taken over allocates nothing. Everything
+    /// runs inside one `BEGIN IMMEDIATE` write transaction, which is also why
+    /// this backend needs no `RETURNING`: SQLite admits one writer, so the bump
+    /// and the read-back of the bumped value cannot interleave with a sibling's.
     async fn finalize(
         &self,
         fence: &EffectLeaseFence,
         terminal: &EffectTerminal,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<EffectFinalizeOutcome, RuntimeEffectControllerError> {
         let fence = fence.clone();
         let status = terminal.status().column();
         let outcome_json = terminal.outcome_json().map(str::to_string);
@@ -516,7 +525,127 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
                         now as i64,
                     ],
                 )?;
-                Ok(changed == 1)
+                if changed != 1 {
+                    // No counter bump: the fence moved, so this driver owns
+                    // neither the child nor a rank in its group. Committing an
+                    // observation is the port's documented shape; burning a
+                    // number here would advance a group this driver has lost.
+                    return Ok(EffectFinalizeOutcome::FenceMoved);
+                }
+                let group_key: Option<String> = tx.query_row(
+                    "SELECT group_key FROM runtime_effect_replay
+                     WHERE scope_id = ?1 AND replay_key = ?2",
+                    params![fence.scope_id.as_str(), fence.replay_key.as_str()],
+                    |row| row.get(0),
+                )?;
+                let Some(group_key) = group_key else {
+                    return Ok(EffectFinalizeOutcome::Written {
+                        settlement_seq: None,
+                    });
+                };
+                let bumped = tx.execute(
+                    "UPDATE runtime_effect_group
+                     SET next_seq = next_seq + 1
+                     WHERE group_key = ?1",
+                    params![group_key.as_str()],
+                )?;
+                if bumped != 1 {
+                    return Err(missing_group_row(&group_key));
+                }
+                let settlement_seq: i64 = tx.query_row(
+                    "SELECT next_seq FROM runtime_effect_group WHERE group_key = ?1",
+                    params![group_key.as_str()],
+                    |row| row.get(0),
+                )?;
+                tx.execute(
+                    "UPDATE runtime_effect_replay
+                     SET settlement_seq = ?3
+                     WHERE scope_id = ?1 AND replay_key = ?2",
+                    params![
+                        fence.scope_id.as_str(),
+                        fence.replay_key.as_str(),
+                        settlement_seq,
+                    ],
+                )?;
+                Ok(EffectFinalizeOutcome::Written {
+                    settlement_seq: Some(u64_from_sql(
+                        "RuntimeEffectGroup",
+                        "next_seq",
+                        settlement_seq,
+                    )?),
+                })
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
+    async fn open_group(
+        &self,
+        record: &EffectGroupRecord,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let record = record.clone();
+        self.conn
+            .write(move |tx| {
+                // `DO NOTHING` rather than an upsert: reopening a group must not
+                // reset `next_seq`, which would re-seat recorded children at
+                // ranks a caller has already consumed.
+                tx.execute(
+                    "INSERT INTO runtime_effect_group (
+                        group_key, scope_id, session_id, wake, loser_disposition,
+                        children, next_seq, created_at_ms
+                     )
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+                     ON CONFLICT(group_key) DO NOTHING",
+                    params![
+                        record.group_key.as_str(),
+                        record.scope_id.as_str(),
+                        record.session_id.as_deref(),
+                        record.wake.column(),
+                        record.loser_disposition.column(),
+                        record.children as i64,
+                        record.created_at_ms as i64,
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: usize,
+    ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError> {
+        let Some(offset) = rank.checked_sub(1) else {
+            return Ok(None);
+        };
+        let group_key = group_key.to_string();
+        self.conn
+            .call(move |connection| {
+                connection
+                    .query_row(
+                        "SELECT settlement_seq, replay_key, status, outcome_json, error_json
+                         FROM runtime_effect_replay
+                         WHERE group_key = ?1 AND settlement_seq IS NOT NULL
+                         ORDER BY settlement_seq
+                         LIMIT 1 OFFSET ?2",
+                        params![group_key.as_str(), offset as i64],
+                        |row| {
+                            Ok(StoredGroupSettlement {
+                                sequence: u64_from_sql(
+                                    "RuntimeEffectReplay",
+                                    "settlement_seq",
+                                    row.get(0)?,
+                                )?,
+                                replay_key: row.get(1)?,
+                                status: row.get(2)?,
+                                outcome_json: row.get(3)?,
+                                error_json: row.get(4)?,
+                            })
+                        },
+                    )
+                    .optional()
             })
             .await
             .map_err(effect_sqlite_error)
@@ -560,6 +689,18 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
             .map_err(effect_sqlite_error)
     }
 
+    /// Deletes the named children **and their groups in the same transaction**
+    /// (N3), so no partially-retired group is ever visible.
+    ///
+    /// A settlement rank counts a group's recorded children, and it survives
+    /// gaps only because allocation is monotonic and therefore appends above a
+    /// consumed rank. A deletion *below* a consumed rank would shift ranks even
+    /// though allocation never does, which is why the group row and its children
+    /// go together or not at all. Both predicates select the same set: a group
+    /// and its children are opened under one journal identity.
+    ///
+    /// The reported count stays the children, which is what this method has
+    /// always reported and what a caller prunes against.
     async fn retire_journal(
         &self,
         retirement: &EffectJournalRetirement,
@@ -568,18 +709,30 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
         let deleted = self
             .conn
             .write(move |tx| match retirement {
-                EffectJournalRetirement::Session { session_id } => tx.execute(
-                    "DELETE FROM runtime_effect_replay WHERE session_id = ?1",
-                    params![session_id],
-                ),
+                EffectJournalRetirement::Session { session_id } => {
+                    let deleted = tx.execute(
+                        "DELETE FROM runtime_effect_replay WHERE session_id = ?1",
+                        params![session_id],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM runtime_effect_group WHERE session_id = ?1",
+                        params![session_id],
+                    )?;
+                    Ok(deleted)
+                }
                 EffectJournalRetirement::Process { process_id } => {
                     let identity = ExecutionScope::process(process_id)
                         .journal_identity()
                         .expect("process scopes always form durable journal identities");
-                    tx.execute(
+                    let deleted = tx.execute(
                         "DELETE FROM runtime_effect_replay WHERE scope_id = ?1",
                         params![identity.key()],
-                    )
+                    )?;
+                    tx.execute(
+                        "DELETE FROM runtime_effect_group WHERE scope_id = ?1",
+                        params![identity.key()],
+                    )?;
+                    Ok(deleted)
                 }
             })
             .await
@@ -635,9 +788,10 @@ fn insert_claimed_row(
         "INSERT INTO runtime_effect_replay (
             scope_id, session_id, replay_key, envelope_hash,
             envelope_json, status, outcome_json, error_json, lease_owner_id,
-            lease_token, lease_expires_at_ms, due_at_ms, created_at_ms, updated_at_ms
+            lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+            created_at_ms, updated_at_ms
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?11, ?12)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, ?11, ?12)",
         params![
             request.scope_id.as_str(),
             request.session_id.as_deref(),
@@ -651,6 +805,7 @@ fn insert_claimed_row(
             stamp.due_at_ms.map(|value| value as i64),
             stamp.now_ms as i64,
             stamp.now_ms as i64,
+            request.group_key.as_deref(),
         ],
     )?;
     Ok(())
@@ -682,24 +837,23 @@ fn take_over_expired_lease(
     Ok(())
 }
 
+/// A grouped child whose group row is gone is a corrupt journal, not a
+/// silently ungrouped settlement: the rank it should have taken can never be
+/// served, so reporting success would hide a group no caller can finish
+/// consuming.
+fn missing_group_row(group_key: &str) -> rusqlite::Error {
+    sqlite_conversion_error(stored_data_corrupt(
+        "RuntimeEffectGroup",
+        format!(
+            "grouped effect child finalized against missing group row `{group_key}`; \
+             its settlement rank can never be served"
+        ),
+    ))
+}
+
 fn effect_sqlite_error(err: rusqlite::Error) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(VOCABULARY.store_code(), err.to_string())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stored_effect_corruption_is_non_retryable() {
-        let error = effect_sqlite_error(sqlite_conversion_error(StoreError::StoredDataCorrupt {
-            record_kind: "RuntimeEffectReplay",
-            message: "lease_expires_at_ms must be non-negative, got -1".to_string(),
-        }));
-        assert_eq!(
-            error.code,
-            lash_core::RuntimeErrorCode::SqliteEffectReplayStore
-        );
-        assert!(!error.code.is_retryable());
-    }
-}
+mod tests;

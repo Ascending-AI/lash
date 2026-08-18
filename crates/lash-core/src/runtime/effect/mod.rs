@@ -4,6 +4,7 @@ pub mod effect_replay_driver;
 mod envelope;
 pub(crate) mod executor;
 mod group;
+mod group_journal;
 mod inline_host;
 mod outcome;
 pub mod promise_semantics;

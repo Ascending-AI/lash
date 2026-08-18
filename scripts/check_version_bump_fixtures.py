@@ -74,6 +74,7 @@ class Migration:
     from_version: int
     to_version: int
     source_missing_tables: tuple[str, ...]
+    source_missing_columns: tuple[tuple[str, str], ...]
     introduced_relations: tuple[str, ...]
 
 
@@ -113,6 +114,30 @@ def string_array_constant(text: str, source: str, name: str) -> tuple[str, ...]:
     if len(set(values)) != len(values):
         raise CheckError(f"{source}: {name} lists a duplicate entry")
     return values
+
+
+def pair_array_constant(text: str, source: str, name: str) -> tuple[tuple[str, str], ...]:
+    pattern = re.compile(
+        rf"^const {re.escape(name)}: \[\(&str, &str\); (\d+)\] =\s*\[(.*?)\];$",
+        re.MULTILINE | re.DOTALL,
+    )
+    matches = pattern.findall(text)
+    if len(matches) != 1:
+        raise CheckError(
+            f"{source}: expected exactly one {name} declaration, found {len(matches)}"
+        )
+    declared_length, body = matches[0]
+    values = STRING_LITERAL.findall(body)
+    if len(values) % 2 != 0:
+        raise CheckError(f"{source}: {name} does not list (table, column) pairs")
+    pairs = tuple(zip(values[0::2], values[1::2]))
+    if len(pairs) != int(declared_length):
+        raise CheckError(
+            f"{source}: {name} declares {declared_length} entries but lists {len(pairs)}"
+        )
+    if len(set(pairs)) != len(pairs):
+        raise CheckError(f"{source}: {name} lists a duplicate entry")
+    return pairs
 
 
 def string_constant(text: str, source: str, name: str) -> str:
@@ -196,6 +221,22 @@ def string_field(entry: str, field: str) -> tuple[str, ...]:
     return tuple(STRING_LITERAL.findall(match.group(1)))
 
 
+def pair_field(entry: str, field: str) -> tuple[tuple[str, str], ...]:
+    """The `(table, column)` literals of a migration's pair-valued field.
+
+    The array carries no nested brackets, so the flat run of string literals
+    between the outer ones is exactly the pairs in order. An odd count means the
+    entry was written as something other than `(table, column)` tuples, which
+    would silently halve the set this derives.
+    """
+    values = string_field(entry, field)
+    if len(values) % 2 != 0:
+        raise CheckError(
+            f"{MIGRATIONS_SOURCE}: {field} does not list (table, column) pairs"
+        )
+    return tuple(zip(values[0::2], values[1::2]))
+
+
 def int_field(entry: str, field: str) -> int:
     match = re.search(rf"^\s*{re.escape(field)}: (\d+),$", entry, re.MULTILINE)
     if match is None:
@@ -217,6 +258,7 @@ def parse_migrations(text: str) -> tuple[Migration, ...]:
             from_version=int_field(entry, "from"),
             to_version=int_field(entry, "to"),
             source_missing_tables=string_field(entry, "source_missing_tables"),
+            source_missing_columns=pair_field(entry, "source_missing_columns"),
             introduced_relations=string_field(entry, "introduced_relations"),
         )
         for entry in (body[start:end] for start, end in zip(bounds, bounds[1:]))
@@ -317,6 +359,27 @@ def check(repo: Path) -> tuple[bool, str]:
         if set(found) != set(expected):
             failures.append(named_set_failure(constant, derivation, found, expected))
 
+    # The rewind has a column axis as well as a relation one: a nullable column
+    # added to a table the floor catalog already has survives every `DROP TABLE`
+    # and every `DROP INDEX`, so without this the "published floor catalog" the
+    # fixture reconstructs still carries current-generation columns and the
+    # refusal it proves is not the one an older store gets.
+    declared_columns = pair_array_constant(
+        fixture_text, FIXTURE_SOURCE, "POST_FLOOR_COLUMNS"
+    )
+    if set(declared_columns) != set(floor.source_missing_columns):
+        failures.append(
+            named_set_failure(
+                "POST_FLOOR_COLUMNS",
+                f"the component-{floor.from_version} migration's source_missing_columns",
+                tuple(f"{table}.{column}" for table, column in declared_columns),
+                tuple(
+                    f"{table}.{column}"
+                    for table, column in floor.source_missing_columns
+                ),
+            )
+        )
+
     # `POST_FLOOR_INDEXES` is the one fixture list nothing else can see. The
     # older-store fixture drops the post-floor *tables*, which takes their indexes
     # with them; every other post-floor relation has to be dropped by name or the
@@ -409,7 +472,8 @@ def check(repo: Path) -> tuple[bool, str]:
         f"version-bump fixture check passed: component {component_version}, floor "
         f"{floor.from_version}, {len(migrations)} explicit migrations, "
         f"{len(renderers)} disjoint refusal kinds, {len(declared_indexes)} explicitly "
-        f"dropped post-floor indexes, {len(demanded)} asserted checkpoints"
+        f"dropped post-floor indexes, {len(declared_columns)} explicitly dropped "
+        f"post-floor columns, {len(demanded)} asserted checkpoints"
     )
 
 
