@@ -596,12 +596,55 @@ jobs:
       - name: Check version-bump recreation fixtures
         run: python3 scripts/check_version_bump_fixtures.py
 
+      # Duration history for the advisory trend signal (FIG-1532). Runtime
+      # wall-clock ceilings are advisory (FIG-1385), which leaves a regression
+      # that allocates nothing — added blocking I/O, lock contention, a stray
+      # sleep — with no gate at all. The remedy is trend, not threshold: each
+      # main run appends its per-scenario medians here and the harness warns
+      # when a scenario has sat above its own trailing median for several
+      # consecutive main runs.
+      #
+      # The store is this cache and nothing else: no new service, no secret,
+      # and no write to a tracked branch. The key is unique per run *attempt*
+      # — `gh run rerun` reuses `run_id`, so keying on it alone would make a
+      # rerun collide with the entry its own first attempt wrote — and the
+      # prefix restore-key picks the newest previous entry. Pull requests fall
+      # back to main's cache automatically, which is exactly the read-only
+      # advisory behaviour they should have. A missing or evicted cache
+      # degrades to "insufficient data", never to a failure.
+      #
+      # Both steps are `continue-on-error` because neither is allowed to gate:
+      # a cache-service outage or a key collision must cost the advisory
+      # signal for one run, never the lint job. That is the same rule the trend
+      # code itself follows (FIG-1385: this signal reports, it does not gate).
+      # Reset the series wholesale — after a scenario is redefined, say — with
+      # `gh cache delete` on the `perf-duration-history-quick-*` keys.
+      - name: Restore runtime perf duration history
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .benchmarks/perf-history
+          key: perf-duration-history-quick-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            perf-duration-history-quick-
+
       # Exercise every database-free runtime and Lashlang measurement path and
       # enforce the cheap budget/phase inventory before release.
       - name: Run performance harness smoke
         run: |
-          python3 scripts/profile_runtime.py --profile quick --enforce-inventory --out .benchmarks/perf-smoke/runtime.json
+          python3 scripts/profile_runtime.py --profile quick --enforce-inventory --out .benchmarks/perf-smoke/runtime.json \
+            --duration-history .benchmarks/perf-history/runtime-quick.jsonl
           python3 scripts/profile_lashlang.py --debug --iterations 10 --profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json
+
+      # Only trunk extends the durable series. A pull request appends to its
+      # restored copy for its own advisory table and throws it away.
+      - name: Save runtime perf duration history
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .benchmarks/perf-history
+          key: perf-duration-history-quick-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh

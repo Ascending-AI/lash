@@ -14,6 +14,7 @@ use crate::perf_support::report as report_support;
 use crate::perf_support::stack::{DEFAULT_STACK_BUDGET_BYTES, StackProfile};
 use crate::perf_support::time::round3;
 
+use super::duration_trend;
 use super::measurement::*;
 use super::scenarios::{RuntimePerfScenario, ScenarioHarnessKind};
 
@@ -67,6 +68,8 @@ pub async fn run_cli(
     chat_turns: usize,
     enforce_budgets: bool,
     enforce_inventory: bool,
+    duration_history: Option<PathBuf>,
+    duration_profile: String,
     version: &str,
 ) -> anyhow::Result<()> {
     if dhat_out.is_some() && !enable_dhat {
@@ -133,6 +136,12 @@ pub async fn run_cli(
         serde_json::to_string_pretty(&runtime_perf_output_json(&out_path, &report))?
     );
     report_advisory_exceedances(&report.budget_results);
+    // The trend runs before enforcement so a scenario whose allocation ceiling
+    // failed still contributes its duration observation: the history is a
+    // record of what the machine measured, not of which runs passed.
+    if let Some(history_path) = duration_history.as_deref() {
+        duration_trend::record_and_report(history_path, &duration_profile, &report.summary);
+    }
     if enforce_budgets || enforce_inventory {
         let inventory_only = enforce_inventory && !enforce_budgets;
         let failures = enforcement_failures(&report.budget_results, inventory_only);

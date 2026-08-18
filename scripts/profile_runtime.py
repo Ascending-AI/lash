@@ -110,6 +110,17 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--duration-history",
+        type=Path,
+        help=(
+            "Append this run's per-scenario median wall clock to an append-only "
+            "JSONL history and print the advisory duration trend table. The "
+            "history is keyed by --profile because durations are only "
+            "comparable within one size preset. Drift is reported, never "
+            "enforced."
+        ),
+    )
+    parser.add_argument(
         "--cargo-feature",
         action="append",
         default=[],
@@ -208,6 +219,9 @@ def main() -> int:
         cmd.append("--runtime-perf-enforce-budgets")
     if args.enforce_inventory:
         cmd.append("--runtime-perf-enforce-inventory")
+    if args.duration_history:
+        cmd.append(f"--runtime-perf-duration-history={args.duration_history}")
+        cmd.append(f"--runtime-perf-duration-profile={args.profile}")
     for scenario in args.scenario:
         cmd.extend(["--runtime-perf-scenario", scenario])
 
@@ -219,6 +233,16 @@ def main() -> int:
     # advisory class invisible.
     if proc.stderr:
         print(proc.stderr, file=sys.stderr, end="")
+    # The binary's stdout is the JSON contract parsed below, so its GitHub
+    # workflow commands (duration-drift annotations) ride on stderr. The
+    # Actions runner reads workflow commands from this script's stdout, so
+    # re-emit them there. Only the two annotation verbs are forwarded, by exact
+    # prefix: a blanket `::` filter would promote any future stderr line that
+    # happens to start that way into a workflow command, including ones that
+    # change runner state.
+    for line in proc.stderr.splitlines():
+        if line.startswith(("::warning ", "::warning:", "::notice ", "::notice:")):
+            print(line)
     if proc.returncode != 0:
         raise SystemExit(proc.returncode)
 
