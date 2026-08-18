@@ -73,8 +73,14 @@ Evidence prose carries nine lints, because the prose is the evidence:
   the item at that line: the item's own name, or the type that owns it, must
   appear in the function around it.  64 rows written earlier in this arc cited
   real lines that never mentioned the symbol, which reads as verification and is
-  not.  Scoped to the internal dispositions and to rows whose prose invokes
-  FIG-1223; see `prose_citation_defect`.
+  not.  The citation also lands on code, sits in the function the prose names,
+  and -- where a row cites a line to reject it, or admits the resolver cannot tie
+  it -- answers the inverse claim instead.  Every citation in every reason is
+  read: FIG-1223 scoped this to internal dispositions and rows naming the ticket,
+  and FIG-1526 re-anchored the 837 rows that scope was hiding and removed it.
+  `prose_citations_recorded` pins the citation population, because dropping a
+  `:line` is the one edit that takes a row out of this check.  See
+  `prose_citation_defect`.
 * No missing repository paths.  A `crates/...`, `examples/...`, `runbooks/...`,
   `scripts/...`, or `docs/...` file cited in reason prose must still exist in
   the repository; a `:line` anchor is metadata and does not change which file
@@ -1190,8 +1196,149 @@ def missing_repository_path(text: str) -> str | None:
 #: A `file.rs:line` citation inside reason prose.
 PROSE_CITATION = re.compile(r"((?:crates|examples)/[^\s,;:()\"]+\.rs):([0-9]+)")
 
+#: Prose naming the function a citation it follows sits in.
+CITED_FUNCTION = re.compile(r"^,? (?:in|inside) `([A-Za-z0-9_]+)`")
 
-def prose_citation_defect(symbol: str, kind: str, reason: str) -> str | None:
+#: Prose citing a line as evidence *against* itself: the anchor a row rejected.
+COUNTER_CITATION = re.compile(r"^ asserts an unrelated expression in `([A-Za-z0-9_]+)`")
+
+#: A cited line carrying no code: blank, punctuation alone, a comment, an attribute.
+NON_CODE_LINE = re.compile(r"^(?:[\s{}();,\[\]]*|//.*|#!?\[.*)$")
+
+#: Prose citing a line the resolver cannot tie to the item, and saying so.
+UNRESOLVED_CITATION = re.compile(
+    r"^ as a consumer of this path and the checker cannot tie that line to the "
+    r"owning type mechanically"
+)
+
+#: A plain string literal, escapes honoured, newlines allowed.
+CODE_LITERAL = re.compile(r"b?\"(?:\\.|[^\"\\])*\"", re.S)
+
+#: The opening of a raw string; its close is the same hash run, found by hand.
+RAW_LITERAL_OPEN = re.compile(r"b?r(#*)\"")
+
+#: A literal holding one bare identifier and nothing else -- a wire key, not a
+#: sentence.  Dots and dashes are excluded on purpose: `"process.abandoned"`
+#: is a *different* item's wire name, and letting it through licenses one
+#: symbol's string as evidence for another's field.
+NAME_LITERAL = re.compile(r"^b?r?#*\"[A-Za-z_][A-Za-z0-9_]*\"#*$")
+
+#: The name a `let` introduces, which the surrounding code chose freely.
+LET_BINDER = re.compile(r"\blet\s+(?:mut\s+)?([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def consuming_text(text: str) -> str:
+    """`text` with the places a name can appear without being a use blanked out.
+
+    A leaf name is a common English word -- `deferred`, `abort`, `cancellation` --
+    and two places spell one without touching the item.  A sentence in a string
+    is prose: `.expect("a deferred digest keeps its bytes")` names nothing, and
+    51 citations rested on exactly that.  A `let` binder is the *caller's* choice
+    of name: `let mut abort = None;` is a local the author could have called
+    anything, and reading it as evidence for `TurnPreparation::abort` reverses
+    who is proving what.
+
+    A literal holding a single name survives, because that is how the wire is
+    asserted: `assert_eq!(projected["external_ref"]["id"], ...)` observes the
+    field this row is about, and blanking it would delete the evidence the
+    serialization rows rest on.  Every other spelling stays too: a field read, an
+    argument, a struct-literal key, a method call, a type.
+
+    Comments go the same way, and they are why this reads the text one character
+    at a time instead of running a regex over it: an apostrophe or a lone quote
+    in a sentence is not the start of a literal, and a pattern that thinks it is
+    swallows every line up to the next quote -- real code included.
+    """
+    kept: list[str] = []
+    index, length = 0, len(text)
+    while index < length:
+        if text.startswith("//", index):
+            newline = text.find("\n", index)
+            index = length if newline == -1 else newline
+            continue
+        if text.startswith("/*", index):
+            depth, scan = 1, index + 2
+            while scan < length and depth:
+                if text.startswith("/*", scan):
+                    depth, scan = depth + 1, scan + 2
+                elif text.startswith("*/", scan):
+                    depth, scan = depth - 1, scan + 2
+                else:
+                    # A literal or comment may span lines, and dropping its
+                    # newlines would slide every line after it.
+                    kept.append("\n" if text[scan] == "\n" else "")
+                    scan += 1
+            index = scan
+            continue
+        raw = RAW_LITERAL_OPEN.match(text, index)
+        if raw:
+            close = text.find('"' + raw.group(1), raw.end())
+            end = length if close == -1 else close + 1 + len(raw.group(1))
+            body = text[index:end]
+        else:
+            plain = CODE_LITERAL.match(text, index)
+            body = plain.group(0) if plain else ""
+            end = plain.end() if plain else index
+        if body:
+            kept.append(body if NAME_LITERAL.match(body) else '""' + "\n" * body.count("\n"))
+            index = end
+            continue
+        kept.append(text[index])
+        index += 1
+    without_literals = "".join(kept)
+    return LET_BINDER.sub(
+        lambda match: match.group(0)[: match.start(1) - match.start(0)] + "_local",
+        without_literals,
+    )
+
+
+def consuming_file_lines(relative: str) -> list[str]:
+    """A file's lines with literals and `let` binders blanked, cached per file.
+
+    Masked whole-file rather than line by line: a message that runs over three
+    lines only looks like a string from above, and read one line at a time its
+    middle reads as code.
+    """
+    if relative not in _CONSUMING_LINES:
+        lines = source_file_lines(relative) or []
+        _CONSUMING_LINES[relative] = consuming_text("\n".join(lines)).split("\n")
+    return _CONSUMING_LINES[relative]
+
+
+def enclosing_function(relative: str, line_number: int) -> str | None:
+    """The name of the innermost function a line sits in, if any."""
+    start, end = anchor_scope_region(relative, line_number)
+    if start < 0:
+        return None
+    header = (source_file_lines(relative) or [])[start]
+    match = re.search(r"\bfn\s+([A-Za-z0-9_]+)", header)
+    return match.group(1) if match else None
+
+
+def prose_citations(entries: list[dict[str, Any]]) -> int:
+    """How many `file.rs:line` citations the reasons across the ledger carry."""
+    return sum(
+        len(PROSE_CITATION.findall(entry.get("reason", "") or "")) for entry in entries
+    )
+
+
+def anchor_locations(entry: Any) -> set[tuple[str, int]]:
+    """The `(file, line)` pairs a row records as its own evidence anchors."""
+    located = set()
+    for field in ("usage", "assertion"):
+        head = str(entry.get(field, "") or "").split("#", 1)[0]
+        relative, _, line_text = head.rpartition(":")
+        if relative and line_text.isdigit():
+            located.add((relative, int(line_text)))
+    return located
+
+
+def prose_citation_defect(
+    symbol: str,
+    kind: str,
+    reason: str,
+    anchors: set[tuple[str, int]] | None = None,
+) -> str | None:
     """Why a cited line does not show what the prose says it shows, if so.
 
     Prose is only evidence while the line it points at is about this item.  The
@@ -1200,30 +1347,102 @@ def prose_citation_defect(symbol: str, kind: str, reason: str) -> str | None:
     is deliberately the anchor rule's weaker sibling: the item's own name, or the
     type that owns it, has to appear in the function around the cited line.
 
-    Scope: internal dispositions, and any row whose prose invokes FIG-1223 -- the
-    rows this arc is answerable for.  298 older citations across the ledger fail
-    it and are a separate cleanup; widening this to them without fixing them
-    would just turn the gate red.
+    Scope: every citation in every reason.  FIG-1223 first scoped the check to
+    internal dispositions and rows whose prose invoked FIG-1223, grandfathering
+    298 older citations; that scope was escapable by simply not naming the ticket,
+    so FIG-1526 re-anchored the grandfathered citations and removed the scope.
 
-    That scope gate is escapable and known to be: a row that cites a line and
-    does not say FIG-1223 is not checked, so the cheapest way past this lint is
-    to write the prose without the reference to the ticket.  The gate only stops
-    getting worse once the check applies to every citation, and the follow-up
-    ticket filed for the 298 owns both the cleanup and widening this to them.
+    Prose says more than *where*, and the rest is checkable too.  A reason that
+    says a line sits `in `some_function`` is read against the function the line
+    is actually in, because a citation whose surrounding prose names a different
+    function reads as a located fact and is a guess.  A reason that cites a line
+    to *reject* it -- the anchor a downgraded row refuses to call evidence -- is
+    held to the inverse: that line has to be an assertion, in the function the
+    prose names, saying nothing about this item.  Without that inverse the only
+    way to keep such a row honest is to drop the line number, which is how 24
+    rows went invisible in the first FIG-1526 round.
+
+    The function around a line is the window, not a licence to point anywhere
+    inside it: 588 citations landed on a blank line, a lone brace, a comment or
+    an attribute and read as located facts, because the file or the function
+    elsewhere happened to name the item.  A citation lands on code.
+
+    A row that says outright that the resolver cannot tie its citation to the
+    item -- an extension trait reached only through a `use` and a method call --
+    is held to the weakest honest claim there is: the cited line has to spell the
+    item.  A blank line, a brace, or an attribute cannot, which is the whole
+    difference between recording a candidate and manufacturing one.
+
+    Naming is read over `consuming_text`, so a leaf spelled inside a string
+    literal or introduced by a `let` is not a use of the item: `.expect("a
+    deferred digest keeps its bytes")` and `let mut abort = None;` are the two
+    shapes that let a common English word stand in for evidence.
+
+    A citation to the row's own recorded anchor is exempt from the naming rule
+    and from nothing else: `reference_exists` re-reads that exact line and its
+    quoted source on every run, and the anchor rules above decide whether it is
+    evidence.  Prose repeating a location the ledger already proves is not a
+    second, weaker claim -- and an assertion in a test whose function never
+    spells the item is exactly the anchor an example is entitled to record.
     """
     leaf = symbol.split("::")[-1]
     owner = symbol.split("::")[-2] if "::" in symbol else ""
-    for relative, line_text in PROSE_CITATION.findall(reason):
-        line_number = int(line_text)
+    for match in PROSE_CITATION.finditer(reason):
+        relative, line_number = match.group(1), int(match.group(2))
         lines = source_file_lines(relative)
         if lines is None or line_number > len(lines):
             return f"cites {relative}:{line_number}, which is not a line in that file"
-        scope = anchor_scope(relative, line_number)
-        if not names_word(leaf, scope) and not (owner and names_word(owner, scope)):
+        if NON_CODE_LINE.match(lines[line_number - 1].strip()):
+            return (
+                f"cites {relative}:{line_number}, a line carrying no code -- a "
+                "citation lands on the code it is about, not near it"
+            )
+        tail = reason[match.end() :]
+        scope = consuming_text(anchor_scope(relative, line_number))
+        cited_line = consuming_file_lines(relative)[line_number - 1]
+        spelled = names_word(leaf, lines[line_number - 1]) or bool(
+            owner and names_word(owner, lines[line_number - 1])
+        )
+        consumes = names_word(leaf, cited_line) or bool(owner and names_word(owner, cited_line))
+        if spelled and not consumes:
+            return (
+                f"cites {relative}:{line_number}, where {leaf} is a local name or "
+                "literal text rather than a use of the item"
+            )
+        names_item = names_word(leaf, scope) or bool(owner and names_word(owner, scope))
+        rejected = COUNTER_CITATION.match(tail)
+        if rejected:
+            if "assert" not in lines[line_number - 1]:
+                return (
+                    f"cites {relative}:{line_number} as the assertion it rejects, "
+                    "but that line asserts nothing"
+                )
+            if names_item:
+                return (
+                    f"calls {relative}:{line_number} unrelated to {leaf}, but the "
+                    "function around it names the item, so the rejection is wrong"
+                )
+        elif UNRESOLVED_CITATION.match(tail):
+            if not names_word(leaf, cited_line) and not (
+                owner and names_word(owner, cited_line)
+            ):
+                return (
+                    f"records {relative}:{line_number} as the consumer candidate the "
+                    f"resolver cannot tie to {leaf}, but that line does not name it"
+                )
+        elif not names_item and (relative, line_number) not in (anchors or set()):
             return (
                 f"cites {relative}:{line_number}, where neither {leaf} nor the type "
                 "that owns it appears -- in the line or in the function around it"
             )
+        named = rejected or CITED_FUNCTION.match(tail)
+        if named:
+            actual = enclosing_function(relative, line_number)
+            if actual != named.group(1):
+                return (
+                    f"places {relative}:{line_number} in `{named.group(1)}`, but that "
+                    f"line sits in {f'`{actual}`' if actual else 'no function'}"
+                )
     return None
 
 
@@ -1477,6 +1696,7 @@ OUT_OF_LINE_MODULE = re.compile(
 #: `#[path = "other.rs"]`, which decides where a module's code actually lives.
 PATH_ATTRIBUTE = re.compile(r"#\[path\s*=\s*\"([^\"]+)\"\s*\]")
 _SOURCE_LINES: dict[str, list[str] | None] = {}
+_CONSUMING_LINES: dict[str, list[str]] = {}
 _SCOPE_BLOCKS: dict[str, list[tuple[int, int, str]]] = {}
 _IMPORTED_TYPES: dict[str, set[str]] = {}
 _TEST_REGIONS: dict[str, list[tuple[int, int]] | None] = {}
@@ -1833,8 +2053,17 @@ def block_header(lines: list[str], index: int) -> tuple[str, int]:
     unrecognizable, and a function nobody can find becomes a scope the size of the
     file -- which is how two different `context:` parameters ended up in one
     scope and a receiver resolved to both (FIG-1223).
+
+    The walk back is bounded by the first line that cannot be part of a signature
+    -- a blank line, a comment, an attribute, or a line ending a statement or a
+    block -- so the only thing a line budget adds is a ceiling on how long a
+    parameter list may be.  Fourteen lines was under the longest constructors
+    here -- `ProcessEngineRunContext::new` takes seventeen parameters -- so their
+    bodies had no enclosing function, which was invisible while that meant the
+    whole file and would have made every citation into one unconfirmable once an
+    unenclosed line means nothing at all (FIG-1526).
     """
-    for position in range(index, max(-1, index - 14), -1):
+    for position in range(index, max(-1, index - 60), -1):
         stripped = lines[position].strip()
         if FUNCTION_HEADER.match(stripped):
             return "fn", position
@@ -1910,6 +2139,11 @@ def anchor_scope_text(relative: str, line_number: int) -> str:
     where a receiver's type is established, and the `impl` header is where a
     trait method's owner is named -- `fn begin(&self, ...)` proves nothing on its
     own, `impl RuntimeTurnPhaseProbe for ...` above it proves everything.
+
+    A line outside every function has no such window, and reading the whole file
+    as its scope is how a citation to a blank line, a `}`, or an attribute passed:
+    the symbol appears *somewhere* in the file, so the check saw its own name and
+    agreed.  FIG-1526 made that case an empty scope, which no name matches.
     """
     lines = source_file_lines(relative) or []
     target = line_number - 1
@@ -1922,7 +2156,9 @@ def anchor_scope_text(relative: str, line_number: int) -> str:
             headers.append(start)
         elif body is None or start > body[0]:
             body = (start, end)
-    region = lines if body is None else lines[body[0] : body[1] + 1]
+    if body is None:
+        return ""
+    region = lines[body[0] : body[1] + 1]
     return "\n".join([*(lines[index] for index in headers), *region])
 
 
@@ -3311,13 +3547,14 @@ def check() -> int:
                     f"{symbol}: {field} names the machine-local path {offender!r}; "
                     "evidence must be repository-relative"
                 )
-        if disposition in INTERNAL_DISPOSITIONS or "FIG-1223" in reason:
-            citation = prose_citation_defect(symbol, kind or "", reason)
-            if citation:
-                errors.append(
-                    f"{symbol}: reason {citation}. A citation a reader cannot "
-                    "confirm is not a justification."
-                )
+        citation = prose_citation_defect(
+            symbol, kind or "", reason, anchor_locations(entry)
+        )
+        if citation:
+            errors.append(
+                f"{symbol}: reason {citation}. A citation a reader cannot "
+                "confirm is not a justification."
+            )
         stale = stale_disposition_reason(disposition or "", reason)
         if stale:
             errors.append(f"{symbol}: reason {stale}")
@@ -3337,6 +3574,20 @@ def check() -> int:
 
     all_entries = [*entries, *low_level_entries]
     errors += example_test_tier_errors(all_entries)
+    # A citation only answers to the check above while it carries a line: the
+    # pattern reads `file.rs:line` and nothing else, so deleting `:1079` turns a
+    # checked claim into unreadable prose.  That is how 24 rows left the check in
+    # the first FIG-1526 round, and pinning the population makes the next one an
+    # edit a reviewer sees.
+    counted_citations = prose_citations(all_entries)
+    recorded_citations = document.get("prose_citations_recorded")
+    if not isinstance(recorded_citations, int) or recorded_citations != counted_citations:
+        errors.append(
+            f"prose_citations_recorded is {recorded_citations!r} but the reasons "
+            f"hold {counted_citations} line citations; re-anchor a citation rather "
+            "than dropping its line, and move the pin when the population really "
+            "changes"
+        )
 
     items = current_surface()
     errors += item_errors(by_api, items)
