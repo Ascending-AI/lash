@@ -966,7 +966,7 @@ mod tests {
     fn attachment_source(id: &str) -> AttachmentSource {
         AttachmentSource::stored(
             AttachmentMeta::new(
-                AttachmentId::new(id),
+                AttachmentId::parse(id).expect("valid attachment id"),
                 MediaType::parse("image/png").unwrap(),
                 3,
                 Some(AttachmentTypeMetadata::image(Some(1), Some(1))),

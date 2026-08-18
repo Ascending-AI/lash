@@ -207,14 +207,11 @@ async fn retrieve_attachment(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     let attachment_id = attachment_id.trim();
-    if attachment_id.is_empty() {
-        return Err(AppError::bad_request("attachment id is required"));
-    }
-    let stored = match state
-        .attachment_store
-        .get(&lash::attachments::AttachmentId::new(attachment_id))
-        .await
-    {
+    // The id arrives from the URL path, so it is untrusted: a malformed one is
+    // a bad request, never a store lookup.
+    let parsed_id = lash::attachments::AttachmentId::parse(attachment_id)
+        .map_err(|err| AppError::bad_request(err.to_string()))?;
+    let stored = match state.attachment_store.get(&parsed_id).await {
         Ok(stored) => stored,
         Err(lash::persistence::AttachmentStoreError::NotFound(_)) => {
             return Err(AppError::not_found(format!(
@@ -348,7 +345,12 @@ async fn send_turn(
         None => None,
         Some(attachment_id) => match state
             .attachment_store
-            .get(&lash::attachments::AttachmentId::new(attachment_id))
+            .get(
+                // Request-body id: untrusted, so a malformed one is a bad
+                // request rather than a store lookup.
+                &lash::attachments::AttachmentId::parse(attachment_id)
+                    .map_err(|err| AppError::bad_request(err.to_string()))?,
+            )
             .await
         {
             Ok(stored) => Some(stored),

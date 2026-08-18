@@ -952,7 +952,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
             .attachments
             .push(lash::direct::AttachmentSource::stored(
                 lash::attachments::AttachmentRef {
-                    id: lash::attachments::AttachmentId::new(id),
+                    id: lash::attachments::AttachmentId::parse(id).expect("valid attachment id"),
                     media_type: lash::attachments::MediaType::parse("image/png")
                         .expect("valid PNG media type"),
                     byte_len: 68,
@@ -1826,7 +1826,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig994";
     let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::new("sha256:fig994-backfill"),
+        id: lash::attachments::AttachmentId::parse("sha256:fig994-backfill").expect("valid attachment id"),
         media_type: lash::attachments::MediaType::parse("image/png")
             .expect("valid test media type"),
         byte_len: 68,
@@ -1937,7 +1937,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig994-replay";
     let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::new("sha256:fig994-replay"),
+        id: lash::attachments::AttachmentId::parse("sha256:fig994-replay").expect("valid attachment id"),
         media_type: lash::attachments::MediaType::parse("image/png")
             .expect("valid test media type"),
         byte_len: 68,
@@ -2005,7 +2005,7 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
     let session_id = state.current_session_id();
     let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::new("sha256:fig994-committed"),
+        id: lash::attachments::AttachmentId::parse("sha256:fig994-committed").expect("valid attachment id"),
         media_type: lash::attachments::MediaType::parse("image/png")
             .expect("valid test media type"),
         byte_len: 68,

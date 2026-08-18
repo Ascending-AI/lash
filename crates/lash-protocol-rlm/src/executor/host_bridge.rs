@@ -1295,17 +1295,19 @@ fn collect_printed_images_inner<'a>(
                 if !seen.insert(image.id.clone()) {
                     return Ok(());
                 }
-                attachment_store
-                    .get(&lash_core::AttachmentId::new(image.id.clone()))
-                    .await
-                    .map_err(|_| {
-                        ExecutionHostError::new(format!(
-                            "image bytes for `{}` are unavailable or were pruned",
-                            image.id
-                        ))
-                    })?;
+                // The image id rides in from program-produced values, so it is
+                // untrusted: a malformed one is a host error, not a lookup.
+                let id = lash_core::AttachmentId::parse(&image.id).map_err(|err| {
+                    ExecutionHostError::new(format!("printed image id is unusable: {err}"))
+                })?;
+                attachment_store.get(&id).await.map_err(|_| {
+                    ExecutionHostError::new(format!(
+                        "image bytes for `{}` are unavailable or were pruned",
+                        image.id
+                    ))
+                })?;
                 let reference = AttachmentRef {
-                    id: lash_core::AttachmentId::new(image.id.clone()),
+                    id,
                     media_type: image.mime.clone(),
                     byte_len: image.size,
                     type_metadata: Some(lash_core::AttachmentTypeMetadata::image(

@@ -849,7 +849,7 @@ mod tests {
     fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
         let projector = projector(1000);
         let terminal_image = lash_core::AttachmentRef {
-            id: lash_core::AttachmentId::new("terminal-image"),
+            id: lash_core::AttachmentId::parse("terminal-image").expect("valid attachment id"),
             media_type: lash_core::MediaType::parse("image/png").unwrap(),
             byte_len: 3,
             type_metadata: Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
@@ -1260,7 +1260,7 @@ mod tests {
                 code: "print img".to_string(),
                 output: vec![r#"{"type":"image","id":"img"}"#.to_string()],
                 images: vec![lash_core::AttachmentRef {
-                    id: lash_core::AttachmentId::new("img-ref"),
+                    id: lash_core::AttachmentId::parse("img-ref").expect("valid attachment id"),
                     media_type: lash_core::MediaType::parse("image/png").unwrap(),
                     byte_len: 3,
                     type_metadata: Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),

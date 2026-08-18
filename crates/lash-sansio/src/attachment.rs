@@ -1,15 +1,67 @@
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, PartialOrd, Ord,
-)]
-#[serde(transparent)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidAttachmentId {
+    value: String,
+}
+
+impl fmt::Display for InvalidAttachmentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid attachment id `{}`: expected 1..={MAX_ATTACHMENT_ID_LEN} printable ASCII \
+             characters forming a single namespace component",
+            self.value.escape_debug()
+        )
+    }
+}
+
+impl std::error::Error for InvalidAttachmentId {}
+
+/// Maximum attachment-id length.
+///
+/// Content ids minted by Lash are 64-byte lowercase SHA-256 hex strings. The
+/// larger bound leaves room for compatible caller-defined ids while keeping
+/// file names comfortably below common per-component limits after a staging
+/// suffix is appended.
+const MAX_ATTACHMENT_ID_LEN: usize = 128;
+
+/// An attachment id, validated at construction.
+///
+/// Every attachment backend maps this id into a namespace it does not fully
+/// control — a filesystem path component, an object-store key segment, a SQL
+/// identifier column. An id therefore has to be a *single* namespace component:
+/// non-empty, bounded, printable ASCII, free of path separators, not a relative
+/// directory reference, and not a drive-qualified path. Ids arrive from places
+/// Lash does not control (remote-protocol peers, host HTTP routes, model
+/// output), so the check lives at construction: there is no way to obtain an
+/// `AttachmentId` that a backend would have to defend itself against, and no
+/// silent acceptance of a malformed id that only misbehaves later at the store.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AttachmentId(String);
 
 impl AttachmentId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+    pub fn parse(id: impl AsRef<str>) -> Result<Self, InvalidAttachmentId> {
+        let value = id.as_ref();
+        let bytes = value.as_bytes();
+        let has_windows_drive_prefix =
+            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+        let malformed = value.is_empty()
+            || value.len() > MAX_ATTACHMENT_ID_LEN
+            || !bytes
+                .iter()
+                .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+            || value.contains(['/', '\\'])
+            || matches!(value, "." | "..")
+            || has_windows_drive_prefix;
+
+        if malformed {
+            return Err(InvalidAttachmentId {
+                value: value.to_string(),
+            });
+        }
+        Ok(Self(value.to_string()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -23,15 +75,38 @@ impl fmt::Display for AttachmentId {
     }
 }
 
-impl From<String> for AttachmentId {
-    fn from(value: String) -> Self {
-        Self::new(value)
+impl FromStr for AttachmentId {
+    type Err = InvalidAttachmentId;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
     }
 }
 
-impl From<&str> for AttachmentId {
-    fn from(value: &str) -> Self {
-        Self::new(value)
+impl TryFrom<String> for AttachmentId {
+    type Error = InvalidAttachmentId;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(value)
+    }
+}
+
+impl serde::Serialize for AttachmentId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AttachmentId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -251,6 +326,72 @@ impl AttachmentRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_id_accepts_content_hashes_and_caller_ids() {
+        assert_eq!(
+            AttachmentId::parse("a".repeat(64)).unwrap().as_str(),
+            "a".repeat(64)
+        );
+        assert_eq!(
+            AttachmentId::parse("workbench attachment.png")
+                .unwrap()
+                .as_str(),
+            "workbench attachment.png"
+        );
+        assert_eq!(
+            AttachmentId::parse("a".repeat(MAX_ATTACHMENT_ID_LEN))
+                .unwrap()
+                .as_str()
+                .len(),
+            MAX_ATTACHMENT_ID_LEN
+        );
+    }
+
+    #[test]
+    fn attachment_id_rejects_ids_that_are_not_a_single_namespace_component() {
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "..\\outside",
+            "/etc/passwd",
+            "nested/id",
+            "C:\\windows",
+            "line\nbreak",
+            "null\0byte",
+            "tab\there",
+            &"a".repeat(MAX_ATTACHMENT_ID_LEN + 1),
+        ] {
+            assert!(
+                AttachmentId::parse(invalid).is_err(),
+                "accepted {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn serde_cannot_bypass_attachment_id_validation() {
+        // Before validation moved to construction this deserialized happily
+        // into a well-formed-looking id that only escaped the store root later.
+        let error = serde_json::from_str::<AttachmentId>(r#""../../etc/passwd""#)
+            .expect_err("traversal id must not deserialize");
+        assert!(
+            error.to_string().contains("invalid attachment id"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            serde_json::from_str::<AttachmentId>(r#""abc123""#).unwrap(),
+            AttachmentId::parse("abc123").unwrap()
+        );
+    }
+
+    #[test]
+    fn attachment_id_round_trips_through_json_as_a_bare_string() {
+        let id = AttachmentId::parse("abc123").unwrap();
+        assert_eq!(serde_json::to_string(&id).unwrap(), r#""abc123""#);
+    }
 
     #[test]
     fn media_type_accepts_any_valid_type_and_normalizes_case() {

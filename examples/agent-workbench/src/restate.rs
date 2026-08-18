@@ -763,9 +763,12 @@ pub(crate) async fn workbench_turn_input(
 ) -> Result<TurnInput, AppError> {
     let mut input = TurnInput::text(request.text.clone());
     if let Some(attachment_id) = request.attachment_id.as_deref() {
+        // Request-supplied id: untrusted, so a malformed one is a bad request.
+        let attachment_id = lash::attachments::AttachmentId::parse(attachment_id)
+            .map_err(|err| AppError::bad_request(err.to_string()))?;
         let stored = state
             .attachment_store
-            .get(&lash::attachments::AttachmentId::new(attachment_id))
+            .get(&attachment_id)
             .await
             // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
             .map_err(AppError::internal)?;

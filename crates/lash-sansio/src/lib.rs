@@ -21,7 +21,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata,
-    InvalidMediaType, MediaType,
+    InvalidAttachmentId, InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
 pub use frame_key::{FrameKey, FrameKeyError};

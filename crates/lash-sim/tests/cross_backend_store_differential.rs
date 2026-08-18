@@ -811,7 +811,7 @@ fn differential_usage_delta() -> TokenLedgerEntry {
 }
 
 fn differential_attachment_id() -> AttachmentId {
-    AttachmentId::new("differential-attachment")
+    AttachmentId::parse("differential-attachment").expect("valid attachment id")
 }
 
 // Row shapes for the SQL observation queries. Named because the tuples are wide
@@ -1079,7 +1079,7 @@ async fn read_sqlite_durable_state(
                     owner_kind,
                     owner_id,
                 )| AttachmentManifestObservation {
-                    attachment_id: AttachmentId::new(attachment_id),
+                    attachment_id: AttachmentId::parse(attachment_id).expect("valid attachment id"),
                     canonical_uri,
                     intent_at_epoch_ms: intent_at_epoch_ms as u64,
                     committed: committed_at_epoch_ms.is_some(),

@@ -224,6 +224,22 @@ fn stored_data_corrupt(record_kind: &'static str, error: impl std::fmt::Display)
     }
 }
 
+/// Rebuild a stored attachment id, refusing a row that no longer satisfies the
+/// id rule. A malformed stored id is corrupt data, not an id: it must surface
+/// as a read failure rather than travel on as a well-formed-looking value.
+fn attachment_id_from_sql(
+    record_kind: &'static str,
+    field: &'static str,
+    value: String,
+) -> rusqlite::Result<lash_core::AttachmentId> {
+    lash_core::AttachmentId::parse(&value).map_err(|err| {
+        sqlite_conversion_error(stored_data_corrupt(
+            record_kind,
+            format!("{field} is not a valid attachment id: {err}"),
+        ))
+    })
+}
+
 fn u64_from_sql(
     record_kind: &'static str,
     field: &'static str,

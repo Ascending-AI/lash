@@ -2100,7 +2100,7 @@ async fn attachment_blob_store_differential_agrees() {
                 s3.delete(id).await.unwrap();
             }
             BlobOperation::DeleteAbsent => {
-                let id = lash_core::AttachmentId::new("absent");
+                let id = lash_core::AttachmentId::parse("absent").expect("valid attachment id");
                 memory.delete(&id).await.unwrap();
                 file.delete(&id).await.unwrap();
                 s3.delete(&id).await.unwrap();
@@ -2132,7 +2132,7 @@ fn raw_file_blobs(root: &Path) -> Vec<(lash_core::AttachmentId, Vec<u8>)> {
             let name = entry.file_name().to_string_lossy().to_string();
             if !name.contains(".staging.") {
                 rows.push((
-                    lash_core::AttachmentId::new(name),
+                    lash_core::AttachmentId::parse(name).expect("valid attachment id"),
                     fs::read(entry.path()).unwrap(),
                 ));
             }

@@ -1047,14 +1047,27 @@ impl TryFrom<RemoteAttachmentRef> for lash_core::AttachmentRef {
             label,
         } = value;
         let media_type = parse_media_type(&media_type)?;
+        let id = parse_attachment_id(id)?;
         Ok(Self {
-            id: lash_core::AttachmentId::new(id),
+            id,
             media_type,
             byte_len,
             type_metadata: type_metadata.map(Into::into),
             label,
         })
     }
+}
+
+/// The wire boundary is the enforcement point for peer-supplied attachment
+/// ids: a peer that sends a malformed id gets a typed protocol error here,
+/// rather than a well-formed-looking id that only misbehaves at a store.
+fn parse_attachment_id(value: String) -> Result<lash_core::AttachmentId, RemoteProtocolError> {
+    lash_core::AttachmentId::parse(&value).map_err(|err| {
+        RemoteProtocolError::InvalidAttachmentRef {
+            id: value,
+            message: err.to_string(),
+        }
+    })
 }
 
 fn parse_media_type(value: &str) -> Result<lash_core::MediaType, RemoteProtocolError> {

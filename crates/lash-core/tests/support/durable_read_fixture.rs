@@ -97,7 +97,8 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("commit identity-bearing fixture append");
 
-    let attachment_id = AttachmentId::new("durable-read-attachment");
+    let attachment_id =
+        AttachmentId::parse("durable-read-attachment").expect("valid attachment id");
     handles
         .runtime
         .record_intent(AttachmentIntent {
@@ -606,7 +607,9 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert!(
         AttachmentManifest::list_all_refs(handles.runtime.as_ref())
             .expect("read fixture attachment manifest")
-            .contains(&AttachmentId::new("durable-read-attachment")),
+            .contains(
+                &AttachmentId::parse("durable-read-attachment").expect("valid attachment id")
+            ),
         "durable fixture semantic drift: committed attachment disappeared"
     );
 

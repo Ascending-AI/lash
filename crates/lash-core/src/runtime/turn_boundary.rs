@@ -682,7 +682,7 @@ mod tests {
 
     fn attachment_ref(id: &str) -> crate::AttachmentRef {
         crate::AttachmentMeta::new(
-            crate::AttachmentId::new(id),
+            crate::AttachmentId::parse(id).expect("valid attachment id"),
             crate::MediaType::parse("image/png").unwrap(),
             3,
             Some(crate::AttachmentTypeMetadata::image(Some(1), Some(1))),
@@ -1220,8 +1220,8 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                crate::AttachmentId::new("message-ref"),
-                crate::AttachmentId::new("tool-output"),
+                crate::AttachmentId::parse("message-ref").expect("valid attachment id"),
+                crate::AttachmentId::parse("tool-output").expect("valid attachment id"),
             ]
         );
     }

@@ -282,7 +282,7 @@ mod attachment_reconciliation_tests {
 
     fn intent_at(session: &str, id: &str, at_ms: u64) -> crate::AttachmentIntent {
         crate::AttachmentIntent {
-            attachment_id: crate::AttachmentId::new(id.to_string()),
+            attachment_id: crate::AttachmentId::parse(id).expect("valid attachment id"),
             session_id: session.to_string(),
             canonical_uri: format!("lash-attachment://sha256/{id}"),
             intent_at_epoch_ms: at_ms,
@@ -320,13 +320,19 @@ mod attachment_reconciliation_tests {
 
         assert!(
             store
-                .holds_ref("s", &crate::AttachmentId::new("kept".to_string()))
+                .holds_ref(
+                    "s",
+                    &crate::AttachmentId::parse("kept").expect("valid attachment id")
+                )
                 .unwrap(),
             "a refreshed intent (timestamp past the cutoff) must survive reconciliation"
         );
         assert!(
             !store
-                .holds_ref("s", &crate::AttachmentId::new("collected".to_string()))
+                .holds_ref(
+                    "s",
+                    &crate::AttachmentId::parse("collected").expect("valid attachment id")
+                )
                 .unwrap(),
             "a stale aged intent must be reconciled away"
         );
@@ -338,8 +344,8 @@ mod attachment_reconciliation_tests {
     fn has_live_ref_distinguishes_committed_from_aged_orphan() {
         let store = InMemorySessionStore::new();
         let cutoff = 200;
-        let committed = crate::AttachmentId::new("committed".to_string());
-        let orphan = crate::AttachmentId::new("orphan".to_string());
+        let committed = crate::AttachmentId::parse("committed").expect("valid attachment id");
+        let orphan = crate::AttachmentId::parse("orphan").expect("valid attachment id");
 
         store
             .record_intent(intent_at("s", "committed", 100))

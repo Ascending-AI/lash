@@ -577,10 +577,9 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
             .await
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(rows
-            .into_iter()
-            .map(|row| lash_core::AttachmentId::new(row.get::<String, _>(0)))
-            .collect())
+        rows.into_iter()
+            .map(|row| attachment_id_from_sql("AttachmentManifest", "attachment_id", row.get(0)))
+            .collect()
     }
 
     async fn has_live_attachment_ref(

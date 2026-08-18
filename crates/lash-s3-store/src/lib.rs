@@ -15,35 +15,19 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use std::sync::Arc;
 use url::Url;
 
-/// Maximum attachment-id length accepted by namespaced storage backends.
-const MAX_STORAGE_ATTACHMENT_ID_LEN: usize = 128;
-
 /// An attachment id proven safe to use as one object-key component.
 ///
-/// Requiring this private type in `content_path` prevents future S3/MinIO call
-/// sites from deriving a key from a raw, potentially untrusted id.
+/// [`AttachmentId`] enforces that shape at construction, so a malformed id
+/// cannot exist to be turned into a key here. Requiring this private type in
+/// `content_path` keeps that dependency visible at every S3/MinIO call site: a
+/// raw string can only become a key segment by passing through
+/// `AttachmentId::parse` first.
 #[derive(Clone, Copy)]
 struct GuardedAttachmentId<'a>(&'a AttachmentId);
 
 impl<'a> GuardedAttachmentId<'a> {
-    fn new(id: &'a AttachmentId) -> Result<Self, AttachmentStoreError> {
-        let value = id.as_str();
-        let bytes = value.as_bytes();
-        let has_windows_drive_prefix =
-            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
-        let malformed = value.is_empty()
-            || value.len() > MAX_STORAGE_ATTACHMENT_ID_LEN
-            || !bytes
-                .iter()
-                .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
-            || value.contains(['/', '\\'])
-            || matches!(value, "." | "..")
-            || has_windows_drive_prefix;
-
-        if malformed {
-            return Err(AttachmentStoreError::NotFound(id.clone()));
-        }
-        Ok(Self(id))
+    fn new(id: &'a AttachmentId) -> Self {
+        Self(id)
     }
 
     fn as_str(self) -> &'a str {
@@ -232,6 +216,18 @@ impl S3AttachmentStore {
             let Some(id) = meta.location.parts().next_back() else {
                 continue;
             };
+            let id = match AttachmentId::parse(id.as_ref()) {
+                Ok(id) => id,
+                Err(err) => {
+                    tracing::warn!(
+                        key = %meta.location,
+                        reason = %err,
+                        "S3 attachment store is skipping an object key that cannot name an \
+                         attachment: it is unreachable and invisible to reclamation"
+                    );
+                    continue;
+                }
+            };
             let bytes = self
                 .store
                 .get(&meta.location)
@@ -241,7 +237,7 @@ impl S3AttachmentStore {
                 .await
                 .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?
                 .to_vec();
-            rows.push((AttachmentId::new(id.as_ref().to_string()), bytes));
+            rows.push((id, bytes));
         }
         rows.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(rows)
@@ -268,7 +264,7 @@ impl AttachmentStore for S3AttachmentStore {
         );
         put_at_path(
             &*self.store,
-            self.content_path(GuardedAttachmentId::new(&meta.id)?)?,
+            self.content_path(GuardedAttachmentId::new(&meta.id))?,
             bytes,
             meta,
         )
@@ -278,7 +274,7 @@ impl AttachmentStore for S3AttachmentStore {
     async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
         get_at_path(
             &*self.store,
-            self.content_path(GuardedAttachmentId::new(id)?)?,
+            self.content_path(GuardedAttachmentId::new(id))?,
             id,
         )
         .await
@@ -287,13 +283,13 @@ impl AttachmentStore for S3AttachmentStore {
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         delete_at_path(
             &*self.store,
-            self.content_path(GuardedAttachmentId::new(id)?)?,
+            self.content_path(GuardedAttachmentId::new(id))?,
         )
         .await
     }
 
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        let content_path = self.content_path(GuardedAttachmentId::new(id)?)?;
+        let content_path = self.content_path(GuardedAttachmentId::new(id))?;
         match self.store.head(&content_path).await {
             Ok(meta) => Ok(Some(StoredBlobRef {
                 id: id.clone(),
@@ -319,12 +315,28 @@ impl AttachmentStore for S3AttachmentStore {
         Ok(metas
             .into_iter()
             .filter_map(|meta| {
-                // The object key's final segment is the content hash.
-                let id = meta.location.parts().next_back()?;
+                // The object key's final segment is the content hash. A key
+                // this store never wrote cannot name an attachment, so it is
+                // not listed. It is also unreachable through `get` and
+                // invisible to reclamation, so say so rather than dropping it
+                // in silence.
+                let segment = meta.location.parts().next_back()?;
+                let id = match AttachmentId::parse(segment.as_ref()) {
+                    Ok(id) => id,
+                    Err(err) => {
+                        tracing::warn!(
+                            key = %meta.location,
+                            reason = %err,
+                            "S3 attachment store is skipping an object key that cannot name an \
+                             attachment: it is unreachable and invisible to reclamation"
+                        );
+                        return None;
+                    }
+                };
                 let last_modified_epoch_ms =
                     u64::try_from(meta.last_modified.timestamp_millis()).ok();
                 Some(StoredBlobRef {
-                    id: AttachmentId::new(id.as_ref().to_string()),
+                    id,
                     last_modified_epoch_ms,
                 })
             })
@@ -410,9 +422,13 @@ mod tests {
     use lash_core::testing::conformance::ReopenableAttachmentStore;
     use lash_core::{AttachmentTypeMetadata, MediaType};
 
+    /// `content_path` derives the object key from the id, so it depends on
+    /// `AttachmentId` refusing every shape that is not a single key segment.
+    /// If that rule ever loosens, this fails here rather than silently letting
+    /// a caller-supplied id name a foreign key namespace.
     #[test]
-    fn s3_store_guard_rejects_malformed_attachment_id_shapes() {
-        let overlong = "a".repeat(MAX_STORAGE_ATTACHMENT_ID_LEN + 1);
+    fn attachment_id_rule_keeps_every_shape_out_of_the_key_namespace() {
+        let overlong = "a".repeat(129);
         let cases = [
             ("parent with separator", "../"),
             ("parent component", ".."),
@@ -429,45 +445,55 @@ mod tests {
         ];
 
         for (shape, raw) in cases {
-            let id = AttachmentId::new(raw);
-            let error = GuardedAttachmentId::new(&id)
-                .err()
-                .unwrap_or_else(|| panic!("{shape} id must be rejected: {raw:?}"));
             assert!(
-                matches!(error, AttachmentStoreError::NotFound(ref rejected) if rejected == &id),
-                "{shape} id returned the wrong error: {error:?}"
+                AttachmentId::parse(raw).is_err(),
+                "{shape} id must be unconstructible: {raw:?}"
             );
         }
     }
 
+    /// An object key whose final segment cannot be an attachment id is
+    /// unreachable through `get` and invisible to reclamation. It must not be
+    /// listed as an attachment, and the skip is announced by a `warn!` at the
+    /// same site (not asserted here: lash-core's tracing capture helper is
+    /// crate-private, and pulling a subscriber into this crate's dev-deps to
+    /// observe one line is not worth it — the file-store test covers the
+    /// announcement, this covers the omission).
     #[tokio::test]
-    async fn s3_store_rejects_malformed_ids_by_contract() {
+    async fn s3_store_does_not_list_a_key_it_cannot_name() {
         let object_store = Arc::new(object_store::memory::InMemory::new());
-        let store = Arc::new(S3AttachmentStore::from_object_store(
-            object_store,
-            Some("contract".to_string()),
-        )) as Arc<dyn AttachmentStore>;
-        let malformed = AttachmentId::new("../outside");
+        let store = S3AttachmentStore::from_object_store(
+            Arc::clone(&object_store) as Arc<dyn ObjectStore>,
+            Some("skip".to_string()),
+        );
+        let reference = store
+            .put(
+                vec![7, 7, 7],
+                AttachmentCreateMeta::new(
+                    MediaType::parse("image/png").expect("media type"),
+                    Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
+                    Some("pixel".to_string()),
+                ),
+            )
+            .await
+            .expect("put");
+        // A key no `put` could have produced: the final segment is over the
+        // attachment-id length bound.
+        object_store
+            .put(
+                &Path::from(format!("skip/sha256/zz/{}", "z".repeat(200))),
+                object_store::PutPayload::from_static(b"not an attachment"),
+            )
+            .await
+            .expect("seed stray object");
 
-        let get_error = store
-            .get(&malformed)
-            .await
-            .expect_err("malformed attachment get must fail");
-        let delete_error = store
-            .delete(&malformed)
-            .await
-            .expect_err("malformed attachment delete must fail");
-        let head_error = store
-            .head(&malformed)
-            .await
-            .expect_err("malformed attachment head must fail");
+        let listed = store.list().await.expect("list");
 
-        for error in [get_error, delete_error, head_error] {
-            assert!(
-                matches!(error, AttachmentStoreError::NotFound(ref rejected) if rejected == &malformed),
-                "malformed attachment id must map to NotFound, got {error:?}"
-            );
-        }
+        assert_eq!(
+            listed.iter().map(|blob| &blob.id).collect::<Vec<_>>(),
+            vec![&reference.id],
+            "a key segment that cannot be an attachment id must not be listed"
+        );
     }
 
     #[test]

@@ -3241,7 +3241,12 @@ async fn assert_attachments_round_trip(
         .iter()
         .filter(|response| !response.attachment_id.is_empty())
     {
-        let id = lash_core::AttachmentId::new(response.attachment_id.clone());
+        let id = lash_core::AttachmentId::parse(&response.attachment_id).with_context(|| {
+            format!(
+                "workbench returned an unusable attachment id `{}`",
+                response.attachment_id
+            )
+        })?;
         let manifest: Option<(String, Option<i64>)> = sqlx::query_as(
             "SELECT session_id, committed_at_ms
              FROM lash_attachment_manifest

@@ -2534,6 +2534,7 @@ dependencies = [
  "lash-core",
  "object_store",
  "tokio",
+ "tracing",
  "url",
 ]
 

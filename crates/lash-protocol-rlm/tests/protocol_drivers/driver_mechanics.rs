@@ -697,7 +697,8 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                 output: lash_core::ToolCallOutput::success(lash_core::ToolValue::Attachment(
                     lash_core::AttachmentSource::stored(
                         lash_core::facade_support::AttachmentMeta::new(
-                            lash_core::AttachmentId::new("replayed-attachment"),
+                            lash_core::AttachmentId::parse("replayed-attachment")
+                                .expect("valid attachment id"),
                             lash_core::MediaType::parse("image/png").unwrap(),
                             3,
                             Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
@@ -737,7 +738,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             .stored_ref()
             .expect("stored attachment")
             .id,
-        lash_core::AttachmentId::new("replayed-attachment")
+        lash_core::AttachmentId::parse("replayed-attachment").expect("valid attachment id")
     );
     let trajectory = machine_trajectory(&restored);
     let entry = trajectory.last().expect("rlm trajectory entry");
