@@ -7056,14 +7056,7 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
         panic!("the Restate parent-end law must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == restate_parent_end_intent_tool().id()
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::AttemptToolCall<'_>,
-    ) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptResult::done(
             lash_core::ToolResultDone::ok(serde_json::json!({"started": true})),
@@ -8510,7 +8503,7 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
                 lash_core::ToolResult::ok(serde_json::json!({ "value": "counted" }))
             }
             "replay_pending_input" => {
-                let key = match call.context.completion_key().await {
+                let key = match call.context.completion_key() {
                     Ok(key) => key,
                     Err(err) => return lash_core::ToolResult::err_fmt(err),
                 };
@@ -8523,19 +8516,29 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
         }
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == Self::scalar_definition().id()
-    }
-
     fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
         tool_id == Self::pending_definition().id()
     }
 
-    async fn execute_attempt(
-        &self,
-        call: lash_core::AttemptToolCall<'_>,
-    ) -> lash_core::ToolAttemptResult {
-        assert_eq!(call.name, "replay_scalar_counter");
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+        if call.name != "replay_scalar_counter" {
+            let key = match call.context.completion_key() {
+                Ok(key) => key,
+                Err(err) => {
+                    return lash_core::ToolAttemptResult::done_without_intents(
+                        lash_core::ToolResultDone::failure(lash_core::ToolFailure::runtime(
+                            lash_core::ToolFailureClass::Internal,
+                            "replay_pending_input_completion_key",
+                            err.to_string(),
+                        )),
+                    );
+                }
+            };
+            if let Some(tx) = self.completion_key_tx.lock_recover().take() {
+                let _ = tx.send(Ok(key));
+            }
+            return lash_core::ToolAttemptResult::pending(lash_core::PendingCompletion::new());
+        }
         self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptResult::done(
             lash_core::ToolResultDone::ok(serde_json::json!({ "value": "counted" })),
@@ -10799,21 +10802,42 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        let _ = call;
+        lash_core::ToolResult::err_fmt(
+            "recovery_echo owes a process.wake emission and runs only on the leaf attempt route",
+        )
+    }
+
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
         let line = call
             .args
             .get("line")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let event = lash_core::ProcessEventAppendRequest::new(
-            "process.wake",
-            serde_json::json!({ "message": line, "wake_input": line }),
+        let Some(process_id) = call.context.runtime_process_id() else {
+            return lash_core::ToolAttemptResult::done_without_intents(
+                lash_core::ToolResultDone::from_output(lash_core::ToolCallOutput::failure(
+                    lash_core::ToolFailure::runtime(
+                        lash_core::ToolFailureClass::Internal,
+                        "recovery_echo_outside_process",
+                        "recovery_echo runs only inside a durable process",
+                    ),
+                )),
+            );
+        };
+        // The wake append is journal-capable work: the attempt declares it and
+        // the intent executor emits it once the attempt commits.
+        let intent = lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
+            session_id: call.context.session_id().to_string(),
+            process_id: process_id.to_string(),
+            event_type: "process.wake".to_string(),
+            payload: serde_json::json!({ "message": line, "wake_input": line }),
+        });
+        lash_core::ToolAttemptResult::done(
+            lash_core::ToolResultDone::ok(serde_json::json!({ "echo": line })),
+            lash_core::ToolIntents::v1(vec![intent]),
         )
-        .with_replay_key(format!("process.wake:{line}"));
-        if let Err(err) = call.context.process_events().emit_request(event).await {
-            return lash_core::ToolResult::err_fmt(err);
-        }
-        lash_core::ToolResult::ok(serde_json::json!({ "echo": line }))
     }
 }
 
@@ -10980,14 +11004,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         panic!("the process-parent law must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == Self::definition().id()
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::AttemptToolCall<'_>,
-    ) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args

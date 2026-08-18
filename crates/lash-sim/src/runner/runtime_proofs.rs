@@ -662,7 +662,7 @@ impl lash_core::ToolProvider for PendingToolProvider {
         if call.name != "app_lookup" {
             return lash_core::ToolResult::err_fmt(format_args!("unknown tool {}", call.name));
         }
-        let key = match call.context.completion_key().await {
+        let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return lash_core::ToolResult::err_fmt(err),
         };
@@ -759,7 +759,7 @@ impl lash_core::ToolProvider for SuspendToolProvider {
         if call.name != self.tool_name {
             return lash_core::ToolResult::err_fmt(format_args!("unknown tool {}", call.name));
         }
-        let key = match call.context.completion_key().await {
+        let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return lash_core::ToolResult::err_fmt(err),
         };

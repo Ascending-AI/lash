@@ -227,7 +227,7 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         &self,
         tool: &str,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult;
     async fn execute_orchestrating(
         &self,
@@ -236,9 +236,6 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         _context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
     ) -> ToolResult {
         ToolResult::err_fmt("leaf tools cannot execute in the orchestrating registration lane")
-    }
-    fn supports_attempt_context(&self, _tool_id: &ToolId) -> bool {
-        false
     }
     fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
         false
@@ -249,16 +246,15 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
     ) -> crate::ToolAttemptResult {
-        let _ = (args, context);
-        crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
-            "AttemptContext execution is unsupported for tool id `{tool_id}`"
-        )))
+        crate::ToolAttemptResult::from_tool_result(
+            self.execute_by_id(tool_id, args, context).await,
+        )
     }
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
-        context: &ToolContext<'_>,
+        context: &crate::AttemptContext<'_>,
     ) -> ToolResult {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
             return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
@@ -271,6 +267,7 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &crate::InternalProcessContext<'_>,
     ) -> ToolResult {
-        self.execute_by_id(tool_id, args, context.__tool_context()).await
+        self.execute_by_id(tool_id, args, &context.__attempt_context())
+            .await
     }
 }

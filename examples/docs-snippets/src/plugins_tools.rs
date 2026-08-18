@@ -55,21 +55,49 @@ async fn rank(call: ToolCall<'_>) -> ToolResult {
 
 async fn await_external_completion(call: ToolCall<'_>) -> ToolResult {
     // docs:start:detached-tool
-    use lash::tools::PendingCompletion;
+    use lash::tools::{PendingAnnouncement, PendingCompletion};
 
     // Take the completion key BEFORE returning Pending, then hand it to whatever
     // will deliver the result out-of-band — a webhook, a job queue, a human.
-    let key = match call.context.completion_key().await {
+    // The key exists only for a tool that declares `attempt_may_defer`.
+    let key = match call.context.completion_key() {
         Ok(key) => key,
         Err(err) => return ToolResult::err_fmt(format_args!("{err}")),
     };
     enqueue_external_work(key);
 
+    // A recorded attempt body cannot append process events, so a tool that must
+    // announce its durable wait declares the event and lets the runtime append
+    // it at park time: the event exists if and only if the park happened. The
+    // replay key is required, because the declaration is re-made on every
+    // redrive of the attempt.
+    let announcement = PendingAnnouncement::new(
+        "process.yield",
+        serde_json::json!({ "type": "work.input_request.opened" }),
+        "docs-snippets:input-request-opened",
+    );
+    let pending = PendingCompletion::announcing(PendingCompletion::new(), announcement);
+    if let Some(summary) = mirror_declared_wait(&pending) {
+        record_mirrored_wait(summary);
+    }
+
     // Returning Pending without first taking the key fails the call with
     // `pending_tool_missing_completion_key`.
-    ToolResult::pending(PendingCompletion::new())
+    ToolResult::pending(pending)
     // docs:end:detached-tool
 }
+
+/// A host that mirrors declared waits into its own inbox reads the parts of the
+/// declaration; appending the event stays the runtime's job.
+fn mirror_declared_wait(pending: &lash::tools::PendingCompletion) -> Option<String> {
+    let announcement: &lash::tools::PendingAnnouncement = pending.announcement.as_ref()?;
+    let event_type = announcement.event_type.clone();
+    let replay_key = announcement.replay_key.clone();
+    let payload = announcement.payload.to_string();
+    Some(format!("{event_type} {replay_key} {payload}"))
+}
+
+fn record_mirrored_wait(_summary: String) {}
 
 fn enqueue_external_work(_key: lash::AwaitEventKey) {}
 
@@ -366,8 +394,8 @@ mod asserted_examples {
         use std::time::Duration;
 
         use lash::tools::{
-            CancelHint, PendingCompletion, TimeoutBehavior, ToolCallOutput, ToolFailure,
-            ToolFailureClass, ToolFailureSource, ToolResult, ToolValue,
+            CancelHint, PendingAnnouncement, PendingCompletion, TimeoutBehavior, ToolCallOutput,
+            ToolFailure, ToolFailureClass, ToolFailureSource, ToolResult, ToolValue,
         };
 
         let success: ToolResult = ToolResult::ok(serde_json::json!({ "saved": true }));
@@ -492,6 +520,29 @@ mod asserted_examples {
         );
         assert_eq!(pending_spec.deadline, Some(Duration::from_secs(30)));
         assert_eq!(pending_spec.on_timeout, TimeoutBehavior::FailTurn);
+        assert_eq!(pending_spec.announcement, None);
+        // A recorded attempt body cannot append process events. A tool that must
+        // announce its durable wait declares the event instead, and the runtime
+        // appends it when the call parks — so the announcement cannot outlive a
+        // park that never happened. The replay key is required, not optional:
+        // the declaration is re-made on every redrive of the attempt.
+        let announcement = PendingAnnouncement::new(
+            "process.yield",
+            serde_json::json!({ "type": "work.input_request.opened" }),
+            "docs-snippets:input-request-opened",
+        );
+        assert_eq!(announcement.event_type, "process.yield");
+        assert_eq!(
+            announcement.replay_key,
+            "docs-snippets:input-request-opened"
+        );
+        assert_eq!(
+            announcement.payload,
+            serde_json::json!({ "type": "work.input_request.opened" })
+        );
+        let announcing_spec =
+            PendingCompletion::announcing(pending_spec.clone(), announcement.clone());
+        assert_eq!(announcing_spec.announcement, Some(announcement));
         let pending = ToolResult::pending(pending_spec.clone());
         assert!(ToolResult::is_pending(&pending));
         let ToolResult::Pending(observed_pending) = pending.clone() else {

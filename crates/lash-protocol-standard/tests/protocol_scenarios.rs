@@ -747,14 +747,7 @@ impl lash_core::ToolProvider for StandardIntentProvider {
         panic!("Standard intent scenario must use AttemptContext")
     }
 
-    fn supports_attempt_context(&self, tool_id: &lash_core::ToolId) -> bool {
-        tool_id == standard_intent_tool().id()
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::AttemptToolCall<'_>,
-    ) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
         let session_id = call.context.session_id().to_string();
         lash_core::ToolAttemptResult::done(
             lash_core::ToolResultDone::ok(serde_json::json!({"provider": "done"})),

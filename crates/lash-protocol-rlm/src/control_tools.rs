@@ -102,7 +102,7 @@ pub fn continue_as_input_schema() -> Value {
 
 fn continue_as_switch_frame(
     args: &Value,
-    context: &lash_core::ToolContext<'_>,
+    context: &lash_core::AttemptContext<'_>,
 ) -> Result<ContinueAsResult, String> {
     let task = required_string(args, "task")?;
     let seed = RlmSeed::from_tool_args(args).map_err(|err| format!("continue_as {err}"))?;
@@ -447,6 +447,7 @@ mod tests {
             Some(tool_call_id.to_string()),
         )
         .with_agent_frame_id_for_testing("frame-node/v2/test-lineage");
+        let context = lash_core::testing::mock_attempt_context_from(&context);
         provider
             .execute(lash_core::ToolCall {
                 name: "continue_as",

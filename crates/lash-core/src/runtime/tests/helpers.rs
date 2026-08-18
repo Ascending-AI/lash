@@ -473,6 +473,21 @@ async fn recording_factory_root_set_keeps_committed_blob() {
         .expect("committed blob survives");
 }
 
+pub(crate) fn plugin_session_with_orchestrating_tool(
+    session_id: &str,
+    tool: crate::tool_provider::orchestration::OrchestratingToolDef,
+) -> Arc<crate::PluginSession> {
+    let tool_factory = StaticPluginFactory::new(
+        "test_orchestrating_tools",
+        crate::PluginSpec::new().with_orchestrating_tool(tool),
+    );
+    let mut factories = crate::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(tool_factory));
+    crate::PluginHost::new(factories)
+        .build_session(session_id, None)
+        .expect("plugins")
+}
+
 pub(crate) fn plugin_session_with_tools(
     session_id: &str,
     tools: Arc<dyn crate::ToolProvider>,
@@ -834,18 +849,38 @@ fn memory_probe_tool_definition() -> crate::ToolDefinition {
 
 pub(crate) struct ChildSessionTool;
 
+impl ChildSessionTool {
+    /// Managed child turns are journal-capable session work, so this test tool
+    /// registers in the runtime-owned orchestrating lane; a recorded leaf
+    /// attempt has no route to `sessions().start_turn()`.
+    pub(crate) fn orchestrating() -> crate::tool_provider::orchestration::OrchestratingToolDef {
+        let implementation: Arc<
+            dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
+        > = Arc::new(Self);
+        // SAFETY: lash-core owns this test-only tool contract and its body.
+        unsafe {
+            crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(
+                implementation,
+            )
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl crate::ToolProvider for ChildSessionTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        vec![child_session_tool_definition().manifest()]
+impl crate::tool_provider::orchestration::OrchestratingToolImplementation for ChildSessionTool {
+    fn manifest(&self) -> crate::ToolManifest {
+        child_session_tool_definition().manifest()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        (name == "spawn_child").then(|| Arc::new(child_session_tool_definition().contract()))
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(child_session_tool_definition().contract())
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
-        let context = call.context;
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> crate::ToolResult {
         let child = match context
             .sessions()
             .create_session(

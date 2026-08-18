@@ -65,11 +65,16 @@ impl crate::ToolProvider for LatencyProbeTools {
             .map(|tool| Arc::new(tool.contract()))
     }
 
+    /// Every probe parks on an out-of-band completion, so the runtime
+    /// pre-derives the key each attempt body reads.
+    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
+        probe_tools().iter().any(|tool| tool.id() == tool_id)
+    }
+
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
         let key = call
             .context
             .completion_key()
-            .await
             .expect("probe tools run on a controller that issues completion keys");
         let controller = Arc::clone(&self.controller);
         let name = call.name.to_string();

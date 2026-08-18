@@ -1583,7 +1583,7 @@ mod tests {
             &self,
             grant: &lash_core::ToolExecutionGrant,
             args: &serde_json::Value,
-            context: &lash_core::ToolContext<'_>,
+            context: &lash_core::AttemptContext<'_>,
         ) -> lash_core::ToolResult {
             self.execute_by_id(&grant.manifest.id, args, context).await
         }

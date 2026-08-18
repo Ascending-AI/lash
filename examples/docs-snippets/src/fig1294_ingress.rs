@@ -87,7 +87,7 @@ impl ToolProvider for AttemptIntentProvider {
 
     async fn execute_attempt(
         &self,
-        call: lash::tools::AttemptToolCall<'_>,
+        call: lash::tools::ToolCall<'_>,
     ) -> lash::tools::ToolAttemptResult {
         lash::tools::ToolAttemptResult::done(
             lash::tools::ToolResultDone::ok(serde_json::json!({"declared": true})),
@@ -103,7 +103,7 @@ async fn attempt_provider_returns_a_behaviorally_checked_intent_batch() {
     let args = serde_json::json!({});
     let result = ToolProvider::execute_attempt(
         &AttemptIntentProvider,
-        lash::tools::AttemptToolCall {
+        lash::tools::ToolCall {
             name: "attempt_intent_docs",
             args: &args,
             context: &attempt,

@@ -163,8 +163,8 @@ pub mod tools {
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
     pub use lash_core::{
-        AttemptContext, AttemptProcessReads, AttemptSessionReads, AttemptToolCall, CancelHint,
-        CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent, PendingCompletion,
+        AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
+        EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement, PendingCompletion,
         PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent, StartProcessIntent,
         TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy, ToolAttemptResult, ToolCall,
         ToolCallOutput, ToolCallRecord, ToolContext, ToolContract, ToolDefinition,

@@ -622,19 +622,39 @@ impl NestedProcessWaitTool {
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
     }
+
+    /// Starting a process and awaiting it inside the tool call is orchestration,
+    /// not a recorded leaf attempt, so this registers in the orchestrating lane.
+    fn orchestrating() -> crate::tool_provider::orchestration::OrchestratingToolDef {
+        let implementation: Arc<
+            dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
+        > = Arc::new(Self);
+        // SAFETY: lash-core owns this test-only tool contract and its body.
+        unsafe {
+            crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(
+                implementation,
+            )
+        }
+    }
 }
 
 #[async_trait::async_trait]
-impl crate::ToolProvider for NestedProcessWaitTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        vec![Self::definition().manifest()]
+impl crate::tool_provider::orchestration::OrchestratingToolImplementation
+    for NestedProcessWaitTool
+{
+    fn manifest(&self) -> crate::ToolManifest {
+        Self::definition().manifest()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        (name == "await_nested_process").then(|| Arc::new(Self::definition().contract()))
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(Self::definition().contract())
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+    ) -> crate::ToolResult {
         assert!(
             PROCESS_EXECUTION_PERMIT.try_with(|_| ()).is_ok(),
             "production child turn must inherit the outer process execution permit"
@@ -649,12 +669,12 @@ impl crate::ToolProvider for NestedProcessWaitTool {
             RecoveryDisposition::Rerunnable,
             crate::ProcessOriginator::host(),
         );
-        if let Err(err) = call.context.process_admin().start(request).await {
+        if let Err(err) = context.start_process(request).await {
             return crate::ToolResult::err_fmt(format_args!(
                 "failed to start nested process: {err}"
             ));
         }
-        match call.context.process_admin().await_process(process_id).await {
+        match context.await_process(process_id).await {
             Ok(ProcessAwaitOutput::Success { .. }) => {
                 crate::ToolResult::ok(serde_json::json!({ "nested": "done" }))
             }
@@ -1021,7 +1041,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     let mut plugin_factories = crate::testing::test_standard_protocol_factories();
     plugin_factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
         "nested-process-wait-tool",
-        crate::PluginSpec::new().with_tool_provider(Arc::new(NestedProcessWaitTool)),
+        crate::PluginSpec::new().with_orchestrating_tool(NestedProcessWaitTool::orchestrating()),
     )));
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(

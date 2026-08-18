@@ -213,7 +213,7 @@ aliases = ["lash_core::AwaitEventKey::key_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/approvals.rs:101#key.key_id,"
-assertion = "examples/agent-workbench/src/approvals.rs:292#assert_eq!(pending[0].key, \"approval-key-1\");"
+assertion = "examples/agent-workbench/src/approvals.rs:298#assert_eq!(pending[0].key, \"approval-key-1\");"
 reason = "The workbench uses the key id as the stable operator-facing approval identity and asserts it survives reopening the ledger."
 
 [[api]]
@@ -790,7 +790,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_turn_phase_probe_slot", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_turn_phase_probe_slot"]
 area = "processes"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-restate/src/tests.rs:10247 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash-restate/src/tests.rs:11100 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_worker_slot_supplier"
@@ -808,7 +808,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryAttachmentStore::raw_blobs_for_testing"]
 area = "attachments"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:2116#let memory_rows = memory.raw_blobs_for_testing();"
+usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:2109#let memory_rows = memory.raw_blobs_for_testing();"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -1239,7 +1239,7 @@ availability = "all-features"
 aliases = ["lash_core::TestLocalProcessRegistry::raw_state_for_testing"]
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:998#let raw = registry.raw_state_for_testing().await;"
+usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:991#let raw = registry.raw_state_for_testing().await;"
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -1363,8 +1363,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ToolContext::named_phase"]
 area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/providers.rs:338#let _phase = call.context.named_phase(\"trigger.occurrence_to_delivery\");"
+disposition = "unused-justify"
+reason = "Journal-capable orchestration seam: after FIG-1487 tool bodies observe phases through AttemptContext::named_phase, leaving this projection to orchestrating and process-engine hosts; no other workspace crate binds to it."
 
 [[api]]
 symbol = "lash::tools::ToolContext::with_agent_frame_id_for_testing"
@@ -1391,7 +1391,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryTriggerStore::raw_state_for_testing"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:1050#let raw = store.raw_state_for_testing();"
+usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:1043#let raw = store.raw_state_for_testing();"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -2036,8 +2036,8 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::effect::executor::control::ExternalCompletionError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:304#assert_eq!(error.code, \"approval_denied\");"
-assertion = "examples/agent-workbench/src/approvals.rs:304#assert_eq!(error.code, \"approval_denied\");"
+usage = "examples/agent-workbench/src/approvals.rs:310#assert_eq!(error.code, \"approval_denied\");"
+assertion = "examples/agent-workbench/src/approvals.rs:310#assert_eq!(error.code, \"approval_denied\");"
 reason = "The workbench constructs the typed external error used for a denied completion and asserts the resulting tool failure code."
 
 [[api]]
@@ -2065,8 +2065,8 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::effect::executor::control::ExternalCompletionError::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:304#assert_eq!(error.code, \"approval_denied\");"
-assertion = "examples/agent-workbench/src/approvals.rs:304#assert_eq!(error.code, \"approval_denied\");"
+usage = "examples/agent-workbench/src/approvals.rs:310#assert_eq!(error.code, \"approval_denied\");"
+assertion = "examples/agent-workbench/src/approvals.rs:310#assert_eq!(error.code, \"approval_denied\");"
 reason = "The workbench denial action constructs the external completion error with the public constructor and the deterministic denial test observes its code."
 
 [[api]]
@@ -2076,8 +2076,8 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::effect::executor::control::ExternalCompletionError::raw"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:262#error.raw = Some(json!({ \"policy\": \"agent_workbench_human_approval\" }));"
-assertion = "examples/agent-workbench/src/approvals.rs:306#assert_eq!(error.raw, Some(expected));"
+usage = "examples/agent-workbench/src/approvals.rs:268#error.raw = Some(json!({ \"policy\": \"agent_workbench_human_approval\" }));"
+assertion = "examples/agent-workbench/src/approvals.rs:312#assert_eq!(error.raw, Some(expected));"
 reason = "The workbench includes host-policy details in the typed denial's raw value and its module test asserts that exact policy metadata."
 
 [[api]]
@@ -4465,8 +4465,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:307#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
-assertion = "examples/agent-workbench/src/approvals.rs:307#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
+usage = "examples/agent-workbench/src/approvals.rs:313#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
+assertion = "examples/agent-workbench/src/approvals.rs:313#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
 reason = "The workbench maps operator decisions to the host-facing completion resolution and asserts the parked call accepts it."
 
 [[api]]
@@ -4485,8 +4485,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution::Err"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:307#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
-assertion = "examples/agent-workbench/src/approvals.rs:307#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
+usage = "examples/agent-workbench/src/approvals.rs:313#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
+assertion = "examples/agent-workbench/src/approvals.rs:313#assert_eq!(resolution, lash::Resolution::Err(error.clone()));"
 reason = "The workbench represents denial as an error resolution and asserts it becomes an approval_denied tool failure."
 
 [[api]]
@@ -4496,8 +4496,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution::Err::0"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:304#assert_eq!(error.code, \"approval_denied\");"
-assertion = "examples/agent-workbench/src/approvals.rs:304#assert_eq!(error.code, \"approval_denied\");"
+usage = "examples/agent-workbench/src/approvals.rs:310#assert_eq!(error.code, \"approval_denied\");"
+assertion = "examples/agent-workbench/src/approvals.rs:310#assert_eq!(error.code, \"approval_denied\");"
 reason = "The host-supplied external completion error is the payload of the workbench's denial resolution and its code is asserted."
 
 [[api]]
@@ -4507,8 +4507,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution::Ok"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:321#assert!(matches!(resolution, lash::Resolution::Ok(_)));"
-assertion = "examples/agent-workbench/src/approvals.rs:321#assert!(matches!(resolution, lash::Resolution::Ok(_)));"
+usage = "examples/agent-workbench/src/approvals.rs:327#assert!(matches!(resolution, lash::Resolution::Ok(_)));"
+assertion = "examples/agent-workbench/src/approvals.rs:327#assert!(matches!(resolution, lash::Resolution::Ok(_)));"
 reason = "The workbench represents approval as a successful completion and asserts the resumed instruction receives its applied result."
 
 [[api]]
@@ -4518,8 +4518,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution::Ok::0"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/approvals.rs:325#assert_eq!(payload.get(\"status\"), Some(&json!(\"applied\")));"
-assertion = "examples/agent-workbench/src/approvals.rs:325#assert_eq!(payload.get(\"status\"), Some(&json!(\"applied\")));"
+usage = "examples/agent-workbench/src/approvals.rs:331#assert_eq!(payload.get(\"status\"), Some(&json!(\"applied\")));"
+assertion = "examples/agent-workbench/src/approvals.rs:331#assert_eq!(payload.get(\"status\"), Some(&json!(\"applied\")));"
 reason = "The workbench success payload carries the applied operation result and the deterministic approval test asserts its fields."
 
 [[api]]
@@ -48842,7 +48842,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ToolBatch::settlement_order"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/attempt_atomicity.rs:1752#settlement_order,"
+usage = "crates/lash-postgres-store/tests/attempt_atomicity.rs:1745#settlement_order,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48852,7 +48852,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ToolBatch::triggers"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/attempt_atomicity.rs:1751#triggers,"
+usage = "crates/lash-postgres-store/tests/attempt_atomicity.rs:1744#triggers,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -50513,6 +50513,15 @@ aliases = ["lash_core::RuntimeErrorCode::ToolCompletionKeyMissingCallId"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match the typed diagnostic to choose retry, terminal settlement, or caller-bug handling."
+
+[[api]]
+symbol = "lash::runtime::RuntimeErrorCode::ToolDeferralNotDeclared"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::ToolDeferralNotDeclared"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: the typed refusal a provider gets when it asks a recorded attempt for a completion key it never declared through attempt_may_defer, so hosts can tell their own missing declaration from a controller that cannot route await events across process loss."
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::ToolCompletionKeyProcessLifetime"
@@ -55657,8 +55666,8 @@ availability = "default+all-features"
 aliases = ["lash_core::CancelHint"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:489#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:489#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:517#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:517#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -55668,8 +55677,8 @@ availability = "default+all-features"
 aliases = ["lash_core::CancelHint::CancelExternalWork"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:489#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:489#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:517#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:517#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:476; the assertion at examples/docs-snippets/src/plugins_tools.rs:476 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `default_pending.on_cancel` equals `CancelHint::CancelExternalWork`."
 
 [[api]]
@@ -55687,7 +55696,7 @@ kind = "struct"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:582#let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:633#let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -55696,8 +55705,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:577#assert_eq!(direct.call, \"read\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:628#assert_eq!(direct.call, \"read\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:562; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55706,7 +55715,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:582#let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:633#let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -55715,8 +55724,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:576#assert_eq!(direct.module_path, [\"workspace\", \"files\"]);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:627#assert_eq!(direct.module_path, [\"workspace\", \"files\"]);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:561; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55725,8 +55734,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:578#assert_eq!(direct.module_path_string(), \"workspace.files\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:629#assert_eq!(direct.module_path_string(), \"workspace.files\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:563; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55735,7 +55744,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:575#let direct = CataloguePreviewEntry::new([\"workspace\", \"files\"], \"read\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:626#let direct = CataloguePreviewEntry::new([\"workspace\", \"files\"], \"read\");"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -55744,7 +55753,7 @@ kind = "struct"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:621#let options = CataloguePreviewOptions {"
+usage = "examples/docs-snippets/src/plugins_tools.rs:672#let options = CataloguePreviewOptions {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -55753,8 +55762,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:617#defaults.call_name_limit,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:668#defaults.call_name_limit,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:602; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55763,8 +55772,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:613#defaults.module_limit,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:664#defaults.module_limit,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:598; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55773,8 +55782,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:611#assert_eq!(defaults.search_call_path, \"tools.search\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:662#assert_eq!(defaults.search_call_path, \"tools.search\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:596; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55783,8 +55792,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:610#assert_eq!(defaults.search_tool_name, \"search_tools\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:661#assert_eq!(defaults.search_tool_name, \"search_tools\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:595; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55793,8 +55802,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:609#assert_eq!(defaults.title, \"Catalogued Capabilities\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:660#assert_eq!(defaults.title, \"Catalogued Capabilities\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:594; the assertion at examples/docs-snippets/src/plugins_tools.rs:621 in `catalogued_tools_render_searchable_lashlang_module_previews` observes that `contribution.content.contains(\"knowledge.docs.search\")` holds."
 
 [[api]]
@@ -55803,8 +55812,8 @@ kind = "constant"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:618#DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:617#defaults.call_name_limit,"
+usage = "examples/docs-snippets/src/plugins_tools.rs:669#DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:668#defaults.call_name_limit,"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -55813,8 +55822,8 @@ kind = "constant"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:614#DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:613#defaults.module_limit,"
+usage = "examples/docs-snippets/src/plugins_tools.rs:665#DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:664#defaults.module_limit,"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -55990,8 +55999,8 @@ kind = "struct"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -56000,8 +56009,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:228#assert_eq!(decoded_binding.aliases, [\"write_text\"]);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:256#assert_eq!(decoded_binding.aliases, [\"write_text\"]);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:215; the assertion at examples/docs-snippets/src/plugins_tools.rs:219 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
@@ -56010,8 +56019,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:225#decoded_binding.authority_type.as_deref(),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:253#decoded_binding.authority_type.as_deref(),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:212; the assertion at examples/docs-snippets/src/plugins_tools.rs:219 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
@@ -56020,8 +56029,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:757#.executable_for(&manifest.name)"
-assertion = "examples/agent-workbench/src/mail.rs:759#assert_eq!(surface.call_path(), \"inbox.work.send\");"
+usage = "examples/agent-workbench/src/mail.rs:737#.executable_for(&manifest.name)"
+assertion = "examples/agent-workbench/src/mail.rs:739#assert_eq!(surface.call_path(), \"inbox.work.send\");"
 
 [[api]]
 symbol = "lash::tools::LashlangToolBinding::module_path"
@@ -56029,8 +56038,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:222#assert_eq!(decoded_binding.module_path, [\"workspace\", \"files\"]);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:250#assert_eq!(decoded_binding.module_path, [\"workspace\", \"files\"]);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:209; the assertion at examples/docs-snippets/src/plugins_tools.rs:219 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
@@ -56039,7 +56048,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:152#let binding = LashlangToolBinding::new([\"workspace\", \"files\"], \"write\")"
+usage = "examples/docs-snippets/src/plugins_tools.rs:180#let binding = LashlangToolBinding::new([\"workspace\", \"files\"], \"write\")"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56048,8 +56057,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:223#assert_eq!(decoded_binding.operation.as_deref(), Some(\"write\"));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:251#assert_eq!(decoded_binding.operation.as_deref(), Some(\"write\"));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:210; the assertion at examples/docs-snippets/src/plugins_tools.rs:219 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
@@ -56058,8 +56067,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:230#LashlangToolBinding::required_executable_for_remote(&decoded_binding, \"write_file\")"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:258#LashlangToolBinding::required_executable_for_remote(&decoded_binding, \"write_file\")"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:217; the assertion at examples/docs-snippets/src/plugins_tools.rs:219 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
@@ -56068,8 +56077,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:234#LashlangToolBinding::required_for_remote(&manifest)"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:232#assert_eq!(resolved_binding.operation, \"write\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:262#LashlangToolBinding::required_for_remote(&manifest)"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:221; the assertion at examples/docs-snippets/src/plugins_tools.rs:219 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
@@ -56078,7 +56087,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:154#.with_aliases([\"write_text\"]);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:182#.with_aliases([\"write_text\"]);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56102,14 +56111,84 @@ assertion = "examples/docs-snippets/src/remote_protocol.rs:1220#assert_eq!(defin
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
+symbol = "lash::tools::PendingAnnouncement"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::PendingAnnouncement"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:93#let announcement: &lash::tools::PendingAnnouncement = pending.announcement.as_ref()?;"
+reason = "Host-code evidence: the docs-snippets detached-tool host declares the park announcement and mirrors its parts, without an executed assertion observing the contract. The runtime-side behaviour is pinned by the lash-core dispatch tests instead."
+
+[[api]]
+symbol = "lash::tools::PendingAnnouncement::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::PendingAnnouncement::new"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:74#let announcement = PendingAnnouncement::new("
+reason = "Host-code evidence: the docs-snippets detached-tool host declares the park announcement and mirrors its parts, without an executed assertion observing the contract. The runtime-side behaviour is pinned by the lash-core dispatch tests instead."
+
+[[api]]
+symbol = "lash::tools::PendingAnnouncement::event_type"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PendingAnnouncement::event_type"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:94#let event_type = announcement.event_type.clone();"
+reason = "Host-code evidence: the docs-snippets detached-tool host declares the park announcement and mirrors its parts, without an executed assertion observing the contract. The runtime-side behaviour is pinned by the lash-core dispatch tests instead."
+
+[[api]]
+symbol = "lash::tools::PendingAnnouncement::payload"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PendingAnnouncement::payload"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:96#let payload = announcement.payload.to_string();"
+reason = "Host-code evidence: the docs-snippets detached-tool host declares the park announcement and mirrors its parts, without an executed assertion observing the contract. The runtime-side behaviour is pinned by the lash-core dispatch tests instead."
+
+[[api]]
+symbol = "lash::tools::PendingAnnouncement::replay_key"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PendingAnnouncement::replay_key"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:95#let replay_key = announcement.replay_key.clone();"
+reason = "Host-code evidence: the docs-snippets detached-tool host declares the park announcement and mirrors its parts, without an executed assertion observing the contract. The runtime-side behaviour is pinned by the lash-core dispatch tests instead."
+
+[[api]]
+symbol = "lash::tools::PendingCompletion::announcing"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::PendingCompletion::announcing"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:79#let pending = PendingCompletion::announcing(PendingCompletion::new(), announcement);"
+reason = "Host-code evidence: the docs-snippets detached-tool host declares the park announcement and mirrors its parts, without an executed assertion observing the contract. The runtime-side behaviour is pinned by the lash-core dispatch tests instead."
+
+[[api]]
+symbol = "lash::tools::PendingCompletion::announcement"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PendingCompletion::announcement"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:93#let announcement: &lash::tools::PendingAnnouncement = pending.announcement.as_ref()?;"
+reason = "Host-code evidence: the docs-snippets detached-tool host declares the park announcement and mirrors its parts, without an executed assertion observing the contract. The runtime-side behaviour is pinned by the lash-core dispatch tests instead."
+
+[[api]]
 symbol = "lash::tools::PendingCompletion"
 kind = "struct"
 availability = "default+all-features"
 aliases = ["lash_core::PendingCompletion"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -56119,8 +56198,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingCompletion::deadline"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:487#assert_eq!(default_pending.deadline, None);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:515#assert_eq!(default_pending.deadline, None);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:474; the assertion at examples/docs-snippets/src/plugins_tools.rs:487 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `observed_pending` equals `pending_spec`."
 
 [[api]]
@@ -56130,8 +56209,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingCompletion::fail_turn_on_timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -56141,7 +56220,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingCompletion::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:486#let default_pending = PendingCompletion::new();"
+usage = "examples/docs-snippets/src/plugins_tools.rs:514#let default_pending = PendingCompletion::new();"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56151,8 +56230,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingCompletion::on_cancel"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:489#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:517#assert_eq!(default_pending.on_cancel, CancelHint::CancelExternalWork);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:476; the assertion at examples/docs-snippets/src/plugins_tools.rs:487 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `observed_pending` equals `pending_spec`."
 
 [[api]]
@@ -56162,8 +56241,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingCompletion::on_timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:488#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:516#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:475; the assertion at examples/docs-snippets/src/plugins_tools.rs:487 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `observed_pending` equals `pending_spec`."
 
 [[api]]
@@ -56173,8 +56252,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingCompletion::with_deadline"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -56382,8 +56461,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TimeoutBehavior"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:488#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:488#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:516#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:516#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -56393,8 +56472,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TimeoutBehavior::ErrorAsResult"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:488#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:488#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:516#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:516#assert_eq!(default_pending.on_timeout, TimeoutBehavior::ErrorAsResult);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:475; the assertion at examples/docs-snippets/src/plugins_tools.rs:475 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `default_pending.on_timeout` equals `TimeoutBehavior::ErrorAsResult`."
 
 [[api]]
@@ -56404,8 +56483,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TimeoutBehavior::FailTurn"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:494#assert_eq!(pending_spec.on_timeout, TimeoutBehavior::FailTurn);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:494#assert_eq!(pending_spec.on_timeout, TimeoutBehavior::FailTurn);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:522#assert_eq!(pending_spec.on_timeout, TimeoutBehavior::FailTurn);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:522#assert_eq!(pending_spec.on_timeout, TimeoutBehavior::FailTurn);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:481; the assertion at examples/docs-snippets/src/plugins_tools.rs:481 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `pending_spec.on_timeout` equals `TimeoutBehavior::FailTurn`."
 
 [[api]]
@@ -56415,8 +56494,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolActivation"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:211#assert_eq!(manifest.activation, ToolActivation::Internal);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:211#assert_eq!(manifest.activation, ToolActivation::Internal);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(manifest.activation, ToolActivation::Internal);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(manifest.activation, ToolActivation::Internal);"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -56426,8 +56505,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolActivation::Always"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:361#assert_eq!(dynamic.manifest.activation, ToolActivation::Always);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:361#assert_eq!(dynamic.manifest.activation, ToolActivation::Always);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:389#assert_eq!(dynamic.manifest.activation, ToolActivation::Always);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:389#assert_eq!(dynamic.manifest.activation, ToolActivation::Always);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:348; the assertion at examples/docs-snippets/src/plugins_tools.rs:348 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `dynamic.manifest.activation` equals `ToolActivation::Always`."
 
 [[api]]
@@ -56437,8 +56516,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolActivation::Internal"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:211#assert_eq!(manifest.activation, ToolActivation::Internal);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:211#assert_eq!(manifest.activation, ToolActivation::Internal);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(manifest.activation, ToolActivation::Internal);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(manifest.activation, ToolActivation::Internal);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -56448,7 +56527,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolArgumentProjectionPolicy"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:137#ToolArgumentProjectionPolicy::is_materialize_projected_values("
+usage = "examples/docs-snippets/src/plugins_tools.rs:165#ToolArgumentProjectionPolicy::is_materialize_projected_values("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56458,7 +56537,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:148#&ToolArgumentProjectionPolicy::MaterializeProjectedValues"
+usage = "examples/docs-snippets/src/plugins_tools.rs:176#&ToolArgumentProjectionPolicy::MaterializeProjectedValues"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56468,8 +56547,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolArgumentProjectionPolicy::PreserveProjectedRefsInField"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:145#assert_eq!(field, \"contents\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:145#assert_eq!(field, \"contents\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:173#assert_eq!(field, \"contents\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:173#assert_eq!(field, \"contents\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -56479,8 +56558,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolArgumentProjectionPolicy::PreserveProjectedRefsInField::field"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:140#let ToolArgumentProjectionPolicy::PreserveProjectedRefsInField { field } ="
-assertion = "examples/docs-snippets/src/plugins_tools.rs:145#assert_eq!(field, \"contents\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:168#let ToolArgumentProjectionPolicy::PreserveProjectedRefsInField { field } ="
+assertion = "examples/docs-snippets/src/plugins_tools.rs:173#assert_eq!(field, \"contents\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:127; the assertion at examples/docs-snippets/src/plugins_tools.rs:132 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `field` equals `\"contents\"`."
 
 [[api]]
@@ -56490,8 +56569,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolArgumentProjectionPolicy::is_materialize_projected_values"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:137#!ToolArgumentProjectionPolicy::is_materialize_projected_values(&argument_projection),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:145#assert_eq!(field, \"contents\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:165#!ToolArgumentProjectionPolicy::is_materialize_projected_values(&argument_projection),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:173#assert_eq!(field, \"contents\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:124; the assertion at examples/docs-snippets/src/plugins_tools.rs:132 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `field` equals `\"contents\"`."
 
 [[api]]
@@ -56501,8 +56580,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:135#ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(\"contents\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:145#assert_eq!(field, \"contents\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:163#ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(\"contents\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:173#assert_eq!(field, \"contents\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:122; the assertion at examples/docs-snippets/src/plugins_tools.rs:132 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `field` equals `\"contents\"`."
 
 [[api]]
@@ -56549,8 +56628,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:386#assert!(ToolCallOutput::is_success(output));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:414#assert!(ToolCallOutput::is_success(output));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -56579,8 +56658,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::control"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:391#assert!(output.control.is_none());"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:419#assert!(output.control.is_none());"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:378; the assertion at examples/docs-snippets/src/plugins_tools.rs:369 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(ToolCallOutput::status(output)) .expect(\"tool status must serialize\")` equals `serde_json::json!(\"success\")`."
 
 [[api]]
@@ -56590,7 +56669,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::failure"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:446#let direct_failure = ToolCallOutput::failure(tool_failure);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:474#let direct_failure = ToolCallOutput::failure(tool_failure);"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56600,8 +56679,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::into_value_for_projection"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:405#ToolCallOutput::into_value_for_projection(consumed),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:433#ToolCallOutput::into_value_for_projection(consumed),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:392; the assertion at examples/docs-snippets/src/plugins_tools.rs:369 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(ToolCallOutput::status(output)) .expect(\"tool status must serialize\")` equals `serde_json::json!(\"success\")`."
 
 [[api]]
@@ -56611,8 +56690,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::is_success"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:386#assert!(ToolCallOutput::is_success(output));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:414#assert!(ToolCallOutput::is_success(output));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:373; the assertion at examples/docs-snippets/src/plugins_tools.rs:369 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(ToolCallOutput::status(output)) .expect(\"tool status must serialize\")` equals `serde_json::json!(\"success\")`."
 
 [[api]]
@@ -56622,8 +56701,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::outcome"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:393#serde_json::to_value(&output.outcome).expect(\"tool outcome must serialize\")[\"status\"],"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:421#serde_json::to_value(&output.outcome).expect(\"tool outcome must serialize\")[\"status\"],"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:380; the assertion at examples/docs-snippets/src/plugins_tools.rs:369 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(ToolCallOutput::status(output)) .expect(\"tool status must serialize\")` equals `serde_json::json!(\"success\")`."
 
 [[api]]
@@ -56642,8 +56721,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::status"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:369; the assertion at examples/docs-snippets/src/plugins_tools.rs:369 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(ToolCallOutput::status(output)) .expect(\"tool status must serialize\")` equals `serde_json::json!(\"success\")`."
 
 [[api]]
@@ -56653,7 +56732,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::success"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:409#let direct_output = ToolCallOutput::success(serde_json::json!({ \"generation\": 7 }));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:437#let direct_output = ToolCallOutput::success(serde_json::json!({ \"generation\": 7 }));"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56663,8 +56742,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCallOutput::value_for_projection"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:388#ToolCallOutput::value_for_projection(output),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:382#serde_json::to_value(ToolCallOutput::status(output))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:416#ToolCallOutput::value_for_projection(output),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:410#serde_json::to_value(ToolCallOutput::status(output))"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:375; the assertion at examples/docs-snippets/src/plugins_tools.rs:369 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `serde_json::to_value(ToolCallOutput::status(output)) .expect(\"tool status must serialize\")` equals `serde_json::json!(\"success\")`."
 
 [[api]]
@@ -56975,8 +57054,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ToolContext::triggers"]
 area = "triggers"
-disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/providers.rs:341#.triggers()"
+disposition = "unused-justify"
+reason = "Journal-capable orchestration seam: after FIG-1487 no recorded leaf attempt holds a ToolContext, so the trigger client is reached through the orchestrating lane in crates/lash-core/src/tool_provider/orchestration.rs and by process-engine hosts; no other workspace crate binds to it."
 
 [[api]]
 symbol = "lash::tools::ToolContext::with_async_process"
@@ -56994,8 +57073,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:275#assert_eq!(ToolContract::parameter_metadata(&contract).len(), 2);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:303#assert_eq!(ToolContract::parameter_metadata(&contract).len(), 2);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -57005,8 +57084,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::compact_contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:281#ToolContract::compact_contract(&contract, &manifest)"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:309#ToolContract::compact_contract(&contract, &manifest)"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:268; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57016,8 +57095,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::compact_contract_with_example_limit"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:287#ToolContract::compact_contract_with_example_limit(&contract, &manifest, 1)"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:315#ToolContract::compact_contract_with_example_limit(&contract, &manifest, 1)"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:274; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57027,8 +57106,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::compact_contract_with_signature_name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:293#ToolContract::compact_contract_with_signature_name(&contract, &manifest, \"save\").name,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:321#ToolContract::compact_contract_with_signature_name(&contract, &manifest, \"save\").name,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:280; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57038,8 +57117,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::compact_contract_with_signature_name_and_example_limit"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:297#ToolContract::compact_contract_with_signature_name_and_example_limit("
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:325#ToolContract::compact_contract_with_signature_name_and_example_limit("
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:284; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57049,8 +57128,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::default_input_schema"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:358#ToolContract::default_input_schema(),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:386#ToolContract::default_input_schema(),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:345; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57060,8 +57139,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::examples"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:226; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57071,8 +57150,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::input_schema"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:256#contract.input_schema.projection.overrides[0].dialect,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:284#contract.input_schema.projection.overrides[0].dialect,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:243; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57082,8 +57161,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::input_signature"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:264#ToolContract::input_signature(&contract, &manifest),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:292#ToolContract::input_signature(&contract, &manifest),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:251; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57093,8 +57172,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::input_signature_with_name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:268#ToolContract::input_signature_with_name(&contract, &manifest, \"save\")"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:296#ToolContract::input_signature_with_name(&contract, &manifest, \"save\")"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:255; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57113,8 +57192,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::model_tool"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:277#ToolContract::model_tool(&contract, &manifest).name,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:305#ToolContract::model_tool(&contract, &manifest).name,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:264; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57124,8 +57203,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::output_contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:240#assert!(contract.output_contract.is_static());"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:268#assert!(contract.output_contract.is_static());"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:227; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57135,8 +57214,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::output_schema"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:260#contract.output_schema.projection.overrides[0].dialect,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:288#contract.output_schema.projection.overrides[0].dialect,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:247; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57146,8 +57225,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::output_summary"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:272#ToolContract::output_summary(&contract),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:300#ToolContract::output_summary(&contract),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:259; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57157,8 +57236,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolContract::parameter_metadata"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:275#assert_eq!(ToolContract::parameter_metadata(&contract).len(), 2);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(contract.examples.len(), 3);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:303#assert_eq!(ToolContract::parameter_metadata(&contract).len(), 2);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:262; the assertion at examples/docs-snippets/src/plugins_tools.rs:226 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
@@ -57254,8 +57333,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:192#assert_eq!(ToolDefinition::model_tool(&definition).name, \"write_file\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:220#assert_eq!(ToolDefinition::model_tool(&definition).name, \"write_file\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -57265,7 +57344,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::compact_contract"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:194#let compact = ToolDefinition::compact_contract(&definition);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:222#let compact = ToolDefinition::compact_contract(&definition);"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57275,7 +57354,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::compact_contract_with_example_limit"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:200#let one_example = ToolDefinition::compact_contract_with_example_limit(&definition, 1);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:228#let one_example = ToolDefinition::compact_contract_with_example_limit(&definition, 1);"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57285,8 +57364,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:307#assert_eq!(recomposed.contract.examples, contract.examples);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:335#assert_eq!(recomposed.contract.examples, contract.examples);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:294; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57296,8 +57375,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::default_input_schema"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:353#ToolDefinition::default_input_schema(),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:381#ToolDefinition::default_input_schema(),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:340; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57307,8 +57386,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::description"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:182#ToolDefinition::description(&definition),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:210#ToolDefinition::description(&definition),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:169; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57318,8 +57397,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::format_tool_docs"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -57329,8 +57408,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::format_tool_docs_iter"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:312#ToolDefinition::format_tool_docs_iter([&definition]),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:340#ToolDefinition::format_tool_docs_iter([&definition]),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:299; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57340,7 +57419,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::from_parts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:305#let recomposed = ToolDefinition::from_parts(manifest.clone(), contract.clone());"
+usage = "examples/docs-snippets/src/plugins_tools.rs:333#let recomposed = ToolDefinition::from_parts(manifest.clone(), contract.clone());"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57350,8 +57429,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:179#assert_eq!(ToolDefinition::id(&definition).as_str(), \"tool:write_file\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:207#assert_eq!(ToolDefinition::id(&definition).as_str(), \"tool:write_file\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:166; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57361,8 +57440,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::input_signature"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:185#assert!(ToolDefinition::input_signature(&definition).contains(\"contents: str\"));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:213#assert!(ToolDefinition::input_signature(&definition).contains(\"contents: str\"));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:172; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57372,8 +57451,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::manifest"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:216#definition.manifest.argument_projection"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:244#definition.manifest.argument_projection"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:203; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57383,8 +57462,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::model_tool"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:192#assert_eq!(ToolDefinition::model_tool(&definition).name, \"write_file\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:220#assert_eq!(ToolDefinition::model_tool(&definition).name, \"write_file\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:179; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57394,8 +57473,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:180#assert_eq!(ToolDefinition::name(&definition), \"write_file\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:208#assert_eq!(ToolDefinition::name(&definition), \"write_file\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:167; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57405,8 +57484,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::output_summary"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:187#ToolDefinition::output_summary(&definition),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:215#ToolDefinition::output_summary(&definition),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:174; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57416,8 +57495,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::parameter_metadata"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:191#assert_eq!(ToolDefinition::parameter_metadata(&definition).len(), 2);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:219#assert_eq!(ToolDefinition::parameter_metadata(&definition).len(), 2);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:178; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57427,7 +57506,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::raw"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:344#let dynamic = ToolDefinition::raw("
+usage = "examples/docs-snippets/src/plugins_tools.rs:372#let dynamic = ToolDefinition::raw("
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57437,8 +57516,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::signature"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:190#assert!(ToolDefinition::signature(&definition).ends_with(\"record{bytes_written: int}\"));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:218#assert!(ToolDefinition::signature(&definition).ends_with(\"record{bytes_written: int}\"));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:177; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57448,8 +57527,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::typed"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:155#let definition: ToolDefinition = ToolDefinition::typed::<WriteArgs, WriteReceipt>("
-assertion = "examples/docs-snippets/src/plugins_tools.rs:315#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:183#let definition: ToolDefinition = ToolDefinition::typed::<WriteArgs, WriteReceipt>("
+assertion = "examples/docs-snippets/src/plugins_tools.rs:343#assert!(docs.contains(\"### write_file({ contents: str, path: str })\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:142; the assertion at examples/docs-snippets/src/plugins_tools.rs:302 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `docs.contains(\"### write_file({ contents: str, path: str })\")` holds."
 
 [[api]]
@@ -57459,7 +57538,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_activation"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:165#.with_activation(ToolActivation::Internal)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:193#.with_activation(ToolActivation::Internal)"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57469,7 +57548,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_argument_projection"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:166#.with_argument_projection(argument_projection)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:194#.with_argument_projection(argument_projection)"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57479,7 +57558,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_examples"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:160#.with_examples(vec!["
+usage = "examples/docs-snippets/src/plugins_tools.rs:188#.with_examples(vec!["
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57489,7 +57568,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_input_schema_projection"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:169#.with_input_schema_projection("
+usage = "examples/docs-snippets/src/plugins_tools.rs:197#.with_input_schema_projection("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57499,7 +57578,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_output_contract"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:168#.with_output_contract(ToolOutputContract::Static)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:196#.with_output_contract(ToolOutputContract::Static)"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57509,7 +57588,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_output_from_input_schema"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:355#.with_output_from_input_schema(\"schema\", Some(serde_json::json!({ \"type\": \"string\" })));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:383#.with_output_from_input_schema(\"schema\", Some(serde_json::json!({ \"type\": \"string\" })));"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57519,7 +57598,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_output_schema_projection"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:173#.with_output_schema_projection("
+usage = "examples/docs-snippets/src/plugins_tools.rs:201#.with_output_schema_projection("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57529,7 +57608,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::with_retry_policy"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:167#.with_retry_policy(ToolRetryPolicy::safe(3, 25, 100))"
+usage = "examples/docs-snippets/src/plugins_tools.rs:195#.with_retry_policy(ToolRetryPolicy::safe(3, 25, 100))"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57538,8 +57617,8 @@ kind = "trait"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:177#.with_lashlang_binding(binding);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:218#assert!(manifest.bindings.contains_key(\"lashlang.tool\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:205#.with_lashlang_binding(binding);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:246#assert!(manifest.bindings.contains_key(\"lashlang.tool\"));"
 reason = "Assertion relationship: with_lashlang_binding is the extension-trait call that writes the binding asserted on the manifest."
 
 [[api]]
@@ -57548,7 +57627,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:177#.with_lashlang_binding(binding);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:205#.with_lashlang_binding(binding);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57664,8 +57743,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::class"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:432#assert_eq!(tool_failure.class, ToolFailureClass::InvalidRequest);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:460#assert_eq!(tool_failure.class, ToolFailureClass::InvalidRequest);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:419; the assertion at examples/docs-snippets/src/plugins_tools.rs:426 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolFailure::to_json_value(&tool_failure)[\"source\"]` equals `\"tool\"`."
 
 [[api]]
@@ -57675,8 +57754,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::code"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:433#assert_eq!(tool_failure.code, \"invalid_path\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:461#assert_eq!(tool_failure.code, \"invalid_path\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:420; the assertion at examples/docs-snippets/src/plugins_tools.rs:426 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolFailure::to_json_value(&tool_failure)[\"source\"]` equals `\"tool\"`."
 
 [[api]]
@@ -57686,8 +57765,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::invalid_request"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:657#assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:657#assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:708#assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:708#assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -57697,8 +57776,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::io"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:662#assert_eq!(io.class, ToolFailureClass::Io);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:662#assert_eq!(io.class, ToolFailureClass::Io);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:713#assert_eq!(io.class, ToolFailureClass::Io);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:713#assert_eq!(io.class, ToolFailureClass::Io);"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -57708,8 +57787,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::message"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:434#assert_eq!(tool_failure.message, \"path leaves the workspace\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:462#assert_eq!(tool_failure.message, \"path leaves the workspace\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:421; the assertion at examples/docs-snippets/src/plugins_tools.rs:426 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolFailure::to_json_value(&tool_failure)[\"source\"]` equals `\"tool\"`."
 
 [[api]]
@@ -57719,8 +57798,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::raw"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:431#tool_failure.raw = Some(ToolValue::from(serde_json::json!({ \"path\": \"../secret\" })));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:459#tool_failure.raw = Some(ToolValue::from(serde_json::json!({ \"path\": \"../secret\" })));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:418; the assertion at examples/docs-snippets/src/plugins_tools.rs:426 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolFailure::to_json_value(&tool_failure)[\"source\"]` equals `\"tool\"`."
 
 [[api]]
@@ -57740,7 +57819,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::runtime"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:452#let runtime_failure = ToolFailure::runtime("
+usage = "examples/docs-snippets/src/plugins_tools.rs:480#let runtime_failure = ToolFailure::runtime("
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57771,8 +57850,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::to_json_value"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:426; the assertion at examples/docs-snippets/src/plugins_tools.rs:426 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolFailure::to_json_value(&tool_failure)[\"source\"]` equals `\"tool\"`."
 
 [[api]]
@@ -57782,8 +57861,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::tool"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:439#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -57793,8 +57872,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:432#assert_eq!(tool_failure.class, ToolFailureClass::InvalidRequest);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:460#assert_eq!(tool_failure.class, ToolFailureClass::InvalidRequest);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -57804,8 +57883,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::Execution"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57815,8 +57894,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::External"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57826,7 +57905,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::Internal"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:453#ToolFailureClass::Internal,"
+usage = "examples/docs-snippets/src/plugins_tools.rs:481#ToolFailureClass::Internal,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57836,7 +57915,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::InvalidRequest"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:427#ToolFailureClass::InvalidRequest,"
+usage = "examples/docs-snippets/src/plugins_tools.rs:455#ToolFailureClass::InvalidRequest,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57846,7 +57925,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::Io"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:508#ToolFailureClass::Io"
+usage = "examples/docs-snippets/src/plugins_tools.rs:559#ToolFailureClass::Io"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57856,8 +57935,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::PermissionDenied"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57867,8 +57946,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::ResourceLimit"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57878,8 +57957,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::Timeout"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:518#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:569#serde_json::to_value(failure_classes).expect(\"failure classes must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57889,7 +57968,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureClass::Unavailable"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:462#ToolFailureClass::Unavailable,"
+usage = "examples/docs-snippets/src/plugins_tools.rs:490#ToolFailureClass::Unavailable,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57909,8 +57988,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Cancellation"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57920,8 +57999,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Plugin"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57931,8 +58010,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Policy"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57942,8 +58021,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailureSource::Runtime"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:538#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:589#serde_json::to_value(host_failure_sources).expect(\"failure sources must serialize\"),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58066,8 +58145,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58077,8 +58156,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::activation"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:211#assert_eq!(manifest.activation, ToolActivation::Internal);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:239#assert_eq!(manifest.activation, ToolActivation::Internal);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:198; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58088,8 +58167,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::argument_projection"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:215#manifest.argument_projection,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:243#manifest.argument_projection,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:202; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58099,8 +58178,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::bindings"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:218#assert!(manifest.bindings.contains_key(\"lashlang.tool\"));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:246#assert!(manifest.bindings.contains_key(\"lashlang.tool\"));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:205; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58110,8 +58189,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::compact_contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:212#assert!(manifest.compact_contract.is_some());"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:240#assert!(manifest.compact_contract.is_some());"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:199; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58121,8 +58200,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::description"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:208#manifest.description,"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:236#manifest.description,"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:195; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58132,8 +58211,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:192; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58143,8 +58222,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::name"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:206#assert_eq!(manifest.name, \"write_file\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:234#assert_eq!(manifest.name, \"write_file\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:193; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58154,8 +58233,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolManifest::retry_policy"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:213#assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:205#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:241#assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest.id.as_str(), \"tool:write_file\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:200; the assertion at examples/docs-snippets/src/plugins_tools.rs:192 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
@@ -58164,7 +58243,7 @@ kind = "trait"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:219#let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:247#let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58173,7 +58252,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:219#let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:247#let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58183,8 +58262,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolOutputContract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:342#assert!(!ToolOutputContract::is_static(&dynamic_contract));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:335#assert_eq!(input_field, \"schema\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:370#assert!(!ToolOutputContract::is_static(&dynamic_contract));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:363#assert_eq!(input_field, \"schema\");"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -58194,7 +58273,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolOutputContract::FromInputSchema"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:328#let ToolOutputContract::FromInputSchema {"
+usage = "examples/docs-snippets/src/plugins_tools.rs:356#let ToolOutputContract::FromInputSchema {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58204,7 +58283,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolOutputContract::FromInputSchema::default_schema"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:330#default_schema,"
+usage = "examples/docs-snippets/src/plugins_tools.rs:358#default_schema,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only destructures a field; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58214,8 +58293,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolOutputContract::FromInputSchema::input_field"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:335#assert_eq!(input_field, \"schema\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:335#assert_eq!(input_field, \"schema\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:363#assert_eq!(input_field, \"schema\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:363#assert_eq!(input_field, \"schema\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58225,7 +58304,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolOutputContract::Static"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:168#.with_output_contract(ToolOutputContract::Static)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:196#.with_output_contract(ToolOutputContract::Static)"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58235,7 +58314,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolOutputContract::from_input_schema"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:324#let dynamic_contract = ToolOutputContract::from_input_schema("
+usage = "examples/docs-snippets/src/plugins_tools.rs:352#let dynamic_contract = ToolOutputContract::from_input_schema("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58245,8 +58324,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolOutputContract::is_static"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:342#assert!(!ToolOutputContract::is_static(&dynamic_contract));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:335#assert_eq!(input_field, \"schema\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:370#assert!(!ToolOutputContract::is_static(&dynamic_contract));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:363#assert_eq!(input_field, \"schema\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:329; the assertion at examples/docs-snippets/src/plugins_tools.rs:322 in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `input_field` equals `\"schema\"`."
 
 [[api]]
@@ -58500,8 +58579,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:375#assert!(!ToolResult::is_pending(&success));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:403#assert!(!ToolResult::is_pending(&success));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -58511,8 +58590,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::Done"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58522,8 +58601,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::Done::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:396#let ToolResult::Done(done) = success.clone() else {"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:424#let ToolResult::Done(done) = success.clone() else {"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:383; the assertion at examples/docs-snippets/src/plugins_tools.rs:364 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolResult::value_for_projection(&success)` equals `serde_json::json!({ \"saved\": true })`."
 
 [[api]]
@@ -58533,8 +58612,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::Pending"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58544,8 +58623,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::Pending::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:497#let ToolResult::Pending(observed_pending) = pending.clone() else {"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:548#let ToolResult::Pending(observed_pending) = pending.clone() else {"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:484; the assertion at examples/docs-snippets/src/plugins_tools.rs:487 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `observed_pending` equals `pending_spec`."
 
 [[api]]
@@ -58555,7 +58634,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::as_done_output"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:380#let output = ToolResult::as_done_output(&success).expect(\"success must be complete\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:408#let output = ToolResult::as_done_output(&success).expect(\"success must be complete\");"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58565,8 +58644,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::as_output"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:412#ToolResult::as_output(&wrapped).value_for_projection(),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:440#ToolResult::as_output(&wrapped).value_for_projection(),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:399; the assertion at examples/docs-snippets/src/plugins_tools.rs:364 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolResult::value_for_projection(&success)` equals `serde_json::json!({ \"saved\": true })`."
 
 [[api]]
@@ -58576,7 +58655,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::cancelled"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:472#let cancelled = ToolResult::cancelled(\"operator stopped the tool\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:500#let cancelled = ToolResult::cancelled(\"operator stopped the tool\");"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58586,8 +58665,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::cancelled_with_raw"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:483#ToolResult::value_for_projection(&cancelled_with_raw),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:483#ToolResult::value_for_projection(&cancelled_with_raw),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:511#ToolResult::value_for_projection(&cancelled_with_raw),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:511#ToolResult::value_for_projection(&cancelled_with_raw),"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -58597,7 +58676,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::err"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:415#let json_error = ToolResult::err(serde_json::json!({ \"path\": \"missing.md\" }));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:443#let json_error = ToolResult::err(serde_json::json!({ \"path\": \"missing.md\" }));"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58607,8 +58686,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::err_fmt"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:422#ToolResult::value_for_projection(&formatted_error),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:422#ToolResult::value_for_projection(&formatted_error),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:450#ToolResult::value_for_projection(&formatted_error),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:450#ToolResult::value_for_projection(&formatted_error),"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -58618,7 +58697,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::failure"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:440#let failed = ToolResult::failure(tool_failure.clone());"
+usage = "examples/docs-snippets/src/plugins_tools.rs:468#let failed = ToolResult::failure(tool_failure.clone());"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58628,7 +58707,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::from_output"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:410#let wrapped = ToolResult::from_output(direct_output);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:438#let wrapped = ToolResult::from_output(direct_output);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58638,7 +58717,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::into_done_output"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:403#let consumed = ToolResult::into_done_output(success).expect(\"success must unwrap\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:431#let consumed = ToolResult::into_done_output(success).expect(\"success must unwrap\");"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58648,8 +58727,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::is_pending"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:375#assert!(!ToolResult::is_pending(&success));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:500#assert_eq!(observed_pending, pending_spec);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:403#assert!(!ToolResult::is_pending(&success));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:551#assert_eq!(observed_pending, pending_spec);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:362; the assertion at examples/docs-snippets/src/plugins_tools.rs:487 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `observed_pending` equals `pending_spec`."
 
 [[api]]
@@ -58659,8 +58738,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::is_success"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:374#assert!(ToolResult::is_success(&success));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:402#assert!(ToolResult::is_success(&success));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:361; the assertion at examples/docs-snippets/src/plugins_tools.rs:364 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolResult::value_for_projection(&success)` equals `serde_json::json!({ \"saved\": true })`."
 
 [[api]]
@@ -58670,8 +58749,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::ok"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -58681,7 +58760,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::pending"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:495#let pending = ToolResult::pending(pending_spec.clone());"
+usage = "examples/docs-snippets/src/plugins_tools.rs:546#let pending = ToolResult::pending(pending_spec.clone());"
 reason = "The docs-snippets test constructs a pending result and compares its immediate variant payload, but it does not exercise enqueue, callback resolution, reopen, redrive, timeout, cancellation, or deduplication. Add a real out-of-band completion flow before claiming asserted lifecycle coverage."
 
 [[api]]
@@ -58691,8 +58770,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::retryable_failure"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:468#ToolResult::as_output(&retryable).value_for_projection()[\"retry\"][\"after_ms\"],"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:468#ToolResult::as_output(&retryable).value_for_projection()[\"retry\"][\"after_ms\"],"
+usage = "examples/docs-snippets/src/plugins_tools.rs:496#ToolResult::as_output(&retryable).value_for_projection()[\"retry\"][\"after_ms\"],"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:496#ToolResult::as_output(&retryable).value_for_projection()[\"retry\"][\"after_ms\"],"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -58702,8 +58781,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolResult::value_for_projection"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:377#ToolResult::value_for_projection(&success),"
+usage = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:405#ToolResult::value_for_projection(&success),"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs:364; the assertion at examples/docs-snippets/src/plugins_tools.rs:364 in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolResult::value_for_projection(&success)` equals `serde_json::json!({ \"saved\": true })`."
 
 [[api]]
@@ -58780,8 +58859,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:213#assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:213#assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:241#assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:241#assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -58831,8 +58910,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Never"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:723#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
-assertion = "examples/agent-workbench/src/mail.rs:723#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+usage = "examples/agent-workbench/src/mail.rs:703#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+assertion = "examples/agent-workbench/src/mail.rs:703#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58842,7 +58921,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Safe"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:730#ToolRetryPolicy::Safe {"
+usage = "examples/agent-workbench/src/mail.rs:710#ToolRetryPolicy::Safe {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58853,7 +58932,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:394#base_delay_ms: 25,"
-assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:697#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_attempts"
@@ -58863,7 +58942,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::max_attempts"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:393#max_attempts: 3,"
-assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:697#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_delay_ms"
@@ -58873,7 +58952,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:395#max_delay_ms: 250,"
-assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:697#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::safe"
@@ -58883,7 +58962,7 @@ aliases = ["lash_core::ToolRetryPolicy::safe"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:391#\"list\" => ToolRetryPolicy::safe(3, 25, 250),"
-assertion = "examples/agent-workbench/src/mail.rs:717#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:697#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolSourceHandle"
@@ -59169,7 +59248,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:644#let from_records = catalogue_preview_contribution(&records).expect(\"records must render\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:695#let from_records = catalogue_preview_contribution(&records).expect(\"records must render\");"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59178,7 +59257,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:640#let from_entries = catalogue_preview_contribution_for_entries(manifest_entries.clone())"
+usage = "examples/docs-snippets/src/plugins_tools.rs:691#let from_entries = catalogue_preview_contribution_for_entries(manifest_entries.clone())"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59187,8 +59266,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:636#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:687#assert!(contribution.content.contains(\"knowledge.docs.search\"));"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -59197,7 +59276,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:642#let from_manifests = catalogue_preview_contribution_for_manifests(&manifests)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:693#let from_manifests = catalogue_preview_contribution_for_manifests(&manifests)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59206,7 +59285,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:647#let customized = catalogue_preview_contribution_with_options(&records, options)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:698#let customized = catalogue_preview_contribution_with_options(&records, options)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59215,7 +59294,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:605#let record_entries = catalogue_preview_entries_from_catalog_records(&records);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:656#let record_entries = catalogue_preview_entries_from_catalog_records(&records);"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59224,7 +59303,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:589#let manifest_entries = catalogue_preview_entries_from_manifests(&manifests);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:640#let manifest_entries = catalogue_preview_entries_from_manifests(&manifests);"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59233,7 +59312,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:601#let record_entry = catalogue_preview_entry_from_catalog_record(&records[1])"
+usage = "examples/docs-snippets/src/plugins_tools.rs:652#let record_entry = catalogue_preview_entry_from_catalog_record(&records[1])"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59242,7 +59321,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:585#let manifest_entry = catalogue_preview_entry_from_manifest(&manifests[0])"
+usage = "examples/docs-snippets/src/plugins_tools.rs:636#let manifest_entry = catalogue_preview_entry_from_manifest(&manifests[0])"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -66378,12 +66457,12 @@ disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/fig1294_ingress.rs:381#let context = lash_core::InternalProcessContext::__for_testing(&tool);"
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::__tool_context"
+symbol = "lash_core::InternalProcessContext::__attempt_context"
 kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-tools/src/shell/mod.rs:627#context: call.context.__tool_context(),"
+usage = "crates/lash-tools/src/shell/mod.rs:627#context: &call.context.__attempt_context(),"
 
 [[api]]
 symbol = "lash_core::LiveReplayResult"
@@ -69437,7 +69516,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-test-only"
-usage = "examples/docs-snippets/src/plugins_tools.rs:707#let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools("
+usage = "examples/docs-snippets/src/plugins_tools.rs:758#let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70056,7 +70135,7 @@ kind = "field"
 availability = "default+all-features"
 area = "attachments"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/tests/turn_streaming.rs:748 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash/src/tests/turn_streaming.rs:784 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::facade_support::AttachmentProducer::TurnIngress"
@@ -70298,7 +70377,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/runner/contract_support.rs:622#) -> Option<&lash_core::sansio::EffectId> {"
+usage = "crates/lash-sim/src/runner/contract_support.rs:620#) -> Option<&lash_core::sansio::EffectId> {"
 
 [[api]]
 symbol = "lash_core::facade_support::EffectId::0"
@@ -70622,6 +70701,22 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
 usage = "crates/lash-protocol-standard/src/lib.rs:180#context: &lash_core::facade_support::OrchestrationContext<'_>,"
+
+[[api]]
+symbol = "lash_core::facade_support::OrchestrationContext::sessions"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Orchestrating-lane seam for journal-capable session work (child sessions, managed turns) after FIG-1487 removed it from recorded leaf attempts; first-party orchestrating tools are the only callers and no other workspace crate binds to it yet."
+
+[[api]]
+symbol = "lash_core::facade_support::OrchestrationContext::triggers"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Orchestrating-lane seam for runtime-owned trigger emission after FIG-1487 removed it from recorded leaf attempts; first-party orchestrating tools are the only callers and no other workspace crate binds to it yet."
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestrationContext::await_process"
@@ -71774,7 +71869,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:1272#vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {"
+usage = "crates/lash/src/tests/turn_streaming.rs:1307#vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -74823,7 +74918,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/runner/contract_support.rs:588#parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::error("
+usage = "crates/lash-sim/src/runner/contract_support.rs:586#parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::error("
 
 [[api]]
 symbol = "lash_core::facade_support::sort_trigger_delivery_reservations"
@@ -76059,7 +76154,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:11153#probe_slot.set_for_session("
+usage = "crates/lash-restate/src/tests.rs:11170#probe_slot.set_for_session("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -77725,8 +77820,8 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:721#assert_eq!(tool_id.as_str(), \"tool:batch\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:721#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]
 symbol = "lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"
@@ -77735,8 +77830,8 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:722#assert_eq!(leaf_source_id, \"plugins\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:722#assert_eq!(leaf_source_id, \"plugins\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:773#assert_eq!(leaf_source_id, \"plugins\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:773#assert_eq!(leaf_source_id, \"plugins\");"
 
 [[api]]
 symbol = "lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::tool_id"
@@ -77745,8 +77840,8 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::tool_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:721#assert_eq!(tool_id.as_str(), \"tool:batch\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:721#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+usage = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+assertion = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]
 symbol = "lash_core::facade_support::ReconfigureError::UnknownSource"
@@ -78164,7 +78259,7 @@ aliases = ["lash_core::ToolDefinition::contract"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:473#definition_for(&slug, &summary.display_name, operation).contract(),"
-assertion = "examples/agent-workbench/src/mail.rs:748#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
+assertion = "examples/agent-workbench/src/mail.rs:728#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
 
 [[api]]
 symbol = "lash::tools::ToolDefinition::manifest"
@@ -78173,7 +78268,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::manifest"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:203#let manifest: ToolManifest = ToolDefinition::manifest(&definition);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:231#let manifest: ToolManifest = ToolDefinition::manifest(&definition);"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -80050,42 +80145,6 @@ disposition = "unused-justify"
 reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
 
 [[api]]
-symbol = "lash::tools::AttemptToolCall"
-kind = "struct"
-aliases = ["lash_core::AttemptToolCall"]
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
-
-[[api]]
-symbol = "lash::tools::AttemptToolCall::args"
-kind = "field"
-aliases = ["lash_core::AttemptToolCall::args"]
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
-
-[[api]]
-symbol = "lash::tools::AttemptToolCall::context"
-kind = "field"
-aliases = ["lash_core::AttemptToolCall::context"]
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
-
-[[api]]
-symbol = "lash::tools::AttemptToolCall::name"
-kind = "field"
-aliases = ["lash_core::AttemptToolCall::name"]
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
-
-[[api]]
 symbol = "lash::tools::CancelProcessIntent"
 kind = "struct"
 aliases = ["lash_core::CancelProcessIntent"]
@@ -80173,8 +80232,8 @@ aliases = ["lash_core::EmitTriggerIntent"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
-assertion = "examples/agent-workbench/src/mail.rs:660#assert_eq!(declared.session_id, \"session-1\");"
+usage = "examples/agent-workbench/src/mail.rs:641#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:640#assert_eq!(declared.session_id, \"session-1\");"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80185,7 +80244,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:268#request: TriggerOccurrenceRequest::new("
-assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:641#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80196,7 +80255,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:267#session_id: session_id.to_string(),"
-assertion = "examples/agent-workbench/src/mail.rs:660#assert_eq!(declared.session_id, \"session-1\");"
+assertion = "examples/agent-workbench/src/mail.rs:640#assert_eq!(declared.session_id, \"session-1\");"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80515,8 +80574,8 @@ aliases = ["lash_core::ToolIntent::EmitTrigger"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
-assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+usage = "examples/agent-workbench/src/mail.rs:636#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:641#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80527,7 +80586,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:266#let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {"
-assertion = "examples/agent-workbench/src/mail.rs:661#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:641#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80671,15 +80730,6 @@ reason = "Host extension contract for attempt-pure tool providers and durable in
 symbol = "lash::tools::ToolProvider::execute_granted_attempt"
 kind = "function"
 aliases = ["lash_core::ToolProvider::execute_granted_attempt"]
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Host extension contract for attempt-pure tool providers and durable intent executors; examples do not implement third-party providers or runtime hosts."
-
-[[api]]
-symbol = "lash::tools::ToolProvider::supports_attempt_context"
-kind = "function"
-aliases = ["lash_core::ToolProvider::supports_attempt_context"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
@@ -80944,8 +80994,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
-assertion = "examples/agent-workbench/src/mail.rs:656#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+usage = "examples/agent-workbench/src/mail.rs:636#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:636#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -81598,6 +81648,14 @@ disposition = "unused-justify"
 reason = "Runtime host contract carrying the recorded child process identity and Cancel or Abandon policy until durable parent completion."
 
 [[api]]
+symbol = "lash::tools::StaticToolExecute::attempt_may_defer"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Tool-provider integrator contract declaring that a static tool may park; the coordinator reserves a completion key only for declared deferrers, and examples ship no parking static tool."
+
+[[api]]
 symbol = "lash::tools::StaticToolExecute::execute_attempt"
 kind = "function"
 availability = "default+all-features"
@@ -82147,14 +82205,6 @@ disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
 assertion = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
-
-[[api]]
-symbol = "lash::tools::StaticToolExecute::supports_attempt_context"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Tool-provider integrator contract for deterministic process-replay orchestration; examples do not implement third-party orchestrating providers."
 
 [[api]]
 symbol = "lash::plugins::PluginSpec::with_orchestrating_tool"

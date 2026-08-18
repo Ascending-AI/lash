@@ -1,0 +1,41 @@
+error[E0599]: no method named `triggers` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/tool_call_context_is_journal_incapable.rs:5:26
+  |
+5 |     let _ = call.context.triggers();
+  |                          ^^^^^^^^ method not found in `&AttemptContext<'_>`
+
+error[E0599]: no method named `process_events` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/tool_call_context_is_journal_incapable.rs:6:26
+  |
+6 |     let _ = call.context.process_events();
+  |                          ^^^^^^^^^^^^^^
+  |
+help: there is a method `processes` with a similar name
+  |
+6 -     let _ = call.context.process_events();
+6 +     let _ = call.context.processes();
+  |
+
+error[E0599]: no method named `dispatch` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/tool_call_context_is_journal_incapable.rs:7:26
+  |
+7 |     let _ = call.context.dispatch();
+  |                          ^^^^^^^^ method not found in `&AttemptContext<'_>`
+
+error[E0599]: no method named `process_admin` found for reference `&AttemptContext<'_>` in the current scope
+ --> tests/ui/tool_call_context_is_journal_incapable.rs:8:26
+  |
+8 |     let _ = call.context.process_admin();
+  |                          ^^^^^^^^^^^^^
+  |
+help: there is a method `processes` with a similar name
+  |
+8 -     let _ = call.context.process_admin();
+8 +     let _ = call.context.processes();
+  |
+
+error[E0599]: no method named `start_turn` found for struct `AttemptSessionReads` in the current scope
+ --> tests/ui/tool_call_context_is_journal_incapable.rs:9:37
+  |
+9 |     let _ = call.context.sessions().start_turn();
+  |                                     ^^^^^^^^^^ method not found in `AttemptSessionReads`

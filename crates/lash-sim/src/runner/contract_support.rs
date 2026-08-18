@@ -496,7 +496,7 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
             .and_then(Value::as_str)
             .unwrap_or("answer")
             .to_string();
-        let key = match call.context.completion_key().await {
+        let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => {
                 self.send_key_result(Err(err.to_string()));
@@ -504,7 +504,9 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
             }
         };
         self.increment_attempt_count();
-        let event = lash_core::ProcessEventAppendRequest::new(
+        // The attempt body cannot append process events. It declares the
+        // announcement instead, and the runtime appends it when the call parks.
+        let announcement = lash_core::PendingAnnouncement::new(
             "process.yield",
             json!({
                 "type": "work.input_request.opened",
@@ -512,14 +514,10 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
                 "question": question,
                 "await_key_id": key.key_id,
             }),
-        )
-        .with_replay_key("mock-input-request:request-1");
-        if let Err(err) = call.context.process_events().emit_request(event).await {
-            self.send_key_result(Err(err.to_string()));
-            return lash_core::ToolResult::err_fmt(err);
-        }
+            "mock-input-request:request-1",
+        );
         self.send_key_result(Ok(key));
-        lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
+        lash_core::ToolResult::pending(lash_core::PendingCompletion::new().announcing(announcement))
     }
 }
 

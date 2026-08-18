@@ -12,9 +12,10 @@ use lash_core::llm::types::{
 };
 use lash_core::testing::TestProvider;
 use lash_core::{
-    Resolution, ToolContract, ToolDefinition, ToolManifest, ToolOutputContract, ToolProvider,
-    ToolResult, TriggerOccurrenceRequest, facade_support::DirectJsonSchema,
-    facade_support::DirectRequest, facade_support::empty_trigger_source_key,
+    Resolution, ToolAttemptResult, ToolContract, ToolDefinition, ToolManifest, ToolOutputContract,
+    ToolProvider, ToolResult, ToolResultDone, TriggerOccurrenceRequest,
+    facade_support::DirectJsonSchema, facade_support::DirectRequest,
+    facade_support::empty_trigger_source_key,
 };
 #[cfg(test)]
 use lash_lashlang_runtime::tool_lashlang_binding;
@@ -297,7 +298,9 @@ impl ToolProvider for BenchmarkWorkbenchMailTool {
             ));
         };
         match operation {
-            "send" => execute_benchmark_mail_send(call, account).await,
+            "send" => ToolResult::err_fmt(
+                "benchmark mail send requires the leaf attempt signature that declares its emission",
+            ),
             "list" => ToolResult::ok(serde_json::json!({
                 "account": account,
                 "messages": [],
@@ -305,12 +308,40 @@ impl ToolProvider for BenchmarkWorkbenchMailTool {
             _ => ToolResult::err_fmt(format_args!("unsupported mail operation `{operation}`")),
         }
     }
+
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptResult {
+        let Some((account, operation)) = benchmark_mail_route(call.name) else {
+            return done_without_intents(ToolResult::err_fmt(format_args!(
+                "Unknown benchmark workbench mail tool: {}",
+                call.name
+            )));
+        };
+        match operation {
+            "send" => execute_benchmark_mail_send(call, account),
+            _ => done_without_intents(self.execute(call).await),
+        }
+    }
 }
 
-async fn execute_benchmark_mail_send(
+fn done_without_intents(result: ToolResult) -> ToolAttemptResult {
+    match result {
+        ToolResult::Done(output) => {
+            ToolAttemptResult::done_without_intents(ToolResultDone::from_output(*output))
+        }
+        ToolResult::Pending(pending) => ToolAttemptResult::pending(pending),
+    }
+}
+
+/// Commit the send receipt and declare the `mail.received` emission it owes.
+///
+/// The emission is a journaled trigger occurrence, so it cannot run inside the
+/// recorded attempt body: it is declared here and executed by the intent
+/// executor once the attempt commits. The named phase therefore spans the
+/// declaration the attempt owns, not the router-side delivery that follows it.
+fn execute_benchmark_mail_send(
     call: lash_core::ToolCall<'_>,
     account: &'static str,
-) -> ToolResult {
+) -> ToolAttemptResult {
     let title = call
         .args
         .get("title")
@@ -322,11 +353,13 @@ async fn execute_benchmark_mail_send(
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
     let Some(replay_key) = call.context.replay_key() else {
-        return ToolResult::err_fmt("benchmark mail send requires a replay key");
+        return done_without_intents(ToolResult::err_fmt(
+            "benchmark mail send requires a replay key",
+        ));
     };
     let source_key = match empty_trigger_source_key(BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE) {
         Ok(source_key) => source_key,
-        Err(err) => return ToolResult::err_fmt(err.to_string()),
+        Err(err) => return done_without_intents(ToolResult::err_fmt(err.to_string())),
     };
     let message_id = format!("{account}-{replay_key}");
     let payload = serde_json::json!({
@@ -336,26 +369,23 @@ async fn execute_benchmark_mail_send(
     });
     let idempotency_key = format!("{replay_key}:mail.received:{account}");
     let _phase = call.context.named_phase("trigger.occurrence_to_delivery");
-    if let Err(err) = call
-        .context
-        .triggers()
-        .emit(
-            TriggerOccurrenceRequest::new(
-                BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
-                source_key,
-                payload,
-                idempotency_key,
-            )
-            .with_source(serde_json::json!({})),
+    let intent = lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
+        session_id: call.context.session_id().to_string(),
+        request: TriggerOccurrenceRequest::new(
+            BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
+            source_key,
+            payload,
+            idempotency_key,
         )
-        .await
-    {
-        return ToolResult::err_fmt(err.to_string());
-    }
-    ToolResult::ok(serde_json::json!({
-        "account": account,
-        "id": message_id,
-    }))
+        .with_source(serde_json::json!({})),
+    });
+    ToolAttemptResult::done(
+        ToolResultDone::ok(serde_json::json!({
+            "account": account,
+            "id": message_id,
+        })),
+        lash_core::ToolIntents::v1(vec![intent]),
+    )
 }
 
 pub(crate) const BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE: &str = "mail.received";
@@ -479,7 +509,7 @@ async fn execute_benchmark_async(
     completion_resolver: Arc<dyn lash_core::EffectHost>,
     call: lash_core::ToolCall<'_>,
 ) -> ToolResult {
-    let key = match call.context.completion_key().await {
+    let key = match call.context.completion_key() {
         Ok(key) => key,
         Err(err) => return ToolResult::err_fmt(err),
     };

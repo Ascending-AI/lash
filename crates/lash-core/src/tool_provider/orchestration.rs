@@ -48,6 +48,25 @@ impl<'run> OrchestrationContext<'run> {
         crate::tool_dispatch::resolve_callable_manifest(dispatch, name)
     }
 
+    /// Session administration for a runtime-owned orchestrating body.
+    ///
+    /// Journal-capable session work — child sessions and managed turns — lives
+    /// in this lane. A recorded leaf attempt receives
+    /// [`crate::AttemptContext`], which has no route to it.
+    pub fn sessions(&self) -> super::ToolSessionAdmin<'run> {
+        self.context.sessions()
+    }
+
+    /// Trigger emission for a runtime-owned orchestrating body.
+    ///
+    /// Emission reserves and starts deliveries through the effect controller,
+    /// which a recorded leaf attempt cannot do: it declares
+    /// [`crate::ToolIntent::EmitTrigger`] instead and the intent executor emits
+    /// after the attempt commits.
+    pub fn triggers(&self) -> super::ToolTriggerClient<'run> {
+        self.context.triggers()
+    }
+
     pub async fn start_process(
         &self,
         request: crate::ProcessStartRequest,

@@ -1359,7 +1359,7 @@ impl ToolProvider for PendingAppTools {
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
         assert_eq!(call.name, "app_lookup");
-        let key = match call.context.completion_key().await {
+        let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return lash_core::ToolResult::err_fmt(err),
         };
@@ -1489,7 +1489,7 @@ impl ToolProvider for DurableInputTools {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("answer")
             .to_string();
-        let key = match call.context.completion_key().await {
+        let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => {
                 self.send_key_result(Err(err.to_string()));
@@ -1497,7 +1497,9 @@ impl ToolProvider for DurableInputTools {
             }
         };
         self.attempt_count.fetch_add(1, Ordering::SeqCst);
-        let event = lash_core::ProcessEventAppendRequest::new(
+        // The attempt body cannot append process events. It declares the
+        // announcement instead, and the runtime appends it when the call parks.
+        let announcement = lash_core::PendingAnnouncement::new(
             "process.yield",
             serde_json::json!({
                 "type": "work.input_request.opened",
@@ -1505,14 +1507,10 @@ impl ToolProvider for DurableInputTools {
                 "question": question,
                 "await_key_id": key.key_id,
             }),
-        )
-        .with_replay_key("mock-input-request:request-1");
-        if let Err(err) = call.context.process_events().emit_request(event).await {
-            self.send_key_result(Err(err.to_string()));
-            return lash_core::ToolResult::err_fmt(err);
-        }
+            "mock-input-request:request-1",
+        );
         self.send_key_result(Ok(key));
-        lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
+        lash_core::ToolResult::pending(lash_core::PendingCompletion::new().announcing(announcement))
     }
 }
 

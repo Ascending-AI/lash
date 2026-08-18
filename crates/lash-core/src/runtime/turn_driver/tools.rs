@@ -73,7 +73,7 @@ impl RuntimeTurnDriver<'_> {
                     .map(|(_, prepared)| prepared.clone())
                     .collect(),
             );
-            let outcome = self
+            let mut outcome = self
                 .execute_typed_turn_effect(
                     machine,
                     event_tx,
@@ -85,6 +85,10 @@ impl RuntimeTurnDriver<'_> {
                     RuntimeEffectOutcome::into_tool_batch_effect,
                 )
                 .await?;
+            // Trigger occurrences emitted inside the batch were drained into
+            // the recorded outcome; restore them so an enclosing effect
+            // boundary still observes them, on the local run and on replay.
+            prepare_context.restore_tool_trigger_outcomes(std::mem::take(&mut outcome.triggers));
             if outcome.launches.len() != prepared_entries.len() {
                 return Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::ToolBatchResultCountMismatch,

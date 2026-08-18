@@ -369,6 +369,65 @@ pub fn mock_tool_context_with_execution_binding(
     mock_tool_context().with_tool_execution_binding(binding)
 }
 
+/// Build the sealed leaf-attempt context every recorded tool body receives.
+///
+/// Tool bodies take [`crate::AttemptContext`], never [`crate::ToolContext`], so
+/// this is the context a unit test hands a provider's `execute` or
+/// `execute_attempt`.
+pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
+    mock_attempt_context_from(&mock_tool_context())
+}
+
+impl<'run> crate::AttemptContext<'run> {
+    /// Test-only projection of a mock tool context, with no reserved
+    /// completion key: a test harness is not the attempt coordinator.
+    #[doc(hidden)]
+    pub fn __for_testing(
+        context: &crate::ToolContext<'run>,
+        execution_scope_id: impl Into<String>,
+    ) -> Self {
+        Self::from_tool_context(
+            context,
+            execution_scope_id.into(),
+            None,
+            crate::tool_provider::AttemptCompletionSupport::NotDeclared,
+        )
+    }
+}
+
+/// Project an existing mock host context into the leaf-attempt context. Use
+/// this when the test also needs the host handles the [`mock_tool_context`]
+/// carries.
+pub fn mock_attempt_context_from<'run>(
+    context: &crate::ToolContext<'run>,
+) -> crate::AttemptContext<'run> {
+    crate::AttemptContext::from_tool_context(
+        context,
+        "test-turn".to_string(),
+        None,
+        crate::tool_provider::AttemptCompletionSupport::NotDeclared,
+    )
+}
+
+/// Like [`mock_attempt_context`], but with the grant execution binding
+/// populated, for provider tests that assert grant-only routing behavior.
+pub fn mock_attempt_context_with_execution_binding(
+    binding: serde_json::Value,
+) -> crate::AttemptContext<'static> {
+    mock_attempt_context_from(&mock_tool_context_with_execution_binding(binding))
+}
+
+/// Like [`mock_attempt_context`], but lets the caller supply the host.
+pub fn mock_attempt_context_with_host<T>(host: Arc<T>) -> crate::AttemptContext<'static>
+where
+    T: crate::plugin::SessionStateService
+        + crate::plugin::SessionLifecycleService
+        + crate::plugin::SessionGraphService
+        + 'static,
+{
+    mock_attempt_context_from(&mock_tool_context_with_host(host))
+}
+
 /// Like [`mock_tool_context`], but lets the caller supply the host. Useful
 /// when a tool reads from the host (snapshots, tool state, lifecycle hooks)
 /// and the test wants to assert against captured interactions.
@@ -1231,7 +1290,8 @@ pub async fn run_tool<P>(tool: &P, name: &str, args: &serde_json::Value) -> crat
 where
     P: crate::ToolProvider + ?Sized,
 {
-    let context = mock_tool_context();
+    let host = mock_tool_context();
+    let context = mock_attempt_context_from(&host);
     tool.execute(crate::ToolCall {
         name,
         args,
@@ -1765,7 +1825,7 @@ mod test_protocol_fakes {
                 reg.execution().code_executor(code_executor.clone())?;
             }
             if self.include_batch {
-                reg.tools().provider(Arc::new(TestProtocolTools))?;
+                reg.tools().orchestrating(test_batch_orchestrating_tool())?;
             }
             reg.protocol()
                 .protocol_driver(Arc::new(TestProtocolDriver))?;
@@ -1834,23 +1894,42 @@ mod test_protocol_fakes {
         })
     }
 
-    struct TestProtocolTools;
+    /// The test `batch` tool registers in the runtime-owned orchestration lane,
+    /// exactly like `lash-protocol-standard`'s: nesting tool dispatch is not
+    /// something a recorded leaf attempt can do.
+    fn test_batch_orchestrating_tool() -> crate::tool_provider::orchestration::OrchestratingToolDef
+    {
+        let implementation: Arc<
+            dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
+        > = Arc::new(TestProtocolBatchTool);
+        // SAFETY: lash-core owns this test-only batch contract and its body.
+        unsafe {
+            crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(
+                implementation,
+            )
+        }
+    }
+
+    struct TestProtocolBatchTool;
 
     #[async_trait]
-    impl crate::ToolProvider for TestProtocolTools {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-            vec![test_batch_tool_definition().manifest()]
+    impl crate::tool_provider::orchestration::OrchestratingToolImplementation
+        for TestProtocolBatchTool
+    {
+        fn manifest(&self) -> crate::ToolManifest {
+            test_batch_tool_definition().manifest()
         }
 
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-            (name == "batch").then(|| Arc::new(test_batch_tool_definition().contract()))
+        fn contract(&self) -> Arc<crate::ToolContract> {
+            Arc::new(test_batch_tool_definition().contract())
         }
 
-        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
-            match call.name {
-                "batch" => execute_test_batch(call.context, call.args).await,
-                _ => crate::ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
-            }
+        async fn execute(
+            &self,
+            args: &serde_json::Value,
+            context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
+        ) -> crate::ToolResult {
+            execute_test_batch(context, args).await
         }
     }
 
@@ -1890,7 +1969,7 @@ mod test_protocol_fakes {
     /// Minimal batch executor used by lash's own tests (mirrors the
     /// behavior of `lash-protocol-standard`'s `execute_batch_tool_call`).
     async fn execute_test_batch(
-        context: &crate::ToolContext<'_>,
+        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
         args: &serde_json::Value,
     ) -> crate::ToolResult {
         const MAX: usize = 25;
@@ -1903,7 +1982,6 @@ mod test_protocol_fakes {
 
         let mut results = Vec::new();
         let mut parallel_specs = Vec::new();
-        let dispatch = context.dispatch();
         for (index, item) in raw_calls.iter().enumerate().take(MAX) {
             let Some(obj) = item.as_object() else {
                 return crate::ToolResult::err_fmt(format_args!(
@@ -1934,7 +2012,7 @@ mod test_protocol_fakes {
                 .get("parameters")
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
-            let Some(manifest) = dispatch.callable_tool_manifest(tool) else {
+            let Some(manifest) = context.callable_tool_manifest(tool) else {
                 results.push(serde_json::json!({
                     "index": index,
                     "tool": tool,
@@ -1950,8 +2028,8 @@ mod test_protocol_fakes {
             ));
         }
 
-        let outcomes = dispatch
-            .batch(
+        let outcomes = context
+            .call_tool_batch(
                 parallel_specs
                     .iter()
                     .map(|(_, invocation)| invocation.clone())

@@ -39,7 +39,7 @@ mod tests {
         if matches!(name, "start_command" | "write_stdin") {
             let attempt = lash_core::AttemptContext::__for_testing(context, "shell-test-scope");
             let outcome = shell
-                .execute_attempt(AttemptToolCall {
+                .execute_attempt(ToolCall {
                     name,
                     args,
                     context: &attempt,
@@ -73,7 +73,7 @@ mod tests {
             .execute(ToolCall {
                 name,
                 args,
-                context,
+                context: &lash_core::AttemptContext::__for_testing(context, "shell-test-scope"),
             })
             .await
     }
@@ -763,7 +763,7 @@ mod tests {
         );
         let attempt = lash_core::AttemptContext::__for_testing(&context, "shell-intent-scope");
         let start = shell
-            .execute_attempt(AttemptToolCall {
+            .execute_attempt(ToolCall {
                 name: "start_command",
                 args: &json!({"cmd": "sleep 30", "detach": true}),
                 context: &attempt,
@@ -802,7 +802,7 @@ mod tests {
         assert_eq!(intent.request.wake_session_id, None);
 
         let tracked = shell
-            .execute_attempt(AttemptToolCall {
+            .execute_attempt(ToolCall {
                 name: "start_command",
                 args: &json!({"cmd": "cat"}),
                 context: &attempt,
@@ -825,7 +825,7 @@ mod tests {
         );
 
         let write = shell
-            .execute_attempt(AttemptToolCall {
+            .execute_attempt(ToolCall {
                 name: "write_stdin",
                 args: &json!({
                     "process_id": "literal-shell-process",
@@ -1853,7 +1853,7 @@ mod tests {
             .execute(ToolCall {
                 name: "exec_command",
                 args: &args,
-                context: &ctx,
+                context: &lash_core::AttemptContext::__for_testing(&ctx, "shell-test-scope"),
             })
             .await;
         let elapsed = started.elapsed();

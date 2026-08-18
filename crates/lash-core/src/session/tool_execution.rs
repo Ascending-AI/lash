@@ -726,7 +726,7 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
-    fn restore_tool_trigger_outcomes(
+    pub(crate) fn restore_tool_trigger_outcomes(
         &self,
         outcomes: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
     ) {

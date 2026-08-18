@@ -113,6 +113,10 @@ mod tests {
         .build()
     }
 
+    fn test_attempt_context() -> crate::AttemptContext<'static> {
+        crate::testing::mock_attempt_context_from(&test_tool_context())
+    }
+
     #[tokio::test]
     async fn internal_execution_route_refuses_non_internal_activation() {
         let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
@@ -237,7 +241,7 @@ mod tests {
             &self,
             _tool: &str,
             _args: &serde_json::Value,
-            _context: &ToolContext<'_>,
+            _context: &crate::AttemptContext<'_>,
         ) -> ToolResult {
             ToolResult::err_fmt("orchestrating source cannot execute through the leaf route")
         }
@@ -386,7 +390,7 @@ mod tests {
         );
 
         let leaf_route = registry
-            .execute_by_id(&tool_id("batch"), &json!({}), &test_tool_context())
+            .execute_by_id(&tool_id("batch"), &json!({}), &test_attempt_context())
             .await;
         assert!(
             !leaf_route.is_success(),
@@ -517,7 +521,7 @@ mod tests {
             &self,
             tool: &str,
             args: &serde_json::Value,
-            _context: &ToolContext<'_>,
+            _context: &crate::AttemptContext<'_>,
         ) -> ToolResult {
             ToolResult::ok(json!({
                 "tool": tool,
@@ -586,7 +590,7 @@ mod tests {
             &self,
             tool: &str,
             _args: &serde_json::Value,
-            context: &ToolContext<'_>,
+            context: &crate::AttemptContext<'_>,
         ) -> ToolResult {
             self.executions.fetch_add(1, Ordering::SeqCst);
             if let Some(bindings) = &self.observed_execution_bindings {
@@ -636,7 +640,7 @@ mod tests {
             &self,
             tool: &str,
             _args: &serde_json::Value,
-            _context: &ToolContext<'_>,
+            _context: &crate::AttemptContext<'_>,
         ) -> ToolResult {
             ToolResult::ok(json!(tool))
         }
@@ -908,7 +912,7 @@ mod tests {
             let captured = Arc::clone(&captured);
             async move {
                 let args = json!({});
-                let context = test_tool_context();
+                let context = test_attempt_context();
                 captured
                     .execute(ToolCall {
                         name: "blocking_live",
@@ -1163,7 +1167,7 @@ mod tests {
             .execute_by_id(
                 &tool_id("dynamic_two"),
                 &json!({}),
-                &test_tool_context(),
+                &test_attempt_context(),
             )
             .await;
         assert!(result.is_success(), "new live tool executes: {result:?}");
@@ -1191,7 +1195,7 @@ mod tests {
             .execute_by_id(
                 &tool_id("dynamic_two"),
                 &json!({}),
-                &test_tool_context(),
+                &test_attempt_context(),
             )
             .await;
         assert!(result.is_success(), "forked live tool executes: {result:?}");
@@ -1221,7 +1225,7 @@ mod tests {
             .execute_by_id(
                 &tool_id("dynamic_two"),
                 &json!({}),
-                &test_tool_context(),
+                &test_attempt_context(),
             )
             .await;
         assert!(
@@ -1258,7 +1262,7 @@ mod tests {
         assert_eq!(manifest_resolutions.load(Ordering::SeqCst), 1);
         assert_eq!(contract_resolutions.load(Ordering::SeqCst), 1);
 
-        let context = test_tool_context();
+        let context = test_attempt_context();
         let args = json!({});
         let result = registry
             .execute(crate::ToolCall {
@@ -1327,7 +1331,9 @@ mod tests {
             .expect("grant prepare");
         assert_eq!(prepared.tool_id, grant.manifest.id);
 
-        let context = test_tool_context().with_tool_execution_binding(grant.execution_binding.clone());
+        let context = crate::testing::mock_attempt_context_from(
+            &test_tool_context().with_tool_execution_binding(grant.execution_binding.clone()),
+        );
         let args = json!({});
         let result = registry.execute_granted(&grant, &args, &context).await;
         assert!(result.is_success());
@@ -1365,7 +1371,7 @@ mod tests {
             "host_only",
             "host-only",
         ));
-        let context = test_tool_context();
+        let context = test_attempt_context();
         let args = json!({});
         let result = registry.execute_granted(&grant, &args, &context).await;
 
@@ -1439,7 +1445,7 @@ mod tests {
         ))
         .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
 
-        let context = test_tool_context();
+        let context = test_attempt_context();
         let args = json!({});
         let result = registry.execute_granted(&grant, &args, &context).await;
 
@@ -1469,7 +1475,7 @@ mod tests {
         let defs = registry.tool_manifests();
         assert!(defs.iter().any(|def| def.name == "mcp__demo__search"));
 
-        let context = test_tool_context();
+        let context = test_attempt_context();
         let args = json!({ "query": "hello" });
         let result = registry
             .execute(crate::ToolCall {
@@ -1604,7 +1610,7 @@ mod tests {
         assert!(!entry.is_member(), "orphans are never catalog members");
 
         // Execution fails loudly with a precise error.
-        let context = test_tool_context();
+        let context = test_attempt_context();
         let args = json!({ "query": "hello" });
         let result = target
             .execute(crate::ToolCall {
@@ -1641,7 +1647,7 @@ mod tests {
         assert!(target.is_orchestrating_tool(&tool_id("mock_tool")));
 
         let orphan_result = target
-            .execute_by_id(&tool_id("mock_tool"), &json!({}), &test_tool_context())
+            .execute_by_id(&tool_id("mock_tool"), &json!({}), &test_attempt_context())
             .await;
         assert!(
             !orphan_result.is_success(),
@@ -1660,7 +1666,7 @@ mod tests {
             "the rebound kind comes from the legitimate live source"
         );
         let rebound = target
-            .execute_by_id(&tool_id("mock_tool"), &json!({}), &test_tool_context())
+            .execute_by_id(&tool_id("mock_tool"), &json!({}), &test_attempt_context())
             .await;
         assert!(rebound.is_success(), "the legitimate leaf executes");
         assert_eq!(rebound.value_for_projection(), json!("ok"));
@@ -1692,7 +1698,7 @@ mod tests {
             "the rebound tool is a catalog member again"
         );
 
-        let context = test_tool_context();
+        let context = test_attempt_context();
         let args = json!({ "query": "hello" });
         let result = target
             .execute(crate::ToolCall {
@@ -1803,7 +1809,7 @@ mod tests {
             .execute_by_id(
                 &tool_id("host_only"),
                 &json!({}),
-                &test_tool_context(),
+                &test_attempt_context(),
             )
             .await;
 
