@@ -39,6 +39,10 @@ name = "slack-clone-mcp-server"
 path = "src/bin/mcp_server.rs"
 
 [[bin]]
+name = "slack-clone-mcp-http-server"
+path = "src/bin/mcp_http_server.rs"
+
+[[bin]]
 name = "slack-clone-live-e2e"
 path = "src/bin/live_e2e.rs"
 required-features = ["live-e2e"]
@@ -61,7 +65,13 @@ lash-sqlite-store = { workspace = true }
 # `form` is not optional here: Slack accepts form-encoded bodies for every Web
 # API method and JSON for only some, so the client's default encoding is form.
 reqwest = { workspace = true, features = ["json", "rustls", "http2", "form"] }
-rmcp = { workspace = true, features = ["elicitation", "macros", "server", "transport-io"] }
+rmcp = { workspace = true, features = [
+    "elicitation",
+    "macros",
+    "server",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }

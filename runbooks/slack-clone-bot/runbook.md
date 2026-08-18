@@ -115,9 +115,10 @@ three are correct. The answer key is **counts, typed dispositions, and typed pro
 ## Working material
 
 - Require `OPENROUTER_API_KEY` (environment or repo `.env`; the platform needs no key).
-  Boot both processes on a dedicated port with all state outside the repo:
+  Boot the processes on a dedicated port with all state outside the repo:
   `SLACK_CLONE_STATE_DIR=<scratch> SLACK_CLONE_OPEN=0 bash scripts/slack-clone-dev.sh up --port <p>`.
-  The **bot port is `<p> + 1`**, and state lands under
+  The **bot port is `<p> + 1`** and the **HTTP MCP server's is `<p> + 2`**
+  (unattached until phase 3M-A), and state lands under
   `<scratch>/<host>_<p>/{platform,bot}` with logs in `<scratch>/run/`. Gate both
   `GET /healthz` endpoints. Teardown on success or Abort:
   `bash scripts/slack-clone-dev.sh down --port <p>`.
@@ -261,6 +262,57 @@ Poll until exactly one new bot reply renders, then require:
 Require the bot process log to contain `MCP URL elicitation completed` with
 `slack-clone-demo-url-1`. Screenshot `03M-mcp-depth-both-tabs.png` and save
 `03M-session-tool-results.json` and `03M-url-completion.txt`.
+
+### Phase 3M-A — an integration attached while the bot serves
+
+`scripts/slack-clone-dev.sh up` also starts the HTTP-served MCP server on
+platform port + 2. The bot does **not** wire it at boot: it is an integration an
+operator attaches over the bot's own admin API, which is the point of this
+sub-phase — nothing the model can call reaches that API, so growing the tool
+catalog stays an operator act. The mechanics (a connected status row, the
+attachment write, an emptied catalog after detach) are proven headlessly by
+[`slack-clone-deterministic`](../slack-clone-deterministic/runbook.md); what
+survives here is the model half.
+
+Attach it, using the bot's operator credential as the admin bearer:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:$((p + 1))/admin/mcp/servers" \
+  -H "authorization: Bearer ${SLACK_CLONE_ADMIN_TOKEN:-slack-clone-dev-admin}" \
+  -H 'content-type: application/json' \
+  -d "{\"name\":\"workspace_http\",\"url\":\"http://127.0.0.1:$((p + 2))/mcp\",\"token\":\"${SLACK_CLONE_MCP_HTTP_TOKEN:-slack-clone-mcp-http-dev-token}\"}"
+```
+
+The response must report `"connected": true` with the five
+`mcp__workspace_http__*` tools. As **B**, post one message mentioning the bot and
+asking it for the workspace badge — **without naming the tool**. Then require:
+
+- **Layer 3:** the committed tool result for `mcp__workspace_http__workspace_badge`
+  carries an attachment whose `source.source` is `stored`, and the host's
+  attachment store under `<bot data dir>/lash/attachments` holds a file of
+  exactly that `byte_len`. The bytes are the server's, persisted by the host
+  because this server was attached with binary-content attachments on.
+- **Layer 4:** exactly **one** new `turn_completed` and a successful
+  `tool_call_started`/`tool_call_completed` pair for that exact tool name.
+- **Judged:** the model reached for a tool that did not exist when the session's
+  first turn ran. That it found it is the claim; the wording is not gated.
+
+Now detach it and ask again, in a new mention, whether the badge tool is still
+available:
+
+```bash
+curl -sS -X DELETE "http://127.0.0.1:$((p + 1))/admin/mcp/servers/workspace_http" \
+  -H "authorization: Bearer ${SLACK_CLONE_ADMIN_TOKEN:-slack-clone-dev-admin}"
+```
+
+- **Layer 3/4:** the new turn contains **no** `mcp__workspace_http__*` tool
+  record, and `GET /admin/mcp/servers` lists no `workspace_http` row.
+- **Judged:** the reply says the capability is gone rather than inventing a
+  badge. A model that fabricates the badge after detach fails this phase.
+
+Screenshot `03MA-attached-both-tabs.png` and `03MA-detached-both-tabs.png`; save
+`03MA-attach-status.json`, `03MA-session-tool-results.json`, and
+`03MA-after-detach-servers.json`.
 
 ## Phase 3T — Human B opens a thread: inherited context, one threaded reply, no channel leak
 
@@ -484,7 +536,8 @@ comparison, on a surface that is behaving correctly.
 
 ## Phase 8 — Teardown and score
 
-Run `bash scripts/slack-clone-dev.sh down --port <p>` and confirm both processes are gone.
+Run `bash scripts/slack-clone-dev.sh down --port <p>` and confirm all three processes are
+gone — platform, bot, and HTTP MCP server.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
@@ -500,6 +553,9 @@ Run `bash scripts/slack-clone-dev.sh down --port <p>` and confirm both processes
 | Tool loop ran | `tool_call_started`/`completed` pair; exactly one `turn_completed` | | layer-4 extract |
 | MCP client depth | four host-owned results committed; four exact tool names, `batch` envelope unwrapped; one `turn_completed` | | `03M-session-tool-results.json`, `03M-url-completion.txt` |
 | MCP sampling is the host's | sampled model id equals the bot's configured provider model | | `03M-session-tool-results.json` |
+| Integration attached at runtime | attach reports `connected` with five `mcp__workspace_http__*` tools; the model calls one it was not booted with | | `03MA-attach-status.json`, `03MA-attached-both-tabs.png` |
+| Binary MCP content is stored | the committed result carries a `stored` attachment and the host attachment store holds the bytes | | `03MA-session-tool-results.json` |
+| Detach removes the capability | no `mcp__workspace_http__*` record in the later turn; the operator view is empty; the reply admits the loss | | `03MA-after-detach-servers.json`, `03MA-detached-both-tabs.png` |
 | Thread fork | deterministic child session with retained channel ancestry | | `03T-thread-both-tabs.png`, layer-3 extract |
 | Thread inheritance | reply uses the pre-fork ambient fact; post-fork marker absent from the ancestor chain named by `fork_lineage` and from the committed thread transcript | | phase-3T transcript extract |
 | Thread root recall | the child names the thread root, not the later room mention; the seeded root line appears exactly once in the child's committed transcript, starting its own line | | `03T-thread-both-tabs.png`, phase-3T transcript extract |

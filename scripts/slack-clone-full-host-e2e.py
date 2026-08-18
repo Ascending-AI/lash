@@ -55,6 +55,12 @@ class Journey:
         self.args = args
         self.base = f"http://127.0.0.1:{args.port}"
         self.bot_base = f"http://127.0.0.1:{args.port + 1}"
+        # The HTTP MCP server is a third process the bot does not know about at
+        # boot: it only exists in this journey once an operator attaches it.
+        self.mcp_http_url = f"http://127.0.0.1:{args.port + 2}/mcp"
+        self.mcp_http_server = "workspace_http"
+        self.admin_token = "slack-clone-dev-admin"
+        self.mcp_http_token = "slack-clone-mcp-http-dev-token"
         self.state_key = f"127.0.0.1_{args.port}"
         self.data_root = args.state_dir / self.state_key
         self.platform_db = self.data_root / "platform" / "workspace.db"
@@ -63,6 +69,7 @@ class Journey:
             self.data_root / "bot" / "lash" / "lash-sessions" / "durable-core.db"
         )
         self.trace_path = self.data_root / "bot" / "lash" / "trace.jsonl"
+        self.attachments_dir = self.data_root / "bot" / "lash" / "attachments"
         self.bot_log = args.state_dir / "run" / f"bot-{self.state_key}.log"
         self.bot_pid_file = args.state_dir / "run" / f"bot-{self.state_key}.pid"
         self.provider_log = args.state_dir / "provider" / "provider-requests.jsonl"
@@ -696,6 +703,117 @@ class Journey:
         self.screenshot("06-mcp-depth")
         self.write_extract("06-mcp-depth")
 
+    def admin(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        body: Any | None = None,
+    ) -> Any:
+        return self.http_json(
+            f"{self.bot_base}{path}",
+            method=method,
+            body=body,
+            headers={"authorization": f"Bearer {self.admin_token}"},
+        )
+
+    def provider_requests_for(self, marker: str, *, without: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+        """Provider requests whose transcript reached `marker` but not `without`.
+
+        A marker stays in the transcript once it is said, so a later turn's
+        request still carries the earlier turn's marker. `without` is what keeps
+        "the catalog while the server was attached" from silently including the
+        request made after it was detached.
+        """
+        lines = self.provider_log.read_text(encoding="utf-8", errors="replace").splitlines()
+        requests = []
+        for line in lines:
+            if marker not in line or any(excluded in line for excluded in without):
+                continue
+            try:
+                requests.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return requests
+
+    @staticmethod
+    def offered_tools(request: dict[str, Any]) -> set[str]:
+        return {
+            tool.get("name")
+            for tool in request.get("tools") or []
+            if isinstance(tool, dict)
+        }
+
+    def stored_attachment_bytes(self) -> list[bytes]:
+        if not self.attachments_dir.exists():
+            return []
+        return [path.read_bytes() for path in self.attachments_dir.rglob("*") if path.is_file()]
+
+    def checkpoint_mcp_runtime_attach(self) -> None:
+        """Attach an MCP integration while the bot serves, use it, detach it."""
+        badge_tool = f"mcp__{self.mcp_http_server}__workspace_badge"
+        badge_bytes = b"slack-clone workspace badge v1\x00\x01\x02\x03"
+        before_turns = len(self.turn_traces())
+        before_main = len(self.history())
+        before_total = len(self.platform_rows())
+        before_bots = len([r for r in self.dom_rows(self.pages["ada"]) if r["bot"]])
+
+        attached = self.admin(
+            "/admin/mcp/servers",
+            method="POST",
+            body={
+                "name": self.mcp_http_server,
+                "url": self.mcp_http_url,
+                "token": self.mcp_http_token,
+            },
+        )
+
+        self.send_main(
+            self.pages["ada"],
+            f"<@{self.bot_user}> FIG1341-MCP-ATTACH fetch the workspace badge",
+        )
+        for page in self.pages.values():
+            expect(page.locator("#stream .msg.is-bot")).to_have_count(before_bots + 1, timeout=45_000)
+        attach_row = self.wait_ledger("FIG1341-MCP-ATTACH", "replied")
+
+        detached_ok = self.admin(
+            f"/admin/mcp/servers/{self.mcp_http_server}", method="DELETE"
+        ) == {"detached": self.mcp_http_server}
+        after_detach = self.admin("/admin/mcp/servers")
+
+        self.send_main(
+            self.pages["ada"],
+            f"<@{self.bot_user}> FIG1341-MCP-DETACHED is the badge tool still there",
+        )
+        for page in self.pages.values():
+            expect(page.locator("#stream .msg.is-bot")).to_have_count(before_bots + 2, timeout=45_000)
+        detached_row = self.wait_ledger("FIG1341-MCP-DETACHED", "replied")
+
+        # The binary half of the result is committed as its own typed
+        # `Attachment` part rather than inline JSON: the transcript carries a
+        # reference, and the bytes live in the host's attachment store.
+        session = self.session_snapshot()
+        attachments = []
+        for node in session["nodes"]:
+            value = json.loads(node["node_json"])
+            conversation = value.get("event", {}).get("Conversation", {})
+            for part in conversation.get("parts", []):
+                if part.get("kind") == "Attachment" and part.get("tool_name") == badge_tool:
+                    attachments.append(part["attachment"])
+        reference = attachments[0]["source"] if len(attachments) == 1 else {}
+        stored = self.stored_attachment_bytes()
+
+        self.gate("08-mcp-attach", "dom", "the attach turn and the post-detach turn each render exactly one reply in both contexts", all(len([r for r in self.dom_rows(p) if r["bot"]]) == before_bots + 2 and "workspace badge came back" in "\n".join(r["text"] for r in self.dom_rows(p)) for p in self.pages.values()), "08-mcp-attach-*.png")
+        self.gate("08-mcp-attach", "platform", "the platform stores both mentions and both attributed replies", len(self.history()) == before_main + 4 and len(self.platform_rows()) == before_total + 4 and all(any(row["event_id"] in (r["metadata_json"] or "") for r in self.platform_rows()) for row in (attach_row, detached_row)), "08-mcp-attach-four-layers.json")
+        self.gate("08-mcp-attach", "bot", "the operator attaches a connected server, its binary content is committed as one stored attachment reference whose exact bytes reach the host attachment store, and detaching leaves only the server the bot booted with", attached.get("connected") is True and badge_tool in (attached.get("tools") or []) and reference.get("source") == "stored" and reference.get("attachment_ref", {}).get("byte_len") == len(badge_bytes) and reference.get("attachment_ref", {}).get("media_type") == "application/octet-stream" and any(blob == badge_bytes for blob in stored) and detached_ok and [view["name"] for view in after_detach["servers"]] == ["slack_clone"], "08-mcp-attach-four-layers.json")
+        attach_turn = f"mention:{attach_row['event_id']}"
+        completions = self.traces_for_turn(attach_turn, "tool_call_completed")
+        offered_after_attach = [self.offered_tools(r) for r in self.provider_requests_for("FIG1341-MCP-ATTACH", without=("FIG1341-MCP-DETACHED",))]
+        offered_after_detach = [self.offered_tools(r) for r in self.provider_requests_for("FIG1341-MCP-DETACHED")]
+        self.gate("08-mcp-attach", "trace", "the attached tool succeeds inside one new turn while it is offered, and the catalog stops offering it after detach", len(self.turn_traces()) == before_turns + 2 and [self.trace_tool_name(record) for record in completions] == [badge_tool] and all(self.trace_tool_succeeded(record) for record in completions) and bool(offered_after_attach) and all(badge_tool in offered for offered in offered_after_attach) and bool(offered_after_detach) and not any(badge_tool in offered for offered in offered_after_detach), "08-mcp-attach-four-layers.json + provider-requests.jsonl")
+        self.screenshot("08-mcp-attach")
+        self.write_extract("08-mcp-attach")
+
     def normalized_dom(self, page: Page) -> list[tuple[str, bool, str]]:
         return [(row["ts"], row["bot"], row["text"]) for row in self.dom_rows(page)]
 
@@ -750,6 +868,7 @@ class Journey:
                 self.checkpoint_redelivery()
                 self.checkpoint_kill_restart()
                 self.checkpoint_mcp_depth()
+                self.checkpoint_mcp_runtime_attach()
                 self.checkpoint_reload()
             except Exception:
                 for name, page in self.pages.items():

@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use lash::persistence::LeaseOwnerIdentity;
@@ -25,7 +26,7 @@ use super::slack_api::SlackApi;
 use super::tools;
 use crate::mcp_server::{API_BASE_URL_ENV, BOT_TOKEN_ENV};
 
-const DEMO_MCP_SERVER_NAME: &str = "slack_clone";
+const DEMO_MCP_SERVER_NAME: &str = crate::mcp_server::SERVER_NAME;
 const DEMO_MCP_SERVER_BINARY: &str = "slack-clone-mcp-server";
 
 /// Where the bot's durable Lash state lives, and how this boot identifies itself.
@@ -65,26 +66,75 @@ impl RuntimeConfig {
             Err(std::env::VarError::NotPresent) => demo_mcp_server_binary()?,
             Err(error) => return Err(error).context("read SLACK_CLONE_MCP_SERVER"),
         };
-        let mut env = BTreeMap::new();
-        env.insert(API_BASE_URL_ENV.to_string(), api_base_url.to_string());
-        env.insert(BOT_TOKEN_ENV.to_string(), bot_token.to_string());
         self.mcp_servers.insert(
             DEMO_MCP_SERVER_NAME.to_string(),
-            McpServerConfig::Stdio {
-                command: command.display().to_string(),
-                args: Vec::new(),
-                env,
-                cwd: None,
-                startup_timeout_ms: 10_000,
-                call_policy: lash_plugin_mcp::McpCallPolicy {
-                    call_timeout_ms: 20_000,
-                    ..Default::default()
-                },
-                binary_content_attachments: false,
-            },
+            demo_mcp_server_config(&command.display().to_string(), api_base_url, bot_token),
         );
         Ok(self)
     }
+}
+
+/// Configuration for the bundled stdio server.
+///
+/// The child's whole environment is the two values it needs, supplied with
+/// [`McpServerConfig::with_env`]: an MCP child inherits nothing implicitly here,
+/// so the server cannot read a token this host did not hand it.
+pub fn demo_mcp_server_config(
+    command: &str,
+    api_base_url: &str,
+    bot_token: &str,
+) -> McpServerConfig {
+    McpServerConfig::stdio(command, Vec::new())
+        .with_env([(API_BASE_URL_ENV, api_base_url), (BOT_TOKEN_ENV, bot_token)])
+        .with_timeouts(
+            Duration::from_secs(10),
+            Duration::from_secs(20),
+            Duration::from_secs(120),
+        )
+}
+
+/// Configuration for the bundled streamable-HTTP server.
+///
+/// Two host policies are written out rather than defaulted, because each is a
+/// decision an embedder has to make for a server it does not own:
+///
+/// * the static bearer header, which is the only credential lash installs for
+///   this transport — there is no OAuth or refresh behind it;
+/// * timeouts short enough that a stalled call is a tool failure the model sees
+///   rather than a hung turn;
+/// * binary content persisted as model attachments, which is off by default
+///   because it writes to the host's attachment store.
+///
+/// The timeout *disconnect* policy is deliberately left at its default. The
+/// obvious-looking `TimeoutDisconnectPolicy::Never` keeps a slow tool from
+/// costing the connection, but with the default liveness probe interval of `0`
+/// nothing else ever tests the peer, so a server that died mid-call would keep
+/// reporting `connected: true` forever. The default probes on timeout instead,
+/// which distinguishes "slow" from "gone".
+pub fn http_mcp_server_config(url: &str, token: &str) -> McpServerConfig {
+    McpServerConfig::streamable_http(url)
+        .with_headers([("Authorization", format!("Bearer {token}"))])
+        .with_timeouts(
+            Duration::from_secs(5),
+            Duration::from_secs(2),
+            Duration::from_secs(10),
+        )
+        .with_binary_content_attachments(true)
+}
+
+/// Everything [`build_core`] hands back to the host.
+///
+/// The core alone is not enough for a host that manages MCP integrations while
+/// it runs: attaching and detaching a server, and telling connected servers the
+/// host's roots changed, are calls on the plugin factory and on this host's own
+/// roots provider, so both stay reachable for the lifetime of the bot.
+pub struct BotRuntime {
+    /// The standard-mode core every channel session is opened from.
+    pub core: LashCore,
+    /// The MCP plugin factory shared by every session built from `core`.
+    pub mcp: Arc<McpPluginFactory>,
+    /// The roots this host publishes to connected MCP servers.
+    pub roots: Arc<DemoRootsProvider>,
 }
 
 /// A stable, per-boot session-execution owner.
@@ -113,7 +163,7 @@ pub async fn build_core(
     provider: ProviderHandle,
     model: ModelSpec,
     api: Arc<SlackApi>,
-) -> Result<LashCore> {
+) -> Result<BotRuntime> {
     validate_stdio_commands(&config.mcp_servers)?;
 
     let data_dir = &config.data_dir;
@@ -129,34 +179,34 @@ pub async fn build_core(
             .map_err(|error| anyhow::anyhow!("open process env store: {error}"))?,
     );
 
-    let mcp = if config.mcp_servers.is_empty() {
-        None
-    } else {
-        let workspace = std::env::current_dir()
-            .context("resolve workspace root for the demo MCP roots provider")?;
-        let mcp = Arc::new(
-            McpPluginFactory::builder(config.mcp_servers.clone())
-                .sampling_handler(Arc::new(DemoSamplingHandler::new(
-                    provider.clone(),
-                    model.clone(),
-                )))
-                .elicitation_handler(Arc::new(DemoElicitationHandler))
-                .roots_provider(Arc::new(DemoRootsProvider::new(&workspace)))
-                .build()
-                .await
-                .context("connect slack-clone MCP servers")?,
+    // The factory is built even with no configured servers: it carries this
+    // host's sampling, elicitation and roots policy, and a server attached later
+    // through the admin API has to arrive into that policy rather than into an
+    // empty pool that would answer nothing.
+    let workspace = std::env::current_dir()
+        .context("resolve workspace root for the demo MCP roots provider")?;
+    let roots = Arc::new(DemoRootsProvider::new(&workspace));
+    let mcp = Arc::new(
+        McpPluginFactory::builder(config.mcp_servers.clone())
+            .sampling_handler(Arc::new(DemoSamplingHandler::new(
+                provider.clone(),
+                model.clone(),
+            )))
+            .elicitation_handler(Arc::new(DemoElicitationHandler))
+            .roots_provider(Arc::clone(&roots) as Arc<dyn lash_plugin_mcp::McpRootsProvider>)
+            .build()
+            .await
+            .context("connect slack-clone MCP servers")?,
+    );
+    for status in mcp.server_statuses() {
+        println!(
+            "slack-clone-bot MCP server {}: connected={}, tools={}, last_error={}",
+            status.server_name,
+            status.connected,
+            status.tool_count,
+            status.last_error.as_deref().unwrap_or("none")
         );
-        for status in mcp.server_statuses() {
-            println!(
-                "slack-clone-bot MCP server {}: connected={}, tools={}, last_error={}",
-                status.server_name,
-                status.connected,
-                status.tool_count,
-                status.last_error.as_deref().unwrap_or("none")
-            );
-        }
-        Some(mcp)
-    };
+    }
     let mut builder = LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
@@ -179,14 +229,12 @@ pub async fn build_core(
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .tools(tools::workspace_tools(api))
         .trace_sink(trace_sink(config))
-        .trace_level(TraceLevel::Extended);
-    if let Some(mcp) = mcp {
-        builder = builder.plugin(mcp);
-    }
+        .trace_level(TraceLevel::Extended)
+        .plugin(Arc::clone(&mcp) as Arc<dyn lash::plugins::PluginFactory>);
     if let Some(lease_timings) = config.lease_timings {
         builder = builder.lease_timings(lease_timings);
     }
-    builder
+    let core = builder
         // Ambient channel traffic is admitted as queued turn input but must NOT
         // provoke a reply. The default inline queued-work driver would drain that
         // input on its own schedule and run a turn nobody asked for, so the bot
@@ -194,7 +242,8 @@ pub async fn build_core(
         // mentioned the bot.
         .disable_queued_work_driver()
         .build(session_owner(&config.incarnation))
-        .context("build slack-clone bot Lash core")
+        .context("build slack-clone bot Lash core")?;
+    Ok(BotRuntime { core, mcp, roots })
 }
 
 fn demo_mcp_server_binary() -> Result<PathBuf> {

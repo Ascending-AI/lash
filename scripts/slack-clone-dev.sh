@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Dev driver for the examples/slack-clone pair: one platform process and one bot
-# process. Mirrors scripts/agent-workbench-dev.sh (detached `up`, `status`,
-# `logs`, `down`, state under a run directory), with the one structural
-# difference that matters here: this example is two processes, and the bot
-# registers itself with the platform at boot, so `up` starts them in order and
-# waits for the registration to land.
+# Dev driver for the examples/slack-clone processes: the platform, the bot, and
+# the HTTP-served MCP server the bot can attach at runtime. Mirrors
+# scripts/agent-workbench-dev.sh (detached `up`, `status`, `logs`, `down`, state
+# under a run directory), with the one structural difference that matters here:
+# this example is several processes, and the bot registers itself with the
+# platform at boot, so `up` starts them in order and waits for the registration
+# to land. The MCP server is deliberately *not* wired into the bot's boot: it is
+# an integration an operator attaches over the bot's admin API while it serves.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,11 +37,14 @@ Usage:
 
 Defaults:
   up is detached and idempotent; it starts the platform, waits for it, then
-  starts the bot and waits for the bot to register its Events API request URL.
-  The bot's port is the platform port + 1.
+  starts the bot and waits for the bot to register its Events API request URL,
+  and finally starts the HTTP MCP server the bot can attach at runtime.
+  The bot's port is the platform port + 1, the MCP server's is the platform
+  port + 2.
   Without --port/--addr, SLACK_CLONE_ADDR is used, then 127.0.0.1:3040.
   State (SQLite stores, traces, pids, logs) lives under .slack-clone/.
   OPENROUTER_API_KEY is required for the bot; the platform needs no key.
+  SLACK_CLONE_MCP_HTTP_TOKEN overrides the HTTP MCP server's bearer token.
   SLACK_CLONE_OPEN=0 suppresses opening a browser.
 USAGE
 }
@@ -141,14 +146,20 @@ validate_port platform "$platform_port"
 # never collide as long as their platform ports differ by more than one.
 bot_port=$((10#$platform_port + 1))
 bot_addr="$platform_host:$bot_port"
+# The runtime-attachable MCP server sits one port above the bot.
+mcp_http_port=$((10#$platform_port + 2))
+mcp_http_addr="$platform_host:$mcp_http_port"
 platform_url="http://$platform_addr"
 bot_url="http://$bot_addr"
+mcp_http_url="http://$mcp_http_addr/mcp"
 
 state_key="$(printf '%s' "$platform_addr" | tr -c 'A-Za-z0-9_.-' '_')"
 platform_pid_file="$state_dir/platform-$state_key.pid"
 bot_pid_file="$state_dir/bot-$state_key.pid"
+mcp_http_pid_file="$state_dir/mcp-http-$state_key.pid"
 platform_log="$state_dir/platform-$state_key.log"
 bot_log="$state_dir/bot-$state_key.log"
+mcp_http_log="$state_dir/mcp-http-$state_key.log"
 data_root="$state_root/$state_key"
 
 # ------------------------------------------------------------- process glue ---
@@ -283,6 +294,12 @@ bot_env() {
     "SLACK_CLONE_BOT_DATA_DIR=$data_root/bot"
 }
 
+mcp_http_env() {
+  printf '%s\n' \
+    "SLACK_CLONE_MCP_HTTP_ADDR=$mcp_http_addr" \
+    "SLACK_CLONE_MCP_HTTP_TOKEN=${SLACK_CLONE_MCP_HTTP_TOKEN:-slack-clone-mcp-http-dev-token}"
+}
+
 events_registered() {
   curl -fsS "$platform_url/healthz" 2>/dev/null | grep -q '"events_verified":true'
 }
@@ -373,13 +390,25 @@ run_up() {
   fi
 
   wait_registered || die "the bot is up but not receiving events"
+
+  if pid_alive mcp-http "$mcp_http_pid_file"; then
+    log "HTTP MCP server already running on $mcp_http_addr"
+  else
+    mapfile -t env_pairs < <(mcp_http_env)
+    start_detached mcp-http "$mcp_http_pid_file" "$mcp_http_log" \
+      "${env_pairs[@]}" "$(binary_path slack-clone-mcp-http-server)"
+    wait_tcp mcp-http "$platform_host" "$mcp_http_port" \
+      || require_alive mcp-http "$mcp_http_pid_file" "$mcp_http_log"
+  fi
+
   log "platform: $platform_url"
   log "bot:      $bot_url (events at $bot_url/slack/events)"
+  log "mcp:      $mcp_http_url (attach it via POST $bot_url/admin/mcp/servers)"
   open_browser "$platform_url"
 }
 
 run_status() {
-  local platform_state="stopped" bot_state="stopped"
+  local platform_state="stopped" bot_state="stopped" mcp_http_state="stopped"
   local record="" pid=""
   if pid_alive platform "$platform_pid_file"; then
     record="$(read_pid_file "$platform_pid_file")"
@@ -391,8 +420,14 @@ run_status() {
     read -r pid _ <<<"$record"
     bot_state="running ($pid)"
   fi
+  if pid_alive mcp-http "$mcp_http_pid_file"; then
+    record="$(read_pid_file "$mcp_http_pid_file")"
+    read -r pid _ <<<"$record"
+    mcp_http_state="running ($pid)"
+  fi
   printf 'platform  %-24s %s\n' "$platform_addr" "$platform_state"
   printf 'bot       %-24s %s\n' "$bot_addr" "$bot_state"
+  printf 'mcp-http  %-24s %s\n' "$mcp_http_addr" "$mcp_http_state"
   if health="$(curl -fsS "$platform_url/healthz" 2>/dev/null)"; then
     printf 'health    %s\n' "$health"
   fi
@@ -402,6 +437,7 @@ run_logs() {
   local files=()
   [[ -f "$platform_log" ]] && files+=("$platform_log")
   [[ -f "$bot_log" ]] && files+=("$bot_log")
+  [[ -f "$mcp_http_log" ]] && files+=("$mcp_http_log")
   ((${#files[@]})) || die "no logs yet for $platform_addr"
   if (( follow_logs )); then
     tail -n 40 -F "${files[@]}"
@@ -412,8 +448,11 @@ run_logs() {
 
 run_down() {
   # Bot first: it is the guest, and stopping the platform under it would only
-  # make its shutdown noisier.
+  # make its shutdown noisier. The MCP server outlives the bot on the way down
+  # so an in-flight tool call fails against a live server rather than a
+  # half-torn-down socket.
   stop_one bot "$bot_pid_file"
+  stop_one mcp-http "$mcp_http_pid_file"
   stop_one platform "$platform_pid_file"
 }
 

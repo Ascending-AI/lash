@@ -16,8 +16,9 @@ use lash_plugin_mcp::{
     McpSamplingRequest, McpUrlElicitationComplete, Root, SamplingMessage, SamplingMessageContent,
     UrlElicitationCapability,
 };
-use rmcp::model::{PrimitiveSchema, Role};
+use rmcp::model::Role;
 use serde_json::{Map, Value};
+use tokio::sync::RwLock;
 
 /// The bot's direct provider-backed implementation of MCP sampling.
 pub struct DemoSamplingHandler {
@@ -38,9 +39,9 @@ impl McpSamplingHandler for DemoSamplingHandler {
         request: McpSamplingRequest<'_>,
     ) -> Result<CreateMessageResult, McpProtocolError> {
         let params = request.params;
-        if request.context.server_name() != "slack_clone" {
+        if request.context.server_name() != crate::mcp_server::SERVER_NAME {
             return Err(McpProtocolError::invalid_params(
-                "the slack-clone sampling policy only trusts its bundled server",
+                "the slack-clone sampling policy only trusts its bundled stdio server",
                 None,
             ));
         }
@@ -123,7 +124,35 @@ impl McpSamplingHandler for DemoSamplingHandler {
     }
 }
 
-/// Deterministic example UI policy for the bundled server's form and URL prompts.
+/// MCP servers whose prompts this host is willing to answer at all.
+///
+/// Elicitation is the server asking the *host* to act, so the trust decision is
+/// the host's and it is made by server name, before the prompt is read.
+const TRUSTED_SERVERS: [&str; 2] = [
+    crate::mcp_server::SERVER_NAME,
+    crate::mcp_http_server::SERVER_NAME,
+];
+
+/// The answers this host will give an MCP form without a human present.
+///
+/// Keyed by the exact prompt *and* the field, never by the field alone.
+/// Elicitation is a consent primitive: a book keyed only by field name would
+/// answer `answer: yes` to any question a trusted server thought to phrase with
+/// that field, which is blind consent wearing a policy's clothes. Standing
+/// consent is only meaningful for a question the host has actually read.
+fn answer_book(prompt: &str, field: &str) -> Option<Value> {
+    match (prompt, field) {
+        ("May the Slack-clone MCP demo continue?", "answer") => {
+            Some(Value::String("yes".to_string()))
+        }
+        ("How many workspace badges should the demo render?", "count") => {
+            Some(Value::String("one".to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Deterministic example UI policy for the bundled servers' form and URL prompts.
 pub struct DemoElicitationHandler;
 
 #[async_trait]
@@ -145,7 +174,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
                 None,
             ));
         }
-        if request.context.server_name() != "slack_clone" {
+        if !TRUSTED_SERVERS.contains(&request.context.server_name()) {
             return Ok(CreateElicitationResult::new(ElicitationAction::Decline));
         }
         match request.params {
@@ -154,33 +183,35 @@ impl McpElicitationHandler for DemoElicitationHandler {
                 requested_schema,
                 ..
             } => {
-                let answer_is_required = requested_schema
-                    .required
-                    .as_ref()
-                    .is_some_and(|required| required.len() == 1 && required[0] == "answer");
-                if message != "May the Slack-clone MCP demo continue?"
-                    || requested_schema.properties.len() != 1
-                    || !answer_is_required
-                {
-                    return Ok(CreateElicitationResult::new(ElicitationAction::Decline));
-                }
+                // No human is watching a bot's MCP call, so the host answers
+                // from a fixed book keyed by the prompt and the field. A
+                // question the book has not read is declined, never guessed.
                 let mut content = Map::new();
-                for (name, property) in &requested_schema.properties {
-                    match property {
-                        PrimitiveSchema::String(_) if name == "answer" => {
-                            content.insert(name.clone(), Value::String("yes".to_string()));
-                        }
-                        _ => {
-                            return Err(McpProtocolError::invalid_params(
-                                "the slack-clone form policy requires one string field named `answer`",
-                                None,
-                            ));
-                        }
+                for name in requested_schema.properties.keys() {
+                    let Some(answer) = answer_book(message, name) else {
+                        println!(
+                            "slack-clone-bot has no answer on file for MCP form field `{name}` \
+                             of prompt {message:?}; declining"
+                        );
+                        return Ok(CreateElicitationResult::new(ElicitationAction::Decline));
+                    };
+                    content.insert(name.clone(), answer);
+                }
+                // The book is keyed by name, not by type, so its answer can
+                // still be the wrong shape for this server's schema. Validate
+                // before sending: a decline is a legitimate MCP answer, while
+                // content that fails the schema the server just published is a
+                // protocol violation the host would be committing knowingly.
+                match request.accept(Value::Object(content)) {
+                    Ok(result) => Ok(result),
+                    Err(error) => {
+                        println!(
+                            "slack-clone-bot declined an MCP form its answer book cannot satisfy: {}",
+                            error.message()
+                        );
+                        Ok(CreateElicitationResult::new(ElicitationAction::Decline))
                     }
                 }
-                request
-                    .accept(Value::Object(content))
-                    .map_err(|error| McpProtocolError::invalid_params(error.to_string(), None))
             }
             CreateElicitationRequestParams::UrlElicitationParams {
                 message,
@@ -209,16 +240,44 @@ impl McpElicitationHandler for DemoElicitationHandler {
     }
 }
 
-/// Static workspace root supplied by the example host.
+/// Workspace roots supplied by the example host.
+///
+/// The list is mutable because roots are a live host fact, not a boot-time
+/// constant: an operator can publish another root while the bot runs, and the
+/// host then tells connected servers to re-read the list with
+/// [`McpPluginFactory::notify_roots_changed`](lash_plugin_mcp::McpPluginFactory::notify_roots_changed).
+/// The provider is the single source both the notification and the servers'
+/// subsequent `roots/list` calls read.
 pub struct DemoRootsProvider {
-    root: Root,
+    roots: RwLock<Vec<Root>>,
 }
 
 impl DemoRootsProvider {
     pub fn new(workspace: &std::path::Path) -> Self {
         Self {
-            root: Root::new(format!("file://{}", workspace.display())).with_name("slack-clone"),
+            roots: RwLock::new(vec![
+                Root::new(format!("file://{}", workspace.display())).with_name("slack-clone"),
+            ]),
         }
+    }
+
+    /// Publish another root, replacing any root already at the same URI.
+    ///
+    /// Returns the number of roots the host now publishes.
+    pub async fn publish(&self, uri: String, name: Option<String>) -> usize {
+        let mut roots = self.roots.write().await;
+        roots.retain(|root| root.uri != uri);
+        let mut root = Root::new(uri);
+        if let Some(name) = name {
+            root = root.with_name(name);
+        }
+        roots.push(root);
+        roots.len()
+    }
+
+    /// The roots this host currently publishes.
+    pub async fn published(&self) -> Vec<Root> {
+        self.roots.read().await.clone()
     }
 }
 
@@ -234,6 +293,6 @@ impl McpRootsProvider for DemoRootsProvider {
                 None,
             ));
         }
-        Ok(vec![self.root.clone()])
+        Ok(self.published().await)
     }
 }

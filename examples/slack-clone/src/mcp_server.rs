@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::bot::slack_api::SlackApi;
 use crate::wire::methods::ChannelObject;
 
+/// The MCP server name the bot registers this stdio server under.
+pub const SERVER_NAME: &str = "slack_clone";
 /// Environment variable naming the Slack-compatible API origin.
 pub const API_BASE_URL_ENV: &str = "SLACK_CLONE_MCP_API_BASE_URL";
 /// Environment variable carrying the bot token used for read-only API calls.
