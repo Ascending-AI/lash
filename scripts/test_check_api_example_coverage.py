@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 
+import contextlib
+import io
 import unittest
+from unittest import mock
 
+import check_api_example_coverage
 from check_api_example_coverage import (
     ApiItem,
+    check,
     EXAMPLE_TEST_TIER_RATCHET,
     _IMPORTED_TYPES,
     _SCOPE_BLOCKS,
     _SOURCE_LINES,
     _ANCHOR_SCOPES,
+    _CONSUMING_LINES,
     _RESOLVED_RECEIVERS,
     _LITERAL_STACKS,
     _TYPE_FACTS,
@@ -1006,6 +1012,7 @@ class MemberAnchorTests(unittest.TestCase):
         _SOURCE_LINES[self.FILE] = list(self.SOURCE)
         _SCOPE_BLOCKS.pop(self.FILE, None)
         _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
         _RESOLVED_RECEIVERS.clear()
         _IMPORTED_TYPES.pop(self.FILE, None)
         _LITERAL_STACKS.pop(self.FILE, None)
@@ -1195,6 +1202,7 @@ class ReceiverResolutionTests(unittest.TestCase):
         _SOURCE_LINES[self.FILE] = list(self.SOURCE)
         _SCOPE_BLOCKS.pop(self.FILE, None)
         _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
         _RESOLVED_RECEIVERS.clear()
         _IMPORTED_TYPES.pop(self.FILE, None)
         # The type index is built once per run over every readable source file,
@@ -1402,6 +1410,7 @@ class MultiLineReceiverTests(unittest.TestCase):
         _SOURCE_LINES[self.FILE] = list(self.SOURCE)
         _SCOPE_BLOCKS.pop(self.FILE, None)
         _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
         _RESOLVED_RECEIVERS.clear()
         _IMPORTED_TYPES.pop(self.FILE, None)
         _LITERAL_STACKS.pop(self.FILE, None)
@@ -1578,6 +1587,7 @@ class ProseCitationTests(unittest.TestCase):
         _SOURCE_LINES[self.FILE] = list(self.SOURCE)
         _SCOPE_BLOCKS.pop(self.FILE, None)
         _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
         _RESOLVED_RECEIVERS.clear()
         self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
         self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
@@ -1610,6 +1620,423 @@ class ProseCitationTests(unittest.TestCase):
     def test_holds_no_opinion_about_prose_without_a_citation(self):
         self.assertIsNone(
             prose_citation_defect("lash::TurnRecord", "struct", "Internal seam (FIG-1223).")
+        )
+
+    def test_rejects_a_citation_to_a_line_no_function_encloses(self):
+        # The whole point of FIG-1526: line 7 is module-level, and reading the
+        # file as its scope let 415 citations to blank lines, braces, attributes
+        # and comments read as located facts.
+        _SOURCE_LINES[self.FILE].extend(["", "struct TurnRecord { duration_ms: u64 }"])
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        self.assertIn(
+            "carrying no code",
+            prose_citation_defect(
+                "lash::TurnRecord::duration_ms", "field", f"Consumed at {self.FILE}:7."
+            )
+            or "",
+        )
+        # Line 8 spells the item and carries code; it is still no consumer's
+        # scope, and reading the file as one is what passed the blank line above.
+        self.assertIn(
+            "where neither duration_ms",
+            prose_citation_defect(
+                "lash::TurnRecord::duration_ms", "field", f"Consumed at {self.FILE}:8."
+            )
+            or "",
+        )
+
+    def test_rejects_a_citation_to_a_blank_line_inside_a_naming_function(self):
+        _SOURCE_LINES[self.FILE] = [
+            "fn consumer(record: TurnRecord) {",
+            "",
+            "    let _ = record.duration_ms;",
+            "}",
+        ]
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        defect = prose_citation_defect(
+            "lash::TurnRecord::duration_ms", "field", f"Consumed at {self.FILE}:2."
+        )
+        self.assertIn("carrying no code", defect or "")
+
+    def test_rejects_a_citation_to_a_closing_brace_or_a_comment(self):
+        for line in (3, 6):
+            _SOURCE_LINES[self.FILE] = [
+                "fn consumer(record: TurnRecord) {",
+                "    let _ = record.duration_ms;",
+                "}",
+                "fn other(record: TurnRecord) {",
+                "    let _ = record.duration_ms;",
+                "    // duration_ms is read above",
+                "}",
+            ]
+            _SCOPE_BLOCKS.pop(self.FILE, None)
+            _ANCHOR_SCOPES.clear()
+            _CONSUMING_LINES.clear()
+            defect = prose_citation_defect(
+                "lash::TurnRecord::duration_ms", "field", f"Consumed at {self.FILE}:{line}."
+            )
+            self.assertIn("carrying no code", defect or "")
+
+    def test_reads_prose_that_names_the_function_against_the_real_one(self):
+        defect = prose_citation_defect(
+            "lash::TurnRecord::duration_ms",
+            "field",
+            f"The read at {self.FILE}:5 in `unrelated` is the only one.",
+        )
+        self.assertIn("places", defect or "")
+        self.assertIn("sits in `consumer`", defect or "")
+        self.assertIsNone(
+            prose_citation_defect(
+                "lash::TurnRecord::duration_ms",
+                "field",
+                f"The read at {self.FILE}:5 in `consumer` is the only one.",
+            )
+        )
+
+    def test_accepts_the_rows_own_anchor_a_test_function_never_names(self):
+        anchors = {(self.FILE, 2)}
+        reason = f"the assertion at {self.FILE}:2 in `unrelated` observes the total."
+        self.assertIn(
+            "where neither duration_ms",
+            prose_citation_defect("lash::TurnRecord::duration_ms", "field", reason) or "",
+        )
+        self.assertIsNone(
+            prose_citation_defect(
+                "lash::TurnRecord::duration_ms", "field", reason, anchors
+            )
+        )
+
+
+class NameCoincidenceCitationTests(unittest.TestCase):
+    """Spelling a leaf is not using it: prose and local names spell it too.
+
+    Leaf names are ordinary words -- `deferred`, `abort`, `cancellation` -- so a
+    sentence in an `.expect(...)` and a `let mut abort = None;` both put the
+    word on a line that has nothing to do with the item.  Fifty-one citations
+    rested on exactly that coincidence.
+    """
+
+    FILE = "crates/lash-fixture/src/coincidence.rs"
+    SOURCE = [
+        "fn narrates() {",
+        '    let _ = value.expect("a deferred digest keeps its bytes");',
+        "}",
+        "fn binds() {",
+        "    let mut deferred = None;",
+        "    record(&mut deferred);",
+        "}",
+        "fn observes(report: ProcessDrainReport) {",
+        "    let _ = report.deferred;",
+        '    assert_eq!(projected["deferred"], 1);',
+        "    // deferred is read above",
+        "}",
+    ]
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        _RESOLVED_RECEIVERS.clear()
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+        self.addCleanup(_CONSUMING_LINES.clear)
+
+    def test_rejects_a_line_that_spells_the_leaf_only_inside_a_sentence(self):
+        defect = prose_citation_defect(
+            "lash::durability::ProcessDrainReport::deferred",
+            "field",
+            f"Consumed at {self.FILE}:2.",
+        )
+        self.assertIn("a local name or literal text", defect or "")
+
+    def test_rejects_a_line_that_spells_the_leaf_only_as_a_let_binder(self):
+        defect = prose_citation_defect(
+            "lash::durability::ProcessDrainReport::deferred",
+            "field",
+            f"Consumed at {self.FILE}:5.",
+        )
+        self.assertIn("a local name or literal text", defect or "")
+
+    def test_accepts_a_field_read_and_a_wire_key_that_names_the_field(self):
+        for line in (9, 10):
+            self.assertIsNone(
+                prose_citation_defect(
+                    "lash::durability::ProcessDrainReport::deferred",
+                    "field",
+                    f"Consumed at {self.FILE}:{line}.",
+                ),
+                f"line {line} uses the field",
+            )
+
+    def test_rejects_a_wire_name_that_belongs_to_a_different_item(self):
+        # "process.abandoned" is ProcessStatus::Abandoned's wire name, not this
+        # field's: a dotted literal spells the leaf while naming another symbol.
+        _SOURCE_LINES[self.FILE] = [
+            "fn labels(status: ProcessStatus) -> &'static str {",
+            '    ProcessStatus::Abandoned => "process.abandoned",',
+            "}",
+        ]
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        defect = prose_citation_defect(
+            "lash::durability::ProcessDrainReport::abandoned",
+            "field",
+            f"Consumed at {self.FILE}:2.",
+        )
+        self.assertIn("a local name or literal text", defect or "")
+
+    def test_masks_a_comment_without_swallowing_the_code_after_it(self):
+        # A lone quote in a sentence is not a literal opening: reading it as one
+        # blanks every line up to the next quote, and real uses vanish with it.
+        _SOURCE_LINES[self.FILE] = [
+            "fn observes(report: ProcessDrainReport) {",
+            "    // the report doesn't say how many",
+            "    let _ = report.deferred;",
+            "}",
+        ]
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        self.assertIsNone(
+            prose_citation_defect(
+                "lash::durability::ProcessDrainReport::deferred",
+                "field",
+                f"Consumed at {self.FILE}:3.",
+            )
+        )
+
+
+class RejectedAnchorCitationTests(unittest.TestCase):
+    """A row that cites the anchor it refuses is held to the inverse claim.
+
+    Dropping the line number is the other way to keep such a row green, and it
+    makes the rejected anchor unfindable -- which is how 24 used-unasserted rows
+    went invisible in the first FIG-1526 round.
+    """
+
+    FILE = "crates/lash-fixture/src/rejected.rs"
+    SOURCE = [
+        "fn elsewhere() {",
+        "    assert_eq!(session.id(), \"s-1\");",
+        "}",
+        "fn consumer(record: TurnRecord) {",
+        "    assert_eq!(record.duration_ms, 4);",
+        "}",
+    ]
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+
+    def defect(self, line, function):
+        return prose_citation_defect(
+            "lash::TurnRecord::duration_ms",
+            "field",
+            f"Downgraded: {self.FILE}:{line} asserts an unrelated expression in "
+            f"`{function}`, and nothing else observes it.",
+        )
+
+    def test_accepts_an_assertion_that_says_nothing_about_the_item(self):
+        self.assertIsNone(self.defect(2, "elsewhere"))
+
+    def test_rejects_a_rejection_the_function_contradicts(self):
+        self.assertIn("so the rejection is wrong", self.defect(5, "consumer") or "")
+
+    def test_rejects_a_line_that_asserts_nothing(self):
+        self.assertIn("asserts nothing", self.defect(1, "elsewhere") or "")
+
+    def test_rejects_a_rejection_placed_in_the_wrong_function(self):
+        self.assertIn("places", self.defect(2, "consumer") or "")
+
+
+class UnresolvedCandidateCitationTests(unittest.TestCase):
+    """A candidate the resolver cannot tie to the item still has to name it."""
+
+    FILE = "crates/lash-fixture/src/candidate.rs"
+    SOURCE = [
+        "use lash_core::facade_support::ToolStateFacadeOps;",
+        "",
+        "fn consumer(state: ToolState) {",
+        "    state.record_catalog(catalog);",
+        "}",
+    ]
+    PROSE = (
+        " as a consumer of this path and the checker cannot tie that line to the "
+        "owning type mechanically, so the row records the candidate."
+    )
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+
+    def defect(self, line):
+        return prose_citation_defect(
+            "lash_core::facade_support::ToolStateFacadeOps",
+            "trait",
+            f"An earlier round named {self.FILE}:{line}{self.PROSE}",
+        )
+
+    def test_accepts_the_import_that_spells_the_trait(self):
+        self.assertIsNone(self.defect(1))
+
+    def test_rejects_a_line_that_does_not_name_it(self):
+        self.assertIn("does not name it", self.defect(4) or "")
+
+
+class UnscopedProseCitationGateTests(unittest.TestCase):
+    """The citation check runs on every row, not on the ones that admit to it.
+
+    FIG-1223 ran it on internal dispositions and rows whose prose said
+    "FIG-1223", so the way past it was to write the prose without the ticket.
+    This drives `check` over a used-unasserted row that is neither, and it is red
+    the moment that scope condition comes back.
+    """
+
+    FILE = "examples/docs-snippets/src/lib.rs"
+    SOURCE = [
+        "fn shows_the_turn(record: TurnRecord) {",
+        "    let _ = record.duration_ms;",
+        "}",
+        "",
+        "fn unrelated() {",
+        "    let total = 1 + 1;",
+        "}",
+    ]
+    ITEM = ApiItem(
+        primary="lash::TurnRecord::duration_ms",
+        kind="field",
+        availability="default+all-features",
+        paths=["lash::TurnRecord::duration_ms"],
+        identity="lash_core::runtime::turn_loop::TurnRecord::duration_ms",
+    )
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+
+    def run_check(self, reason, recorded=1):
+        document = {
+            "prose_citations_recorded": recorded,
+            "api": [
+                {
+                    "symbol": "lash::TurnRecord::duration_ms",
+                    "kind": "field",
+                    "availability": "default+all-features",
+                    "area": "sessions-turns",
+                    "disposition": "used-unasserted",
+                    "usage": f"{self.FILE}:2#let _ = record.duration_ms;",
+                    "reason": reason,
+                }
+            ],
+            "low_level_api": [],
+            "removal_verdict": [],
+            "removal_verdicts_recorded": 0,
+            "gated_core_modules": [],
+        }
+        module = check_api_example_coverage
+        with mock.patch.object(module, "inventory_document", lambda: document), mock.patch.object(
+            module, "current_surface", lambda: [self.ITEM]
+        ), mock.patch.object(
+            module, "crate_directories", lambda: {"lash": "crates/lash"}
+        ), mock.patch.object(
+            module, "facade_dependency_dirs", set
+        ), mock.patch.object(
+            module, "REQUIRED_LOW_LEVEL_API", set()
+        ), mock.patch.object(
+            module, "EXAMPLE_TEST_TIER_RATCHET", 0
+        ):
+            errors, output = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stderr(errors), contextlib.redirect_stdout(output):
+                code = check()
+        return code, errors.getvalue()
+
+    def test_fails_a_stale_citation_on_a_row_that_never_names_the_ticket(self):
+        code, errors = self.run_check(
+            f"Read by the example at {self.FILE}:6, which never mentions it."
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertIn("where neither duration_ms", errors)
+        self.assertEqual(errors.count("\n- "), 1, errors)
+
+    def test_passes_the_same_row_once_the_citation_lands_on_the_read(self):
+        code, errors = self.run_check(
+            f"Read by the example at {self.FILE}:2, inside `shows_the_turn`."
+        )
+        self.assertEqual(code, 0, errors)
+
+    def test_rejects_dropping_the_line_that_makes_a_citation_checkable(self):
+        # The evasion the check cannot see by itself: without `:2` the reference
+        # is a file path, the citation pattern never matches it, and the row is
+        # silently outside every rule above.
+        code, errors = self.run_check(
+            f"Read by the example at {self.FILE}, inside `shows_the_turn`."
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertIn("prose_citations_recorded is 1 but the reasons hold 0", errors)
+
+    def test_requires_the_pin_to_move_when_a_citation_is_added(self):
+        code, errors = self.run_check(
+            f"Read by the example at {self.FILE}:2, inside `shows_the_turn`.", recorded=2
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertIn("hold 1 line citations", errors)
+
+
+class LongSignatureScopeTests(unittest.TestCase):
+    """A parameter list longer than the header walk left a function unfindable.
+
+    Before FIG-1526 the walk stopped after fourteen lines, so a twenty-parameter
+    constructor had no enclosing function -- harmless while a function-less line
+    meant the whole file, and a citation-killer once it means nothing at all.
+    """
+
+    FILE = "crates/lash-fixture/src/long_signature.rs"
+    SOURCE = [
+        "impl ProcessEngineRunContext {",
+        "    pub fn new(",
+        *[f"        parameter_{index}: Parameter{index}," for index in range(20)],
+        "    ) -> Self {",
+        "        let processes = ProcessEngineProcessContext::new(registration);",
+        "        Self { processes }",
+        "    }",
+        "}",
+    ]
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _CONSUMING_LINES.clear()
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+
+    def test_finds_the_function_behind_a_twenty_parameter_signature(self):
+        body = len(self.SOURCE) - 3
+        self.assertIn("ProcessEngineProcessContext::new", anchor_scope(self.FILE, body))
+        self.assertIsNone(
+            prose_citation_defect(
+                "lash_core::facade_support::ProcessEngineProcessContext",
+                "struct",
+                f"Exercised at {self.FILE}:{body} in `new`.",
+            )
         )
 
 
