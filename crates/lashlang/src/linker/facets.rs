@@ -53,6 +53,13 @@ impl LinkError {
             Self::IncompatibleOperationInput { .. } => "incompatible_operation_input",
             Self::IncompatibleExpectedLiteral { .. } => "incompatible_expected_literal",
             Self::IncompatibleProcessReturn { .. } => "incompatible_process_return",
+            Self::IncompatibleFunctionReturn { .. } => "incompatible_function_return",
+            Self::DuplicateFunctionParam { .. } => "duplicate_function_param",
+            Self::FunctionArgumentCount { .. } => "function_argument_count",
+            Self::IncompatibleFunctionArgument { .. } => "incompatible_function_argument",
+            Self::ForbiddenInFunction { .. } => "forbidden_in_function",
+            Self::FunctionNameIsNotAValue { .. } => "function_name_is_not_a_value",
+            Self::FunctionShadowsBuiltin { .. } => "function_shadows_builtin",
             Self::InvalidTriggerRegistration { .. } => "invalid_trigger_registration",
             Self::InvalidTriggerSubscriptionKey { .. } => "invalid_trigger_subscription_key",
             Self::DuplicateDerivedTriggerSubscriptionKey { .. } => {
@@ -101,6 +108,10 @@ impl<'module> Linker<'module> {
                 }
                 Declaration::Process(process) => {
                     self.process_names.insert(process.name.to_string());
+                }
+                Declaration::Function(function) => {
+                    self.function_signatures
+                        .insert(function.name.to_string(), function_signature(function));
                 }
             }
         }

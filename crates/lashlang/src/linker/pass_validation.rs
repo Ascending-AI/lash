@@ -862,6 +862,14 @@ impl<'module> Linker<'module> {
                 }
                 TypeExpr::Any
             }
+            Expr::FunctionCall { function, args } => {
+                for arg in args {
+                    self.infer_expr_type(arg, scope)?;
+                }
+                self.function_signatures
+                    .get(function.as_str())
+                    .map_or(TypeExpr::Any, |signature| signature.return_ty.clone())
+            }
             Expr::Map { items, function } => {
                 self.infer_expr_type(items, scope)?;
                 self.infer_expr_type(function, scope)?;

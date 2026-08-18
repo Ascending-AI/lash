@@ -18,8 +18,8 @@ use smallvec::SmallVec;
 
 use crate::artifact::CompiledModuleContext;
 use crate::ast::{
-    AssignPathStep, AssignTarget, BinaryOp, Expr, FunctionExpr, JavaScriptLogicalOp, LabelMetadata,
-    ListComprehensionClause, ProcessStartExpr, Program, TypeExpr, UnaryOp,
+    AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionExpr, JavaScriptLogicalOp,
+    LabelMetadata, ListComprehensionClause, ProcessStartExpr, Program, TypeExpr, UnaryOp,
 };
 use crate::lexer::Span;
 use crate::tracking::{LashlangAstPath, LashlangExecutionContext, LashlangExecutionSite};
@@ -63,6 +63,8 @@ pub(crate) struct Compiler {
     pending_finally_sites: Vec<Vec<usize>>,
     functions: Vec<CompiledFunction>,
     pending_functions: Vec<Option<PendingFunction>>,
+    /// Chunk function index for each declared `fn`, by name.
+    declared_functions: FxHashMap<String, usize>,
 }
 
 struct PendingFunction {

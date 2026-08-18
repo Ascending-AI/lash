@@ -3215,3 +3215,5 @@ async fn parse_errors_are_parse_level_and_precise() {
 }
 
 include!("language/support.rs");
+
+include!("language/function_declarations.rs");

@@ -1,7 +1,7 @@
 use crate::ast::{
     AssignPathStep, AssignTarget, AstString, BinaryOp, Declaration, Expr, ExpressionSourceSpan,
-    LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam, ProcessSignalDecl,
-    ProcessStartExpr, Program, TypeDecl, TypeExpr, TypeField, UnaryOp,
+    FunctionDecl, FunctionParam, LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam,
+    ProcessSignalDecl, ProcessStartExpr, Program, TypeDecl, TypeExpr, TypeField, UnaryOp,
 };
 use crate::lexer::{LexError, Span, Token, TokenKind, lex};
 use thiserror::Error;
@@ -295,6 +295,7 @@ impl Parser {
                 }
                 if self.peek_contextual("type")
                     || self.peek_contextual("trigger")
+                    || (self.peek_contextual("fn") && !self.peek_assignment_target())
                     || matches!(self.peek_kind(), TokenKind::At)
                 {
                     return Err(ParseError::InvalidLabelTarget {
@@ -329,6 +330,12 @@ impl Parser {
             if self.peek_contextual("process") && !self.peek_assignment_target() {
                 let start = self.peek().span.start;
                 declarations.push(Declaration::Process(self.parse_process_decl(None)?));
+                declaration_spans.push(self.span_from(start));
+                continue;
+            }
+            if self.peek_contextual("fn") && !self.peek_assignment_target() {
+                let start = self.peek().span.start;
+                declarations.push(Declaration::Function(self.parse_function_decl()?));
                 declaration_spans.push(self.span_from(start));
                 continue;
             }
@@ -427,6 +434,59 @@ impl Parser {
             signals,
             return_ty,
             label,
+            body: body.into_expr(),
+        })
+    }
+
+    /// Parses `fn name(param: TYPE, ...) -> TYPE { body }`.
+    ///
+    /// Both the parameter types and the return type are mandatory, unlike
+    /// `process`, whose return type may be inferred. A function is called from
+    /// arbitrary sites and its result flows into typed positions, so an
+    /// inferred signature would make the one thing a reader needs — what the
+    /// call yields — invisible at the declaration. A mandatory return type also
+    /// makes recursion typeable without a fixpoint: a recursive call is checked
+    /// against the declared signature.
+    fn parse_function_decl(&mut self) -> Result<FunctionDecl, ParseError> {
+        self.expect_contextual("fn")?;
+        let name = self.expect_ident()?;
+        self.expect_exact(TokenKind::LParen, "`(`")?;
+        let mut params = Vec::new();
+        while !matches!(self.peek_kind(), TokenKind::RParen | TokenKind::Eof) {
+            let param_name = self.expect_ident()?;
+            self.expect_exact(TokenKind::Colon, "`:`")?;
+            let ty = self.parse_type_expr()?;
+            params.push(FunctionParam {
+                name: param_name,
+                ty,
+            });
+            if matches!(self.peek_kind(), TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect_exact(TokenKind::RParen, "`)`")?;
+        if !(matches!(self.peek_kind(), TokenKind::Minus)
+            && self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Greater)))
+        {
+            return Err(ParseError::Expected {
+                expected: "`->` and a return type",
+                found: render_kind(self.peek_kind()),
+                span: self.peek().span,
+            });
+        }
+        self.bump();
+        self.bump();
+        let return_ty = self.parse_type_expr()?;
+        let body = self.parse_block()?;
+        Ok(FunctionDecl {
+            name,
+            params,
+            return_ty,
             body: body.into_expr(),
         })
     }
@@ -812,6 +872,7 @@ impl Parser {
         if matches!(self.peek_kind(), TokenKind::At)
             || self.peek_contextual("type")
             || self.peek_contextual("process")
+            || (self.peek_contextual("fn") && !self.peek_assignment_target())
             || self.peek_contextual("trigger")
         {
             return Err(ParseError::InvalidLabelTarget {

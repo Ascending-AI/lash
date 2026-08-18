@@ -812,3 +812,13 @@ fn structured_loop_control_round_trips_without_opaque_parse_context() {
     let graph = workflow_graph_from_source(&canonical).unwrap();
     assert_eq!(workflow_graph_to_source(&graph).unwrap(), canonical);
 }
+
+#[test]
+fn function_declarations_survive_the_graph_round_trip() {
+    // A pure body contributes no steps, so a function is carried verbatim
+    // rather than projected — projecting it would invent workflow structure
+    // that never executes as its own node.
+    assert_lens_laws(
+        "fn describe(name: str, count: int) -> str {\n  format(\"{}: {}\", name, count)\n}\n\nprint describe(\"items\", 2)\nfinish null\n",
+    );
+}

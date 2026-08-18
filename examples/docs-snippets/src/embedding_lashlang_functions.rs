@@ -1,10 +1,11 @@
 //! Public AST-only Lashlang function embedding example.
 
 use lashlang::{
-    AbilityOp, AbilityResult, AssignTarget, BinaryOp, CatchClause, ErrorTaxonomy, ExecutionHost,
-    ExecutionHostError, ExecutionMode, ExecutionOutcome, Expr, FunctionExpr, InvalidAst,
-    MAX_AST_NESTING_DEPTH, NestingTooDeep, Program, RuntimeError, State, TryExpr, Value, Vm,
-    VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
+    AbilityOp, AbilityResult, AssignTarget, BinaryOp, CatchClause, Declaration, ErrorTaxonomy,
+    ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome, Expr, FunctionDecl,
+    FunctionExpr, FunctionParam, InvalidAst, MAX_AST_NESTING_DEPTH, NestingTooDeep, Program,
+    RuntimeError, State, TryExpr, TypeExpr, Value, Vm, VmContinuation,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
     VmPendingErrorOriginContinuation, VmRunOutcome, check_ast_nesting_depth, compile_ast, execute,
     validate_ast,
 };
@@ -89,6 +90,45 @@ async fn ast_only_functions_compile_execute_map_and_checkpoint() {
     );
     assert_eq!(vm.suspend().expect("function checkpoint").frame_depth(), 1);
     assert_eq!(lashlang::DEFAULT_MAX_VM_FRAME_DEPTH.get(), 1_024);
+}
+
+/// Declared `fn` is the source-level counterpart of the AST-only closures
+/// above: a named, top-level, pure function that a host can also build
+/// directly and that call sites reach by name rather than through a value.
+///
+/// This is host code rather than test code because the AST shape *is* the
+/// documented surface: a reader copying it needs the construction, not an
+/// assertion harness around it.
+async fn declared_function_module() -> ExecutionOutcome {
+    let mut program = Program::block(vec![Expr::Finish(Box::new(Expr::FunctionCall {
+        function: "double".into(),
+        args: vec![Expr::Number(21.0)],
+    }))]);
+    program.declarations = vec![Declaration::Function(FunctionDecl {
+        name: "double".into(),
+        params: vec![FunctionParam {
+            name: "value".into(),
+            ty: TypeExpr::Float,
+        }],
+        return_ty: TypeExpr::Float,
+        body: Expr::Binary {
+            left: Box::new(Expr::Variable("value".into())),
+            op: BinaryOp::Add,
+            right: Box::new(Expr::Variable("value".into())),
+        },
+    })];
+
+    let compiled = compile_ast(&program).expect("program nesting is within the cap");
+    let outcome = execute(&compiled, &mut State::new(), &Host)
+        .await
+        .expect("declared functions execute");
+    assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(42.0)));
+    outcome
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn declared_functions_compile_and_execute() {
+    declared_function_module().await;
 }
 
 #[tokio::test(flavor = "current_thread")]

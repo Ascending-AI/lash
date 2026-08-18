@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::HostRequirements;
 use crate::ast::{
-    AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, LabelMetadata,
+    AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, LabelMetadata,
     ListComprehensionClause, ProcessDecl, Program, ResourceRefExpr, TypeExpr, TypeField, UnaryOp,
 };
 
@@ -135,7 +135,38 @@ impl<'a> SourceFormatter<'a> {
                 self.write_process(&mut out, process)?;
                 Ok(out)
             }
+            Declaration::Function(function) => {
+                let mut out = String::new();
+                self.write_function(&mut out, function)?;
+                Ok(out)
+            }
         }
+    }
+
+    fn write_function(
+        &self,
+        out: &mut String,
+        function: &FunctionDecl,
+    ) -> Result<(), CanonicalSourceError> {
+        out.push_str("fn ");
+        out.push_str(&format_identifier("function name", function.name.as_str())?);
+        out.push('(');
+        for (index, param) in function.params.iter().enumerate() {
+            if index > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&format_identifier(
+                "function parameter",
+                param.name.as_str(),
+            )?);
+            out.push_str(": ");
+            out.push_str(&self.type_source(&param.ty)?);
+        }
+        out.push_str(") -> ");
+        out.push_str(&self.type_source(&function.return_ty)?);
+        out.push(' ');
+        out.push_str(&self.block_source(&function.body, 0)?);
+        Ok(())
     }
 
     fn write_process(
@@ -488,6 +519,17 @@ impl<'a> SourceFormatter<'a> {
                     args.join(", ")
                 ))
             }
+            Expr::FunctionCall { function, args } => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expr_source(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!(
+                    "{}({})",
+                    format_identifier("function", function.as_str())?,
+                    args.join(", ")
+                ))
+            }
             Expr::Function(_) => Err(CanonicalSourceError::NonSourceableExpression {
                 kind: "AST-only function",
             }),
@@ -557,6 +599,7 @@ impl<'a> SourceFormatter<'a> {
             | Expr::ResourceRef(_)
             | Expr::ReceiverCall { .. }
             | Expr::BuiltinCall { .. }
+            | Expr::FunctionCall { .. }
             | Expr::Field { .. }
             | Expr::Index { .. }
             | Expr::ResultUnwrap(_)
@@ -582,6 +625,7 @@ impl<'a> SourceFormatter<'a> {
             | Expr::ResourceRef(_)
             | Expr::ReceiverCall { .. }
             | Expr::BuiltinCall { .. }
+            | Expr::FunctionCall { .. }
             | Expr::Field { .. }
             | Expr::Index { .. }
             | Expr::ResultUnwrap(_)

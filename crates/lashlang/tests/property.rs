@@ -561,7 +561,8 @@ fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &st
                     .iter_mut()
                     .find_map(|declaration| match declaration {
                         lashlang::WorkflowDeclaration::Process(process) => Some(process),
-                        lashlang::WorkflowDeclaration::Type(_) => None,
+                        lashlang::WorkflowDeclaration::Type(_)
+                        | lashlang::WorkflowDeclaration::Function(_) => None,
                     })
             else {
                 return false;
@@ -719,7 +720,8 @@ fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &st
                     .iter_mut()
                     .find_map(|declaration| match declaration {
                         lashlang::WorkflowDeclaration::Process(process) => Some(process),
-                        lashlang::WorkflowDeclaration::Type(_) => None,
+                        lashlang::WorkflowDeclaration::Type(_)
+                        | lashlang::WorkflowDeclaration::Function(_) => None,
                     })
             else {
                 return false;

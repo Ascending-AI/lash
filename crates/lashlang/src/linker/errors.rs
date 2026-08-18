@@ -62,6 +62,42 @@ pub enum LinkError {
         actual: String,
         span: Option<Span>,
     },
+    #[error("function `{function}` return type is incompatible: expected {expected}, got {actual}")]
+    IncompatibleFunctionReturn {
+        function: String,
+        expected: String,
+        actual: String,
+        span: Option<Span>,
+    },
+    #[error("duplicate function parameter `{name}`")]
+    DuplicateFunctionParam { name: String, span: Option<Span> },
+    #[error("function `{function}` expects {expected} argument(s), got {actual}")]
+    FunctionArgumentCount {
+        function: String,
+        expected: usize,
+        actual: usize,
+        span: Option<Span>,
+    },
+    #[error("function `{function}` parameter `{param}` expects {expected}, got {actual}")]
+    IncompatibleFunctionArgument {
+        function: String,
+        param: String,
+        expected: String,
+        actual: String,
+        span: Option<Span>,
+    },
+    #[error(
+        "`{construct}` can't be used inside function `{function}`; functions are pure, so keep effects at the top level (or in a `process`) and pass their results in as arguments"
+    )]
+    ForbiddenInFunction {
+        function: String,
+        construct: &'static str,
+        span: Option<Span>,
+    },
+    #[error("`{name}` names a function; call it as `{name}(...)` — it is not a value")]
+    FunctionNameIsNotAValue { name: String, span: Option<Span> },
+    #[error("function `{name}` cannot reuse the name of a builtin")]
+    FunctionShadowsBuiltin { name: String, span: Option<Span> },
     #[error("trigger registration requires {{ source, target, inputs, name? }}")]
     InvalidTriggerRegistration { span: Option<Span> },
     #[error(
@@ -210,6 +246,13 @@ impl LinkError {
             | Self::IncompatibleOperationInput { span, .. }
             | Self::IncompatibleExpectedLiteral { span, .. }
             | Self::IncompatibleProcessReturn { span, .. }
+            | Self::IncompatibleFunctionReturn { span, .. }
+            | Self::DuplicateFunctionParam { span, .. }
+            | Self::FunctionArgumentCount { span, .. }
+            | Self::IncompatibleFunctionArgument { span, .. }
+            | Self::ForbiddenInFunction { span, .. }
+            | Self::FunctionNameIsNotAValue { span, .. }
+            | Self::FunctionShadowsBuiltin { span, .. }
             | Self::InvalidTriggerRegistration { span }
             | Self::InvalidTriggerSubscriptionKey { span }
             | Self::DuplicateDerivedTriggerSubscriptionKey { span, .. }

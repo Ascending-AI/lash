@@ -82,8 +82,12 @@ pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
     check_ast_nesting_depth(program)?;
     check_loop_control(&program.main)?;
     for declaration in &program.declarations {
-        if let Declaration::Process(process) = declaration {
-            check_loop_control(&process.body)?;
+        match declaration {
+            Declaration::Process(process) => check_loop_control(&process.body)?,
+            // A declared function compiles to a real call frame, so `return`
+            // is legal in its body while `break`/`continue` still need a loop.
+            Declaration::Function(function) => check_function_loop_control(&function.body)?,
+            Declaration::Type(_) => {}
         }
     }
     Ok(())
@@ -96,7 +100,16 @@ pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
 /// its loop contexts across one, so an enclosing loop outside the function does
 /// not reach in.
 fn check_loop_control(root: &Expr) -> Result<(), InvalidAst> {
-    let mut pending: Vec<(&Expr, bool, bool)> = vec![(root, false, false)];
+    check_loop_control_inner(root, false)
+}
+
+/// Walks a declared function's body, which is itself a function body.
+fn check_function_loop_control(root: &Expr) -> Result<(), InvalidAst> {
+    check_loop_control_inner(root, true)
+}
+
+fn check_loop_control_inner(root: &Expr, in_function: bool) -> Result<(), InvalidAst> {
+    let mut pending: Vec<(&Expr, bool, bool)> = vec![(root, false, in_function)];
     while let Some((expr, in_loop, in_function)) = pending.pop() {
         match expr {
             Expr::Break if !in_loop => {
@@ -141,8 +154,10 @@ pub fn check_ast_nesting_depth(program: &Program) -> Result<(), NestingTooDeep> 
     let mut pending: Vec<(&Expr, usize)> = Vec::new();
     pending.push((&program.main, 1));
     for declaration in &program.declarations {
-        if let Declaration::Process(process) = declaration {
-            pending.push((&process.body, 1));
+        match declaration {
+            Declaration::Process(process) => pending.push((&process.body, 1)),
+            Declaration::Function(function) => pending.push((&function.body, 1)),
+            Declaration::Type(_) => {}
         }
     }
     while let Some((expr, depth)) = pending.pop() {
@@ -211,6 +226,7 @@ pub struct ExpressionSourceSpan {
 pub enum Declaration {
     Type(TypeDecl),
     Process(ProcessDecl),
+    Function(FunctionDecl),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -234,6 +250,30 @@ pub struct ProcessDecl {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessParam {
+    pub name: AstString,
+    pub ty: TypeExpr,
+}
+
+/// A user-defined pure synchronous function.
+///
+/// A function is the language's only reusable *synchronous* abstraction:
+/// `process` is durable and asynchronous, so shared pure logic previously had
+/// to be inlined at every use. The declaration is deliberately narrower than
+/// `process`: parameters and the return type are both mandatory, and the linker
+/// rejects every effect inside the body. That ban is what keeps effect identity
+/// untouched — every effect stays at a stable top-level syntactic site, so
+/// call-site exactly-once identity and continuation snapshots see no new shape.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FunctionDecl {
+    pub name: AstString,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<FunctionParam>,
+    pub return_ty: TypeExpr,
+    pub body: Expr,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FunctionParam {
     pub name: AstString,
     pub ty: TypeExpr,
 }
@@ -360,6 +400,18 @@ pub enum Expr {
     /// Calls a user-defined function value.
     Call {
         function: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    /// Calls a declared [`FunctionDecl`] by name.
+    ///
+    /// The parser never produces this node: source spells a call to a declared
+    /// function exactly like a builtin call, and the linker is the resolver
+    /// that rewrites the `BuiltinCall` whose name it recognises. Keeping the
+    /// resolved shape distinct is what lets the compiler emit a static callee
+    /// and lets every later pass tell a pure declared call apart from a
+    /// first-class closure call.
+    FunctionCall {
+        function: AstString,
         args: Vec<Expr>,
     },
     /// AST-only map intrinsic used to exercise builtin-to-VM callbacks.
@@ -535,7 +587,9 @@ impl Expr {
             | Expr::JavaScriptUnary { expr, .. }
             | Expr::Return(expr) => buffer.push(expr),
             Expr::Finish(expr) => buffer.push(expr),
-            Expr::BuiltinCall { args, .. } => buffer.extend(args.iter()),
+            Expr::BuiltinCall { args, .. } | Expr::FunctionCall { args, .. } => {
+                buffer.extend(args.iter())
+            }
             Expr::Function(function) => buffer.push(&function.body),
             Expr::Call { function, args } => {
                 buffer.push(function);
@@ -730,6 +784,13 @@ where
         Expr::Fail(expr) => Expr::Fail(Box::new(folder.fold_expr(*expr))),
         Expr::BuiltinCall { name, args } => Expr::BuiltinCall {
             name,
+            args: args
+                .into_iter()
+                .map(|expr| folder.fold_expr(expr))
+                .collect(),
+        },
+        Expr::FunctionCall { function, args } => Expr::FunctionCall {
+            function,
             args: args
                 .into_iter()
                 .map(|expr| folder.fold_expr(expr))

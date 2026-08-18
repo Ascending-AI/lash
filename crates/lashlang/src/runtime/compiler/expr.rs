@@ -18,7 +18,49 @@ impl Compiler {
         });
     }
 
+    /// Emits a call to a declared `fn`.
+    ///
+    /// The callee is materialized at the call site as a capture-free closure
+    /// over the chunk function, and the call then runs through the ordinary
+    /// `Call` path. Reusing that path rather than adding a call opcode is the
+    /// point: the frame, the argument-count check, the return, and the
+    /// continuation encoding of an active frame are the ones the heap VM
+    /// already carries, so the durable instruction contract gains no shape.
+    /// Capture-free also means order-free — the closure depends on nothing that
+    /// must have been created earlier, so declarations may call each other in
+    /// any direction, including recursively.
+    ///
+    /// No execution site is marked. A site is how an effect earns its
+    /// exactly-once identity and its workflow node; a function body cannot
+    /// perform one, so a call is ordinary computation and stays invisible to
+    /// the graph.
+    fn compile_declared_call(&mut self, function: &str, args: &[Expr]) {
+        let index = self
+            .declared_functions
+            .get(function)
+            .copied()
+            .expect("the linker only emits calls to declared functions");
+        self.code.push(Instruction::MakeClosure {
+            function: index,
+            captures: 0,
+        });
+        for arg in args {
+            self.compile_expr(arg);
+            self.emit_isolation();
+        }
+        self.code.push(Instruction::Call { argc: args.len() });
+    }
+
     fn emit_builtin_call(&mut self, name: &str, args: &[Expr]) {
+        // Source spells a declared call and a builtin call the same way, and
+        // the linker normally resolves which one it is. The unlinked compile
+        // entry has no linker, so the same resolution happens here: without it
+        // a program compiled that way would defer a name it can see to a
+        // runtime "unknown builtin".
+        if self.declared_functions.contains_key(name) {
+            self.compile_declared_call(name, args);
+            return;
+        }
         if let ("__typescript_call_dynamic", [function, arguments]) = (name, args) {
             self.compile_expr(function);
             self.compile_expr(arguments);
@@ -359,6 +401,7 @@ impl Compiler {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
+            Expr::FunctionCall { function, args } => self.compile_declared_call(function, args),
             Expr::Map { items, function } => {
                 self.compile_expr(items);
                 self.compile_expr(function);

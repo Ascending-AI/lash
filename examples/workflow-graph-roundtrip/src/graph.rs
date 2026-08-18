@@ -166,7 +166,7 @@ pub(crate) fn graph_from_document(
             WorkflowDeclaration::Process(process) => {
                 Some((process.id.to_string(), process.clone()))
             }
-            WorkflowDeclaration::Type(_) => None,
+            WorkflowDeclaration::Type(_) | WorkflowDeclaration::Function(_) => None,
         })
         .collect::<BTreeMap<_, _>>();
     let mut graph = baseline.clone();

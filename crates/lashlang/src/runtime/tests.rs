@@ -1300,6 +1300,7 @@ include!("tests/async_and_cache_cases.rs");
 include!("tests/continuation_cases.rs");
 include!("tests/continuation_wire_cases.rs");
 include!("tests/function_cases.rs");
+include!("tests/declared_function_cases.rs");
 include!("tests/exception_cases.rs");
 include!("tests/exception_control_flow_cases.rs");
 include!("tests/exception_wire_cases.rs");

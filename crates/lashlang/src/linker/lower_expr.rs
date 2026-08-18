@@ -32,8 +32,15 @@ impl<'module> Linker<'module> {
     /// a ~68 KiB frame, so the deepest program the parser admits
     /// (`MAX_NESTING_DEPTH`) needed ~3 MiB to link — past the 2 MiB a host
     /// thread gets, which turned a legal program into an abort. Split, each
-    /// level carries this dispatcher plus the one variant's frame. Keep new
-    /// variants in their own method.
+    /// level carries this dispatcher plus the one variant's frame.
+    ///
+    /// The same accounting is why every arm *returns* its method's `Result`
+    /// instead of unwrapping it with `?` into a shared `Ok(match ..)`. Each `?`
+    /// is a separate temporary, so an unoptimized build gave every arm its own
+    /// `Result<(Expr, Option<Binding>), LinkError>` slot and this frame grew by
+    /// roughly two kilobytes per variant added — 28 KiB across the match, or
+    /// about 2 MiB at the nesting cap, which is the entire host budget. Keep
+    /// new variants in their own method, and keep the arm a tail call.
     fn lower_expr_expected_inner(
         &self,
         expr: &Expr,
@@ -52,88 +59,91 @@ impl<'module> Linker<'module> {
                 }),
             ));
         }
-        Ok(match expr {
-            Expr::Block(expressions) => self.lower_block(expressions, scope, expected)?,
+        match expr {
+            Expr::Block(expressions) => self.lower_block(expressions, scope, expected),
             Expr::LabelAnnotated { label, expr } => {
-                self.lower_label_annotated(label, expr, scope, expected)?
+                self.lower_label_annotated(label, expr, scope, expected)
             }
-            Expr::Variable(name) => self.lower_variable(name, scope)?,
+            Expr::Variable(name) => self.lower_variable(name, scope),
             Expr::Null
             | Expr::Undefined
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
             | Expr::Break
-            | Expr::Continue => (expr.clone(), Some(Binding::Value(literal_type(expr)))),
-            Expr::TypeLiteral(_) => (
+            | Expr::Continue => Ok((expr.clone(), Some(Binding::Value(literal_type(expr))))),
+            Expr::TypeLiteral(_) => Ok((
                 expr.clone(),
                 Some(
                     self.closed_schema_witness_binding(expr)
                         .unwrap_or_else(any_binding),
                 ),
-            ),
-            Expr::Tuple(items) => self.lower_tuple(items, scope, expected)?,
-            Expr::List(items) => self.lower_list(items, scope, expected)?,
+            )),
+            Expr::Tuple(items) => self.lower_tuple(items, scope, expected),
+            Expr::List(items) => self.lower_list(items, scope, expected),
             Expr::ListComprehension { element, clauses } => {
-                self.lower_list_comprehension(element, clauses, scope)?
+                self.lower_list_comprehension(element, clauses, scope)
             }
-            Expr::Record(entries) => self.lower_record(entries, scope, expected)?,
-            Expr::Assign { target, expr } => self.lower_assign(target, expr, scope)?,
+            Expr::Record(entries) => self.lower_record(entries, scope, expected),
+            Expr::Assign { target, expr } => self.lower_assign(target, expr, scope),
             Expr::If {
                 condition,
                 then_block,
                 else_block,
-            } => self.lower_if(condition, then_block, else_block, scope, expected)?,
+            } => self.lower_if(condition, then_block, else_block, scope, expected),
             Expr::For {
                 binding,
                 iterable,
                 body,
-            } => self.lower_for(binding, iterable, body, scope)?,
-            Expr::While { condition, body } => self.lower_while(condition, body, scope)?,
-            Expr::StartProcess(start) => self.lower_start_process(start, scope)?,
-            Expr::ProcessRef { process } => self.lower_process_ref(process, scope)?,
+            } => self.lower_for(binding, iterable, body, scope),
+            Expr::While { condition, body } => self.lower_while(condition, body, scope),
+            Expr::StartProcess(start) => self.lower_start_process(start, scope),
+            Expr::ProcessRef { process } => self.lower_process_ref(process, scope),
             Expr::HostDescriptorConstructor { type_name, input } => {
-                self.lower_host_descriptor_constructor(type_name, input, scope)?
+                self.lower_host_descriptor_constructor(type_name, input, scope)
             }
-            Expr::ResourceRef(resource) => self.lower_resource_ref(resource, scope)?,
+            Expr::ResourceRef(resource) => self.lower_resource_ref(resource, scope),
             Expr::ReceiverCall {
                 receiver,
                 operation,
                 args,
-            } => self.lower_receiver_call(receiver, operation, args, scope)?,
-            Expr::Await(inner) => self.lower_await(inner, scope, expected)?,
-            Expr::SleepFor(inner) => self.lower_sleep_for(inner, scope)?,
-            Expr::SleepUntil(inner) => self.lower_sleep_until(inner, scope)?,
-            Expr::WaitSignal { name } => self.lower_wait_signal(name, scope)?,
+            } => self.lower_receiver_call(receiver, operation, args, scope),
+            Expr::Await(inner) => self.lower_await(inner, scope, expected),
+            Expr::SleepFor(inner) => self.lower_sleep_for(inner, scope),
+            Expr::SleepUntil(inner) => self.lower_sleep_until(inner, scope),
+            Expr::WaitSignal { name } => self.lower_wait_signal(name, scope),
             Expr::SignalRun { run, name, payload } => {
-                self.lower_signal_run(run, name, payload, scope)?
+                self.lower_signal_run(run, name, payload, scope)
             }
-            Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, scope, expected)?,
-            Expr::Cancel(inner) => self.lower_cancel(inner, scope)?,
-            Expr::Print(inner) => self.lower_print(inner, scope)?,
-            Expr::Yield(inner) => self.lower_yield(inner, scope)?,
-            Expr::Wake(inner) => self.lower_wake(inner, scope)?,
-            Expr::Finish(inner) => self.lower_finish(inner, scope)?,
-            Expr::Fail(inner) => self.lower_fail(inner, scope)?,
-            Expr::BuiltinCall { name, args } => self.lower_builtin_call(name, args, scope)?,
-            Expr::Function(function) => self.lower_function(function, scope)?,
-            Expr::Call { function, args } => self.lower_call(function, args, scope)?,
-            Expr::Map { items, function } => self.lower_map(items, function, scope)?,
-            Expr::Try(exception) => self.lower_try_expr(exception, scope)?,
-            Expr::Throw(value) => self.lower_throw_expr(value, scope)?,
-            Expr::Return(value) => self.lower_return_expr(value, scope)?,
-            Expr::Field { target, field } => self.lower_field(target, field, scope)?,
-            Expr::Index { target, index } => self.lower_index(target, index, scope)?,
-            Expr::Unary { op, expr } => self.lower_unary(op, expr, scope)?,
-            Expr::Binary { left, op, right } => self.lower_binary(left, op, right, scope)?,
-            Expr::JavaScriptUnary { op, expr } => self.lower_javascript_unary(op, expr, scope)?,
+            Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, scope, expected),
+            Expr::Cancel(inner) => self.lower_cancel(inner, scope),
+            Expr::Print(inner) => self.lower_print(inner, scope),
+            Expr::Yield(inner) => self.lower_yield(inner, scope),
+            Expr::Wake(inner) => self.lower_wake(inner, scope),
+            Expr::Finish(inner) => self.lower_finish(inner, scope),
+            Expr::Fail(inner) => self.lower_fail(inner, scope),
+            Expr::BuiltinCall { name, args } => self.lower_builtin_call(name, args, scope),
+            Expr::FunctionCall { function, args } => {
+                self.lower_function_call(function, args, scope)
+            }
+            Expr::Function(function) => self.lower_function(function, scope),
+            Expr::Call { function, args } => self.lower_call(function, args, scope),
+            Expr::Map { items, function } => self.lower_map(items, function, scope),
+            Expr::Try(exception) => self.lower_try_expr(exception, scope),
+            Expr::Throw(value) => self.lower_throw_expr(value, scope),
+            Expr::Return(value) => self.lower_return_expr(value, scope),
+            Expr::Field { target, field } => self.lower_field(target, field, scope),
+            Expr::Index { target, index } => self.lower_index(target, index, scope),
+            Expr::Unary { op, expr } => self.lower_unary(op, expr, scope),
+            Expr::Binary { left, op, right } => self.lower_binary(left, op, right, scope),
+            Expr::JavaScriptUnary { op, expr } => self.lower_javascript_unary(op, expr, scope),
             Expr::JavaScriptBinary { left, op, right } => {
-                self.lower_javascript_binary(left, op, right, scope)?
+                self.lower_javascript_binary(left, op, right, scope)
             }
             Expr::JavaScriptLogical { left, op, right } => {
-                self.lower_javascript_logical(left, op, right, scope)?
+                self.lower_javascript_logical(left, op, right, scope)
             }
-        })
+        }
     }
 
     fn lower_block(
@@ -184,6 +194,7 @@ impl<'module> Linker<'module> {
         name: &AstString,
         scope: &mut Scope,
     ) -> Result<(Expr, Option<Binding>), LinkError> {
+        self.reject_function_name_binding(name.as_str(), scope.span)?;
         Ok(if let Some(binding) = scope.get(name) {
             (Expr::Variable(name.clone()), Some(binding))
         } else if let Some(process_ty) = self.process_types.get(name.as_str()) {
@@ -264,6 +275,7 @@ impl<'module> Linker<'module> {
         for clause in clauses {
             match clause {
                 ListComprehensionClause::For { binding, iterable } => {
+                    self.reject_function_name_binding(binding.as_str(), scope.span)?;
                     let (iterable, iterable_binding) = self.lower_expr(iterable, scope)?;
                     let item_ty = self
                         .iterable_item_type(&binding_type(iterable_binding.as_ref()), scope.span)?;
@@ -335,6 +347,7 @@ impl<'module> Linker<'module> {
         expr: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Option<Binding>), LinkError> {
+        self.reject_function_name_binding(target.root.as_str(), scope.span)?;
         for step in &target.steps {
             if let AssignPathStep::Index(index) = step {
                 self.lower_expr(index, scope)?;
@@ -396,6 +409,7 @@ impl<'module> Linker<'module> {
         body: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Option<Binding>), LinkError> {
+        self.reject_function_name_binding(binding.as_str(), scope.span)?;
         let (iterable, iterable_binding) = self.lower_expr(iterable, scope)?;
         let item_ty =
             self.iterable_item_type(&binding_type(iterable_binding.as_ref()), scope.span)?;
@@ -883,6 +897,14 @@ impl<'module> Linker<'module> {
         args: &[Expr],
         scope: &mut Scope,
     ) -> Result<(Expr, Option<Binding>), LinkError> {
+        // Source spells a call to a declared function exactly like a builtin
+        // call, so this is where the two namespaces are told apart. Builtins
+        // win by construction: a declaration that reuses a builtin name is
+        // rejected at collection, so the lookup order here cannot hide a
+        // function behind a builtin.
+        if self.function_signatures.contains_key(name.as_str()) {
+            return self.lower_function_call(name, args, scope);
+        }
         if !crate::builtins::is_builtin(name.as_str()) {
             if let Some(suggestion) = self
                 .surface
@@ -920,6 +942,55 @@ impl<'module> Linker<'module> {
                 name.as_str(),
                 &arg_types,
             ))),
+        ))
+    }
+
+    /// Type-checks one call to a declared function against its signature.
+    ///
+    /// Arity is exact and every argument is checked positionally, which is what
+    /// makes the declared return type usable: the call's binding is the
+    /// declared output, so a function result flows into typed positions exactly
+    /// like a process result does.
+    fn lower_function_call(
+        &self,
+        function: &AstString,
+        args: &[Expr],
+        scope: &mut Scope,
+    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        let signature = self
+            .function_signatures
+            .get(function.as_str())
+            .expect("a function call is only lowered for a declared function")
+            .clone();
+        if args.len() != signature.params.len() {
+            return Err(LinkError::FunctionArgumentCount {
+                function: function.to_string(),
+                expected: signature.params.len(),
+                actual: args.len(),
+                span: scope.span,
+            });
+        }
+        let mut lowered = Vec::with_capacity(args.len());
+        for (arg, (param_name, param_ty)) in args.iter().zip(&signature.params) {
+            let (expr, binding) = self.lower_expr_expected(arg, scope, Some(param_ty))?;
+            let actual = binding_type(binding.as_ref());
+            if !self.is_type_assignable(&actual, param_ty) {
+                return Err(LinkError::IncompatibleFunctionArgument {
+                    function: function.to_string(),
+                    param: param_name.clone(),
+                    expected: format_type_expr(&self.resolve_type_aliases(param_ty)),
+                    actual: format_type_expr(&self.resolve_type_aliases(&actual)),
+                    span: scope.span,
+                });
+            }
+            lowered.push(expr);
+        }
+        Ok((
+            Expr::FunctionCall {
+                function: function.clone(),
+                args: lowered,
+            },
+            Some(Binding::Value(signature.return_ty)),
         ))
     }
 
