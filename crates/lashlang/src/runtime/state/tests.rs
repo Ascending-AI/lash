@@ -1292,3 +1292,68 @@ fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
         assert!(reason.contains("Lashlang forest"), "{reason}");
     }
 }
+
+/// A host with no abilities: the closure fixture below never performs one.
+struct CrossProgramHost;
+
+impl crate::runtime::ExecutionHost for CrossProgramHost {
+    async fn perform(
+        &self,
+        _op: crate::runtime::AbilityOp,
+    ) -> Result<crate::runtime::AbilityResult, crate::runtime::ExecutionHostError> {
+        Err(crate::runtime::ExecutionHostError::new("no abilities"))
+    }
+}
+
+/// A real captured closure, snapshotted and restored, must not fail validation
+/// of a *different* program.
+///
+/// The sibling test above pins the intended rejection of malformed closure
+/// metadata against the program that produced it. This is the other half:
+/// closure metadata that is well-formed for program A carries no claim about
+/// program B, and an RLM session compiles a fresh program per cell. See
+/// FIG-1562.
+///
+/// Red on `main`: `State::snapshot` collects the heap but keeps closures its
+/// roots reach, so the restored state rejects the next program with
+/// `UnknownFunction { index: 0 }`.
+#[test]
+#[ignore = "FIG-1562: heap closures outlive their program and fail the next program's validation"]
+fn a_restored_real_closure_does_not_reject_a_different_program() {
+    let closure_program = compile_program_internal(&Program::block(vec![
+        Expr::Assign {
+            target: AssignTarget::variable("captured".into()),
+            expr: Box::new(Expr::Number(1.0)),
+        },
+        Expr::Assign {
+            target: AssignTarget::variable("f".into()),
+            expr: Box::new(Expr::Function(Box::new(FunctionExpr {
+                name: None,
+                params: Vec::new(),
+                captures: vec!["captured".into()],
+                body: Box::new(Expr::Variable("captured".into())),
+            }))),
+        },
+    ]));
+    let mut state = State::new();
+    futures::executor::block_on(crate::runtime::entry_points::execute(
+        &closure_program,
+        &mut state,
+        &CrossProgramHost,
+    ))
+    .expect("the closure fixture executes");
+
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("a real closure snapshot encodes");
+    let restored = State::from_snapshot(
+        Snapshot::from_canonical_bytes(&bytes).expect("a real closure snapshot decodes"),
+    );
+
+    // A different cell: no functions of its own.
+    let next_program = compile_program_internal(&Program::block(vec![Expr::Number(42.0)]));
+    restored
+        .validate_program(&next_program)
+        .expect("a restored closure must not reject the next cell's program");
+}
