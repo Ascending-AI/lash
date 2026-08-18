@@ -292,8 +292,8 @@ mod tests {
 
     use super::*;
     use crate::plugin::budget_warning::BUDGET_WARNING_STATUS;
-    use lash_rlm_types::RlmDialect;
     use crate::projection::RlmProjectedBindings;
+    use lash_rlm_types::RlmDialect;
 
     struct NoopPromptManager;
 

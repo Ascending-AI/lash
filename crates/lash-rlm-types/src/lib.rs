@@ -296,9 +296,7 @@ impl RlmSessionConfig {
 
     /// Whether this states nothing at all.
     pub fn is_empty(&self) -> bool {
-        self.dialect.is_none()
-            && self.final_answer_format.is_none()
-            && self.termination.is_none()
+        self.dialect.is_none() && self.final_answer_format.is_none() && self.termination.is_none()
     }
 }
 

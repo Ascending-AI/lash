@@ -391,7 +391,10 @@ fn final_answer_format_prompt(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> Option<String> {
     let termination = options.effective_termination();
-    if matches!(termination, RlmTermination::FinishRequired { schema: Some(_) }) {
+    if matches!(
+        termination,
+        RlmTermination::FinishRequired { schema: Some(_) }
+    ) {
         return None;
     }
     match options.final_answer_format.as_ref()? {
