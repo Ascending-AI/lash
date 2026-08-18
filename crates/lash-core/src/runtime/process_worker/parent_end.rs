@@ -117,7 +117,7 @@ impl DurableProcessWorker {
         process_id: &str,
         output: Box<ProcessAwaitOutput>,
         actions: Vec<crate::ToolIntentParentEndAction>,
-    ) {
+    ) -> super::recovery::ProcessRecoveryOutcome {
         let completion = self
             .complete_and_release_with_parent_end(lease, process_id, *output, actions)
             .await;
@@ -126,7 +126,7 @@ impl DurableProcessWorker {
             RecoveryCompletionDisposition::Committed
                 | RecoveryCompletionDisposition::AlreadyApplied(_)
         );
-        Self::observe_recovery_completion(completion);
+        let outcome = completion.into_outcome();
         if terminal_written && let Err(error) = self.drive_one_parent_end_plan(process_id).await {
             tracing::warn!(
                 process_id = %process_id,
@@ -134,5 +134,6 @@ impl DurableProcessWorker {
                 "durable parent-end plan remains pending after terminal completion",
             );
         }
+        outcome
     }
 }

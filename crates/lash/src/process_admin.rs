@@ -292,7 +292,7 @@ impl Processes {
             )));
         };
         if let Some(driver) = self.core.work_driver.drivers().await.process {
-            driver.claim_and_run_pending("admin_process_start").await?;
+            let _ = driver.claim_and_run_pending("admin_process_start").await?;
         }
         Ok(*record)
     }

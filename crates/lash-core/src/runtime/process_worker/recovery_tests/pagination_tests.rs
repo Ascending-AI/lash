@@ -65,7 +65,7 @@ async fn process_slot_reservation_is_cancelled_when_the_dispatcher_shuts_down() 
         ))
         .await
         .expect("register blocked process-slot fixture");
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("start process dispatcher");
@@ -93,16 +93,17 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
     let started_changed = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Semaphore::new(2));
     let run_handle = Arc::new(LateBoundProcessRunHandle::default());
-    let (_worker, registry, run_handle, env_ref, test_registry) = worker_with_engine_and_registry(
-        1,
-        Arc::new(GatedSuccessEngine {
-            started,
-            started_changed,
-            release,
-        }),
-        run_handle,
-    )
-    .await;
+    let (_worker, registry, run_handle, env_ref, test_registry, sink) =
+        worker_with_engine_and_fault_sink(
+            1,
+            Arc::new(GatedSuccessEngine {
+                started,
+                started_changed,
+                release,
+            }),
+            run_handle,
+        )
+        .await;
     for index in 0..2 {
         registry
             .register_process(engine_registration(
@@ -123,7 +124,7 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
         )
         .await;
 
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("initial worklist page succeeds");
@@ -137,11 +138,18 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
     .await
     .expect("continuation retry budget is exhausted");
 
-    let error = run_handle
+    // The failed scan is reported by the pass that failed it, on the fault
+    // surface — never folded into the next call's outcome.
+    match sink.await_first_fault("the incomplete worklist scan").await {
+        ProcessWorkerFault::WorklistScanIncomplete { error } => {
+            assert!(error.contains("injected worklist failure"));
+        }
+        other => panic!("expected an incomplete-scan fault, got {other:?}"),
+    }
+    let _ = run_handle
         .enable_and_drive()
         .await
-        .expect_err("the next drive observes the typed incomplete scan");
-    assert!(error.to_string().contains("injected worklist failure"));
+        .expect("the next drive describes its own admission, not a prior scan");
     wait_for_terminal_count(&registry, 2, "resumed continuation sweep").await;
 }
 
@@ -151,16 +159,17 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
     let fail_retry = Arc::new(tokio::sync::Notify::new());
     let retry_runs = Arc::new(AtomicUsize::new(0));
     let run_handle = Arc::new(LateBoundProcessRunHandle::default());
-    let (worker, registry, run_handle, env_ref, test_registry) = worker_with_engine_and_registry(
-        2,
-        Arc::new(FailFirstRetryEngine {
-            retry_started: Arc::clone(&retry_started),
-            fail_retry: Arc::clone(&fail_retry),
-            retry_runs: Arc::clone(&retry_runs),
-        }),
-        run_handle,
-    )
-    .await;
+    let (worker, registry, run_handle, env_ref, test_registry, sink) =
+        worker_with_engine_and_fault_sink(
+            2,
+            Arc::new(FailFirstRetryEngine {
+                retry_started: Arc::clone(&retry_started),
+                fail_retry: Arc::clone(&fail_retry),
+                retry_runs: Arc::clone(&retry_runs),
+            }),
+            run_handle,
+        )
+        .await;
     for process_id in ["a-fast", "b-retry", "c-later-page"] {
         registry
             .register_process(engine_registration(
@@ -181,7 +190,7 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
         )
         .await;
 
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("start retry-exhaustion drive");
@@ -210,10 +219,16 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
     .await
     .expect("the transiently failed execution releases its worker slot");
 
-    run_handle
+    match sink.await_first_fault("the exhausted worklist scan").await {
+        ProcessWorkerFault::WorklistScanIncomplete { error } => {
+            assert!(error.contains("injected worklist failure"));
+        }
+        other => panic!("expected an incomplete-scan fault, got {other:?}"),
+    }
+    let _ = run_handle
         .enable_and_drive()
         .await
-        .expect_err("the next drive observes the exhausted scan");
+        .expect("the next drive reports its own admission");
     wait_for_terminal_count(&registry, 3, "retry after continuation exhaustion").await;
     assert_eq!(retry_runs.load(Ordering::SeqCst), 2);
     assert_eq!(worker.execution_scheduler.state.lock_recover().active, 0);
@@ -253,7 +268,7 @@ async fn concurrent_drive_rescan_survives_the_initial_fetch_error() {
         crate::task::spawn(async move { run_handle.enable_and_drive().await })
     };
     pause.wait_until_validated().await;
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("concurrent drive records its rescan intent");
@@ -296,7 +311,7 @@ async fn worklist_intake_fetches_next_page_only_after_dispatch_capacity_frees() 
             .expect("register bounded-intake process");
     }
 
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("start bounded worklist drive");
@@ -385,4 +400,119 @@ impl crate::ProcessEngine for GatedSuccessEngine {
         }
         .into())
     }
+}
+
+/// A call that finds a scan already in flight admits nothing of its own. Its
+/// empty report used to be indistinguishable from "the worklist was empty";
+/// the typed intake state is what separates the two.
+#[tokio::test]
+async fn a_drive_that_coalesces_onto_an_in_flight_scan_reports_no_intake() {
+    let started = Arc::new(AtomicUsize::new(0));
+    let started_changed = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(1));
+    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let (_worker, registry, run_handle, env_ref, test_registry) = worker_with_engine_and_registry(
+        1,
+        Arc::new(GatedSuccessEngine {
+            started,
+            started_changed,
+            release,
+        }),
+        run_handle,
+    )
+    .await;
+    registry
+        .register_process(engine_registration(
+            "coalesced-intake-row",
+            "gated-success",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register the coalesced intake row");
+
+    let pause = test_registry.pause_next_worklist_page_for_testing();
+    let scanning_drive = {
+        let run_handle = Arc::clone(&run_handle);
+        crate::task::spawn(async move { run_handle.enable_and_drive().await })
+    };
+    pause.wait_until_validated().await;
+    let coalesced = run_handle
+        .enable_and_drive()
+        .await
+        .expect("the coalescing drive returns cleanly");
+    assert_eq!(
+        coalesced.intake,
+        ProcessAdmissionIntake::Coalesced,
+        "a call that never read the worklist must say so"
+    );
+    assert!(
+        coalesced.admitted.is_empty() && coalesced.deferred.is_empty(),
+        "a coalesced pass reports no rows of its own: {coalesced:?}"
+    );
+
+    pause.resume();
+    let scanned = scanning_drive
+        .await
+        .expect("scanning drive task joins")
+        .expect("the scanning drive returns its own admission");
+    assert_eq!(
+        scanned.intake,
+        ProcessAdmissionIntake::Scanned,
+        "the call that read the page owns the intake"
+    );
+    assert_eq!(scanned.admitted, vec!["coalesced-intake-row".to_string()]);
+    wait_for_terminal_count(&registry, 1, "coalesced intake row").await;
+}
+
+/// The re-entrant leg of the same problem: a nested drive (trigger-delivery
+/// reconcile calls the work driver) admits rows the outer scan then sees as
+/// already scheduled. Folding the nested report in first is what keeps the
+/// outer call from reporting its own admission as somebody else's `Busy`.
+#[test]
+fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
+    let mut outer = ProcessAdmissionReport {
+        intake: ProcessAdmissionIntake::Coalesced,
+        ..ProcessAdmissionReport::default()
+    };
+    outer.absorb(ProcessAdmissionReport {
+        intake: ProcessAdmissionIntake::Scanned,
+        admitted: vec!["nested-row".to_string()],
+        deferred: Vec::new(),
+    });
+    assert_eq!(
+        outer.intake,
+        ProcessAdmissionIntake::Scanned,
+        "the nested pass's intake belongs to this call"
+    );
+
+    // The outer scan sees the nested pass's row already scheduled and the
+    // page's own untouched row.
+    outer.absorb(ProcessAdmissionReport {
+        intake: ProcessAdmissionIntake::Scanned,
+        admitted: vec!["outer-row".to_string()],
+        deferred: vec![
+            ProcessAdmissionDeferred {
+                process_id: "nested-row".to_string(),
+                disposition: ProcessRecoveryAttemptDisposition::Busy,
+            },
+            ProcessAdmissionDeferred {
+                process_id: "peer-row".to_string(),
+                disposition: ProcessRecoveryAttemptDisposition::Busy,
+            },
+        ],
+    });
+    assert_eq!(
+        outer.admitted,
+        vec!["nested-row".to_string(), "outer-row".to_string()],
+        "both legs' admissions belong to the one call"
+    );
+    assert_eq!(
+        outer.deferred,
+        vec![ProcessAdmissionDeferred {
+            process_id: "peer-row".to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::Busy,
+        }],
+        "another owner's contention survives; this call's own admission does not become it"
+    );
 }

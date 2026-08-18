@@ -347,7 +347,27 @@ A generalization of code that already existed for turns — not a new subsystem:
 - **`DurableProcessWorker::drive_pending_processes`** — the sole inline
   process executor. Live tool starts, subagent fan-outs, trigger deliveries,
   admin starts, session-open work, and crash recovery all enter this same
-  lease-protected drive. It fetches a bounded page only as dispatch capacity
+  lease-protected drive. The call itself is **admission, not completion**: it
+  reads one intake page, hands those rows to the worker's dispatcher, and
+  returns a per-row `ProcessAdmissionReport` (`admitted` ids plus typed
+  `deferred` dispositions). The report also names its `intake`: a call that
+  found a scan already in flight requests a rescan and reports
+  `ProcessAdmissionIntake::Coalesced`, so "this call read nothing" never reads
+  as "the worklist was empty". A re-entrant drive's report (trigger-delivery
+  reconcile calls the work driver) is folded into the outer call's, which is
+  what keeps a call from reporting its own admission as another owner's `Busy`.
+  `ExternallyOwned` rows are reported as a typed deferral on both the inline
+  and Restate tiers — Lash never executes them — so one registry reads the same
+  whichever tier drove it. `Err` means *this call* failed — its parent-end
+  pass, its trigger-delivery reconcile, or its own intake read; a prior pass's
+  incomplete scan is never folded into it. Everything that can strand a row
+  after the return — a failed claim, read, terminal write, lease release, or
+  runtime rebuild, and a worklist scan that exhausted its retry budget — is
+  reported as a typed `ProcessWorkerFault` on the `ProcessEventSink`, an
+  unconditional surface present in every build (never a feature-gated metrics
+  recorder). Waiting for a terminal outcome stays on the engine seam
+  (`ProcessWorkDriver::await_terminal`); the worker exposes no completion
+  handle. It fetches a bounded page only as dispatch capacity
   frees, claims each lease (skipping any held live by another owner), re-checks terminality after
   claiming, then handles each row by its declared `RecoveryDisposition` (ADR
   0019). A `Rerunnable` row —
@@ -373,7 +393,8 @@ A generalization of code that already existed for turns — not a new subsystem:
   resumes. Two workers over one registry therefore have twice the configured
   aggregate capacity.
 - **`ProcessWorkDriver` (`claim_and_run_pending`)** — the seam that *drives*
-  `drive_pending_processes` promptly: invoked directly after a successful start
+  `drive_pending_processes` promptly, returning the same admission report:
+  invoked directly after a successful start
   and once on session open (`drive_process_on_open`), the latter folding in what
   used to be a separate boot-time recovery sweep. A `ProcessRunHandle` selects
   the tier: the inline `InlineProcessRunHandle` delegates to the worker's

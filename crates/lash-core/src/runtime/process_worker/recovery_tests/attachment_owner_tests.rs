@@ -295,7 +295,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         .await
         .expect("register process");
 
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("recover process");

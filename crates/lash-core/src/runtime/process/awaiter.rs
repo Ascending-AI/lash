@@ -1305,8 +1305,10 @@ mod tests {
     struct NoopRunHandle;
     #[async_trait::async_trait]
     impl crate::ProcessRunHandle for NoopRunHandle {
-        async fn claim_and_run_pending(&self) -> Result<(), PluginError> {
-            Ok(())
+        async fn claim_and_run_pending(
+            &self,
+        ) -> Result<crate::runtime::ProcessAdmissionReport, PluginError> {
+            Ok(crate::runtime::ProcessAdmissionReport::default())
         }
     }
     struct PanicAttach;

@@ -126,7 +126,10 @@ Read `graceful_drain_observed` and require:
 - the parked session id equals the seeded session;
 - provider close and trace flush completed; and
 - `drain_report_abandoned` contains only `drain-owner-bound-mine`; and
-- `drain_report_deferred` is empty (including no peer-settled or backend-error row).
+- `drain_report_deferred` is empty (including no peer-settled or backend-error row); and
+- `drain_worker_faults` is zero — the companion wires a `ProcessEventSink` and records every
+  `ProcessWorkerFault` the worker reports, so a fault stranded after admission cannot hide
+  behind a clean-looking drain.
 
 **Fail if:** the host admits work after quiesce, drops the in-flight effect, parks before it
 commits, declares an empty journal without a completed key, or invokes a substitute

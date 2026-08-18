@@ -35,7 +35,7 @@ impl ProcessLocalExecution {
                     InlineRuntimeEffectController::start_process(registry, registration, observers)
                         .await?;
                 if let Some(driver) = process_work_driver.as_ref() {
-                    driver.claim_and_run_pending("process_start").await?;
+                    let _ = driver.claim_and_run_pending("process_start").await?;
                 }
                 Ok(ProcessEffectOutcome::Start {
                     record: Box::new(record),

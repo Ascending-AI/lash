@@ -241,7 +241,7 @@ impl SessionBuilder {
         if drivers.drive_process_on_open
             && let Some(driver) = drivers.process.as_ref()
         {
-            driver.claim_and_run_pending("session_open").await?;
+            let _ = driver.claim_and_run_pending("session_open").await?;
         }
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,

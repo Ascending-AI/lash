@@ -189,8 +189,21 @@ async fn async_main() -> AnyhowResult<()> {
             );
         }
     });
-    let process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
-        as Arc<dyn lash::process::ProcessEventSink>;
+    // The worker's own faults ride the same sink, because the drive that loses
+    // a row is admission-only and has no return value left to say so. They are
+    // rare and unreconcilable, so they get their own channel — never queued
+    // behind event pressure — and are written to the workbench's stderr
+    // process log, where an operator reads them.
+    let (worker_fault_tx, mut worker_fault_rx) = mpsc::channel::<WorkerFaultNotice>(256);
+    tokio::spawn(async move {
+        while let Some(notice) = worker_fault_rx.recv().await {
+            eprintln!("agent-workbench process worker fault: {}", notice.render());
+        }
+    });
+    let process_event_sink = Arc::new(ChannelProcessEventSink::new(
+        process_event_tx,
+        worker_fault_tx,
+    )) as Arc<dyn lash::process::ProcessEventSink>;
     let process_deployment = lash_restate::RestateProcessDeployment::new_with_sink(
         lash_restate::RestateConnection::with_config(
             restate_ingress_url.clone(),
@@ -201,7 +214,7 @@ async fn async_main() -> AnyhowResult<()> {
         ),
         process_registry,
         process_continuations,
-        Some(process_event_sink),
+        Some(Arc::clone(&process_event_sink)),
     );
     // Retained so a host-facing "wait for the work item" flow can route through
     // `ProcessWorkDriver::await_terminal` (see the `/api/work/{id}/await` route).
@@ -278,6 +291,10 @@ async fn async_main() -> AnyhowResult<()> {
             );
         })
         .process_work_driver(process_work_driver.clone())
+        // The driver already carries this sink for appended events; the core
+        // needs it too, because the durable process worker it configures
+        // reports its faults there and nowhere else.
+        .process_event_sink(Arc::clone(&process_event_sink))
         .queued_work_driver(queued_work_driver.clone())
         .advanced()
         .runtime_host_config(runtime_host_config)

@@ -626,7 +626,7 @@ impl TriggerRouter {
             deliveries.push(reservation.emit_report(outcome));
         }
         if started_any && let Some(driver) = self.process_work_driver.as_ref() {
-            driver.claim_and_run_pending("trigger_delivery").await?;
+            let _ = driver.claim_and_run_pending("trigger_delivery").await?;
         }
         Ok(TriggerEmitReport::new(occurrence.occurrence_id, deliveries))
     }

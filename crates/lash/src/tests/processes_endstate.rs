@@ -1365,7 +1365,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
         Arc::clone(&registry),
         recovery_local_owner("foreign-host", "host-b", "foreign-start"),
     );
-    foreign.drive_pending_processes().await?;
+    let _ = foreign.drive_pending_processes().await?;
     assert!(
         registry
             .list_non_terminal_page(
@@ -1463,7 +1463,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
 
     // A sweep leaves the silent holder's row non-terminal:
     // elapsed time / silence alone never terminalizes.
-    worker.drive_pending_processes().await?;
+    let _ = worker.drive_pending_processes().await?;
     let observed = core
         .processes()
         .get(process_id)
@@ -1526,7 +1526,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
             &silent_lease,
         ))
         .await?;
-    worker.drive_pending_processes().await?;
+    let _ = worker.drive_pending_processes().await?;
 
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(5),

@@ -26,6 +26,7 @@ use crate::process::{
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use lash_core::TestProcessRegistryWriteExt;
+use lash_core::facade_support::{ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation};
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
     ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome,
@@ -11333,7 +11334,7 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
         "the crash is after terminal commit and before teardown"
     );
 
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("redrive durable segmented parent-end plan");
@@ -11376,7 +11377,7 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
         .register_process(tool_parent)
         .await
         .expect("register ToolCall process parent");
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("drive ToolCall process parent");
@@ -11733,7 +11734,7 @@ async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_r
         store_factory,
         vec![snapshot_recovery_tool_factory()],
     );
-    worker_b
+    let _ = worker_b
         .drive_pending_processes()
         .await
         .expect("recover snapshot-backed process");
@@ -11785,7 +11786,7 @@ async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin_options() 
         store_factory,
         vec![snapshot_recovery_tool_factory()],
     );
-    worker_b
+    let _ = worker_b
         .drive_pending_processes()
         .await
         .expect("recover revoked snapshot-backed process");
@@ -11927,7 +11928,7 @@ async fn typescript_artifact_runs_through_process_engine_to_terminal() {
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("run stored TypeScript artifact");
@@ -12046,7 +12047,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
     );
 
     let worker_b = recovery_worker(Arc::clone(&registry_b), Arc::clone(&store_factory));
-    worker_b
+    let _ = worker_b
         .drive_pending_processes()
         .await
         .expect("recover non-terminal trigger-started process");
@@ -12077,7 +12078,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
 
     // Idempotent by process_id: re-running the sweep over an already-terminal
     // process is a no-op and never double-executes it.
-    worker_b
+    let _ = worker_b
         .drive_pending_processes()
         .await
         .expect("second recovery sweep is idempotent");
@@ -13014,8 +13015,8 @@ async fn ingress_runner_submits_non_terminal_process_by_workflow_key() {
         registry.clone(),
         continuation_store(),
     );
-    runner.claim_and_run_pending().await.expect("drive pending");
-    runner
+    let _ = runner.claim_and_run_pending().await.expect("drive pending");
+    let _ = runner
         .claim_and_run_pending()
         .await
         .expect("drive pending again");
@@ -13092,7 +13093,7 @@ async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
     }])
     .await;
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuations);
-    runner.claim_and_run_pending().await.expect("drive pending");
+    let _ = runner.claim_and_run_pending().await.expect("drive pending");
     server.await.expect("capture server");
 
     let requests = captured.lock_recover();
@@ -13158,11 +13159,25 @@ async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_request() {
     .await;
     let runner =
         RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
-    runner
+    let report = runner
         .claim_and_run_pending()
         .await
         .expect("sweep skips externally-owned rows and submits the rerunnable one");
     server.await.expect("mock ingress server task");
+
+    // Skipped is not silent: an externally-owned row is a typed deferral on this
+    // tier too, so one registry reads the same whichever tier drove it.
+    assert_eq!(report.admitted, vec!["rerun-1".to_string()]);
+    let externally_owned = report
+        .deferred
+        .iter()
+        .filter(|entry| entry.disposition == ProcessRecoveryAttemptDisposition::ExternallyOwned)
+        .map(|entry| entry.process_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        externally_owned,
+        vec!["ext-abandon".to_string(), "ext-idle".to_string()]
+    );
 
     let requests = captured.lock_recover().clone();
     assert_eq!(
@@ -14087,10 +14102,12 @@ async fn restate_process_attach_maps_malformed_ingress_body_to_plugin_error() {
     );
 }
 
-/// Records each pushed event's `(event_type, sequence)` in emit order.
+/// Records each pushed event's `(event_type, sequence)` in emit order, and
+/// every worker fault the handle reports.
 #[derive(Clone, Default)]
 struct RecordingProcessEventSink {
     events: Arc<Mutex<Vec<(String, u64)>>>,
+    faults: Arc<Mutex<Vec<lash_core::facade_support::ProcessWorkerFault>>>,
 }
 
 #[async_trait::async_trait]
@@ -14099,6 +14116,10 @@ impl lash_core::facade_support::ProcessEventSink for RecordingProcessEventSink {
         self.events
             .lock_recover()
             .push((event.event_type.clone(), event.sequence));
+    }
+
+    async fn emit_worker_fault(&self, fault: &lash_core::facade_support::ProcessWorkerFault) {
+        self.faults.lock_recover().push(fault.clone());
     }
 }
 
@@ -14277,4 +14298,83 @@ async fn restate_admin_client_cancels_kills_and_queries_invocation_status() {
     assert!(requests[3].contains(
         "target_service_name = 'WorkbenchTurnWorkflow' AND target_service_key = 'turn-2' AND target_handler_name = 'run'"
     ));
+}
+
+/// A submit that fails mid-pass is that row's outcome, not the pass's. Failing
+/// the call would throw away the ids that already reached the ingress, so the
+/// failure rides back as a typed per-row deferral instead.
+#[tokio::test]
+async fn a_failed_ingress_submit_defers_its_row_without_discarding_the_pass() {
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("submit-fails"))
+        .await
+        .expect("register the row whose submit fails");
+
+    let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
+        status: "500 Internal Server Error",
+        body: r#"{"message":"ingress unavailable"}"#,
+    }])
+    .await;
+    let runner =
+        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
+    let report = runner
+        .claim_and_run_pending()
+        .await
+        .expect("a per-row submit failure does not fail the pass");
+    server.await.expect("mock ingress server task");
+
+    assert!(report.admitted.is_empty());
+    assert_eq!(report.deferred.len(), 1, "{report:?}");
+    assert_eq!(report.deferred[0].process_id, "submit-fails");
+    let ProcessRecoveryAttemptDisposition::BackendError { operation, .. } =
+        &report.deferred[0].disposition
+    else {
+        panic!(
+            "expected a typed backend error, got {:?}",
+            report.deferred[0]
+        );
+    };
+    assert_eq!(*operation, ProcessRecoveryOperation::SubmitRun);
+}
+
+/// A per-row deferral only reaches a host that reads the report, and every
+/// in-tree caller discards it. The fault surface is the path that does not
+/// depend on anyone reading a return value, so a failed ingress submit has to
+/// arrive there too.
+#[tokio::test]
+async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink() {
+    let sink = RecordingProcessEventSink::default();
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("submit-fails-loudly"))
+        .await
+        .expect("register the row whose submit fails");
+
+    let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
+        status: "500 Internal Server Error",
+        body: r#"{"message":"ingress unavailable"}"#,
+    }])
+    .await;
+    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store())
+        .with_event_sink(Some(Arc::new(sink.clone())));
+    let report = runner
+        .claim_and_run_pending()
+        .await
+        .expect("a per-row submit failure does not fail the pass");
+    server.await.expect("mock ingress server task");
+    assert_eq!(report.deferred.len(), 1, "{report:?}");
+
+    let faults = sink.faults.lock_recover().clone();
+    assert_eq!(faults.len(), 1, "{faults:?}");
+    let lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError {
+        process_id,
+        operation,
+        ..
+    } = &faults[0]
+    else {
+        panic!("expected a recovery backend fault, got {:?}", faults[0]);
+    };
+    assert_eq!(process_id, "submit-fails-loudly");
+    assert_eq!(*operation, ProcessRecoveryOperation::SubmitRun);
 }
