@@ -12,6 +12,13 @@ cd "$repo"
 source "$repo/scripts/worktree-gate-env.sh"
 lash_gate_acquire "slack-clone-full-host-e2e"
 
+# This is the scripted evidence layer, not the judged one: keep the `dev`
+# profile so the deterministic gate still runs with debug assertions armed.
+# Exported for the whole run, not set on the boot command alone — the Python
+# driver restarts the bot by re-invoking `slack-clone-dev.sh`, and a child that
+# missed this would rebuild the host under a second profile mid-gate.
+export SLACK_CLONE_CARGO_PROFILE=dev
+
 port="${LASH_SLACK_CLONE_E2E_PORT:-$((LASH_E2E_PORT_BASE + 48))}"
 if ! [[ "$port" =~ ^[0-9]+$ ]] || ((10#$port < 1 || 10#$port > 65534)); then
   echo "slack-clone E2E platform port must be an integer in 1..65534, got '$port'." >&2

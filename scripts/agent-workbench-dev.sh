@@ -446,12 +446,12 @@ write_meta() {
 }
 
 start_detached() {
-  log "building agent-workbench"
-  cargo build -p agent-workbench
+  log "building agent-workbench (profile: judged)"
+  cargo build -p agent-workbench --profile judged
 
   # Launch the binary cargo just built: honor CARGO_TARGET_DIR, or a stale
   # binary in the repo-local target/ boots instead of the fresh build.
-  local workbench_bin="${CARGO_TARGET_DIR:-$repo_root/target}/debug/agent-workbench"
+  local workbench_bin="${CARGO_TARGET_DIR:-$repo_root/target}/judged/agent-workbench"
   local -a workbench_env=(
     "AGENT_WORKBENCH_ADDR=$workbench_addr"
     "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
@@ -561,7 +561,7 @@ run_foreground() {
   if [[ -n "${AGENT_WORKBENCH_DATA_DIR:-}" ]]; then
     workbench_env+=("AGENT_WORKBENCH_DATA_DIR=$AGENT_WORKBENCH_DATA_DIR")
   fi
-  env "${workbench_env[@]}" cargo run -p agent-workbench &
+  env "${workbench_env[@]}" cargo run -p agent-workbench --profile judged &
   started_pid="$!"
   write_pid_file "$pid_file" "$started_pid" || die "could not record process identity for $started_pid"
   started_start_time="$(process_start_time "$started_pid")"

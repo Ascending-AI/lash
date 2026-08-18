@@ -197,3 +197,28 @@ strip = true
 # and read back the difference on every subsequent test run.
 [profile.dev.package."*"]
 opt-level = 2
+
+# The judged-runbook profile. A judged scenario scores what a host actually
+# ships, so the example binaries it drives must not carry development-only
+# self-checks: `debug_assert!` and overflow checks are compiled out here, and
+# `runbooks/RULES.md` requires every judged host boot to use this profile.
+#
+# The alternative — judging a `dev` build — turned in-contract outcomes into
+# `effect_panicked`: a Lashlang execution bound the runtime is supposed to
+# report back as feedback instead tripped a debug-only assertion inside the
+# effect task, and the turn surfaced as an opaque "turn could not be
+# completed". Debug-assert coverage is real coverage, but it belongs to the
+# unit/law lane (`cargo test`/`cargo nextest`), which keeps the `test` profile.
+#
+# Everything else inherits `dev`, so this stays a fast iteration build rather
+# than a `release` build; only the assertion geometry differs.
+[profile.judged]
+inherits = "dev"
+debug-assertions = false
+overflow-checks = false
+# Nobody attaches a debugger to a judged host; the one thing its log needs is a
+# readable `file:line` if the shipping code genuinely panics.
+debug = "line-tables-only"
+
+[profile.judged.package."*"]
+opt-level = 2

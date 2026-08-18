@@ -230,10 +230,30 @@ require_alive() {
   fi
 }
 
+# This launcher serves both runbook layers, and they want different builds. A
+# judged browser row scores what the host ships, so it boots the `judged`
+# profile (`runbooks/RULES.md`); the scripted full-host gate is deterministic
+# evidence rather than a product judgement, so it keeps `dev` and its debug
+# assertions. `scripts/slack-clone-full-host-e2e.sh` is the only caller that
+# overrides this.
+cargo_profile="${SLACK_CLONE_CARGO_PROFILE:-judged}"
+
+# Cargo's artifact directory is not the profile name: the built-in `dev` profile
+# writes to `target/debug`, and only `dev` is renamed this way. Every other
+# profile — `release` and custom ones like `judged` — uses its own name. Getting
+# this wrong points the launcher at a path that never exists, and the failure
+# reads as "the binary is missing" rather than "the mapping is wrong".
+profile_artifact_dir() {
+  case "$cargo_profile" in
+    dev) printf 'debug' ;;
+    *) printf '%s' "$cargo_profile" ;;
+  esac
+}
+
 # Launch the binary cargo just built: honor CARGO_TARGET_DIR, or a stale binary
 # in the repo-local target/ boots instead of the fresh build.
 binary_path() {
-  printf '%s/debug/%s' "${CARGO_TARGET_DIR:-$repo_root/target}" "$1"
+  printf '%s/%s/%s' "${CARGO_TARGET_DIR:-$repo_root/target}" "$(profile_artifact_dir)" "$1"
 }
 
 start_detached() {
@@ -282,12 +302,12 @@ wait_registered() {
 }
 
 build_binaries() {
-  log "building slack-clone"
+  log "building slack-clone (profile: $cargo_profile)"
   local -a feature_args=()
   if [[ "${SLACK_CLONE_E2E_PROVIDER:-}" == "scripted-v1" ]]; then
     feature_args=(--features e2e)
   fi
-  cargo build -p slack-clone --locked "${feature_args[@]}"
+  cargo build -p slack-clone --locked --profile "$cargo_profile" "${feature_args[@]}"
 }
 
 stop_one() {

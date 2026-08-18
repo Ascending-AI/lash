@@ -207,13 +207,41 @@ harness gap → Abort; do not add an ad hoc stub. A deterministic provider is va
 environment selector, expected exact output, and dev-only startup warning.
 
 **Boot and teardown are part of the run.** Phase 0 boots the example (`cargo run -p
-agent-service`, `just agent-workbench <port>`) and gates on its readiness signal
-(`/healthz`, the listening line). Boot via `cargo run` / the `just` recipe **only** —
-never launch a `target/debug/*` path directly: this repo redirects builds through
+agent-service --profile judged`, `just agent-workbench <port>`) and gates on its readiness
+signal (`/healthz`, the listening line). Boot via `cargo run` / the `just` recipe **only** —
+never launch a `target/*/…` path directly: this repo redirects builds through
 `CARGO_TARGET_DIR`, so a stale in-repo `target/` binary can predate the endpoints a
 runbook gates on and fake a contract violation. You own everything you started: end the run — success
 or Abort — with the example stopped and any Docker containers it launched torn down
 (`just agent-workbench-down <port>`).
+
+**The judged build geometry is the shipping one.** Every judged host boots from the
+workspace's `judged` cargo profile: no `testing` feature on any host dependency, and
+`debug-assertions`/`overflow-checks` compiled out. The `just` recipes and the
+`scripts/*-dev.sh` launchers already pass `--profile judged`; the one host you boot by
+hand (`agent-service`) needs the flag typed, and a row booted without it is invalid
+evidence — rerun it.
+
+This exists because a judged run scores what the host ships. A `dev` build turns
+in-contract outcomes into opaque failures: an exhausted Lashlang execution bound is a
+`Policy` observation the runtime hands back to the agent, but under the workbench's old
+`testing`-feature build it tripped an assertion inside the effect task and the turn
+surfaced as `effect_panicked` → "turn could not be completed" — a permanently
+unjudgeable row that says nothing about the product. Debug-assert and `testing`-feature
+coverage is real, and it is the unit/law lane's job: `cargo test` / `cargo nextest` keep
+the `test` profile and keep every one of those checks armed.
+
+So a panic in a judged host is now a finding, not background noise. `panicked at` in a
+host log is an Abort/RCA — it is a genuine crash in shipping code, not a development
+self-check firing.
+
+The split runs along the two layers this file opens with, not along the launcher.
+`scripts/slack-clone-dev.sh` boots both the judged browser row and the scripted
+`slack-clone-full-host` gate, so it takes its profile from `SLACK_CLONE_CARGO_PROFILE`
+and defaults to `judged`; only the scripted gate sets `dev`, because deterministic
+evidence wants its debug assertions armed. `scripts/check_judged_build_geometry.py`
+holds all of this — the profile's settings, the absence of `testing` on any host's
+runtime dependencies, and the `--profile judged` on every judged boot command.
 
 `agent-workbench-restart` is a new helper invocation and does not inherit
 `AGENT_WORKBENCH_RUN_DIR` or `AGENT_WORKBENCH_DATA_DIR` from the original `up` command.
