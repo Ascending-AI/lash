@@ -314,6 +314,9 @@ runtime-persistence-soak cases='256':
 cross-backend-store-soak cases='64' seed='852':
   LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" cargo test -p lash-sim --locked --test cross_backend_store_differential generated_cross_backend_surface_differential_agrees -- --nocapture
 
+# The runtime leg gates on allocation ceilings and phase inventory only;
+# wall-clock budgets print as advisories (see scripts/perf_guard_budgets.json,
+# whose runtime scenarios split `enforced_allocation` from `advisory_duration`).
 # The Lashlang iteration counts are part of the gate, not a speed knob: the
 # cache-mode budgets in scripts/perf_guard_budgets.json are per-iteration costs
 # of a fixed setup, so they only hold at the count they were calibrated at.

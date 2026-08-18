@@ -94,7 +94,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--enforce-budgets",
         action="store_true",
-        help="Exit non-zero when a runtime perf guard budget is exceeded.",
+        help=(
+            "Exit non-zero when an enforced runtime perf guard budget "
+            "(allocation ceiling or inventory check) is exceeded. Wall-clock "
+            "budgets are advisory: they are always reported and never gate."
+        ),
     )
     parser.add_argument(
         "--enforce-inventory",
@@ -102,7 +106,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Exit non-zero only on machine-independent inventory failures "
             "(missing required phases, emitted phases without a checked-in "
-            "budget); duration/allocation ceilings stay release-enforced."
+            "budget); allocation ceilings stay release-enforced."
         ),
     )
     parser.add_argument(
@@ -210,9 +214,12 @@ def main() -> int:
     proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
     if proc.stdout:
         print(proc.stdout, end="")
+    # Always forward stderr: advisory wall-clock exceedances are reported there
+    # on an otherwise successful run, and swallowing them would make the
+    # advisory class invisible.
+    if proc.stderr:
+        print(proc.stderr, file=sys.stderr, end="")
     if proc.returncode != 0:
-        if proc.stderr:
-            print(proc.stderr, file=sys.stderr, end="")
         raise SystemExit(proc.returncode)
 
     payload = json.loads(proc.stdout)

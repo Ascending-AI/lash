@@ -18,10 +18,9 @@ use super::measurement::*;
 use super::scenarios::{RuntimePerfScenario, ScenarioHarnessKind};
 
 mod budgets;
-use budgets::{
-    allocation_budget_bytes, phase_wall_clock_budget_ms, process_list_run_allocation_budget_bytes,
-    process_list_run_wall_clock_budget_ms, steady_state_turn_allocation_budget_bytes,
-    wall_clock_budget_ms,
+mod guards;
+use guards::{
+    RuntimePerfBudgetResult, enforcement_failures, evaluate_budgets, report_advisory_exceedances,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -49,18 +48,6 @@ pub(crate) struct RuntimePerfScenarioHarnessSummary {
     runs: usize,
     total_ms: RuntimePerfMetricSummary,
     total_alloc_bytes: RuntimePerfMetricSummary,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RuntimePerfBudgetResult {
-    scenario: String,
-    scenario_harness: String,
-    metric: String,
-    statistic: String,
-    actual: Option<f64>,
-    budget: Option<f64>,
-    passed: bool,
-    reason: Option<String>,
 }
 
 pub(crate) fn default_output_path() -> PathBuf {
@@ -145,29 +132,10 @@ pub async fn run_cli(
         "{}",
         serde_json::to_string_pretty(&runtime_perf_output_json(&out_path, &report))?
     );
+    report_advisory_exceedances(&report.budget_results);
     if enforce_budgets || enforce_inventory {
         let inventory_only = enforce_inventory && !enforce_budgets;
-        let failures = report
-            .budget_results
-            .iter()
-            .filter(|budget| !budget.passed)
-            .filter(|budget| !inventory_only || is_inventory_result(budget))
-            .map(|budget| {
-                let actual = budget
-                    .actual
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "missing".to_string());
-                let budget_value = budget
-                    .budget
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "required".to_string());
-                let reason = budget.reason.as_deref().unwrap_or("budget exceeded");
-                format!(
-                    "{} {} {} actual={} budget={} ({reason})",
-                    budget.scenario, budget.metric, budget.statistic, actual, budget_value
-                )
-            })
-            .collect::<Vec<_>>();
+        let failures = enforcement_failures(&report.budget_results, inventory_only);
         if !failures.is_empty() {
             let label = if inventory_only {
                 "Runtime perf inventory check failed"
@@ -178,14 +146,6 @@ pub async fn run_cli(
         }
     }
     Ok(())
-}
-
-/// Machine-independent inventory result (presence check or emitted phase with
-/// no checked-in budget), as opposed to a release-calibrated ceiling
-/// comparison. Presence checks carry `budget: Some(1.0)`, so the statistic
-/// clause is load-bearing — `is_none()` alone would silently drop them.
-fn is_inventory_result(result: &RuntimePerfBudgetResult) -> bool {
-    result.statistic == "present" || result.budget.is_none()
 }
 
 fn runtime_perf_output_json(out_path: &Path, report: &RuntimePerfReport) -> serde_json::Value {
@@ -477,429 +437,6 @@ fn summarize(
         .collect()
 }
 
-fn evaluate_budgets(
-    summaries: &[RuntimePerfScenarioSummary],
-    scenarios: &[RuntimePerfScenario],
-) -> Vec<RuntimePerfBudgetResult> {
-    let mut budgets = Vec::new();
-    for scenario in scenarios {
-        let Some(summary) = summaries
-            .iter()
-            .find(|summary| summary.scenario == scenario.name())
-        else {
-            budgets.push(RuntimePerfBudgetResult {
-                scenario: scenario.name().to_string(),
-                scenario_harness: scenario.scenario_harness().name().to_string(),
-                metric: "scenario_output".to_string(),
-                statistic: "present".to_string(),
-                actual: None,
-                budget: Some(1.0),
-                passed: false,
-                reason: Some("scenario did not produce a summary".to_string()),
-            });
-            continue;
-        };
-
-        for phase in required_phases(*scenario) {
-            let passed = summary.phase_summary.contains_key(*phase);
-            budgets.push(RuntimePerfBudgetResult {
-                scenario: scenario.name().to_string(),
-                scenario_harness: scenario.scenario_harness().name().to_string(),
-                metric: format!("phase:{phase}"),
-                statistic: "present".to_string(),
-                actual: if passed { Some(1.0) } else { None },
-                budget: Some(1.0),
-                passed,
-                reason: (!passed).then(|| "required phase metrics were missing".to_string()),
-            });
-        }
-
-        for (phase, metrics) in &summary.phase_summary {
-            let Some(budget_ms) = phase_wall_clock_budget_ms(*scenario, phase) else {
-                budgets.push(RuntimePerfBudgetResult {
-                    scenario: summary.scenario.clone(),
-                    scenario_harness: summary.scenario_harness.clone(),
-                    metric: format!("phase:{phase}:duration_ms"),
-                    statistic: "median".to_string(),
-                    actual: Some(metrics.duration_ms.median),
-                    budget: None,
-                    passed: false,
-                    reason: Some("emitted phase has no checked-in wall-clock budget".to_string()),
-                });
-                continue;
-            };
-            push_max_budget(
-                &mut budgets,
-                summary,
-                &format!("phase:{phase}:duration_ms"),
-                "median",
-                metrics.duration_ms.median,
-                budget_ms,
-            );
-        }
-
-        if *scenario == RuntimePerfScenario::ProcessListStress {
-            // The 1,537-row fixture is populated through TestLocalProcessRegistry,
-            // whose test-only map-clone writes are quadratic. Keep that separately
-            // reported setup span out of the product-facing release guard.
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "run_turn_alloc_bytes",
-                "median",
-                summary.run_turn_alloc_bytes.median,
-                process_list_run_allocation_budget_bytes(),
-            );
-        } else {
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "total_alloc_bytes",
-                "median",
-                summary.total_alloc_bytes.median,
-                allocation_budget_bytes(*scenario),
-            );
-        }
-        push_max_budget(
-            &mut budgets,
-            summary,
-            "steady_state_turn_alloc_bytes",
-            "median",
-            steady_state_turn_alloc_bytes(summary),
-            steady_state_turn_allocation_budget_bytes(*scenario),
-        );
-        if *scenario == RuntimePerfScenario::ProcessListStress {
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "run_turn_ms",
-                "median",
-                summary.run_turn_ms.median,
-                process_list_run_wall_clock_budget_ms(),
-            );
-        } else {
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "total_ms",
-                "median",
-                summary.total_ms.median,
-                wall_clock_budget_ms(*scenario),
-            );
-        }
-    }
-    budgets
-}
-
-fn push_max_budget(
-    budgets: &mut Vec<RuntimePerfBudgetResult>,
-    summary: &RuntimePerfScenarioSummary,
-    metric: &str,
-    statistic: &str,
-    actual: f64,
-    budget: f64,
-) {
-    budgets.push(RuntimePerfBudgetResult {
-        scenario: summary.scenario.clone(),
-        scenario_harness: summary.scenario_harness.clone(),
-        metric: metric.to_string(),
-        statistic: statistic.to_string(),
-        actual: Some(actual),
-        budget: Some(budget),
-        passed: actual <= budget,
-        reason: (actual > budget).then(|| "metric exceeded checked-in guard budget".to_string()),
-    });
-}
-
-fn required_phases(scenario: RuntimePerfScenario) -> &'static [&'static str] {
-    match scenario {
-        RuntimePerfScenario::OpenAiResponsesSseParse => &[
-            "openai_responses_sse_parse.parse_payload",
-            "openai_responses_sse_parse.project_parts",
-        ],
-        RuntimePerfScenario::DirectLlmClient => &["direct_llm_client.complete"],
-        RuntimePerfScenario::ProcessListStress => &[
-            "process_list_stress.list_live",
-            "process_list_stress.list_all",
-            "process_list_stress.list_global",
-            "process_list_stress.signal_append",
-            "process_list_stress.wait_roundtrip",
-            "process_list_stress.env_spec_hash",
-            "process_list_stress.render_live_json",
-            "process_list_stress.render_all_json",
-        ],
-        RuntimePerfScenario::QueuedWorkClaimStress => &[
-            "queued_work.claim_session_lease",
-            "queued_work.enqueue_mixed_batch",
-            "queued_work.claim_session_command",
-            "queued_work.complete_session_command",
-            "queued_work.claim_join_turn_work",
-            "queued_work.abandon_join_claim",
-            "queued_work.reclaim_by_batch_ids",
-            "queued_work.complete_join_turn_work",
-            "queued_work.claim_exclusive_turn_work",
-            "queued_work.complete_exclusive_turn_work",
-            "queued_work.list_pending",
-        ],
-        RuntimePerfScenario::TurnInputIngressInterrupt => &[
-            "turn_input_ingress.claim_session_lease",
-            "turn_input_ingress.enqueue_active",
-            "turn_input_ingress.enqueue_next",
-            "turn_input_ingress.claim_active_initial",
-            "turn_input_ingress.abandon_active_claim",
-            "turn_input_ingress.reclaim_active_inputs",
-            "turn_input_ingress.complete_active_and_defer",
-            "turn_input_ingress.claim_next_turn_inputs",
-            "turn_input_ingress.abandon_next_claim",
-            "turn_input_ingress.reclaim_next_turn_inputs",
-            "turn_input_ingress.complete_next_turn_inputs",
-            "turn_input_ingress.list_pending",
-        ],
-        RuntimePerfScenario::DeepTurnComposition => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.execute",
-            "rlm_process.start",
-            "rlm_process.await_handle",
-            "process.start_child",
-            "process.await_handle",
-        ],
-        RuntimePerfScenario::TurnStartGate => &["turn_cancel.start_gate"],
-        RuntimePerfScenario::TurnCancelRoundTrip => &[
-            "turn_cancel.start_gate",
-            "turn_cancel.request_to_token_to_seal",
-        ],
-        RuntimePerfScenario::IngressClaimProjection => &[
-            "turn_cancel.start_gate",
-            "turn_input_ingress.enqueue_to_claim_to_projection",
-            "rlm_lashlang.execute",
-        ],
-        RuntimePerfScenario::TurnCheckpoint => &[
-            "standard_llm_checkpoint",
-            "standard_parallel_tools_checkpoint",
-            "rlm_exec_checkpoint",
-        ],
-        RuntimePerfScenario::CheckpointStateHotPaths => &[
-            "checkpoint_state.initial_capture",
-            "checkpoint_state.dirty_binding_update",
-            "checkpoint_state.incremental_capture",
-            "checkpoint_state.measure_budget",
-            "checkpoint_state.component_commit",
-            "checkpoint_state.component_load",
-            "checkpoint_state.execution_restore",
-        ],
-        RuntimePerfScenario::LiveReplayPressure => &[
-            "live_replay.append",
-            "live_replay.current_cursor_parse",
-            "live_replay.replay_after_cursor",
-            "live_replay.subscribe_buffered",
-            "live_replay.trim_by_capacity",
-            "live_replay.gap_handling",
-        ],
-        RuntimePerfScenario::StoreHardeningHotPaths => &[
-            "store_hardening.identity.process_registration",
-            "store_hardening.identity.trigger_occurrence",
-            "store_hardening.identity.usage_delta",
-            "store_hardening.postgres.open_preverified",
-            "store_hardening.postgres.open_enforce",
-            "store_hardening.memory.claim_session_lease",
-            "store_hardening.memory.claim_queued_work",
-            "store_hardening.memory.complete_queued_work",
-            "store_hardening.memory.attachment_intent",
-            "store_hardening.memory.attachment_adopt",
-            "store_hardening.memory.append_receipt_usage_fresh",
-            "store_hardening.memory.append_receipt_replay",
-            "store_hardening.sqlite.claim_session_lease",
-            "store_hardening.sqlite.claim_queued_work",
-            "store_hardening.sqlite.complete_queued_work",
-            "store_hardening.sqlite.attachment_intent",
-            "store_hardening.sqlite.attachment_adopt",
-            "store_hardening.sqlite.append_receipt_usage_fresh",
-            "store_hardening.sqlite.append_receipt_replay",
-            "store_hardening.postgres.claim_session_lease",
-            "store_hardening.postgres.claim_queued_work",
-            "store_hardening.postgres.complete_queued_work",
-            "store_hardening.postgres.attachment_intent",
-            "store_hardening.postgres.attachment_adopt",
-            "store_hardening.postgres.append_receipt_usage_fresh",
-            "store_hardening.postgres.append_receipt_replay",
-            "store_hardening.memory.prune_terminal_processes",
-            "store_hardening.sqlite.prune_terminal_processes",
-            "store_hardening.postgres.prune_terminal_processes",
-        ],
-        RuntimePerfScenario::Rlm => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "plugin_hook.context_transform.rlm_protocol",
-            "rlm_lashlang.rehydrate_projected_globals",
-            "rlm_lashlang.resolve_projected_bindings",
-        ],
-        RuntimePerfScenario::Standard => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "plugin_hook.context_transform.rolling_history",
-        ],
-        RuntimePerfScenario::StoreReopen => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "store_reopen.persisted_load",
-            "store_reopen.runtime_hydration",
-            "store_reopen.store_factory_create",
-        ],
-        RuntimePerfScenario::SqliteStoreReopen => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "sqlite_store_reopen.runtime_reopen",
-        ],
-        RuntimePerfScenario::TraceJsonlExtended => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "trace_jsonl.inspect_files",
-        ],
-        RuntimePerfScenario::RlmAsyncToolCompletion => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.execute",
-        ],
-        RuntimePerfScenario::RlmTriggerMailPipeline => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.store_module_artifact",
-            "rlm_lashlang.execute",
-            "trigger.occurrence_to_delivery",
-        ],
-        RuntimePerfScenario::RlmLargePrint => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.execute",
-            "rlm_lashlang.print_project",
-        ],
-        RuntimePerfScenario::RlmObliqueStackMix => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.execute",
-            "rlm_lashlang.print_project",
-            "rlm_process.prepare_start",
-            "rlm_process.start",
-            "rlm_process.await_handle",
-            "process.await_handle",
-            "rlm_process.load_artifact",
-            "rlm_process.resolve_environment",
-            "rlm_process.compile",
-            "rlm_process.build_context",
-            "rlm_process.execute",
-            "rlm_process.shutdown",
-        ],
-        RuntimePerfScenario::RlmStreamedPairedLashlang => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.execute",
-        ],
-        RuntimePerfScenario::RlmProcessHandles
-        | RuntimePerfScenario::RlmProcessAsyncToolCompletion => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.store_module_artifact",
-            "rlm_lashlang.execute",
-            "rlm_process.prepare_start",
-            "rlm_process.start",
-            "rlm_process.await_handle",
-            "rlm_process.load_artifact",
-            "rlm_process.resolve_environment",
-            "rlm_process.compile",
-            "rlm_process.build_context",
-            "rlm_process.execute",
-            "rlm_process.shutdown",
-        ],
-        RuntimePerfScenario::EmbedStandard | RuntimePerfScenario::EmbedRlm => &[],
-        _ => &[
-            "context_transform",
-            "before_turn_hooks",
-            "prompt_build",
-            "effect_loop",
-            "prepared_turn",
-            "committed_turn",
-            "post_commit_delivery",
-        ],
-    }
-}
-
-fn steady_state_turn_alloc_bytes(summary: &RuntimePerfScenarioSummary) -> f64 {
-    summary
-        .steady_state_turn
-        .as_ref()
-        .unwrap_or(&summary.last_turn)
-        .total_alloc_bytes
-        .median
-}
-
 fn summarize_phase_profiles(
     profiles: &[BTreeMap<String, RuntimePerfPhaseRunResult>],
 ) -> BTreeMap<String, RuntimePerfPhaseSummary> {
@@ -1041,6 +578,11 @@ fn summarize_optional_metric(values: Vec<f64>) -> Option<RuntimePerfMetricSummar
 }
 #[cfg(test)]
 mod tests {
+    use super::budgets::{
+        allocation_budget_bytes, phase_wall_clock_budget_ms,
+        steady_state_turn_allocation_budget_bytes, wall_clock_budget_ms,
+    };
+    use super::guards::required_phases;
     use super::*;
     use crate::runtime_perf::openai_compat::openai_compat_sse_body;
     use crate::runtime_perf::providers::benchmark_stream_profile;
@@ -1115,7 +657,7 @@ mod tests {
         }
     }
 
-    fn run_result(
+    pub(super) fn run_result(
         scenario: RuntimePerfScenario,
         total_ms: f64,
         bytes_allocated: usize,

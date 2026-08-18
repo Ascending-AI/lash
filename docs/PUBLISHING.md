@@ -45,8 +45,12 @@ time (`scripts/release_version.py stamp`, `scripts/publish_workspace.py
    `scripts/release_version.py print-next` computes the next version from
    `[workspace.metadata.release].channel` and the existing `v*` tags.
 4. `release.yml` validates `cargo metadata --locked` and runs both full,
-   budget-enforcing performance profiles on the validated SHA. If either gate
-   fails, nothing is published and no tag is created. Then:
+   budget-enforcing performance profiles on the validated SHA. What gates is
+   the allocation ceilings and the phase inventory; the runtime leg's
+   wall-clock budgets are advisory, printed with their measured value against
+   the budget but never failing the run, because shared runners move them by
+   more than an order of magnitude. If either gate fails, nothing is published
+   and no tag is created. Then:
    - `publish-crates` runs
      `python3 .release-tools/scripts/publish_workspace.py --version <version>`,
      which stamps the manifests + lockfile and publishes every crate in
