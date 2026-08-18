@@ -263,7 +263,7 @@ DISPOSITION_TIERS = {
 #: code.  A ratchet, not a target: the count may only fall, and lowering it is a
 #: one-line diff beside the row that was upgraded.  Raising it is the bleeding
 #: this gate exists to stop, so an increase fails.
-EXAMPLE_TEST_TIER_RATCHET = 1914
+EXAMPLE_TEST_TIER_RATCHET = 1959
 #: Module paths that put an item behind the `testing` feature, which is what
 #: makes a test-only consumer a home rather than an excuse.  `test_support` is
 #: the doc-hidden one lash-core relocates cross-crate test-only items into;

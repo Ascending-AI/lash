@@ -714,8 +714,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::await_next_settlement"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectController::await_next_settlement to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:233#.await_next_settlement(&mut handle, CancellationToken::new())"
+assertion = "examples/docs-snippets/src/effect_groups.rs:240#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::close_effect_group"
@@ -723,8 +724,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::close_effect_group"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectController::close_effect_group to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:388#.close_effect_group(handle, LoserDisposition::Cancel)"
+assertion = "examples/docs-snippets/src/effect_groups.rs:395#assert_eq!(loser_completions.load(Ordering::SeqCst), 0);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::open_effect_group"
@@ -732,8 +734,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::open_effect_group"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectController::open_effect_group to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:224#.open_effect_group(checked(group, vec![slow, settles_now()]))"
+assertion = "examples/docs-snippets/src/effect_groups.rs:227#assert_eq!(handle.group_key(), group_key);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::supports_effect_groups"
@@ -741,8 +744,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::supports_effect_groups"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectController::supports_effect_groups to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:617#assert!(implementing.supports_effect_groups());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:617#assert!(implementing.supports_effect_groups());"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectEnvelope::group"
@@ -750,8 +754,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectEnvelope::group"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectEnvelope::group to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:187#assert!(child(\"docs:race:0\", 0).group.is_none());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:187#assert!(child(\"docs:race:0\", 0).group.is_none());"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectEnvelope::in_effect_group"
@@ -759,8 +764,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectEnvelope::in_effect_group"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeEffectEnvelope::in_effect_group to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:163#let mispositioned = child(\"docs:race:0\", 0).in_effect_group("
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::EffectGroupUnsupported"
@@ -768,8 +773,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::EffectGroupUnsupported"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeErrorCode::EffectGroupUnsupported to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:608#assert_eq!(refused_await.code, RuntimeErrorCode::EffectGroupUnsupported);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:608#assert_eq!(refused_await.code, RuntimeErrorCode::EffectGroupUnsupported);"
 
 [[api]]
 symbol = "lash::TurnCancelOriginHint"
@@ -49539,6 +49545,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
 
 [[api]]
+symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectGroupChildCancelled"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelled"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime hosts match this first-party controller diagnostic to choose retryable or terminal durable settlement without parsing wire strings."
+
+[[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode"
 kind = "variant"
 availability = "default+all-features"
@@ -66009,36 +66024,43 @@ disposition = "internal-consumed"
 usage = "crates/lash-restate/src/controller/mod.rs:578#.then_some(lash_core::BoundaryReason::JournalBudget);"
 
 [[api]]
-symbol = "lash_core::CheckedEffectGroup"
+symbol = "lash::runtime::CheckedEffectGroup"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::CheckedEffectGroup"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::CheckedEffectGroup to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:198#assert!(CheckedEffectGroup::try_new(all, vec![settles_now()]).is_err());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:198#assert!(CheckedEffectGroup::try_new(all, vec![settles_now()]).is_err());"
 
 [[api]]
-symbol = "lash_core::CheckedEffectGroup::group"
+symbol = "lash::runtime::CheckedEffectGroup::group"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::CheckedEffectGroup::group"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::CheckedEffectGroup::group to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:520#assert_eq!(group.group().children().len(), 2);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:520#assert_eq!(group.group().children().len(), 2);"
 
 [[api]]
-symbol = "lash_core::CheckedEffectGroup::into_parts"
+symbol = "lash::runtime::CheckedEffectGroup::into_parts"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::CheckedEffectGroup::into_parts"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::CheckedEffectGroup::into_parts to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:521#let (group, executors) = group.into_parts();"
 
 [[api]]
-symbol = "lash_core::CheckedEffectGroup::try_new"
+symbol = "lash::runtime::CheckedEffectGroup::try_new"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::CheckedEffectGroup::try_new"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::CheckedEffectGroup::try_new to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:198#assert!(CheckedEffectGroup::try_new(all, vec![settles_now()]).is_err());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:198#assert!(CheckedEffectGroup::try_new(all, vec![settles_now()]).is_err());"
 
 [[api]]
 symbol = "lash_core::CheckpointDelivery"
@@ -84677,8 +84699,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:355#assert_eq!(code, RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:355#assert_eq!(code, RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectGroupShape"
@@ -84686,264 +84709,325 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectGroupShape"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash::runtime::RuntimeErrorCode::RuntimeEffectGroupShape to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:182#assert_eq!(refused.code, RuntimeErrorCode::RuntimeEffectGroupShape);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:182#assert_eq!(refused.code, RuntimeErrorCode::RuntimeEffectGroupShape);"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle"
+symbol = "lash::runtime::EffectGroupHandle"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:304#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:304#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle::advance"
+symbol = "lash::runtime::EffectGroupHandle::advance"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle::advance"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle::advance to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:560#handle.advance()?;"
+assertion = "examples/docs-snippets/src/effect_groups.rs:641#assert!(handle.is_exhausted());"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle::children"
+symbol = "lash::runtime::EffectGroupHandle::children"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle::children"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle::children to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:228#assert_eq!(handle.children(), 2);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:228#assert_eq!(handle.children(), 2);"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle::consumed"
+symbol = "lash::runtime::EffectGroupHandle::consumed"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle::consumed"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle::consumed to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:229#assert_eq!(handle.consumed(), 0);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:229#assert_eq!(handle.consumed(), 0);"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle::group_key"
+symbol = "lash::runtime::EffectGroupHandle::group_key"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle::group_key"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle::group_key to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:227#assert_eq!(handle.group_key(), group_key);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:227#assert_eq!(handle.group_key(), group_key);"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle::is_exhausted"
+symbol = "lash::runtime::EffectGroupHandle::is_exhausted"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle::is_exhausted"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle::is_exhausted to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:230#assert!(!handle.is_exhausted());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:230#assert!(!handle.is_exhausted());"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle::new"
+symbol = "lash::runtime::EffectGroupHandle::new"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle::new"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle::new to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:593#let mut handle = EffectGroupHandle::new(&group);"
 
 [[api]]
-symbol = "lash_core::EffectGroupHandle::restored"
+symbol = "lash::runtime::EffectGroupHandle::restored"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupHandle::restored"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupHandle::restored to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:304#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:304#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
 
 [[api]]
-symbol = "lash_core::EffectGroupMembership"
+symbol = "lash::runtime::EffectGroupMembership"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupMembership"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupMembership to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:151#let second: &EffectGroupMembership = group.children()[1]"
 
 [[api]]
-symbol = "lash_core::EffectGroupMembership::group_key"
+symbol = "lash::runtime::EffectGroupMembership::group_key"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupMembership::group_key"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupMembership::group_key to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:155#assert_eq!(second.group_key, \"docs:race:0\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:155#assert_eq!(second.group_key, \"docs:race:0\");"
 
 [[api]]
-symbol = "lash_core::EffectGroupMembership::loser_disposition"
+symbol = "lash::runtime::EffectGroupMembership::loser_disposition"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupMembership::loser_disposition"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupMembership::loser_disposition to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:158#assert_eq!(second.loser_disposition, LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:158#assert_eq!(second.loser_disposition, LoserDisposition::RunToCompletion);"
 
 [[api]]
-symbol = "lash_core::EffectGroupMembership::position"
+symbol = "lash::runtime::EffectGroupMembership::position"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupMembership::position"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupMembership::position to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:156#assert_eq!(second.position, 1, \"a child's position is its index\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:156#assert_eq!(second.position, 1, \"a child's position is its index\");"
 
 [[api]]
-symbol = "lash_core::EffectGroupMembership::wake"
+symbol = "lash::runtime::EffectGroupMembership::wake"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::EffectGroupMembership::wake"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::EffectGroupMembership::wake to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:157#assert_eq!(second.wake, GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:157#assert_eq!(second.wake, GroupWakePolicy::First);"
 
 [[api]]
-symbol = "lash_core::GroupSettlement"
+symbol = "lash::runtime::GroupSettlement"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::GroupSettlement"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupSettlement to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:232#let settlement: GroupSettlement = controller"
 
 [[api]]
-symbol = "lash_core::GroupSettlement::outcome"
+symbol = "lash::runtime::GroupSettlement::outcome"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::GroupSettlement::outcome"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupSettlement::outcome to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:241#assert!(settlement.outcome.is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:241#assert!(settlement.outcome.is_ok());"
 
 [[api]]
-symbol = "lash_core::GroupSettlement::position"
+symbol = "lash::runtime::GroupSettlement::position"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::GroupSettlement::position"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupSettlement::position to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:437#assert_eq!(first.position, 0);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:437#assert_eq!(first.position, 0);"
 
 [[api]]
-symbol = "lash_core::GroupSettlement::sequence"
+symbol = "lash::runtime::GroupSettlement::sequence"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::GroupSettlement::sequence"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupSettlement::sequence to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:240#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:240#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
 
 [[api]]
-symbol = "lash_core::GroupWakePolicy"
+symbol = "lash::runtime::GroupWakePolicy"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::GroupWakePolicy"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupWakePolicy to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:144#assert_eq!(group.wake(), GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:144#assert_eq!(group.wake(), GroupWakePolicy::First);"
 
 [[api]]
-symbol = "lash_core::GroupWakePolicy::All"
+symbol = "lash::runtime::GroupWakePolicy::All"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::GroupWakePolicy::All"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupWakePolicy::All to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:192#assert_eq!(all.wake(), GroupWakePolicy::All);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:192#assert_eq!(all.wake(), GroupWakePolicy::All);"
 
 [[api]]
-symbol = "lash_core::GroupWakePolicy::First"
+symbol = "lash::runtime::GroupWakePolicy::First"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::GroupWakePolicy::First"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupWakePolicy::First to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:144#assert_eq!(group.wake(), GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:144#assert_eq!(group.wake(), GroupWakePolicy::First);"
 
 [[api]]
-symbol = "lash_core::GroupWakePolicy::FirstSuccess"
+symbol = "lash::runtime::GroupWakePolicy::FirstSuccess"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::GroupWakePolicy::FirstSuccess"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::GroupWakePolicy::FirstSuccess to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:427#assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:427#assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);"
 
 [[api]]
-symbol = "lash_core::LoserDisposition"
+symbol = "lash::runtime::LoserDisposition"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::LoserDisposition"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::LoserDisposition to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:145#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:145#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
 
 [[api]]
-symbol = "lash_core::LoserDisposition::Cancel"
+symbol = "lash::runtime::LoserDisposition::Cancel"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::LoserDisposition::Cancel"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::LoserDisposition::Cancel to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:193#assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:193#assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);"
 
 [[api]]
-symbol = "lash_core::LoserDisposition::RunToCompletion"
+symbol = "lash::runtime::LoserDisposition::RunToCompletion"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::LoserDisposition::RunToCompletion"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::LoserDisposition::RunToCompletion to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:145#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:145#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
 
 [[api]]
-symbol = "lash_core::LoserDisposition::resolve_close"
+symbol = "lash::runtime::LoserDisposition::resolve_close"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::LoserDisposition::resolve_close"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::LoserDisposition::resolve_close to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:402#assert!(LoserDisposition::resolve_close(run, cancel).is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:402#assert!(LoserDisposition::resolve_close(run, cancel).is_ok());"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectGroup"
+symbol = "lash::runtime::RuntimeEffectGroup"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectGroup"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::RuntimeEffectGroup to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:68#RuntimeEffectGroup::try_new("
 
 [[api]]
-symbol = "lash_core::RuntimeEffectGroup::children"
+symbol = "lash::runtime::RuntimeEffectGroup::children"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectGroup::children"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::RuntimeEffectGroup::children to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:146#assert_eq!(group.children().len(), 2);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:146#assert_eq!(group.children().len(), 2);"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectGroup::group_key"
+symbol = "lash::runtime::RuntimeEffectGroup::group_key"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectGroup::group_key"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::RuntimeEffectGroup::group_key to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:143#assert_eq!(group.group_key(), \"docs:race:0\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:143#assert_eq!(group.group_key(), \"docs:race:0\");"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectGroup::invocation"
+symbol = "lash::runtime::RuntimeEffectGroup::invocation"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectGroup::invocation"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::RuntimeEffectGroup::invocation to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:149#assert_eq!(group.invocation().replay_key(), Some(\"docs:race:0:group\"));"
+assertion = "examples/docs-snippets/src/effect_groups.rs:149#assert_eq!(group.invocation().replay_key(), Some(\"docs:race:0:group\"));"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectGroup::loser_disposition"
+symbol = "lash::runtime::RuntimeEffectGroup::loser_disposition"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectGroup::loser_disposition"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::RuntimeEffectGroup::loser_disposition to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:145#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:145#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectGroup::try_new"
+symbol = "lash::runtime::RuntimeEffectGroup::try_new"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectGroup::try_new"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::RuntimeEffectGroup::try_new to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:68#RuntimeEffectGroup::try_new("
+assertion = "examples/docs-snippets/src/effect_groups.rs:143#assert_eq!(group.group_key(), \"docs:race:0\");"
 
 [[api]]
-symbol = "lash_core::RuntimeEffectGroup::wake"
+symbol = "lash::runtime::RuntimeEffectGroup::wake"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectGroup::wake"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "Add lash_core::RuntimeEffectGroup::wake to the examples/docs-snippets durable-effect-group example and assert its externally observable result. The FIG-1416 effect-group contract lands ahead of the host implementations that give it a runnable consumer; the example is owed with the in-memory group host, which is the tier whose observable semantics an example can assert."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/effect_groups.rs:144#assert_eq!(group.wake(), GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:144#assert_eq!(group.wake(), GroupWakePolicy::First);"
 
 [[api]]
 symbol = "lash_core::store::queued_work::PendingSessionWorkOrdering"

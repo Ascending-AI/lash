@@ -21,6 +21,8 @@ fn example_process_owner() -> lash::persistence::LeaseOwnerIdentity {
 
 mod architecture_execution;
 mod architecture_providers;
+#[cfg(test)]
+mod effect_groups;
 mod embedding;
 mod embedding_advanced;
 mod embedding_lashlang_functions;

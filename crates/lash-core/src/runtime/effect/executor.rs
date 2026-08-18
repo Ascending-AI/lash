@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) mod control;
 mod controller_error;
+mod inline_controller;
 mod process_local;
 
 mod language_runtime;
@@ -28,15 +29,15 @@ pub(crate) use control::{
     drive_effect_controller_task,
 };
 pub use controller_error::RuntimeEffectControllerError;
+pub use inline_controller::InlineRuntimeEffectController;
 pub use trigger::TriggerLocalExecution;
 
 use crate::LlmRequest as CoreLlmRequest;
-use crate::ProcessRecord;
 use crate::ProcessRegistry;
+use crate::RuntimeError;
 use crate::provider::ProviderHandle;
 use crate::runtime::{RuntimeStreamEvent, RuntimeTurnDriver};
 use crate::sansio::LlmCallError;
-use crate::{PluginError, RuntimeError};
 use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
 use super::envelope::{
@@ -63,8 +64,6 @@ pub struct RuntimeSleepOptions {
     pub observe_turn_cancel: bool,
     pub turn_cancel_scope: Option<crate::ExecutionScope>,
 }
-
-use super::await_events::AwaitEventRegistry;
 
 // =============================================================================
 // Local executor (per-effect borrowed runner state)
@@ -1284,186 +1283,6 @@ async fn sleep_with_cancellation(
             "runtime effect sleep was cancelled",
         )),
         _ = &mut sleep => Ok(()),
-    }
-}
-
-// =============================================================================
-// Default in-process effect controller
-// =============================================================================
-
-/// Default in-process effect controller.
-///
-/// The inline controller executes local runners in process and provides
-/// in-memory await-event resolution. It does not make in-flight effects crash
-/// durable; workflow adapters provide that by recording outcomes in history.
-#[derive(Clone)]
-pub struct InlineRuntimeEffectController {
-    await_events: Arc<AwaitEventRegistry>,
-    allow_process_lifetime_completion_keys: bool,
-}
-
-impl Default for InlineRuntimeEffectController {
-    fn default() -> Self {
-        Self {
-            await_events: Arc::new(AwaitEventRegistry::new()),
-            allow_process_lifetime_completion_keys: false,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl AwaitEventResolver for InlineRuntimeEffectController {
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.allow_process_lifetime_completion_keys
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.await_events.key_for(scope, wait)
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.await_events.resolve(key, resolution)
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.await_events.peek_resolution(key)
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.await_events
-            .await_resolution(key, cancel, deadline, &crate::SystemClock)
-            .await
-    }
-
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.await_events.revoke_session(session_id)
-    }
-
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.await_events.cancel_session(session_id)
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for InlineRuntimeEffectController {
-    async fn execute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        match envelope.command {
-            RuntimeEffectCommand::PeekAwaitEvent { key } => {
-                let resolution = self
-                    .await_events
-                    .peek_resolution(&key)
-                    .map_err(RuntimeEffectControllerError::from)?;
-                Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution })
-            }
-            RuntimeEffectCommand::AwaitEvent { key } => {
-                let RuntimeAwaitEventOptions {
-                    cancellation,
-                    deadline,
-                    clock,
-                    ..
-                } = local_executor.into_await_event_options()?;
-                let resolution = self
-                    .await_events
-                    .await_resolution(&key, cancellation, deadline, clock.as_ref())
-                    .await
-                    .map_err(RuntimeEffectControllerError::from)?;
-                Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
-            }
-            RuntimeEffectCommand::Process { command } => {
-                let execution = local_executor.into_process()?;
-                if matches!(command.as_ref(), ProcessCommand::Await { .. }) {
-                    let result = execution.execute(*command).await?;
-                    return Ok(RuntimeEffectOutcome::Process { result });
-                }
-                let result = task_panic::map_process_task_join(
-                    crate::task::spawn(
-                        crate::runtime::process_worker::inherit_process_execution_permit(
-                            async move { execution.execute(*command).await },
-                        ),
-                    )
-                    .await,
-                )?;
-                Ok(RuntimeEffectOutcome::Process { result })
-            }
-            RuntimeEffectCommand::Trigger { command } => {
-                local_executor
-                    .execute_trigger(envelope.invocation, *command)
-                    .await
-            }
-            _ => local_executor.execute(envelope).await,
-        }
-    }
-}
-
-impl InlineRuntimeEffectController {
-    /// Opt into externally routable keys that remain valid only while this
-    /// controller's process and owned registry remain alive.
-    pub fn allow_process_lifetime_completion_keys(mut self) -> Self {
-        self.allow_process_lifetime_completion_keys = true;
-        self
-    }
-    /// Register the process and its initial observer edges into the durable registry.
-    ///
-    /// The inline controller no longer runs the process here: the registry's
-    /// non-terminal row *is* the durable work queue, and the host-owned
-    /// [`ProcessWorkDriver`](crate::ProcessWorkDriver) is the sole executor.
-    /// Registering the row is all this path does; the control seam drives the
-    /// host driver after a successful start.
-    pub(crate) async fn start_process(
-        registry: Arc<dyn crate::ProcessRegistry>,
-        registration: crate::ProcessRegistration,
-        observers: Vec<String>,
-    ) -> Result<ProcessRecord, PluginError> {
-        registry
-            .register_process_with_observers(registration, &observers)
-            .await
-    }
-
-    pub(crate) async fn request_process_cancel(
-        registry: Arc<dyn crate::ProcessRegistry>,
-        process_id: &str,
-        reason: Option<String>,
-        replay: Option<crate::RuntimeReplay>,
-    ) -> Result<ProcessRecord, PluginError> {
-        // Cancellation is a durable signal: the cancel event is what the
-        // runner-run process observes, so the inline controller appends it and
-        // no longer tracks an in-process cancellation token.
-        let mut request =
-            crate::ProcessEventAppendRequest::cancel_requested(process_id, reason.clone());
-        if let Some(replay) = replay {
-            request = request.with_optional_replay(Some(replay));
-        }
-        registry.append_event(process_id, request).await?;
-        registry
-            .get_process(process_id)
-            .await?
-            .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))
-    }
-}
-
-impl std::fmt::Debug for InlineRuntimeEffectController {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InlineRuntimeEffectController").finish()
     }
 }
 

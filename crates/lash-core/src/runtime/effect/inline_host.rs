@@ -4,9 +4,10 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
-    EffectJournalRetirement, ExecutionScope, InlineRuntimeEffectController, Resolution,
-    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CheckedEffectGroup,
+    EffectGroupHandle, EffectHost, EffectJournalRetirement, ExecutionScope, GroupSettlement,
+    InlineRuntimeEffectController, LoserDisposition, Resolution, ResolveOutcome,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
 };
 use crate::RuntimeError;
@@ -242,6 +243,41 @@ impl RuntimeEffectController for InlineHostScopedController {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.controller
             .execute_effect(envelope, local_executor)
+            .await
+    }
+
+    // The four group methods are forwarded rather than defaulted. A scoped view
+    // that answered the capability flag from the wrapped controller while
+    // leaving the methods on their fail-closed defaults would report a host that
+    // supports groups and then refuse every group opened through the only path
+    // production reaches it by — `EffectHost::scoped`.
+
+    fn supports_effect_groups(&self) -> bool {
+        self.controller.supports_effect_groups()
+    }
+
+    async fn open_effect_group(
+        &self,
+        group: CheckedEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        self.controller.open_effect_group(group).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut EffectGroupHandle,
+        cancel: CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        self.controller.await_next_settlement(handle, cancel).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: EffectGroupHandle,
+        disposition: LoserDisposition,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.controller
+            .close_effect_group(handle, disposition)
             .await
     }
 }
