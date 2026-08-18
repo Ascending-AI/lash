@@ -424,6 +424,10 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
         self.inner.create_store(request).await
     }
 
+    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+        crate::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+    }
+
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         self.inner.delete_session(session_id).await
     }

@@ -4458,6 +4458,13 @@ impl lash_core::AttachmentStore for DurableMemoryAttachmentStore {
     async fn list(&self) -> Result<Vec<lash_core::StoredBlobRef>, lash_core::AttachmentStoreError> {
         self.inner.list().await
     }
+
+    async fn head(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<Option<lash_core::StoredBlobRef>, lash_core::AttachmentStoreError> {
+        self.inner.head(id).await
+    }
 }
 
 #[derive(Default)]

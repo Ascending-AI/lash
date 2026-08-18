@@ -1746,6 +1746,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
         .run()
         .await?;
     assert!(!session.read_view().messages().is_empty());
+    assert!(!core.session_was_deleted("delete-session").await?);
     drop(session);
 
     let report = core
@@ -1754,6 +1755,10 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
             session_delete_scope(&core, "delete-session").await,
         )
         .await?;
+    // The tombstone the factory now keeps is the answer a resume needs; a
+    // reopened-but-empty session is not on its own evidence that the id is dead.
+    assert!(core.session_was_deleted("delete-session").await?);
+    assert!(!core.session_was_deleted("never-existed").await?);
     let reopened = core.session("delete-session").open().await?;
 
     assert_eq!(report.session_id, "delete-session");

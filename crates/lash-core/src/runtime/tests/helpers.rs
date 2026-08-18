@@ -416,6 +416,12 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
             .map(|store| store as Arc<dyn crate::store::RuntimePersistence>))
     }
 
+    // Recorded stores are retained, never tombstoned: this fixture drops no
+    // session, so no id has a deletion marker.
+    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+
     async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
         Ok(())
     }

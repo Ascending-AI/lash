@@ -26,6 +26,10 @@ impl SessionStoreFactory for DelegatingFactory {
         self.inner.open_existing_store(request).await
     }
 
+    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+        self.inner.session_was_deleted(session_id).await
+    }
+
     async fn delete_session(&self, session_id: &str) -> Result<(), String> {
         self.inner.delete_session(session_id).await
     }

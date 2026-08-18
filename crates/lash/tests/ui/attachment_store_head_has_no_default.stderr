@@ -1,0 +1,7 @@
+error[E0046]: not all trait items implemented, missing: `head`
+  --> tests/ui/attachment_store_head_has_no_default.rs:13:1
+   |
+13 | impl AttachmentStore for HeadlessStore {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `head` in implementation
+   |
+   = help: implement the missing item: `fn head<'life0: 'async_trait, 'life1: 'async_trait, 'async_trait>(&'life0 self, _: &'life1 AttachmentId) -> std::pin::Pin<Box<(dyn Future<Output = Result<Option<StoredBlobRef>, AttachmentStoreError>> + Send + 'async_trait)>> { todo!() }`
