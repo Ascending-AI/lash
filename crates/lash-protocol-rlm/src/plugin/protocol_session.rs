@@ -379,6 +379,56 @@ mod tests {
         assert!(error.to_string().contains("RLM dialect is durably pinned"));
     }
 
+    /// FIG-1555 clobber 1: a reopen that names no format must keep the one the
+    /// session recorded, instead of resetting it to the root default.
+    #[test]
+    fn reopen_without_an_explicit_format_keeps_the_recorded_final_answer_format() {
+        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
+            dialect: Some(RlmDialect::Lashlang),
+            termination: lash_rlm_types::RlmTermination::Natural,
+            final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+        })
+        .expect("existing options");
+
+        let options = resolve_rlm_session_options(&existing, &PluginOptions::default(), true)
+            .expect("resolve options");
+        let extras: RlmCreateExtras = options.decode().expect("decode options");
+        assert_eq!(
+            extras.final_answer_format,
+            Some(RlmFinalAnswerFormat::RawFinalValue),
+            "a reopen that states no format must not reset the recorded one"
+        );
+    }
+
+    /// FIG-1555 clobber 2: options that state a dialect and nothing else must
+    /// not reset a recorded `FinishRequired` termination to the default.
+    #[test]
+    fn stating_only_a_dialect_keeps_the_recorded_termination() {
+        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
+            dialect: None,
+            termination: lash_rlm_types::RlmTermination::FinishRequired { schema: None },
+            final_answer_format: None,
+        })
+        .expect("existing options");
+        let requested = PluginOptions::typed(
+            RLM_PROTOCOL_PLUGIN_ID,
+            RlmCreateExtras {
+                dialect: Some(RlmDialect::Lashlang),
+                ..RlmCreateExtras::default()
+            },
+        )
+        .expect("dialect-only options");
+
+        let options =
+            resolve_rlm_session_options(&existing, &requested, true).expect("resolve options");
+        let extras: RlmCreateExtras = options.decode().expect("decode options");
+        assert_eq!(
+            extras.termination,
+            lash_rlm_types::RlmTermination::FinishRequired { schema: None },
+            "stating a dialect must not silently restate the termination"
+        );
+    }
+
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
         let runtime_state =
             Arc::new(RlmRuntimeState::new_lashlang_for_tests().expect("runtime state"));

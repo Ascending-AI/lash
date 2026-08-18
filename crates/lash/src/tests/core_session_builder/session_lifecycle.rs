@@ -1179,6 +1179,46 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
     Ok(())
 }
 
+/// FIG-1555 clobber 1, end to end: a recorded final-answer format must survive
+/// a reopen that says nothing about it.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() -> Result<()> {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(recording_request_provider(Arc::clone(&seen)))
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let raw = core
+        .session("rlm-format-survives-reopen")
+        .final_answer_format(RlmFinalAnswerFormat::RawFinalValue)?
+        .open()
+        .await?;
+    raw.turn(TurnInput::text("hello"))
+        .require_finish()?
+        .run()
+        .await?;
+    raw.close().await?;
+    let reopened = core.session("rlm-format-survives-reopen").open().await?;
+    reopened
+        .turn(TurnInput::text("again"))
+        .require_finish()?
+        .run()
+        .await?;
+
+    let prompts = seen.lock_recover();
+    assert_eq!(prompts.len(), 2);
+    assert!(
+        !prompts[1].contains("=== FINAL ANSWER FORMAT ==="),
+        "the reopened session must keep its recorded raw-final-value format"
+    );
+    Ok(())
+}
+
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()> {
