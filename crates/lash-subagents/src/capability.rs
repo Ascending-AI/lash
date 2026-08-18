@@ -95,7 +95,7 @@ impl SubagentSpawnContext<'_> {
             lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
             lash_rlm_types::RlmCreateExtras {
                 dialect: Some(self.inherited_rlm_dialect()?),
-                termination,
+                termination: Some(termination),
                 final_answer_format: Some(self.final_answer_format.clone()),
             },
         )

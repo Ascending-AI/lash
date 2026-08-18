@@ -2,7 +2,7 @@ use lash_sansio::sync::MutexExt;
 use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::{
-    RlmDialect, RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _,
+    RlmDialect, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionExt as _, RlmTurnBuilderExt as _,
 };
 #[cfg(feature = "rlm")]
 use lash_lashlang_runtime::LashlangArtifactStore as _;
@@ -1163,7 +1163,13 @@ async fn rlm_root_session_final_answer_format_defaults_to_markdown_and_can_be_ra
 
     let raw = core
         .session("rlm-root-raw")
-        .final_answer_format(RlmFinalAnswerFormat::RawFinalValue)?
+        .plugin_option(
+            lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+            lash_rlm_types::RlmCreateExtras {
+                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                ..lash_rlm_types::RlmCreateExtras::default()
+            },
+        )?
         .open()
         .await?;
     raw.turn(TurnInput::text("hello"))
@@ -1195,7 +1201,13 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
 
     let raw = core
         .session("rlm-format-survives-reopen")
-        .final_answer_format(RlmFinalAnswerFormat::RawFinalValue)?
+        .plugin_option(
+            lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+            lash_rlm_types::RlmCreateExtras {
+                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                ..lash_rlm_types::RlmCreateExtras::default()
+            },
+        )?
         .open()
         .await?;
     raw.turn(TurnInput::text("hello"))

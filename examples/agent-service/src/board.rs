@@ -213,19 +213,27 @@ mod dialect_tests {
         );
     }
 
-    /// FIG-1398: `is_dialect_pin_conflict` matches the exact error message the
-    /// protocol plugin emits when a session is reopened with a different dialect.
+    /// FIG-1555: a refused pin is a typed value, not a message to match on.
+    ///
+    /// The message-string test this replaces existed because the host had to
+    /// tell a pin conflict from every other protocol failure by reading prose.
+    /// The typed refusal carries both dialects, so the host reads the values it
+    /// needs and the message is only ever rendered for the operator.
     #[test]
-    fn dialect_pin_conflict_matches_the_protocol_plugins_exact_message() {
-        let error = lash::EmbedError::Session(lash_core::SessionError::Protocol(
-            "RLM dialect is durably pinned to `typescript` and cannot be reopened as `lashlang`"
-                .to_string(),
-        ));
-        assert!(crate::state::is_dialect_pin_conflict(&error));
-
-        let unrelated = lash::EmbedError::Session(lash_core::SessionError::Protocol(
-            "other protocol error".to_string(),
-        ));
-        assert!(!crate::state::is_dialect_pin_conflict(&unrelated));
+    fn a_refused_pin_is_typed_and_carries_both_dialects() {
+        let conflict = lash::rlm::RlmSessionConfigConflict::Dialect {
+            recorded: lash::rlm::RlmDialect::Typescript,
+            requested: lash::rlm::RlmDialect::Lashlang,
+        };
+        let lash::rlm::RlmSessionConfigConflict::Dialect {
+            recorded,
+            requested,
+        } = &conflict
+        else {
+            panic!("a dialect refusal must be the dialect variant");
+        };
+        assert_eq!(*recorded, lash::rlm::RlmDialect::Typescript);
+        assert_eq!(*requested, lash::rlm::RlmDialect::Lashlang);
+        assert_eq!(conflict.field(), "dialect");
     }
 }

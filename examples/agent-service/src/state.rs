@@ -21,12 +21,15 @@ pub(crate) struct AppStateData {
     default_model_variant: Option<String>,
     #[cfg_attr(not(feature = "restate"), allow(dead_code))]
     durability: AgentServiceDurability,
-    /// The dialect a newly created chat session is pinned to.
+    /// The dialect the operator configured, if they configured one at all.
     ///
-    /// Read once at construction rather than from the environment on every
-    /// session open, so the value is injectable and a chat's dialect cannot
-    /// change under it mid-process.
-    rlm_dialect: lash::rlm::RlmDialect,
+    /// `None` is "the operator said nothing", and it is a different instruction
+    /// from naming Lashlang: an unconfigured service states nothing about a
+    /// chat's dialect and runs whatever each chat recorded. Read once at
+    /// construction rather than from the environment on every session open, so
+    /// the value is injectable and a chat's dialect cannot change under it
+    /// mid-process.
+    rlm_dialect: Option<lash::rlm::RlmDialect>,
     #[cfg(feature = "restate")]
     restate_ingress_url: Option<String>,
     #[cfg(feature = "restate")]
@@ -46,7 +49,7 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
-        rlm_dialect: lash::rlm::RlmDialect,
+        rlm_dialect: Option<lash::rlm::RlmDialect>,
         restate_ingress_url: Option<String>,
     ) -> Self {
         Self {
@@ -70,7 +73,7 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
-        rlm_dialect: lash::rlm::RlmDialect,
+        rlm_dialect: Option<lash::rlm::RlmDialect>,
     ) -> Self {
         Self {
             core,
@@ -120,34 +123,29 @@ impl AppStateData {
         chat_id: &str,
         model: ModelSpec,
     ) -> AppResult<LashSession> {
-        use lash::rlm::RlmSessionBuilderExt as _;
-
-        let builder = || {
-            self.core
-                .session(chat_id)
-                .session_spec(lash::SessionSpec::inherit().model(model.clone()))
-                .plugin::<DemoPlugin>(DemoPluginConfig {
-                    db: Arc::clone(&self.db),
-                })
-        };
-        // The ambient dialect applies to a chat this call is creating. An
-        // existing chat keeps the dialect recorded at its first commit: asking
-        // for a different one is a hard error, and asserting it on every open
-        // made every route fail against a store that predates the flip. Asking
-        // and accepting the recorded answer is the same rule, stated so that a
-        // reopen cannot break.
-        if self.rlm_dialect == lash::rlm::RlmDialect::Lashlang {
-            return Ok(builder().open().await?);
+        let mut builder = self
+            .core
+            .session(chat_id)
+            .session_spec(lash::SessionSpec::inherit().model(model))
+            .plugin::<DemoPlugin>(DemoPluginConfig {
+                db: Arc::clone(&self.db),
+            });
+        // A durable fact is stated, not requested (ADR 0064). The statement is
+        // a guarded set-if-unset write: it lands on a chat that recorded
+        // nothing, is a no-op on a chat that recorded the same dialect, and
+        // refuses on one that recorded another. The refusal reaches the
+        // operator; there is no reopen path that quietly runs the chat in its
+        // old dialect. An unconfigured service states nothing at all.
+        if let Some(configured) = self.rlm_dialect {
+            builder = builder.plugin_option(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras {
+                    dialect: Some(configured),
+                    ..lash::rlm::RlmCreateExtras::default()
+                },
+            )?;
         }
-        match builder()
-            .rlm_dialect(lash::rlm::RlmDialect::Typescript)?
-            .open()
-            .await
-        {
-            Ok(session) => Ok(session),
-            Err(error) if is_dialect_pin_conflict(&error) => Ok(builder().open().await?),
-            Err(error) => Err(error.into()),
-        }
+        Ok(builder.open().await?)
     }
 
     pub(crate) async fn with_db<T, F>(&self, f: F) -> AppResult<T>
@@ -292,30 +290,24 @@ pub(crate) mod anyhow_like {
     pub(crate) type Result<T> = std::result::Result<T, String>;
 }
 
-/// Whether opening a session failed because it already recorded a different
-/// dialect, as opposed to failing for any other reason.
-///
-/// Matched on the message because the pin lives in the protocol plugin and
-/// surfaces as a protocol error; a narrower match would need the plugin's error
-/// type in this example's dependency set. A wrong answer here can only make a
-/// genuinely broken open retry once without the dialect and fail again.
-pub(crate) fn is_dialect_pin_conflict(error: &lash::EmbedError) -> bool {
-    error.to_string().contains("RLM dialect is durably pinned")
-}
-
 /// The dialect new chat sessions are created with, from `LASH_RUNBOOK_DIALECT`.
 ///
-/// Read once at startup so the value is injected into the state rather than
-/// consulted on every session open.
-pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
-    let configured = std::env::var("LASH_RUNBOOK_DIALECT")
-        .unwrap_or_else(|_| lash::rlm::RlmDialect::default().language_id().to_string());
-    lash::rlm::RlmDialect::from_language_id(&configured).ok_or_else(|| {
-        format!(
-            "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
-            lash::rlm::RlmDialect::registered_language_ids()
-        )
-    })
+/// An unset variable is `None` — the operator stated nothing — rather than the
+/// Lashlang default, so an unconfigured service never asserts a dialect against
+/// a chat that recorded another one. Read once at startup so the value is
+/// injected into the state rather than consulted on every session open.
+pub(crate) fn rlm_dialect_from_env() -> Result<Option<lash::rlm::RlmDialect>, String> {
+    let Ok(configured) = std::env::var("LASH_RUNBOOK_DIALECT") else {
+        return Ok(None);
+    };
+    lash::rlm::RlmDialect::from_language_id(&configured)
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
+                lash::rlm::RlmDialect::registered_language_ids()
+            )
+        })
 }
 
 /// The dialect a turn actually resolved, for prompt copy that has to be written

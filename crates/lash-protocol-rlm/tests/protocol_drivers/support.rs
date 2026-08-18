@@ -31,7 +31,7 @@ pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> T
     test_config_with_protocol_turn_options(
         lash_core::ProtocolTurnOptions::typed(RlmCreateExtras {
             dialect: None,
-            termination: rlm_termination,
+            termination: Some(rlm_termination),
             final_answer_format: None,
         })
         .expect("valid rlm turn options"),

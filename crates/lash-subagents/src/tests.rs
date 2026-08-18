@@ -419,7 +419,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
         .expect("rlm extras");
     assert!(matches!(
         extras.termination,
-        lash_rlm_types::RlmTermination::FinishRequired { .. }
+        Some(lash_rlm_types::RlmTermination::FinishRequired { .. })
     ));
     assert!(matches!(
         extras.final_answer_format,
@@ -1132,9 +1132,9 @@ async fn run_seed_probe_inner(
                 Some(dialect) => {
                     lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
                         dialect: Some(dialect),
-                        termination: lash_rlm_types::RlmTermination::FinishRequired {
+                        termination: Some(lash_rlm_types::RlmTermination::FinishRequired {
                             schema: None,
-                        },
+                        }),
                         final_answer_format: None,
                     })
                     .expect("encode parent dialect")

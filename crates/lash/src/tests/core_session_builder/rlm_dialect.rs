@@ -2,6 +2,21 @@
 // is selected on the production path, what makes it durable, and what cannot
 // change it once it is.
 
+/// State a session's dialect through the plugin-agnostic options seam, which
+/// applies it as a guarded set-if-unset write (ADR 0064).
+#[cfg(feature = "rlm")]
+fn stating_dialect(builder: crate::SessionBuilder, dialect: RlmDialect) -> crate::SessionBuilder {
+    builder
+        .plugin_option(
+            crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
+            crate::rlm::RlmCreateExtras {
+                dialect: Some(dialect),
+                ..crate::rlm::RlmCreateExtras::default()
+            },
+        )
+        .expect("the typed RLM session options must serialize")
+}
+
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn typescript_dialect_is_selected_on_the_production_session_path_and_survives_resume()
@@ -35,11 +50,12 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
         ))
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core
-        .session("rlm-typescript-production")
-        .rlm_dialect(RlmDialect::Typescript)?
-        .open()
-        .await?;
+    let session = stating_dialect(
+        core.session("rlm-typescript-production"),
+        RlmDialect::Typescript,
+    )
+    .open()
+    .await?;
     let first = session
         .turn(TurnInput::text("compute"))
         .require_finish()?
@@ -114,11 +130,12 @@ async fn a_per_turn_protocol_override_cannot_rewrite_the_recorded_dialect() -> R
         .store_factory(store_factory)
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core
-        .session("rlm-dialect-turn-override")
-        .rlm_dialect(RlmDialect::Typescript)?
-        .open()
-        .await?;
+    let session = stating_dialect(
+        core.session("rlm-dialect-turn-override"),
+        RlmDialect::Typescript,
+    )
+    .open()
+    .await?;
     session
         .turn(TurnInput::text("pin the dialect"))
         .require_finish()?
@@ -255,13 +272,12 @@ async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect()
             .provider(provider)
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
-        let session = {
-            use crate::rlm::RlmSessionBuilderExt as _;
-            core.session(format!("projected-{}", dialect.language_id()))
-                .rlm_dialect(dialect)?
-                .open()
-                .await?
-        };
+        let session = stating_dialect(
+            core.session(format!("projected-{}", dialect.language_id())),
+            dialect,
+        )
+        .open()
+        .await?;
 
         let input = TurnInput::text("read the projected binding")
             .rlm_project(

@@ -30,7 +30,7 @@ async fn standard_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
 async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<()> {
     // docs:start:rlm-core
     // Build one RLM core; each session chooses its durable source dialect.
-    use lash::rlm::{RlmDialect, RlmSessionBuilderExt as _};
+    use lash::rlm::{RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmDialect};
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::new(
@@ -61,11 +61,21 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         serde_json::json!("lashlang")
     );
 
-    // TypeScript is selected at creation and remains pinned on rehydrate.
+    // TypeScript is *stated* at creation and remains pinned on rehydrate. The
+    // statement goes through the plugin-agnostic options seam and is applied as
+    // a guarded set-if-unset write: it lands on a session that recorded
+    // nothing, and a session that recorded another dialect refuses rather than
+    // reopening in the old one.
     assert_eq!(RlmDialect::Typescript.language_id(), "typescript");
     let typescript = core
         .session("task-typescript")
-        .rlm_dialect(RlmDialect::Typescript)?
+        .plugin_option(
+            RLM_PROTOCOL_PLUGIN_ID,
+            RlmCreateExtras {
+                dialect: Some(RlmDialect::Typescript),
+                ..RlmCreateExtras::default()
+            },
+        )?
         .open()
         .await?;
     assert_eq!(

@@ -1457,7 +1457,7 @@ fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) ->
 fn finish_required_options() -> lash_core::ProtocolTurnOptions {
     lash_core::ProtocolTurnOptions::typed(RlmCreateExtras {
         dialect: None,
-        termination: RlmTermination::FinishRequired { schema: None },
+        termination: Some(RlmTermination::FinishRequired { schema: None }),
         final_answer_format: None,
     })
     .expect("valid rlm turn options")

@@ -594,10 +594,15 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     let attachments = tempfile::tempdir().context("drain attachment directory")?;
     let core = core(storage, provider.handle.clone(), &attachments)?;
     let session = {
-        use lash::rlm::RlmSessionBuilderExt as _;
         core.session(TURN_SESSION_ID)
-            .rlm_dialect(runbook_dialect())
-            .context("pin the row's dialect")?
+            .plugin_option(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras {
+                    dialect: Some(runbook_dialect()),
+                    ..lash::rlm::RlmCreateExtras::default()
+                },
+            )
+            .context("state the row's dialect")?
             .open()
             .await?
     };

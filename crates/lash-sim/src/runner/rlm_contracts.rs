@@ -714,7 +714,7 @@ fn rlm_contract_config(
 ) -> Result<lash_core::TurnMachineConfig, FixedScriptRunnerError> {
     let options = lash_core::ProtocolTurnOptions::typed(RlmCreateExtras {
         dialect: None,
-        termination,
+        termination: Some(termination),
         final_answer_format: None,
     })
     .map_err(|err| FixedScriptRunnerError::Assertion(err.to_string()))?;

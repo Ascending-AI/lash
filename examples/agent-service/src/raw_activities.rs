@@ -372,7 +372,7 @@ finish "done through raw activities"
             "scripted-model".to_string(),
             None,
             durability,
-            lash::rlm::RlmDialect::Lashlang,
+            Some(lash::rlm::RlmDialect::Lashlang),
         );
         #[cfg(feature = "restate")]
         let state = AppStateData::from_shared_db(
