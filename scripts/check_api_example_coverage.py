@@ -270,6 +270,15 @@ DISPOSITION_TIERS = {
 #: code.  A ratchet, not a target: the count may only fall, and lowering it is a
 #: one-line diff beside the row that was upgraded.  Raising it is the bleeding
 #: this gate exists to stop, so an increase fails.
+#:
+#: A raise is not forbidden, it is *argued*: the population may only grow
+#: because a correctness fix admitted rows the old reading hid, and the PR body
+#: has to state the delta and why the new number is the honest one, with the pin
+#: moving in that same diff so a reviewer reads the raise rather than discovers
+#: it.  PR #492 raised it 1914 -> 1959 on that footing.  Raising it because a
+#: change would otherwise fail the gate is the thing this constant exists to
+#: catch; the honest move there is to record the row's consumer in prose under
+#: an `unused-*` disposition and leave the pin.
 EXAMPLE_TEST_TIER_RATCHET = 1959
 #: Module paths that put an item behind the `testing` feature, which is what
 #: makes a test-only consumer a home rather than an excuse.  `test_support` is
