@@ -42,12 +42,15 @@ release cache` is deliberately **not** in that set: it warms a cache for
 release.yml and perf.yml on `main` and is skipped for pull requests and queue
 entries, where the cache it writes is scoped to a ref nothing else can read.
 
-At the time of writing the repository carries no branch protection and no
-rulesets (`/branches/main/protection` returns 404 and `rulesets` returns an empty
-list), so no stale required-check name can be broken by renaming or splitting a
-job. The ruleset is created with the names above, after they exist on `main`. Any
-later split of a required job must either keep the original name on a gate job
-that needs the new sub-jobs, or update the ruleset in the same motion.
+That set is enforced by the active `main merge queue` ruleset on the default
+branch: a merge-queue rule (ALLGREEN grouping, squash merges, up to five
+entries built and merged per group) plus a required-status-checks rule naming
+exactly the checks above. Pull requests land by being added to the queue, which
+revalidates every entry against the true merged base before it lands — never by
+direct merge. Any later split of a required job must either keep the original
+name on a gate job that needs the new sub-jobs, or update the ruleset in the
+same motion; a renamed job that leaves a stale required-check name will wedge
+every queue entry behind a check that can never report.
 
 ## Concurrent local gates
 
