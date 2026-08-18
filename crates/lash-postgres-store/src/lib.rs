@@ -747,6 +747,9 @@ mod session_factory;
 mod session_meta;
 #[path = "postgres/support.rs"]
 mod support;
+#[cfg(any(test, feature = "testing"))]
+#[path = "postgres/testing.rs"]
+pub mod testing;
 #[path = "postgres/trigger_store.rs"]
 mod trigger_store;
 

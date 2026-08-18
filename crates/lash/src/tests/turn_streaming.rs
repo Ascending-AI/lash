@@ -6978,7 +6978,12 @@ fn binary_scratch_files_survive_store_backed_cold_reopen_byte_exactly() -> Resul
 
         match std::env::var("LASH_POSTGRES_DATABASE_URL") {
             Ok(database_url) if !database_url.is_empty() => {
-                let storage = lash_postgres_store::PostgresStorage::connect(&database_url).await?;
+                // Own database, not the shared one: the Postgres conformance
+                // suites truncate every `lash_*` table, and this law's rows
+                // would vanish mid-run beside them.
+                let database =
+                    lash_postgres_store::testing::IsolatedDatabase::create(&database_url).await;
+                let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
                 let postgres = Arc::new(storage.session_store_factory());
                 assert_binary_scratch_files_survive_cold_reopen("postgres", postgres).await?;
                 storage.pool().close().await;

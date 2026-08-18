@@ -66,7 +66,7 @@ lash-plugin-process-controls = { workspace = true }
 lash-subagents = { workspace = true }
 lash-tools = { workspace = true }
 lash-sqlite-store = { workspace = true }
-lash-postgres-store = { workspace = true }
+lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-standard-plugins = { workspace = true }
 tempfile = { workspace = true }
