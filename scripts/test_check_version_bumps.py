@@ -7,6 +7,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import unittest.mock
 
 
 SCRIPT = Path(__file__).with_name("check_version_bumps.py")
@@ -63,6 +64,18 @@ description = "incident 3 trace event surface"
 kind = "rust_serde_shapes"
 paths = ["src/trace.rs"]
 must_cover = ["TraceEvent"]
+"""
+
+UNRELATED_SURFACE_ENTRY = """
+[[surface]]
+constant = "OTHER_VERSION"
+constant_path = "src/other_version.rs"
+description = "a surface the base inventory already declared"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/other.rs"]
+symbols = ["Unrelated"]
 """
 
 LIB_V1 = "pub const WIRE_VERSION: u32 = 1;\n"
@@ -226,6 +239,11 @@ class FixtureRepository:
         run(self.root, "git", "config", "user.name", "Fixture")
         run(self.root, "git", "config", "user.email", "fixture@example.invalid")
         (self.root / "src").mkdir()
+        (self.root / "surface.toml").write_text(
+            textwrap.dedent(config), encoding="utf-8"
+        )
+
+    def write_config(self, config: str) -> None:
         (self.root / "surface.toml").write_text(
             textwrap.dedent(config), encoding="utf-8"
         )
@@ -552,6 +570,146 @@ class VersionBumpFixtureTest(unittest.TestCase):
 
         self.assertEqual(result.errors, ())
         self.assertEqual(len(result.failures), 1)
+
+    def registration_fixture(self, base_lib: str) -> tuple[FixtureRepository, str]:
+        """A base that predates the WIRE_VERSION surface entry entirely."""
+        fixture = FixtureRepository()
+        self.addCleanup(fixture.close)
+        fixture.write_config(UNRELATED_SURFACE_ENTRY)
+        fixture.write_file("src/other_version.rs", "pub const OTHER_VERSION: u32 = 1;\n")
+        fixture.write_file("src/other.rs", "pub struct Unrelated;\n")
+        fixture.write_file("src/lib.rs", base_lib)
+        fixture.write_file("src/wire.rs", WIRE_BASE)
+        return fixture, fixture.commit("base before the surface was registered")
+
+    def registered_check(
+        self, fixture: FixtureRepository, base: str, head: str, baselines: dict[str, str]
+    ):
+        config = fixture.root / "surface.toml"
+        surfaces = MODULE.load_config(config)
+        base_keys = MODULE.base_inventory_keys(fixture.root, base, config)
+        with unittest.mock.patch.dict(
+            MODULE.REGISTRATION_BASELINES, baselines, clear=True
+        ):
+            return MODULE.check_surfaces(
+                fixture.root, base, head, surfaces, base_keys
+            )
+
+    def test_registering_a_surface_without_a_burned_baseline_fails(self) -> None:
+        fixture, base = self.registration_fixture("")
+        fixture.write_config(CONFIG + UNRELATED_SURFACE_ENTRY)
+        fixture.write_file("src/lib.rs", LIB_V1)
+        fixture.write_file("src/wire.rs", WIRE_CHANGED)
+        head = fixture.commit("register the surface and stamp the shape")
+
+        result = self.check_cli(fixture, base, head)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no burned registration baseline", result.stderr)
+        self.assertIn("'src/lib.rs:WIRE_VERSION': 'sha256:", result.stderr)
+
+    def test_registering_a_surface_with_its_burned_baseline_passes(self) -> None:
+        fixture, base = self.registration_fixture("")
+        fixture.write_config(CONFIG + UNRELATED_SURFACE_ENTRY)
+        fixture.write_file("src/lib.rs", LIB_V1)
+        fixture.write_file("src/wire.rs", WIRE_CHANGED)
+        head = fixture.commit("register the surface and stamp the shape")
+
+        unburned = self.registered_check(fixture, base, head, {})
+        self.assertEqual(len(unburned.unregistered), 1)
+
+        result = self.registered_check(
+            fixture,
+            base,
+            head,
+            {"src/lib.rs:WIRE_VERSION": unburned.unregistered[0].fingerprint},
+        )
+
+        self.assertEqual(result.failures, ())
+        self.assertEqual(result.errors, ())
+        self.assertEqual(result.unregistered, ())
+        self.assertEqual(
+            tuple(surface.key for surface in result.registrations),
+            ("src/lib.rs:WIRE_VERSION",),
+        )
+
+    def test_a_burned_baseline_does_not_cover_a_different_shape(self) -> None:
+        fixture, base = self.registration_fixture("")
+        fixture.write_config(CONFIG + UNRELATED_SURFACE_ENTRY)
+        fixture.write_file("src/lib.rs", LIB_V1)
+        fixture.write_file("src/wire.rs", WIRE_CHANGED)
+        head = fixture.commit("register the surface and stamp the shape")
+
+        result = self.registered_check(
+            fixture,
+            base,
+            head,
+            {"src/lib.rs:WIRE_VERSION": "sha256:" + "0" * 64},
+        )
+
+        self.assertEqual(result.registrations, ())
+        self.assertEqual(len(result.unregistered), 1)
+
+    def test_renaming_a_live_constant_is_not_a_registration(self) -> None:
+        """The bypass a category-shaped registration rule would have opened.
+
+        Both halves of the old inference read "new" for a rename: the surface
+        key changed, so the base inventory has never seen it, and the renamed
+        constant is nowhere in the base tree either. Only a baseline pinned to
+        the enrolled key and bytes can tell the two apart.
+        """
+        fixture = self.fixture()
+        fixture.write_config(CONFIG)
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("a live, registered surface")
+
+        renamed_config = CONFIG.replace("WIRE_VERSION", "WIRE_GENERATION")
+        fixture.write_config(renamed_config)
+        fixture.write(
+            LIB_V1.replace("WIRE_VERSION", "WIRE_GENERATION"), WIRE_CHANGED
+        )
+        head = fixture.commit("rename the constant and change the shape")
+
+        result = self.registered_check(
+            fixture,
+            base,
+            head,
+            {"src/lib.rs:WIRE_VERSION": "sha256:" + "0" * 64},
+        )
+
+        self.assertEqual(result.registrations, ())
+        self.assertEqual(len(result.unregistered), 1)
+        self.assertEqual(result.unregistered[0].surface.constant, "WIRE_GENERATION")
+
+        cli = self.check_cli(fixture, base, head)
+        self.assertEqual(cli.returncode, 1)
+        self.assertIn("no burned registration baseline", cli.stderr)
+
+    def test_registering_a_surface_over_a_live_constant_still_needs_a_bump(self) -> None:
+        fixture, base = self.registration_fixture(LIB_V1)
+        fixture.write_config(CONFIG + UNRELATED_SURFACE_ENTRY)
+        fixture.write_file("src/wire.rs", WIRE_CHANGED)
+        head = fixture.commit("re-register a surface whose constant already existed")
+
+        result = self.check_cli(fixture, base, head)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Bump WIRE_VERSION strictly past 1", result.stderr)
+
+    def test_an_unreadable_base_inventory_checks_every_surface(self) -> None:
+        fixture = self.fixture()
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("base")
+        fixture.write(LIB_V1, WIRE_CHANGED)
+        head = fixture.commit("change the shape without a bump")
+
+        self.assertIsNone(
+            MODULE.base_inventory_keys(fixture.root, base, Path("/nowhere/surface.toml"))
+        )
+
+        result = self.check_cli(fixture, base, head)
+
+        self.assertEqual(result.returncode, 1)
 
     def test_surface_errors_are_aggregated(self) -> None:
         config = """

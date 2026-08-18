@@ -369,6 +369,71 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
 }
 
 #[test]
+fn storage_body_states_its_node_body_generation() {
+    let node = SessionNodeRecord {
+        node_id: "node-1".to_string(),
+        parent_node_id: None,
+        timestamp: "2026-08-18T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Event {
+            event: SessionHistoryRecord::Protocol(protocol_event()),
+        },
+    };
+
+    let encoded = node.encode_storage_body().expect("encode storage body");
+    let stamped: serde_json::Value = serde_json::from_str(&encoded).expect("stored body is JSON");
+
+    assert_eq!(
+        stamped
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64),
+        Some(u64::from(SESSION_NODE_BODY_SCHEMA_VERSION)),
+    );
+}
+
+#[test]
+fn unstamped_stored_bodies_keep_loading() {
+    // Byte-for-byte a body written before the generation stamp existed.
+    let legacy = r#"{"timestamp":"2026-07-27T00:00:00Z","kind":"plugin","plugin_type":"legacy","body":{"value":7}}"#;
+
+    let decoded = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
+        .expect("pre-stamp durable bodies must keep loading");
+
+    assert_eq!(decoded.timestamp, "2026-07-27T00:00:00Z");
+    match decoded.payload {
+        SessionNodePayload::Plugin { plugin_type, body } => {
+            assert_eq!(plugin_type, "legacy");
+            assert_eq!(body.as_ref(), &serde_json::json!({"value": 7}));
+        }
+        other => panic!("unexpected payload: {other:?}"),
+    }
+}
+
+#[test]
+fn stored_bodies_from_a_newer_generation_are_refused() {
+    let newer = serde_json::json!({
+        "schema_version": SESSION_NODE_BODY_SCHEMA_VERSION + 1,
+        "timestamp": "2026-08-18T00:00:00Z",
+        "kind": "plugin",
+        "plugin_type": "from-the-future",
+        "body": {},
+    })
+    .to_string();
+
+    let error = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, &newer)
+        .expect_err("a newer node-body generation must be refused");
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "graph node body is schema version {}, but this build reads at most {}; remedy: \
+             run a Lash build at or past that node-body generation",
+            SESSION_NODE_BODY_SCHEMA_VERSION + 1,
+            SESSION_NODE_BODY_SCHEMA_VERSION
+        ),
+    );
+}
+
+#[test]
 fn nearest_frame_is_derived_from_ancestry() {
     let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,

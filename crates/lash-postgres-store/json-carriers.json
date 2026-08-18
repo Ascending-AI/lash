@@ -5,7 +5,7 @@
   },
   "lash_graph_nodes.node_json": {
     "verdict": "deliberately-excluded",
-    "reason": "Unversioned StoredSessionNodeBody spans the broad session-history graph model; enrolling that model is a separate durability cutover."
+    "reason": "StoredSessionNodeBody states SESSION_NODE_BODY_SCHEMA_VERSION and is fenced against newer generations on decode; its shape is guarded by that surface in scripts/versioned-surfaces.toml, which spans the session-history model the schemars payload projection cannot reach."
   },
   "lash_usage_deltas.entry_json": {
     "verdict": "deliberately-excluded",

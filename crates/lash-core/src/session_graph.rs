@@ -201,8 +201,34 @@ pub struct SessionNodeRecord {
     pub payload: SessionNodePayload,
 }
 
+/// Durable generation of the `node_json` graph-node body.
+///
+/// The body is the session graph's persisted history shape: the stored
+/// timestamp plus the whole [`SessionNodePayload`] family it flattens, down
+/// through the conversation record and its message parts. Every change to that
+/// shape advances this constant, and `scripts/versioned-surfaces.toml` makes CI
+/// demand the advance — the guard is what a shape change collides with, so no
+/// node-body field arrives by review attention alone.
+///
+/// Graph nodes are immutable history, so the generation is a forward-only
+/// fence rather than an equality check: a body stamped at this generation or
+/// older loads, and a body from a strictly newer generation is refused with the
+/// generation it carries. Bodies written before the stamp existed carry no
+/// field and are generation 1 by definition.
+const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 1;
+
+/// Generation of a body written before the stamp existed.
+///
+/// The pre-stamp shape is exactly generation 1, so an absent field is that
+/// generation stated rather than an unknown one tolerated.
+fn unstamped_node_body_schema_version() -> u32 {
+    1
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {
+    #[serde(default = "unstamped_node_body_schema_version")]
+    schema_version: u32,
     timestamp: String,
     #[serde(flatten)]
     payload: SessionNodePayload,
@@ -654,9 +680,12 @@ impl SessionNodeRecord {
     /// Encode only immutable node content for `node_json`.
     ///
     /// Identity and graph structure are columns so SQL can index, join, and
-    /// re-derive reachability without parsing an opaque JSON blob.
+    /// re-derive reachability without parsing an opaque JSON blob. The body
+    /// states its own node-body generation so a reader never has to infer the
+    /// shape it is holding.
     pub fn encode_storage_body(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(&StoredSessionNodeBody {
+            schema_version: SESSION_NODE_BODY_SCHEMA_VERSION,
             timestamp: self.timestamp.clone(),
             payload: self.payload.clone(),
         })
@@ -664,12 +693,23 @@ impl SessionNodeRecord {
 
     /// Reassembles a node for store implementors from dedicated identity/parent columns and the
     /// immutable JSON body; malformed body JSON is returned as an error.
+    ///
+    /// A body from a strictly newer node-body generation is refused rather than
+    /// decoded on a shape this build does not know; older and unstamped bodies
+    /// load unchanged.
     pub fn decode_storage_body(
         node_id: String,
         parent_node_id: Option<String>,
         node_json: &str,
     ) -> Result<Self, serde_json::Error> {
         let body = serde_json::from_str::<StoredSessionNodeBody>(node_json)?;
+        if body.schema_version > SESSION_NODE_BODY_SCHEMA_VERSION {
+            return Err(serde::de::Error::custom(format!(
+                "graph node body is schema version {}, but this build reads at most {}; \
+                 remedy: run a Lash build at or past that node-body generation",
+                body.schema_version, SESSION_NODE_BODY_SCHEMA_VERSION
+            )));
+        }
         Ok(Self {
             node_id,
             parent_node_id,

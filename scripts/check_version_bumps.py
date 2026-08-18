@@ -11,6 +11,13 @@ whose target-branch parent is the latest protected-branch tip. Repositories must
 enforce an up-to-date branch or merge queue; a stale merge ref can produce an
 older merge-base and cannot prove that independently-landed bumps stay ordered.
 
+Registering a surface -- enrolling a shape that may move in the same change,
+with no base version to be strictly greater than -- is a burned one-time
+baseline in ``REGISTRATION_BASELINES``, never a category the check infers.  An
+inferred category would read a renamed or relocated constant as brand new and
+silently un-guard a live surface for one change; a pinned key and fingerprint
+cannot be reached by any refactor.
+
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.  Pull-request CI passes the PR merge-base explicitly.
 """
@@ -20,6 +27,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import fnmatch
+import hashlib
 from pathlib import Path
 import re
 import subprocess
@@ -30,6 +38,34 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
+
+# Burned one-time proofs that a surface is being registered rather than
+# changed. A registration has no merge-base version to be strictly greater
+# than, so it is excused from the bump it would otherwise owe -- and that
+# excuse is granted only to these exact surface keys carrying these exact
+# guarded bytes, never to a category the check infers.
+#
+# Inference was the earlier design and it was wrong: it asked whether the
+# surface key was absent from the merge-base inventory, which is also true of a
+# constant someone renamed or moved to another file. An innocent refactor
+# therefore looked identical to a registration and un-guarded the surface for
+# that change. A pinned key plus a fingerprint of the guarded shape at the
+# moment of enrolment answers the real question instead -- "is this the one
+# enrolment we reviewed?" -- and no rename can answer it yes.
+#
+# The fingerprint covers the surface's whole head guard signature: every
+# guarded path and symbol, trivia-stripped, in the order the guards declare
+# them. A failing check prints the fingerprint it computed, so burning a new
+# registration is a deliberate, diffable act by a human who read the shape.
+# Entries stay after the surface lands; they are dead-but-honest history, and
+# re-adding a removed entry over a live constant is not a registration.
+REGISTRATION_BASELINES = {
+    # FIG-1529: enrolment of the durable graph-node body, whose already-current
+    # shape gained its schema_version stamp in the same change.
+    "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
+        "sha256:bcb22b869fe0b86eb9a507b5f1841b733360cfba1164a407d189648998cf1dc9"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -120,9 +156,26 @@ class SurfaceError:
 
 
 @dataclass(frozen=True)
+class Unregistered:
+    """A changed shape whose constant has no merge-base value and no baseline.
+
+    This is what a renamed or relocated version constant looks like from the
+    gate's side, so it is reported as a failure rather than an undecidable
+    surface: the shape moved, and nothing in the inventory can say what it was
+    supposed to move past.
+    """
+
+    surface: Surface
+    changed_guards: tuple[str, ...]
+    fingerprint: str
+
+
+@dataclass(frozen=True)
 class CheckResult:
     failures: tuple[Failure, ...]
     errors: tuple[SurfaceError, ...]
+    registrations: tuple[Surface, ...] = ()
+    unregistered: tuple[Unregistered, ...] = ()
 
 
 class CheckError(RuntimeError):
@@ -740,14 +793,78 @@ def version_at(view: RepositoryView, revision: str, surface: Surface) -> int:
         ) from error
 
 
+def inventory_keys(document: object) -> frozenset[str] | None:
+    """The surface keys a parsed inventory declares, or None if unreadable."""
+    if not isinstance(document, dict):
+        return None
+    raw_surfaces = document.get("surface")
+    if not isinstance(raw_surfaces, list):
+        return None
+    keys: set[str] = set()
+    for raw_surface in raw_surfaces:
+        if not isinstance(raw_surface, dict):
+            return None
+        constant = raw_surface.get("constant")
+        constant_path = raw_surface.get("constant_path")
+        if not isinstance(constant, str) or not isinstance(constant_path, str):
+            return None
+        keys.add(f"{constant_path}:{constant}")
+    return frozenset(keys)
+
+
+def base_inventory_keys(
+    repo: Path, base_revision: str, config: Path
+) -> frozenset[str] | None:
+    """The surfaces the merge-base inventory declared, or None when undecidable.
+
+    A surface absent from that inventory is registered by this change, so its
+    guarded shape has no version to be compared against and none to be bumped
+    past.  Whenever the base inventory cannot be read the answer is None and
+    every surface is checked as pre-existing, which is the stricter reading.
+    """
+    try:
+        relative = config.resolve().relative_to(repo.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+    result = git(repo, "show", f"{base_revision}:{relative}", check=False)
+    if result.returncode != 0:
+        return None
+    try:
+        return inventory_keys(tomllib.loads(result.stdout))
+    except tomllib.TOMLDecodeError:
+        return None
+
+
+def surface_fingerprint(entries: Iterable[tuple[str, str]]) -> str:
+    """Pin the guarded bytes a registration enrolled.
+
+    The digest covers every guarded path and symbol the surface's head
+    signature carries, in guard order, so a baseline burned for one enrolment
+    cannot be reused by a later change to the same shape.
+    """
+    digest = hashlib.sha256()
+    for key, value in entries:
+        digest.update(key.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(value.encode("utf-8"))
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
 def check_surfaces(
-    repo: Path, base: str, head: str, surfaces: Iterable[Surface]
+    repo: Path,
+    base: str,
+    head: str,
+    surfaces: Iterable[Surface],
+    base_keys: frozenset[str] | None = None,
 ) -> CheckResult:
     base_revision = resolve_revision(repo, base)
     head_revision = resolve_revision(repo, head)
     view = RepositoryView(repo)
     failures: list[Failure] = []
     errors: list[SurfaceError] = []
+    registrations: list[Surface] = []
+    unregistered: list[Unregistered] = []
     for surface in surfaces:
         try:
             head_version = version_at(view, head_revision, surface)
@@ -755,6 +872,7 @@ def check_surfaces(
             errors.append(SurfaceError(surface, str(error)))
             continue
         changed_guards: list[str] = []
+        head_entries: list[tuple[str, str]] = []
         for guard in surface.guards:
             try:
                 base_signature = guard_signature(
@@ -775,6 +893,7 @@ def check_surfaces(
                     )
                 )
                 continue
+            head_entries.extend(head_signature)
             if base_signature != head_signature:
                 changed_guards.extend(guard.paths)
         if not changed_guards:
@@ -782,7 +901,30 @@ def check_surfaces(
         try:
             base_version = version_at(view, base_revision, surface)
         except CheckError as error:
-            errors.append(SurfaceError(surface, str(error)))
+            # No merge-base version exists for this constant. Either the change
+            # registers the surface -- a burned baseline says so by name and by
+            # the exact shape it enrolled -- or the constant was renamed,
+            # relocated, or added over a shape that was already moving, and the
+            # shape change stands unaccounted for.
+            fingerprint = surface_fingerprint(head_entries)
+            registered = (
+                base_keys is not None
+                and surface.key not in base_keys
+                and REGISTRATION_BASELINES.get(surface.key) == fingerprint
+            )
+            if registered:
+                registrations.append(surface)
+                continue
+            if base_keys is None or surface.key in base_keys:
+                errors.append(SurfaceError(surface, str(error)))
+                continue
+            unregistered.append(
+                Unregistered(
+                    surface=surface,
+                    changed_guards=tuple(dict.fromkeys(changed_guards)),
+                    fingerprint=fingerprint,
+                )
+            )
             continue
         if head_version <= base_version:
             failures.append(
@@ -793,7 +935,12 @@ def check_surfaces(
                     changed_guards=tuple(dict.fromkeys(changed_guards)),
                 )
             )
-    return CheckResult(tuple(failures), tuple(errors))
+    return CheckResult(
+        tuple(failures),
+        tuple(errors),
+        tuple(registrations),
+        tuple(unregistered),
+    )
 
 
 def select_surfaces(
@@ -847,7 +994,13 @@ def main(argv: list[str] | None = None) -> int:
             surfaces = select_surfaces(surfaces, args.surface)
         base = resolve_revision(args.repo, args.base)
         head = resolve_revision(args.repo, args.head)
-        result = check_surfaces(args.repo, base, head, surfaces)
+        result = check_surfaces(
+            args.repo,
+            base,
+            head,
+            surfaces,
+            base_inventory_keys(args.repo, base, args.config),
+        )
     except CheckError as error:
         print(f"version-bump check error: {error}", file=sys.stderr)
         return 2
@@ -860,11 +1013,23 @@ def main(argv: list[str] | None = None) -> int:
         for error in result.errors:
             print(f"- {error.surface.key}: {error.detail}", file=sys.stderr)
 
-    if result.failures:
+    if result.failures or result.unregistered:
         print(
             f"version-bump check failed against merge-base {base[:12]}:",
             file=sys.stderr,
         )
+        for entry in result.unregistered:
+            paths = ", ".join(entry.changed_guards)
+            print(
+                f"- {entry.surface.constant} has no merge-base value in "
+                f"{entry.surface.constant_path} and no burned registration "
+                f"baseline, but its guarded shape changed ({paths}). A renamed or "
+                f"relocated constant keeps its merge-base identity and bumps that; "
+                f"a genuinely new surface registers once by adding "
+                f"{entry.surface.key!r}: {entry.fingerprint!r} to "
+                f"REGISTRATION_BASELINES in scripts/check_version_bumps.py.",
+                file=sys.stderr,
+            )
         for failure in result.failures:
             paths = ", ".join(failure.changed_guards)
             print(
@@ -875,12 +1040,16 @@ def main(argv: list[str] | None = None) -> int:
             )
     if result.errors:
         return 2
-    if result.failures:
+    if result.failures or result.unregistered:
         return 1
 
+    registered = ""
+    if result.registrations:
+        names = ", ".join(surface.key for surface in result.registrations)
+        registered = f"; registered by this change: {names}"
     print(
         f"version-bump check passed: {len(surfaces)} surfaces against "
-        f"merge-base {base[:12]}"
+        f"merge-base {base[:12]}{registered}"
     )
     return 0
 
