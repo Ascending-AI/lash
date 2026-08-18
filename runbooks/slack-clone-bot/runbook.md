@@ -272,13 +272,29 @@ the root's unique ambient marker. Open the same parent in **A's** tab. Gate all 
   `#threadStream`; the parent's `.thread-badge` increments to two replies; neither tab gains
   a main `#stream .msg` row for either thread reply. The bot answer must refer to the unique
   pre-fork ambient fact, judged semantically rather than by exact prose.
+- **Layer 1, root recall:** ask the thread mention *which message this thread started from*
+  and require the answer to name the root's own marker and **not** the phase-3 room mention.
+  Inheriting the prefix is not the same property: the child forks at the boundary of the turn
+  that drained the room, so the root, the room mention and the bot's own reply are all in the
+  prefix, and nothing in Lash says which of them the thread hangs from. That is host domain
+  knowledge, and the host supplies it by seeding the root into the child at fork time
+  (`THREAD_ROOT_SEED_PREFIX`, `examples/slack-clone/src/bot/threads.rs`). A child that answers
+  with the room mention is the FIG-1403 defect, not a model wobble; a child whose prompt has
+  no seed line fails this gate on layer 3 as well.
 - **Layer 2:** `messages` holds B's mention and the bot reply with `thread_ts = <root-ts>`;
   `/api/conversations.replies` returns parent first and both replies; normal
   `/api/conversations.history` contains neither reply. The bot reply metadata carries the
   thread `app_mention` event id.
 - **Layer 3:** a session named `thread:<C…>:<root-ts>` exists as a fork of the channel's
-  retained boundary. Its **committed transcript** contains the pre-fork ambient marker and
-  the thread mention. The `channel:<C…>` graph and pending-input table contain **no** message
+  retained boundary. Its **committed transcript** contains the pre-fork ambient marker, the
+  host's thread-root seed line naming the root exactly once — **on a line of its own**, since
+  queued text inputs concatenate with no separator and a label that starts mid-line labels the
+  tail of the message copied ahead of it — and the thread mention. Read
+  inheritance through `fork_lineage` — the ancestor chain from the recorded `fork_node_id` —
+  never as rows in the child's own `graph_nodes`: `fork_at` adds a session head *without
+  writing graph nodes*, so ancestor content never appears under the child's session id, and
+  an inclusion gate written that way fails on a correct fork while the matching exclusion gate
+  passes on a broken one. The `channel:<C…>` graph and pending-input table contain **no** message
   with the thread event's `input_id`, `MessageOrigin::TurnInput`, text marker, or turn id.
   Gate the transcript, not "the prompt": see the observability note below.
 - **Layer 4:** the turn and `Replied { source: Turn }` are scoped to the thread session id;
@@ -317,10 +333,13 @@ Two counting traps, both of which turn correct behavior into a false failure:
 - **`#threadStream` renders the parent first, then the replies.** Counting `.msg` rows there as
   replies overcounts by one, and if the root happens to be bot-authored the parent is counted as
   a bot *reply*. Exclude the first row before counting.
-- **Pick the root by its own marker, not by "the newest message".** By this point the newest
-  message in the channel is the bot's own reply from an earlier phase, and threading on that
-  tests nothing about a human root: the root carries no ambient marker to ask about, so the
-  "inherited context" gate fails while the fork is working correctly.
+- **Pick the root by author identity, narrowed by its marker — never by marker text alone,
+  and never as "the newest message".** The newest message by this point is the bot's own reply
+  from an earlier phase, and threading on that tests nothing about a human root. But the
+  marker alone is not an identity either: the phase-3 mention asks the bot to recall the
+  ambient facts, so a real model quotes the root's marker straight back and "the row
+  containing the marker" now matches two rows. Select the human-authored row, treat a second
+  match as an error rather than taking the first, and click it by its `ts`.
 
 Save `03T-thread-both-tabs.png` plus four extracts: thread DOM rows/badge; platform parent and
 reply rows; channel and thread session graphs/pending inputs; trace records grouped by session.
@@ -482,7 +501,8 @@ Run `bash scripts/slack-clone-dev.sh down --port <p>` and confirm both processes
 | MCP client depth | four host-owned results committed; four exact tool names, `batch` envelope unwrapped; one `turn_completed` | | `03M-session-tool-results.json`, `03M-url-completion.txt` |
 | MCP sampling is the host's | sampled model id equals the bot's configured provider model | | `03M-session-tool-results.json` |
 | Thread fork | deterministic child session with retained channel ancestry | | `03T-thread-both-tabs.png`, layer-3 extract |
-| Thread inheritance | reply uses the pre-fork ambient fact; post-fork marker absent from the committed thread transcript | | phase-3T transcript extract |
+| Thread inheritance | reply uses the pre-fork ambient fact; post-fork marker absent from the ancestor chain named by `fork_lineage` and from the committed thread transcript | | phase-3T transcript extract |
+| Thread root recall | the child names the thread root, not the later room mention; the seeded root line appears exactly once in the child's committed transcript, starting its own line | | `03T-thread-both-tabs.png`, phase-3T transcript extract |
 | Request body accounted for | `body_len` + `body_sha256` present; `body_json_omitted_reason` when over the 2 KiB cap | | phase-3T trace extract |
 | Prompt-content isolation law | deterministic law green (the claim is unreadable live over the cap) | | exact test command, passed count, exit |
 | Thread isolation | no thread rows in channel UI/history/session; no post-fork channel traffic in thread | | phase-3T four-layer extracts |

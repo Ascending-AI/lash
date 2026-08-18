@@ -326,6 +326,31 @@ has one durable state instead of a separate pre-engagement buffer: ambient
 replies enqueue directly on the child, cost no model call, and the first mention
 drains them there. No thread event is ever admitted to `channel:<C…>`.
 
+### Seeding the thread root
+
+Inheriting the prefix is not the same as knowing the root. Lash forks at a
+committed graph boundary and has no concept of a "thread root", so it cannot
+mark one — and the inherited prefix normally extends *past* the root, because an
+ambient root only commits when a later mention drains the channel queue and that
+same turn commits the mention and the bot's answer too. A child asked "what did
+the root say?" would then have three equally-committed candidates and answer
+about the wrong one.
+
+The distinction is host domain knowledge, so the host writes it down: at fork
+time the bot seeds one labelled admission naming the root message
+(`THREAD_ROOT_SEED_PREFIX` in `bot/threads.rs`), under a deterministic source
+key, before the child's first turn runs. Every forking host with a similar
+notion of an anchor message pays the same few lines — the price of hosts, not
+the substrate, owning their own semantics.
+
+The seed carries its own newlines on both sides, and that is not cosmetic:
+queued text inputs concatenate into a single user message with no separator, so
+a seed enqueued behind copied pre-root context would begin in the middle of that
+line and read as its tail rather than as a label. The deterministic source key
+makes re-seeding a no-op, resolved against the `(session_id, source_key)` row
+Lash already holds; a host that vacuums live sessions tombstones that row and
+would re-seed on a later redelivery, which this bot never does.
+
 ### Locating the fork boundary
 
 The ledger records two different boundaries because they mean different things.
@@ -345,7 +370,7 @@ Thread-open chooses only from evidence durably tied to the root:
 | --- | --- |
 | Recorded `fork_node_id` | Fork at that retained turn boundary. |
 | `input_id` with a committed application, but no `fork_node_id` | Re-derive the applied turn boundary, repair the ledger row, then fork there. |
-| Folded root with a recorded admission boundary | Fork at that retained pre-root boundary and copy top-level admissions through the root that are not already in the child graph. |
+| Folded root with a recorded admission boundary | Fork at that retained pre-root boundary and copy the pre-root top-level admissions that are not already in the child graph; the root itself arrives as the seed. |
 | Accepted root with `input_id` and an admission boundary | Treat the durable enqueue as valid immediately, even if the process died before advancing the ledger to Folded. |
 | Non-terminal root without an authoritative boundary yet | Poll from 250ms with exponential backoff capped at 8s, for at most 45s. |
 | Terminal ignored root with no admission evidence | Fail immediately; this ledger state proves the bot will never route it. |

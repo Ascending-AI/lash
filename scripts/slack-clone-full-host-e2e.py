@@ -24,6 +24,13 @@ from typing import Any, Callable
 
 from playwright.sync_api import Page, expect, sync_playwright
 
+from slack_clone_thread_evidence import (
+    THREAD_ROOT_SEED_PREFIX,
+    inherited_prefix_nodes,
+    seed_label_line_starts,
+    select_thread_root,
+)
+
 
 LAYERS = ("dom", "platform", "bot", "trace")
 
@@ -421,15 +428,19 @@ class Journey:
         self.write_extract("03-mention")
 
     def open_root_thread(self, page: Page) -> None:
-        page.locator("#stream .msg", has_text="FIG1341-AMBIENT-ONE").click()
+        # By `ts`, never by text: the root's marker also appears in the bot's own
+        # channel reply, and a text locator matching two rows is a strict-mode
+        # failure rather than a click on the root.
+        page.locator(f'#stream .msg[data-ts="{self.root_ts}"]').click()
         expect(page.locator("#threadPanel")).to_be_visible(timeout=10_000)
 
     def checkpoint_thread(self) -> None:
-        root = next(r for r in self.history() if "FIG1341-AMBIENT-ONE" in r["text"])
+        root = select_thread_root(self.history(), "FIG1341-AMBIENT-ONE")
         self.root_ts = root["ts"]
         self.open_root_thread(self.pages["brix"])
         self.send_thread(self.pages["brix"], f"<@{self.bot_user}> FIG1341-THREAD-ONE what did the root say?")
         expect(self.pages["brix"].locator("#threadStream .msg.is-bot")).to_have_count(1, timeout=30_000)
+        root_recall = self.dom_rows(self.pages["brix"], "#threadStream .msg")[-1]["text"]
         self.open_root_thread(self.pages["ada"])
         for page in self.pages.values():
             expect(page.locator("#threadStream .msg")).to_have_count(3, timeout=15_000)
@@ -450,6 +461,10 @@ class Journey:
         channel_id = f"channel:{self.channel}"
         thread_nodes = json.dumps([r for r in session["nodes"] if r["session_id"] == thread_id], sort_keys=True)
         channel_nodes = json.dumps([r for r in session["nodes"] if r["session_id"] == channel_id], sort_keys=True)
+        inherited_nodes = json.dumps(
+            inherited_prefix_nodes(session["nodes"], session["lineage"], thread_id, channel_id),
+            sort_keys=True,
+        )
         meta = next((r for r in session["meta"] if r["session_id"] == thread_id), None)
         lineage = next((r for r in session["lineage"] if r["session_id"] == thread_id and r["ancestor_session_id"] == channel_id), None)
         provider_requests = [
@@ -477,10 +492,26 @@ class Journey:
         self.gate("03T-thread", "dom", "both contexts show parent plus four replies only in the thread and badge=4", all(len(self.dom_rows(p, "#threadStream .msg")) == 5 and len(self.dom_rows(p)) == 5 for p in self.pages.values()), "03T-thread-*.png")
         root_micros = int(self.root_ts.replace(".", ""))
         self.gate("03T-thread", "platform", "thread API returns parent plus four replies while database routes four rows by thread_ts", len(thread_api) == 5 and len(db_thread) == 4 and all(r["thread_ts"] == root_micros for r in db_thread), "03T-thread-four-layers.json")
-        self.gate("03T-thread", "bot", "child has retained ancestry, both child requests inherit the root and exclude post-fork channel input, and channel state excludes both thread inputs", meta is not None and meta["source_session_id"] == channel_id and meta["source_node_id"] and lineage is not None and "FIG1341-AMBIENT-ONE" in channel_nodes and len(thread_requests) == 2 and all("FIG1341-AMBIENT-ONE" in request and "FIG1341-CHANNEL-AFTER-FORK" not in request for request in thread_requests) and "FIG1341-CHANNEL-AFTER-FORK" not in thread_nodes and "FIG1341-THREAD-ONE" not in channel_state and "FIG1341-THREAD-TWO" not in channel_state, "03T-thread-four-layers.json + event-scoped provider requests")
+        self.gate("03T-thread", "bot", "child has retained ancestry, its inherited ancestor chain carries the root and no post-fork channel input, both child requests agree, and channel state excludes both thread inputs", meta is not None and meta["source_session_id"] == channel_id and meta["source_node_id"] and lineage is not None and "FIG1341-AMBIENT-ONE" in channel_nodes and "FIG1341-AMBIENT-ONE" in inherited_nodes and "FIG1341-CHANNEL-AFTER-FORK" not in inherited_nodes and "FIG1341-CHANNEL-AFTER-FORK" not in thread_nodes and len(thread_requests) == 2 and all("FIG1341-AMBIENT-ONE" in request and "FIG1341-CHANNEL-AFTER-FORK" not in request for request in thread_requests) and "FIG1341-THREAD-ONE" not in channel_state and "FIG1341-THREAD-TWO" not in channel_state, "03T-thread-four-layers.json + event-scoped provider requests")
         self.gate("03T-thread", "trace", "two child turns completed and no extra channel turn ran", len(self.turn_traces(thread_id)) == 2 and len(self.turn_traces(channel_id)) == 1, "03T-thread-four-layers.json")
         self.screenshot("03T-thread")
         self.write_extract("03T-thread")
+
+        # FIG-1403: inheritance is not recall. The child's prefix extends past the
+        # root — the draining channel turn committed the room mention and the
+        # bot's reply too — so the root is only answerable if the host said which
+        # message it is.
+        seeded_root = f"{THREAD_ROOT_SEED_PREFIX}ada: FIG1341-AMBIENT-ONE says cobalt"
+        thread_one_request = next(
+            (request for request in thread_requests if "FIG1341-THREAD-ONE" in request), ""
+        )
+        self.gate("03T-root-recall", "dom", "the first thread reply quotes the thread root rather than the later room mention", "FIG1341-AMBIENT-ONE says cobalt" in root_recall and "FIG1341-ROOM-MENTION" not in root_recall, "03T-thread-*.png")
+        marker_rows = [r for r in self.history() if "FIG1341-AMBIENT-ONE" in r["text"]]
+        self.gate("03T-root-recall", "platform", "the root is genuinely ambiguous on the platform: its marker also appears on a bot row, and later channel rows follow it", len(marker_rows) > 1 and any(r["is_bot"] for r in marker_rows) and self.history()[-1]["ts"] != self.root_ts, "03T-thread-four-layers.json")
+        self.gate("03T-root-recall", "bot", "the child's first request carries the host-seeded thread root exactly once", thread_one_request.count(seeded_root) == 1, "event-scoped provider requests")
+        seeded_traces = [r for r in self.traces() if seed_label_line_starts(r)[0]]
+        seed_counts = [seed_label_line_starts(r) for r in seeded_traces]
+        self.gate("03T-root-recall", "trace", "the seed label is traced only into the child's prompts and always starts its own line", bool(seeded_traces) and all(self.trace_session(r) == thread_id for r in seeded_traces) and all(total == at_line_start for total, at_line_start in seed_counts), "trace.jsonl")
 
     def checkpoint_redelivery(self) -> None:
         envelope_row = next(r for r in self.outbox_rows() if r["event_id"] == self.room_event)
