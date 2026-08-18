@@ -9,6 +9,8 @@
 //! These types live beside `envelope.rs` rather than inside it only because the
 //! two together outgrew the production file-size budget.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::envelope::{RuntimeEffectOutcome, RuntimeInvocation};
@@ -108,6 +110,7 @@ impl RuntimeEffectGroup {
     /// rely on all of the following rather than re-deriving them:
     ///
     /// * `children` is non-empty;
+    /// * no two children share a replay key;
     /// * every child's `group_key` is this group's key;
     /// * every child's `position` is its index in `children`;
     /// * every child's `wake` is this group's wake rule;
@@ -116,6 +119,16 @@ impl RuntimeEffectGroup {
     /// Children that arrive already stamped are checked rather than trusted;
     /// children that arrive unstamped are stamped here. Either way one group has
     /// one key, so a host never fishes identity out of `children[0]`.
+    ///
+    /// **Distinct replay keys are required, deliberately.** A replay key is the
+    /// journal's identity for a child: two children carrying the same one are
+    /// one row, one claim and one rank, so the second child replays the first's
+    /// terminal, the group's last rank is never allocated, and a caller waiting
+    /// on it parks forever. The failure is a silent permanent hang rather than a
+    /// refusal, and the rank-to-position lookup would mis-attribute the one
+    /// settlement that did land, so the collision is refused here — where every
+    /// host, durable or inline, is already handed a checked group — rather than
+    /// trusted to be unreachable because ordinal minting happens to make it so.
     ///
     /// **Empty groups are rejected, deliberately.** `Promise.all([])` resolves
     /// immediately with `[]` and `Promise.race([])` never settles; neither has a
@@ -196,6 +209,19 @@ impl RuntimeEffectGroup {
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let mut first_seen_at: HashMap<&str, usize> = HashMap::with_capacity(children.len());
+        for (index, child) in children.iter().enumerate() {
+            let Some(replay_key) = child.invocation.replay_key() else {
+                continue;
+            };
+            if let Some(first) = first_seen_at.insert(replay_key, index) {
+                return Err(group_shape_error(format!(
+                    "children {first} and {index} of durable effect group {group_key} share \
+                     replay key {replay_key}; one replay key is one journaled child, so the \
+                     group could never allocate both ranks"
+                )));
+            }
+        }
         Ok(Self {
             invocation,
             group_key,
@@ -619,6 +645,19 @@ mod effect_group_contract_tests {
 
     fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
         RuntimeInvocation::effect(RuntimeScope::new("session"), "effect", kind, "replay")
+    }
+
+    /// A child's invocation, keyed by its position.
+    ///
+    /// Siblings need distinct replay keys — one replay key is one journaled
+    /// child — so a group's children cannot share the flat [`invocation`] key.
+    fn child_invocation(kind: RuntimeEffectKind, position: usize) -> RuntimeInvocation {
+        RuntimeInvocation::effect(
+            RuntimeScope::new("session"),
+            "effect",
+            kind,
+            format!("replay-{position}"),
+        )
     }
 
     fn await_event_key() -> crate::AwaitEventKey {
@@ -1071,7 +1110,7 @@ mod effect_group_contract_tests {
 
     fn child(position: usize, group_key: &str, wake: GroupWakePolicy) -> RuntimeEffectEnvelope {
         RuntimeEffectEnvelope::new(
-            invocation(RuntimeEffectKind::Sleep),
+            child_invocation(RuntimeEffectKind::Sleep, position),
             RuntimeEffectCommand::Sleep {
                 duration_ms: position as u64 + 1,
             },
@@ -1092,7 +1131,7 @@ mod effect_group_contract_tests {
 
     fn unstamped_child(position: usize) -> RuntimeEffectEnvelope {
         RuntimeEffectEnvelope::new(
-            invocation(RuntimeEffectKind::Sleep),
+            child_invocation(RuntimeEffectKind::Sleep, position),
             RuntimeEffectCommand::Sleep {
                 duration_ms: position as u64 + 1,
             },

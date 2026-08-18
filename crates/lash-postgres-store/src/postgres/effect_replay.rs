@@ -21,10 +21,12 @@ use lash_core::facade_support::effect_replay_driver::{
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectFinalizeOutcome,
     EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayDriver,
     EffectReplayPersistence, EffectReplayVocabulary, EffectRowDefect, EffectRowStatus,
-    EffectTerminal, StoredEffectRow, StoredGroupSettlement, decide_effect_claim,
+    EffectTerminal, StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild,
+    decide_effect_claim,
 };
 
 use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
+use tokio_util::sync::CancellationToken;
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();
 
@@ -282,6 +284,47 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
         )
         .await
     }
+
+    /// `true`: the group methods below are implemented against the durable
+    /// journal, and this store's [`EffectHost::scoped_static`] hands out the
+    /// `'static` scopes the flag's other half requires — a child must be able to
+    /// outlive its caller to honor
+    /// [`LoserDisposition::RunToCompletion`](lash_core::LoserDisposition::RunToCompletion).
+    ///
+    /// The two capabilities are one question and must not drift apart, which is
+    /// why the flag is answered here rather than defaulted: the surface it
+    /// admits is exactly the surface below.
+    fn supports_effect_groups(&self) -> bool {
+        true
+    }
+
+    /// Delegated to the shared driver exactly as `execute_effect` is: the group
+    /// host is one implementation over
+    /// [`EffectReplayPersistence`](lash_core::facade_support::effect_replay_driver::EffectReplayPersistence),
+    /// and this store contributes the substrate half of it rather than a second
+    /// copy of the state machine.
+    async fn open_effect_group(
+        &self,
+        group: lash_core::CheckedEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, RuntimeEffectControllerError> {
+        Box::pin(self.inner.open_effect_group(&self.scope, group)).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, RuntimeEffectControllerError> {
+        Box::pin(self.inner.await_next_group_settlement(handle, cancel)).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserDisposition,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Box::pin(self.inner.close_effect_group(&handle, disposition)).await
+    }
 }
 
 fn build_effect_replay_driver(
@@ -443,21 +486,29 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
         Ok(EffectFinalizeOutcome::Written { settlement_seq })
     }
 
+    /// Records the group and reports the row **as it stands durably**, so a
+    /// reopen is fenced against what the journal holds rather than against the
+    /// opening process's memory.
+    ///
+    /// One statement, so one transaction, committed before any child of this
+    /// group claims (N2) — the read-back rides the same statement through
+    /// `RETURNING` for the insert and a second query only when the insert
+    /// conflicted, and neither touches a child row. `DO NOTHING` rather than an
+    /// upsert: reopening a group must not reset `next_seq`, which would re-seat
+    /// recorded children at ranks a caller has already consumed.
     async fn open_group(
         &self,
         record: &EffectGroupRecord,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        // One statement, so one transaction, committed before any child of this
-        // group claims (N2). `DO NOTHING` rather than an upsert: reopening a
-        // group must not reset `next_seq`, which would re-seat recorded children
-        // at ranks a caller has already consumed.
-        sqlx::query(
+    ) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
+        let inserted = sqlx::query(
             "INSERT INTO lash_runtime_effect_group (
                 group_key, scope_id, session_id, wake, loser_disposition,
                 children, next_seq, created_at_ms
              )
              VALUES ($1, $2, $3, $4, $5, $6, 0, $7)
-             ON CONFLICT (group_key) DO NOTHING",
+             ON CONFLICT (group_key) DO NOTHING
+             RETURNING group_key, scope_id, session_id, wake, loser_disposition,
+                       children, created_at_ms",
         )
         .bind(&record.group_key)
         .bind(&record.scope_id)
@@ -466,10 +517,58 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
         .bind(record.loser_disposition.column())
         .bind(record.children as i64)
         .bind(record.created_at_ms as i64)
-        .execute(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .map_err(effect_store_error)?;
-        Ok(())
+        if let Some(row) = inserted {
+            return stored_group_record(row);
+        }
+        // The conflict path: some earlier open owns this key, and its row — not
+        // the one just refused — is what a reopen must be fenced against.
+        let existing = sqlx::query(
+            "SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    children, created_at_ms
+             FROM lash_runtime_effect_group
+             WHERE group_key = $1",
+        )
+        .bind(&record.group_key)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(effect_store_error)?
+        .ok_or_else(|| missing_group_row(&record.group_key))?;
+        stored_group_record(existing)
+    }
+
+    /// Reads the group's children that hold no rank: the complement of
+    /// [`read_group_settlement`](Self::read_group_settlement)'s
+    /// `settlement_seq IS NOT NULL`.
+    ///
+    /// **Unindexed on this tier, deliberately.** The only `group_key` index is
+    /// the rank read's unique backstop, whose predicate is the opposite half, so
+    /// this read is a sequential scan of `lash_runtime_effect_replay` — once per
+    /// child completion after a close, and once per drain pass. The sqlite tier
+    /// carries a complementary partial index because an additive index rides its
+    /// self-healing schema for free; here every relation is stamped into a
+    /// component generation, so adding one is a `SCHEMA_VERSION` bump with a
+    /// migration row per live generation. That bump belongs with the drain
+    /// (FIG-1536), which is the workload that makes the plan matter and the
+    /// change that has to carry the migration either way. Until then the cost is
+    /// bounded by the journal's size, not the group's.
+    async fn read_unsettled_group_children(
+        &self,
+        group_key: &str,
+    ) -> Result<Vec<UnsettledGroupChild>, RuntimeEffectControllerError> {
+        let rows = sqlx::query(
+            "SELECT scope_id, replay_key, envelope_json, status, lease_expires_at_ms
+             FROM lash_runtime_effect_replay
+             WHERE group_key = $1 AND settlement_seq IS NULL
+             ORDER BY replay_key",
+        )
+        .bind(group_key)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(effect_store_error)?;
+        rows.into_iter().map(unsettled_group_child).collect()
     }
 
     async fn read_group_settlement(
@@ -770,6 +869,68 @@ fn stored_group_settlement(
         status: row.get("status"),
         outcome_json: row.get("outcome_json"),
         error_json: row.get("error_json"),
+    })
+}
+
+/// The durably recorded group row, read back through the same column mapping
+/// that wrote it.
+fn stored_group_record(row: PgRow) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
+    let children = row.get::<i64, _>("children");
+    let created_at_ms = row.get::<i64, _>("created_at_ms");
+    Ok(EffectGroupRecord {
+        group_key: row.get("group_key"),
+        scope_id: row.get("scope_id"),
+        session_id: row.get("session_id"),
+        wake: group_column("wake rule", row.get("wake"))?,
+        loser_disposition: group_column("loser disposition", row.get("loser_disposition"))?,
+        children: usize::try_from(children)
+            .map_err(|_| group_corrupt(format!("children must be non-negative, got {children}")))?,
+        created_at_ms: u64::try_from(created_at_ms).map_err(|_| {
+            group_corrupt(format!(
+                "created_at_ms must be non-negative, got {created_at_ms}"
+            ))
+        })?,
+    })
+}
+
+/// A persisted group column read back through the same mapping that wrote it,
+/// refusing a value no version of this runtime writes.
+fn group_column<T: EffectGroupColumn>(
+    column: &'static str,
+    value: String,
+) -> Result<T, RuntimeEffectControllerError> {
+    EffectGroupColumn::from_column(&value)
+        .ok_or_else(|| group_corrupt(format!("unknown effect group {column} `{value}`")))
+}
+
+fn group_corrupt(message: String) -> RuntimeEffectControllerError {
+    effect_store_message(
+        StoreError::StoredDataCorrupt {
+            record_kind: "RuntimeEffectGroup",
+            message,
+        }
+        .to_string(),
+    )
+}
+
+fn unsettled_group_child(row: PgRow) -> Result<UnsettledGroupChild, RuntimeEffectControllerError> {
+    let lease_expires_at_ms = row.get::<i64, _>("lease_expires_at_ms");
+    Ok(UnsettledGroupChild {
+        scope_id: row.get("scope_id"),
+        replay_key: row.get("replay_key"),
+        envelope_json: row.get("envelope_json"),
+        status: row.get("status"),
+        lease_expires_at_ms: u64::try_from(lease_expires_at_ms).map_err(|_| {
+            effect_store_message(
+                StoreError::StoredDataCorrupt {
+                    record_kind: "RuntimeEffectReplay",
+                    message: format!(
+                        "lease_expires_at_ms must be non-negative, got {lease_expires_at_ms}"
+                    ),
+                }
+                .to_string(),
+            )
+        })?,
     })
 }
 

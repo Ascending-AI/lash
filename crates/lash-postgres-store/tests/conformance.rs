@@ -1426,6 +1426,61 @@ async fn postgres_effect_host_satisfies_cold_instance_await_event_conformance_wh
     drop(database_lock);
 }
 
+/// The durable PostgreSQL tier answers the effect-group contract the same way
+/// the in-memory reference host does (FIG-1564).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_effect_host_satisfies_the_effect_group_contract_when_configured() {
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres effect-group conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    drop(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
+    lash_core::testing::conformance::effect_group_host_conformance(|| {
+        let database_url = database_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("PostgreSQL effect-group host")
+        });
+        Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
+    })
+    .await;
+    drop(database_lock);
+}
+
+/// A cancelled child's cancellation is journaled as its terminal, and a host
+/// that was not running when the close happened reads it back (FIG-1564).
+///
+/// The reading host is the point: it holds none of the closing host's memory,
+/// so the terminal it serves came out of the effect journal or from nowhere.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_journals_a_cancelled_child_as_its_terminal_when_configured() {
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres cancelled-child terminal test: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    drop(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
+    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable(|| {
+        let database_url = database_url.clone();
+        let storage = sync_await(async move {
+            PostgresStorage::connect(&database_url)
+                .await
+                .expect("PostgreSQL effect-group host")
+        });
+        Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
+    })
+    .await;
+    drop(database_lock);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_await_event_key_mint_is_pure_and_signatures_match_sqlite_when_seeded() {
     let Some((_database_lock, storage)) = storage().await else {

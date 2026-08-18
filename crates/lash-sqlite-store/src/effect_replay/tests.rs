@@ -290,3 +290,110 @@ async fn retirement_removes_a_group_and_its_children_together() {
         .expect("count group rows");
     assert_eq!(groups, 0, "the group row goes with its children");
 }
+
+/// The unsettled read is the exact complement of the rank read: every child of
+/// the group is in one answer or the other, never both and never neither.
+///
+/// It is what makes "this group is complete" a single question instead of a walk
+/// up the ranks, and it is the drain queue FIG-1536 reads, which is why the row
+/// carries the child's journal identity, its recorded envelope, and its lease
+/// boundary rather than only its key.
+#[tokio::test]
+async fn unsettled_children_are_exactly_the_children_without_a_rank() {
+    let store = persistence().await;
+    let fences = open_and_claim(&store, &[("k1", "owner-a"), ("k2", "owner-b")]).await;
+
+    let unsettled = store
+        .read_unsettled_group_children(GROUP)
+        .await
+        .expect("read the unsettled children");
+    assert_eq!(
+        unsettled
+            .iter()
+            .map(|child| child.replay_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["k1", "k2"],
+        "a claimed child with no terminal holds no rank, so it is unsettled"
+    );
+    assert_eq!(unsettled[0].scope_id, SCOPE);
+    assert_eq!(unsettled[0].status, "in_progress");
+    assert_eq!(
+        unsettled[0].envelope_json, r#"{"json":"k1","hash":"hash-k1"}"#,
+        "the row carries the recorded canonical envelope a drain re-executes from"
+    );
+    assert!(
+        unsettled[0].lease_expires_at_ms > 0,
+        "the row carries the lease boundary a drain decides takeover against"
+    );
+
+    store
+        .finalize(&fences[0], &terminal("k1"))
+        .await
+        .expect("finalize the first child");
+    let unsettled = store
+        .read_unsettled_group_children(GROUP)
+        .await
+        .expect("read the unsettled children again");
+    assert_eq!(
+        unsettled
+            .iter()
+            .map(|child| child.replay_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["k2"],
+        "a child that took a rank leaves the unsettled set in the same write"
+    );
+
+    store
+        .finalize(&fences[1], &terminal("k2"))
+        .await
+        .expect("finalize the second child");
+    assert!(
+        store
+            .read_unsettled_group_children(GROUP)
+            .await
+            .expect("read the unsettled children a third time")
+            .is_empty(),
+        "an empty unsettled set is what completeness reads as"
+    );
+    assert!(
+        store
+            .read_unsettled_group_children("session:s1/no-such-group")
+            .await
+            .expect("read an unknown group")
+            .is_empty(),
+        "an unknown group has no unsettled children rather than an error"
+    );
+}
+
+/// `open_group` reports the row **as it stands durably**, which is what lets a
+/// reopen be fenced against the journal rather than against one process's
+/// memory: the second open below is refused by the host because the record it
+/// gets back is the first open's, not its own.
+#[tokio::test]
+async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered() {
+    let store = persistence().await;
+    let recorded = store
+        .open_group(&group_record())
+        .await
+        .expect("open the group row");
+    assert_eq!(
+        recorded,
+        group_record(),
+        "a fresh open records what it was given"
+    );
+
+    let mut shrunk = group_record();
+    shrunk.children = 1;
+    shrunk.loser_disposition = lash_core::LoserDisposition::Cancel;
+    shrunk.created_at_ms = 9_999;
+    let reopened = store
+        .open_group(&shrunk)
+        .await
+        .expect("reopening an existing group is idempotent at the store seam");
+    assert_eq!(
+        reopened,
+        group_record(),
+        "the recorded row wins: a reopen may not restate a group's children or \
+         its declared disposition, and the store is what says so"
+    );
+}

@@ -171,6 +171,27 @@ async fn the_inline_tier_supports_groups_through_the_scoped_host_view() {
         .expect("the scoped view closes the group");
 }
 
+/// The in-memory reference host answers the shared host suite, which is what
+/// makes "the SQL tiers agree with the reference" a checkable claim rather than
+/// two files of similar-looking tests (FIG-1564).
+///
+/// The laws in this file stay where they are: they reach this tier's own
+/// settlement record, which is how the *allocator* is asserted, and the shared
+/// suite deliberately cannot.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_inline_host_satisfies_the_shared_effect_group_suite() {
+    // One host, handed out repeatedly: the suite's factory stands for "another
+    // view of the same substrate", and on a tier whose substrate *is* the
+    // process, that is this object. A fresh `InlineEffectHost` per call would be
+    // a different substrate, which is the one thing the factory may not be.
+    let host: std::sync::Arc<dyn crate::EffectHost> =
+        std::sync::Arc::new(crate::InlineEffectHost::default());
+    crate::testing::conformance::effect_group_host_conformance(move || {
+        std::sync::Arc::clone(&host)
+    })
+    .await;
+}
+
 /// First-settlement wake: the caller resumes on the winner while the loser is
 /// still running.
 ///
