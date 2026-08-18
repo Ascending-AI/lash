@@ -341,7 +341,10 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
 
     // A retention filter carrying the `ProcessListFilter` default status selects
     // `running`, which no prunable row can hold. Refusing it is what keeps a
-    // scoped retention call from reporting a silent zero (ADR 0023).
+    // scoped retention call from reporting a silent zero (ADR 0023). The
+    // refusal is scoped to the two live statuses, not to "non-terminal": a
+    // caller-departed row is non-terminal and prunable, so retention policy can
+    // name it (see `caller_departed_rows_are_selectable_retention_policy`).
     let refused = core
         .processes()
         .prune(
@@ -353,11 +356,9 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
             lash_core::ProjectionWatermark::NoProjector,
         )
         .await
-        .expect_err("a non-terminal retention filter must be refused");
+        .expect_err("a live retention filter must be refused");
     assert!(
-        refused
-            .to_string()
-            .contains("non-terminal status `running`"),
+        refused.to_string().contains("live status `running`"),
         "unexpected refusal: {refused}"
     );
     assert!(
@@ -1542,6 +1543,98 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
         evidence.owner.as_ref().map(|owner| owner.owner_id.as_str()),
         Some("silent-owner"),
         "the reconciled abandonment names the started owner as the lapsed owner"
+    );
+
+    Ok(())
+}
+
+/// Caller departure end to end through the host API (FIG-1383). A detached
+/// launch registers its externally-owned audit row, the caller's scope then
+/// departs before any outcome exists, and lash refuses to invent one. The row
+/// stays non-terminal and is observable as `CallerDeparted`; a host await on it
+/// is typed-refused instead of parking forever; and retention policy may name
+/// the state directly, reclaiming those rows while live work survives.
+#[tokio::test]
+async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
+    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
+        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
+    let trigger_store: Arc<dyn lash_core::TriggerStore> =
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let registry: Arc<dyn lash_core::ProcessRegistry> =
+        Arc::new(TestLocalProcessRegistry::default());
+    let core = process_test_core(
+        Arc::clone(&artifact_store),
+        Arc::clone(&trigger_store),
+        Arc::clone(&registry),
+        in_memory_process_env_store(),
+    )?;
+
+    let departed = "facade-caller-departed";
+    let live = "facade-caller-live";
+    for id in [departed, live] {
+        registry
+            .register_process(
+                lash_core::ProcessRegistration::new(
+                    id,
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::json!({}),
+                    },
+                    lash_core::RecoveryDisposition::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                )
+                .with_identity(lash_core::ProcessIdentity::new("test")),
+            )
+            .await?;
+    }
+    registry.record_caller_departure(departed).await?;
+
+    let observed = core
+        .processes()
+        .get(departed)
+        .await?
+        .expect("the caller-departed row is observable");
+    assert_eq!(
+        observed.lifecycle,
+        lash_core::ProcessStatus::CallerDeparted,
+        "the host sees the departure as a lifecycle state, not an invented terminal"
+    );
+
+    // Awaiting it is refused with a typed error rather than parking forever.
+    let refusal = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        core.processes().await_output(departed),
+    )
+    .await
+    .expect("an await on a caller-departed row must be bounded, not parked")
+    .expect_err("an await on a caller-departed row must be refused");
+    assert!(
+        refusal.to_string().contains("recorded a caller departure"),
+        "unexpected await refusal: {refusal}"
+    );
+
+    // Retention policy names the state directly; live work is untouched.
+    let report = core
+        .processes()
+        .prune(
+            u64::MAX,
+            Some(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::CallerDeparted,
+                ..lash_core::ProcessListFilter::default()
+            }),
+            lash_core::ProjectionWatermark::NoProjector,
+        )
+        .await?;
+    assert_eq!(
+        report.pruned_processes, 1,
+        "retention reclaims exactly the caller-departed row"
+    );
+    assert_eq!(
+        registry
+            .get_process(live)
+            .await?
+            .expect("the running sibling survives retention")
+            .status,
+        lash_core::ProcessStatus::Running,
     );
 
     Ok(())

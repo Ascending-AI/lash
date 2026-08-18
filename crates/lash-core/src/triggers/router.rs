@@ -1,7 +1,9 @@
 use super::*;
 
 const LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 2;
-const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
+// Bumped to 4 (FIG-1383): the subscription-definition preimage's process-status
+// tag registry gained `caller_departed`; see the process-registration family note.
+const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 4;
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 const TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION: u8 = 1;
@@ -57,7 +59,7 @@ fn trigger_subscription_address_preimage(
 /// Arbitrary JSON and schemas are each one canonical opaque bytes leaf. Value
 /// selectors: 1 payload, 2 pointer, 3 const, 4 template,
 /// 5 present. Process statuses: 1 running, 2 waiting, 3 completed, 4 failed,
-/// 5 cancelled, 6 abandoned. Retired tags remain burned.
+/// 5 cancelled, 6 abandoned, 7 caller departed. Retired tags remain burned.
 fn trigger_subscription_definition_preimage(
     owner_scope: &TriggerOwnerScope,
     draft: &TriggerSubscriptionDraft,
@@ -208,6 +210,7 @@ fn project_trigger_event_type(
             crate::ProcessStatus::Failed => 4,
             crate::ProcessStatus::Cancelled => 5,
             crate::ProcessStatus::Abandoned => 6,
+            crate::ProcessStatus::CallerDeparted => 7,
         });
         identity.optional(await_output.as_ref(), project_trigger_value_selector);
     });
@@ -1067,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_route_rotates_trigger_definition_to_v3_without_moving_v2() {
+    fn replay_route_rotates_trigger_definition_to_the_current_family_without_moving_v2() {
         let owner = TriggerOwnerScope::session("owner");
         let mut draft = minimal_identity_corpus_draft(crate::ProcessInput::ToolCall {
             call: crate::PreparedToolCall::from_parts(
@@ -1096,7 +1099,7 @@ mod tests {
                 "shared-model",
             ));
         let routed = trigger_subscription_definition_fingerprint(&owner, &draft);
-        assert!(routed.starts_with("trigger-definition:v3:sha256:"));
+        assert!(routed.starts_with("trigger-definition:v4:sha256:"));
         assert_ne!(legacy, routed);
     }
 

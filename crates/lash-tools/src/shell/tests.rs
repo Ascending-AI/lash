@@ -249,6 +249,19 @@ mod tests {
                 .await
         }
 
+        async fn report_caller_departure(
+            &self,
+            session_id: &str,
+            process_id: &str,
+        ) -> Result<lash_core::ProcessRecord, PluginError> {
+            if !self.registry.is_observer(session_id, process_id).await? {
+                return Err(PluginError::Session(format!(
+                    "process handle `{process_id}` is not visible in this session"
+                )));
+            }
+            self.registry.record_caller_departure(process_id).await
+        }
+
         async fn await_process(
             &self,
             process_id: &str,
@@ -1362,13 +1375,53 @@ mod tests {
         })
         .await
         .expect("the detached blocking task must demonstrate post-cancel launch");
+        let departed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let record = registry
+                    .get_process("detach-cancel-audit")
+                    .await
+                    .expect("read post-cancel audit row")
+                    .expect(
+                        "a post-cancel host launch must retain its pre-spawn durable audit row",
+                    );
+                if record.status == lash_core::ProcessStatus::CallerDeparted {
+                    break record;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect(
+            "a caller cancelled mid-spawn must leave a durably distinguishable caller-departed row",
+        );
         assert!(
-            registry
-                .get_process("detach-cancel-audit")
-                .await
-                .expect("read post-cancel audit row")
-                .is_some(),
-            "a post-cancel host launch must retain its pre-spawn durable audit row"
+            !departed.is_terminal(),
+            "lash never observed whether the host launch happened, so the row must not claim an \
+             outcome"
+        );
+        assert!(
+            departed.outcome.is_none(),
+            "a caller-departed row must carry no outcome claim"
+        );
+        assert!(
+            departed.status.is_retired(),
+            "retention must be able to reclaim a row nothing may ever terminalize"
+        );
+
+        // (d): an await on that row is typed-refused instead of parking forever.
+        let refusal = lash_core::facade_support::ProcessAwaiter::polling(
+            Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>
+        )
+        .await_terminal("detach-cancel-audit")
+        .await
+        .expect_err("awaiting a caller-departed row must be refused, not parked");
+        assert!(
+            matches!(
+                refusal,
+                PluginError::ProcessCallerDeparted { ref process_id }
+                    if process_id == "detach-cancel-audit"
+            ),
+            "unexpected await refusal: {refusal:?}"
         );
     }
 

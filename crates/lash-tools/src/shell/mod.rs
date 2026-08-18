@@ -249,8 +249,15 @@ impl StandardShell {
     /// receipt, while the `:detached` ExternallyOwned row is the model-facing
     /// audit record, registered before host launch and normally terminalized
     /// immediately afterward. Lash will not track, signal, or stop the process
-    /// afterward; the host/OS owns it. Cancellation during the blocking spawn
-    /// can leave the pre-existing row pending, but cannot erase the audit fact.
+    /// afterward; the host/OS owns it.
+    ///
+    /// The registration and the blocking launch cannot be one atomic act, so
+    /// the audit row is armed with an [`ExternalLaunchAudit`] across the gap.
+    /// Cancelling the caller mid-launch drops that guard, which durably moves
+    /// the row to `caller_departed` — non-terminal, because the `spawn_blocking`
+    /// launch may well have succeeded and lash cannot see which. The row's
+    /// status is the launch state; there is no second, ad-hoc launch-status
+    /// field to disagree with it (FIG-1383).
     async fn detach_command_process(
         &self,
         params: &StartCommandParams,
@@ -272,10 +279,7 @@ impl StandardShell {
         // Journal-first: durably register the audit identity before entering
         // spawn_blocking. If the caller is cancelled while the blocking task
         // continues, the launch can no longer escape without an audit row.
-        let requested = json!({
-            "command": params.cmd.clone(),
-            "launch_status": "requested",
-        });
+        let requested = json!({ "command": params.cmd.clone() });
         let request = ProcessStartRequest::external(
             detached_process_id,
             lash_core::ProcessOriginator::host_scoped("shell-detached"),
@@ -287,6 +291,12 @@ impl StandardShell {
         if let Err(error) = context.processes().start(request).await {
             return execution_failure("detached_process_registration_failed", error.to_string());
         }
+        // Armed from here until an outcome is recorded: if this future is
+        // dropped inside the window the row is durably marked caller-departed
+        // rather than left pending forever.
+        let audit: lash_core::ExternalLaunchAudit = context
+            .processes()
+            .external_launch_audit(detached_process_id);
 
         let launch = match self
             .runtime
@@ -316,6 +326,7 @@ impl StandardShell {
                         },
                     )
                     .await;
+                audit.resolved();
                 return ToolResult::failure(*failure);
             }
         };
@@ -340,9 +351,14 @@ impl StandardShell {
             )
             .await
         {
+            // The caller is still here and is told the write failed, so this is
+            // not a departure: disarm rather than record one. The registry that
+            // just refused the terminal write would refuse this write too.
+            audit.resolved();
             self.runtime.stop_detached(launch);
             return execution_failure("detached_process_completion_failed", error.to_string());
         }
+        audit.resolved();
         let mut record = launch_value.as_object().cloned().unwrap_or_default();
         record.insert("__handle__".to_string(), json!("process"));
         record.insert("id".to_string(), json!(detached_process_id));

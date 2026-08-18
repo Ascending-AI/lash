@@ -284,7 +284,7 @@ fn process_registration_identity_golden_corpus() {
 }
 
 #[test]
-fn replay_route_rotates_process_registration_to_v3_without_moving_v2() {
+fn replay_route_rotates_process_registration_to_the_current_family_without_moving_v2() {
     let registration = registration_for_input(ProcessInput::ToolCall {
         call: crate::PreparedToolCall::from_parts(
             "call",
@@ -313,7 +313,7 @@ fn replay_route_rotates_process_registration_to_v3_without_moving_v2() {
             "shared-model",
         ));
     let routed = process_registration_fingerprint(&routed, &[]);
-    assert!(routed.starts_with("process-registration-definition:v3:sha256:"));
+    assert!(routed.starts_with("process-registration-definition:v4:sha256:"));
     assert_ne!(legacy, routed);
 }
 

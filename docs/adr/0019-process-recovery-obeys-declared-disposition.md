@@ -61,8 +61,18 @@ provides consults the disposition before executing, completing an already
 started OwnerBound row as Abandoned rather than re-running it.
 
 Work meant to outlive every lash host is not registered as running at all: a
-detached command double-forks, reports its identity as an immediately terminal
-result, and is host/OS property from birth.
+detached command double-forks, reports its identity as a terminal result, and is
+host/OS property from birth.
+
+Amended 2026-08-18 (FIG-1383): the detached-launch audit row is registered
+before the blocking spawn, so it is not always terminal at birth. A caller that
+departs inside that window leaves an outcome lash never observed, and inventing
+`Cancelled` or `Failed` there would break this ADR's own rule that a terminal is
+a written fact. Such a row takes the durable, non-terminal `CallerDeparted`
+state instead: recovery never claims it (it is outside the live worklist),
+`await_terminal` refuses it with a typed error rather than parking forever, and
+retention reclaims it like a terminal row. Elapsed time still terminalizes
+nothing.
 
 ## Why
 

@@ -1010,6 +1010,7 @@ mod asserted_process_examples {
             RemoteProcessStatus::Failed,
             RemoteProcessStatus::Cancelled,
             RemoteProcessStatus::Abandoned,
+            RemoteProcessStatus::CallerDeparted,
         ];
         assert_eq!(
             statuses
@@ -1026,7 +1027,8 @@ mod asserted_process_examples {
                 "completed",
                 "failed",
                 "cancelled",
-                "abandoned"
+                "abandoned",
+                "caller_departed"
             ])
         );
         let filters = [
@@ -1036,6 +1038,7 @@ mod asserted_process_examples {
             RemoteProcessStatusFilter::Failed,
             RemoteProcessStatusFilter::Cancelled,
             RemoteProcessStatusFilter::Abandoned,
+            RemoteProcessStatusFilter::CallerDeparted,
             RemoteProcessStatusFilter::Any,
         ];
         assert_eq!(
@@ -1047,6 +1050,7 @@ mod asserted_process_examples {
                 "failed",
                 "cancelled",
                 "abandoned",
+                "caller_departed",
                 "any"
             ])
         );

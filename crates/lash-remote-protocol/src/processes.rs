@@ -250,11 +250,17 @@ pub enum RemoteProcessStatus {
     Failed,
     Cancelled,
     Abandoned,
+    /// Mirrors [`lash_core::ProcessStatus::CallerDeparted`]: durably
+    /// distinguishable, deliberately never terminal.
+    CallerDeparted,
 }
 
 impl RemoteProcessStatus {
     pub fn is_terminal(self) -> bool {
-        !matches!(self, Self::Running | Self::Waiting)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned
+        )
     }
 }
 
@@ -1280,6 +1286,7 @@ pub enum RemoteProcessStatusFilter {
     Failed,
     Cancelled,
     Abandoned,
+    CallerDeparted,
     Any,
 }
 

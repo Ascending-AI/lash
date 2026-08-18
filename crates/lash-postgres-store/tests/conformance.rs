@@ -2203,7 +2203,7 @@ async fn assert_waiting_process_is_live_not_prunable(
 
 /// A waiting process is live, not prunable. The PostgreSQL half of
 /// `sqlite_waiting_processes_are_live_not_prunable`: both backends spell
-/// `NON_TERMINAL_PROCESS_STATUS_LABELS` out as SQL literals, so both need the
+/// `LIVE_PROCESS_STATUS_LABELS` out as SQL literals, so both need the
 /// behavioural referee.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
@@ -2220,14 +2220,14 @@ async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
 /// Lexical half of the retention contract, mirroring
 /// `sqlite_status_list_literals_derive_from_the_shared_constant`: every
 /// `status IN`/`status NOT IN` literal in this backend's SQL must spell
-/// exactly the label list rendered from `NON_TERMINAL_PROCESS_STATUS_LABELS`,
+/// exactly the label list rendered from `LIVE_PROCESS_STATUS_LABELS`,
 /// so a grown constant with a stale SQL literal fails here instead of
 /// silently pruning live rows.
 #[test]
 fn postgres_status_list_literals_derive_from_the_shared_constant() {
     let expected = format!(
         "({})",
-        lash_core::facade_support::registry_transitions::NON_TERMINAL_PROCESS_STATUS_LABELS
+        lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS
             .iter()
             .map(|label| format!("'{label}'"))
             .collect::<Vec<_>>()
@@ -2240,7 +2240,7 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
             assert!(
                 site.starts_with(&expected),
                 "process_registry.rs: a `{delimiter}` list literal diverged from \
-                 NON_TERMINAL_PROCESS_STATUS_LABELS: expected {expected}, found {}",
+                 LIVE_PROCESS_STATUS_LABELS: expected {expected}, found {}",
                 &site[..site.len().min(40)]
             );
             total += 1;

@@ -1118,7 +1118,9 @@ pub fn evaluate_trigger_prune(
 }
 
 const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 2;
-const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 3;
+// Bumped to 4 (FIG-1383): the command preimage's process-status tag registry
+// gained `caller_departed`; see the process-registration family note.
+const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 4;
 const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 
 /// Fingerprint one trigger command independently of its caller-supplied

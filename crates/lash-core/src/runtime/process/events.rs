@@ -210,7 +210,7 @@ pub fn terminal_event_type_name(status: ProcessStatus) -> &'static str {
         ProcessStatus::Failed => "process.failed",
         ProcessStatus::Cancelled => "process.cancelled",
         ProcessStatus::Abandoned => "process.abandoned",
-        ProcessStatus::Running | ProcessStatus::Waiting => {
+        ProcessStatus::Running | ProcessStatus::Waiting | ProcessStatus::CallerDeparted => {
             unreachable!("non-terminal process status has no terminal event")
         }
     }
@@ -571,6 +571,20 @@ impl ProcessEventAppendRequest {
         .with_replay_key(format!("process:{process_id}:abandon-requested"))
     }
 
+    /// Builds the replay-stable caller-departure event for process-store
+    /// implementors; repeated reports for the process converge on the same
+    /// append identity.
+    ///
+    /// The event carries no payload on purpose. What it records is a lifecycle
+    /// transition of the row itself — its registering caller left before any
+    /// outcome could be written — and the transition's wall clock is the
+    /// event's own `occurred_at`, projected onto `updated_at_ms` like every
+    /// other lifecycle append.
+    pub fn caller_departed(process_id: &str) -> Self {
+        Self::new("process.caller_departed", serde_json::json!({}))
+            .with_replay_key(format!("process:{process_id}:caller-departed"))
+    }
+
     /// Builds an observer-add event for process-store implementors whose replay key includes
     /// process, session, and observer authority.
     pub fn observer_added(process_id: &str, session: &str, by: &ProcessObserverBy) -> Self {
@@ -673,6 +687,7 @@ pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventTyp
         | "process.resumed"
         | "process.external_ref_set"
         | "process.abandon_requested"
+        | "process.caller_departed"
         | "process.observer_added"
         | "process.observer_removed"
         | "process.subscription_retargeted" => Some(ProcessEventType {
@@ -701,6 +716,7 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
             "process.resumed",
             "process.external_ref_set",
             "process.abandon_requested",
+            "process.caller_departed",
             "process.observer_added",
             "process.observer_removed",
             "process.subscription_retargeted",

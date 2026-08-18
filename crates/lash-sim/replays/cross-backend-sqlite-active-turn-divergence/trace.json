@@ -7022,6 +7022,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -8231,6 +8238,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -8667,6 +8681,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -9035,6 +9056,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -9663,6 +9691,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -10396,6 +10431,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -10821,6 +10863,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -11048,6 +11097,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -12960,6 +13016,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -13187,6 +13250,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -16902,6 +16972,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -17129,6 +17206,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -17936,6 +18020,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -18163,6 +18254,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -19778,6 +19876,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -20005,6 +20110,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -20540,6 +20652,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -20914,6 +21033,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -21828,6 +21954,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -22055,6 +22188,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -22294,6 +22434,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -22521,6 +22668,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -22822,6 +22976,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -23049,6 +23210,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -24597,6 +24765,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -24824,6 +24999,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -25063,6 +25245,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -25290,6 +25479,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -26555,6 +26751,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -26782,6 +26985,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -27396,6 +27606,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -27623,6 +27840,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -28142,6 +28366,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -28369,6 +28600,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -28870,6 +29108,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -29097,6 +29342,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -30045,6 +30297,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -30272,6 +30531,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -31780,6 +32046,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -32007,6 +32280,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -33238,6 +33518,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -33465,6 +33752,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -33704,6 +33998,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -33931,6 +34232,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -34170,6 +34478,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -34397,6 +34712,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -35000,6 +35322,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -35227,6 +35556,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -35887,6 +36223,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -36114,6 +36457,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },
@@ -36515,6 +36865,13 @@
                           "semantics": {}
                         },
                         {
+                          "name": "process.caller_departed",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
                           "name": "process.observer_added",
                           "payload_schema": {
                             "schema": {}
@@ -36742,6 +37099,13 @@
                         },
                         {
                           "name": "process.abandon_requested",
+                          "payload_schema": {
+                            "schema": {}
+                          },
+                          "semantics": {}
+                        },
+                        {
+                          "name": "process.caller_departed",
                           "payload_schema": {
                             "schema": {}
                           },

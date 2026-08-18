@@ -278,8 +278,9 @@ so differentiated policy is several scheduled calls over one lever (ADR 0023):
 `agent-workbench` prunes `originator_id`-scoped rows when it deletes a session,
 because deleting a session detaches its process state without deleting
 globally-owned rows and the work rail reads the runtime-wide registry. A filter
-selecting a non-terminal status can never match a prunable row and is refused
-rather than silently reclaiming nothing.
+selecting one of the two live statuses can never match a prunable row and is
+refused rather than silently reclaiming nothing; `CallerDeparted` is a legal
+selection because those rows are reclaimable without being terminal.
 The facade reconciles exact trigger-delivery rows after pruning. Tombstone
 reclamation uses `core.processes().compact_tombstones(cutoff_epoch_ms, watermark)`,
 which structurally retains any tombstone referenced by the trigger store's
@@ -528,10 +529,54 @@ records facts and holds monitors, never links.
 
 Work meant to outlive every lash host is not registered as running at all.
 `shell.start` with `detach: true` double-forks and `setsid`s the command out of the
-runtime's process group, then writes an `ExternallyOwned` row that is **terminal at
-birth**, carrying `{pid, pgid, command, started_at}` as an immediately-terminal
-audit fact. lash never claims it is running, never signals it, and never stops it —
-it is host/OS property from birth. For tracked (non-detached) PTY processes the
+runtime's process group, then writes an `ExternallyOwned` audit row before the
+spawn and terminalizes it from the launch's own outcome, carrying
+`{pid, pgid, command, started_at}`. lash never claims the command is running,
+never signals it, and never stops it — it is host/OS property from birth.
+
+The audit row is registered *before* the blocking spawn so a caller cancelled
+mid-launch cannot leave the OS process with no durable trace at all. That opens
+one window the launch cannot close: the caller's effect scope departs after the
+row commits and before the spawn resolves, and lash then knows neither that the
+command started nor that it did not. Writing `Cancelled` or `Failed` there would
+assert an outcome lash never observed, so it writes
+`ProcessStatus::CallerDeparted` instead — a durable, **non-terminal** lifecycle
+state, appended as the `process.caller_departed` event like every other
+transition (ADR 0046) and legal only from `Running` on an `ExternallyOwned` row.
+It is deliberately not a second ad-hoc `launch_status` field: the row's status
+*is* the launch state, and every store projects it in the same `status` column
+all three backends already filter on.
+
+Because no writer can ever terminalize such a row — nothing observed the
+outcome, and no owner exists to drain it — the state is retired without being
+terminal (`ProcessStatus::is_retired`). Recovery's live worklist
+(`status IN ('running','waiting')`) skips it, `await_terminal` refuses it with
+the typed `PluginError::ProcessCallerDeparted` instead of parking on a wait that
+can never resolve, and retention reclaims it exactly like a terminal row; a
+prune filter may name `CallerDeparted` directly, and only the two live statuses
+are refused as retention selections.
+
+Shipping the variant needs **no store schema bump**, and the mixed-version
+consequence of that is worth stating plainly. `ProcessStatus` has no serde
+fallback arm — a store that folded an unknown status into a known one would
+corrupt the fold the registry exists to keep honest — so an older binary sharing
+a registry with a newer one hard-errors with `unknown variant caller_departed`
+on any read that touches such a row. On `processes_changed_since` that is not a
+skipped row but a stalled projector: the feed stops advancing its cursor
+entirely. The no-bump decision stands anyway. No column shape changed, and for
+SQLite it is the only tenable choice: those stores have no migration chain and
+refuse any database whose `user_version` does not match exactly, so bumping
+would make every existing process database unopenable in exchange for nothing.
+Postgres does have a migration ladder, so a bump was possible there — it was
+skipped for rollout simplicity and one shared status vocabulary across backends,
+not because it was impossible. Operationally: upgrade readers before any writer
+can emit the status; a mixed-version fleet on one registry rolls all binaries
+forward first.
+
+The write itself is controller-free
+(`ProcessService::report_caller_departure`) precisely because the caller's
+effect scope is the thing that just vanished, and it is idempotent: a repeat is
+a no-op, and a launch that *does* resolve terminalizes normally. For tracked (non-detached) PTY processes the
 shell runtime's `ShellProcessTable` SIGKILLs every process group it still tracks on
 teardown, including the lease-lost path, so lash's registry role — record facts,
 hold monitors, never kill or supervise — stays intact while the spawning component

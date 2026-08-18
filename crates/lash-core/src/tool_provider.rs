@@ -24,7 +24,9 @@ mod triggers;
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
-pub use process::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
+pub use process::{
+    ExternalLaunchAudit, InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
+};
 pub use process_events::ToolProcessEventClient;
 pub use session::ToolSessionAdmin;
 pub use triggers::ToolTriggerClient;

@@ -40,7 +40,7 @@ pub(super) async fn list_non_terminal_page(
         Some(cursor) => cursor.through_process_id().to_string(),
         None => match managed
             .values()
-            .filter(|record| !record.record.is_terminal())
+            .filter(|record| !record.record.status.is_retired())
             .map(|record| record.record.id.as_str())
             .max()
         {
@@ -58,7 +58,7 @@ pub(super) async fn list_non_terminal_page(
         .map(ProcessWorklistCursor::after_process_id);
     let mut records: Vec<ProcessRecord> = managed
         .values()
-        .filter(|record| !record.record.is_terminal())
+        .filter(|record| !record.record.status.is_retired())
         .filter(|record| record.record.id.as_str() <= through_process_id.as_str())
         .filter(|record| after_process_id.is_none_or(|after| record.record.id.as_str() > after))
         .map(|record| record.record.clone())

@@ -135,6 +135,13 @@ impl ProcessWorkDriver {
         if let Some(output) = record.outcome.as_ref() {
             return Ok(output.clone());
         }
+        // Refuse before parking: nothing can ever terminalize a caller-departed
+        // row, so the wait would never resolve (FIG-1383).
+        if record.status == crate::ProcessStatus::CallerDeparted {
+            return Err(PluginError::ProcessCallerDeparted {
+                process_id: process_id.to_string(),
+            });
+        }
         crate::runtime::process_worker::release_process_execution_permit_while(async {
             if let Some(attach) = self.attach.as_ref() {
                 return attach.await_terminal(process_id).await;
