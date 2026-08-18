@@ -653,7 +653,11 @@ impl AttachmentManifest for Store {
                         let owner_kind: Option<String> = row.get(5)?;
                         let owner_id: Option<String> = row.get(6)?;
                         Ok(AttachmentManifestEntry {
-                            attachment_id: AttachmentId::new(id),
+                            attachment_id: crate::attachment_id_from_sql(
+                                "AttachmentManifest",
+                                "attachment_id",
+                                id,
+                            )?,
                             session_id,
                             canonical_uri,
                             intent_at_epoch_ms: u64_from_sql(
@@ -810,7 +814,7 @@ impl AttachmentManifest for Store {
                         conn.prepare("SELECT DISTINCT attachment_id FROM attachment_manifest")?;
                     let rows = stmt.query_map([], |row| {
                         let id: String = row.get(0)?;
-                        Ok(AttachmentId::new(id))
+                        crate::attachment_id_from_sql("AttachmentManifest", "attachment_id", id)
                     })?;
                     rows.collect::<rusqlite::Result<Vec<_>>>()
                 })

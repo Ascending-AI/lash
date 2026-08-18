@@ -115,7 +115,12 @@ async fn run_attachment_usage_gate(
     assert_eq!(normalized_media_type.family(), "image");
     assert_eq!(normalized_media_type.as_str(), "image/png");
     assert!(lash::attachments::MediaType::parse("image//png").is_err());
-    let missing_id = lash::attachments::AttachmentId::new("missing-workbench-attachment");
+    // A host route hands whatever the caller typed to `AttachmentId::parse`;
+    // an id that is not a single namespace component is rejected there rather
+    // than reaching the store.
+    assert!(lash::attachments::AttachmentId::parse("../escape").is_err());
+    let missing_id = lash::attachments::AttachmentId::parse("missing-workbench-attachment")
+        .expect("valid attachment id");
     match attachment_store.get(&missing_id).await {
         Err(lash::persistence::AttachmentStoreError::NotFound(id)) => {
             assert_eq!(id, missing_id);

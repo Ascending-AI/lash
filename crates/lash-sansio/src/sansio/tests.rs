@@ -60,7 +60,7 @@ fn assistant_done(text: impl Into<String>) -> TurnOutcome {
 
 fn test_attachment_ref(byte_len: u64) -> crate::AttachmentRef {
     crate::AttachmentRef {
-        id: crate::AttachmentId::new("att-test"),
+        id: crate::AttachmentId::parse("att-test").expect("valid attachment id"),
         media_type: crate::MediaType::parse("image/png").unwrap(),
         byte_len,
         type_metadata: None,

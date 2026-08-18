@@ -185,6 +185,47 @@ fn remote_attachment_media_types_are_validated_syntactically() {
         .expect("arbitrary valid MIME is accepted");
 }
 
+/// A peer-supplied attachment id is untrusted. Before validation moved into
+/// `AttachmentId`, this wire conversion built one straight from the peer string
+/// and a `../`-shaped id travelled on as a well-formed-looking value; now it is
+/// refused at the boundary with a typed protocol error.
+#[test]
+fn remote_attachment_ref_rejects_a_peer_supplied_traversal_id() {
+    let hostile = RemoteAttachmentRef {
+        id: "../../etc/passwd".to_string(),
+        media_type: "image/png".to_string(),
+        byte_len: 3,
+        type_metadata: None,
+        label: None,
+    };
+
+    let error = lash_core::AttachmentRef::try_from(hostile)
+        .expect_err("a traversal id must not cross the wire boundary");
+    assert!(
+        matches!(
+            &error,
+            RemoteProtocolError::InvalidAttachmentRef { id, message }
+                if id == "../../etc/passwd" && message.contains("invalid attachment id")
+        ),
+        "unexpected error: {error:?}"
+    );
+
+    let accepted = RemoteAttachmentRef {
+        id: "abc123".to_string(),
+        media_type: "image/png".to_string(),
+        byte_len: 3,
+        type_metadata: None,
+        label: None,
+    };
+    assert_eq!(
+        lash_core::AttachmentRef::try_from(accepted)
+            .expect("well-formed id is accepted")
+            .id
+            .as_str(),
+        "abc123"
+    );
+}
+
 #[test]
 fn remote_llm_response_json_round_trips() {
     let response = RemoteLlmResponse {

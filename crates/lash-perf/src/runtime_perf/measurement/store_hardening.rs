@@ -448,7 +448,8 @@ async fn measure_store_hardening_backend_turn(
     phases.insert(phase.0, phase.1);
 
     let attachment_id =
-        lash_core::AttachmentId::new(format!("hardening-attachment-{session_id}-{turn_index}"));
+        lash_core::AttachmentId::parse(format!("hardening-attachment-{session_id}-{turn_index}"))
+            .expect("valid attachment id");
     let (_, phase) = measure_runtime_perf_phase(names.attachment_intent, || {
         Ok(store.record_intent(AttachmentIntent {
             attachment_id: attachment_id.clone(),

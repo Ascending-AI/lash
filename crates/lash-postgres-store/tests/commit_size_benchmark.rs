@@ -58,7 +58,10 @@ fn realistic_commit(
         .collect::<Vec<_>>();
     let attachment_count = node_count.div_ceil(512).clamp(1, 16);
     let attachment_ids = (0..attachment_count)
-        .map(|index| AttachmentId::new(format!("{session_id}:attachment:{index:08}")))
+        .map(|index| {
+            AttachmentId::parse(format!("{session_id}:attachment:{index:08}"))
+                .expect("valid attachment id")
+        })
         .collect::<Vec<_>>();
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),

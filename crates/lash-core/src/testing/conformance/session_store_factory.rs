@@ -575,9 +575,10 @@ pub async fn process_prune_deletes_owned_session_stores(
         crate::AttachmentManifest::record_intent(
             store.as_ref(),
             crate::AttachmentIntent {
-                attachment_id: crate::AttachmentId::new(format!(
+                attachment_id: crate::AttachmentId::parse(format!(
                     "process-owned-session-intent-{index}"
-                )),
+                ))
+                .expect("valid attachment id"),
                 session_id,
                 canonical_uri: format!("lash-attachment://process-owned-{index}"),
                 intent_at_epoch_ms: 1,
@@ -1072,7 +1073,8 @@ async fn session_store_factory_rejects_writes_after_delete(
         crate::AttachmentManifest::record_intent(
             stale.as_ref(),
             crate::AttachmentIntent {
-                attachment_id: crate::AttachmentId::new("write-after-delete-attachment"),
+                attachment_id: crate::AttachmentId::parse("write-after-delete-attachment")
+                    .expect("valid attachment id"),
                 session_id: request.session_id.clone(),
                 canonical_uri: "lash-attachment://write-after-delete".to_string(),
                 intent_at_epoch_ms: 1,
@@ -2004,7 +2006,7 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         .create_store(&request)
         .await
         .expect("create session store");
-    let attachment_id = crate::AttachmentId::new("c".repeat(64));
+    let attachment_id = crate::AttachmentId::parse("c".repeat(64)).expect("valid attachment id");
     let intent = || crate::AttachmentIntent {
         attachment_id: attachment_id.clone(),
         session_id: request.session_id.clone(),
@@ -2209,9 +2211,10 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
         .await
         .expect("create session store");
 
-    let aged_uncommitted_id = crate::AttachmentId::new("1".repeat(64));
-    let committed_id = crate::AttachmentId::new("2".repeat(64));
-    let cond_target_id = crate::AttachmentId::new("3".repeat(64));
+    let aged_uncommitted_id =
+        crate::AttachmentId::parse("1".repeat(64)).expect("valid attachment id");
+    let committed_id = crate::AttachmentId::parse("2".repeat(64)).expect("valid attachment id");
+    let cond_target_id = crate::AttachmentId::parse("3".repeat(64)).expect("valid attachment id");
 
     // Record uncommitted intents at timestamp 1000 with no owner (so they age out immediately when cutoff >= 1000).
     assert!(matches!(

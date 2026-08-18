@@ -16,11 +16,15 @@ impl AttachmentStore for HeadlessStore {
         _bytes: Vec<u8>,
         _meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
-        Err(AttachmentStoreError::NotFound(AttachmentId::from("absent")))
+        Err(AttachmentStoreError::NotFound(
+            AttachmentId::parse("absent").expect("literal is a valid attachment id"),
+        ))
     }
 
     async fn get(&self, _id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
-        Err(AttachmentStoreError::NotFound(AttachmentId::from("absent")))
+        Err(AttachmentStoreError::NotFound(
+            AttachmentId::parse("absent").expect("literal is a valid attachment id"),
+        ))
     }
 
     async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {

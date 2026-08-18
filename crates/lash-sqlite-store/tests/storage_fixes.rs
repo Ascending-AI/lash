@@ -577,7 +577,8 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let store = factory.create_store(&request).await.expect("create store");
-    let attachment_id = lash_core::AttachmentId::new("unwired-process-attachment");
+    let attachment_id =
+        lash_core::AttachmentId::parse("unwired-process-attachment").expect("valid attachment id");
     store
         .record_intent(lash_core::AttachmentIntent {
             attachment_id: attachment_id.clone(),

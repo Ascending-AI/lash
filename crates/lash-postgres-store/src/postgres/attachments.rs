@@ -202,7 +202,11 @@ impl AttachmentManifest for PostgresSessionStore {
             rows.into_iter()
                 .map(|row| {
                     Ok(AttachmentManifestEntry {
-                        attachment_id: AttachmentId::new(row.get::<String, _>(0)),
+                        attachment_id: attachment_id_from_sql(
+                            "AttachmentManifest",
+                            "attachment_id",
+                            row.get(0),
+                        )?,
                         session_id: row.get(1),
                         canonical_uri: row.get(2),
                         intent_at_epoch_ms: u64_from_sql(
@@ -276,10 +280,11 @@ impl AttachmentManifest for PostgresSessionStore {
                 .fetch_all(&pool)
                 .await
                 .map_err(store_sqlx_error)?;
-            Ok(rows
-                .into_iter()
-                .map(|row| AttachmentId::new(row.get::<String, _>(0)))
-                .collect())
+            rows.into_iter()
+                .map(|row| {
+                    attachment_id_from_sql("AttachmentManifest", "attachment_id", row.get(0))
+                })
+                .collect()
         })
     }
 }

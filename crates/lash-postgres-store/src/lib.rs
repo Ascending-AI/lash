@@ -1398,7 +1398,8 @@ mod tests {
         let store = std::sync::Arc::new(storage.session_store(&session_id));
         let factory = storage.session_store_factory();
         let attachment_id =
-            lash_core::AttachmentId::new(format!("fence-race-{}", std::process::id()));
+            lash_core::AttachmentId::parse(format!("fence-race-{}", std::process::id()))
+                .expect("valid attachment id");
         sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
             .bind(attachment_id.as_str())
             .execute(storage.pool())

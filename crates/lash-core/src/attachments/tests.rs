@@ -754,7 +754,7 @@ async fn gc_delete_recheck_spares_blob_refreshed_after_snapshot() {
     let now = now_epoch_ms();
     const GRACE_MS: u64 = 60 * 60 * 1000;
     let backend = StaleSnapshotStore {
-        id: AttachmentId::new("recheck"),
+        id: AttachmentId::parse("recheck").expect("valid attachment id"),
         // Stale mtime well past the grace window: the first check would delete.
         list_mtime: now.saturating_sub(GRACE_MS * 2),
         // Fresh mtime inside the window: the re-check must spare it.
@@ -858,7 +858,7 @@ async fn gc_pre_delete_root_recheck_spares_reappeared_ref() {
     let now = now_epoch_ms();
     const GRACE_MS: u64 = 60 * 60 * 1000;
     let backend = StaleHeadStore {
-        id: AttachmentId::new("reappeared"),
+        id: AttachmentId::parse("reappeared").expect("valid attachment id"),
         // Well past the grace window: neither the snapshot nor the head re-stat
         // spares it, so the single-id root re-check is the only guard left.
         mtime: now.saturating_sub(GRACE_MS * 2),
@@ -899,7 +899,7 @@ async fn gc_pre_delete_root_recheck_spares_reappeared_ref() {
 async fn unfenced_root_authority_reports_best_effort_and_detects_the_window_loss() {
     let now = now_epoch_ms();
     const GRACE_MS: u64 = 60 * 60 * 1000;
-    let id = AttachmentId::new("window-ref");
+    let id = AttachmentId::parse("window-ref").expect("valid attachment id");
     let backend = StaleHeadStore {
         id: id.clone(),
         mtime: now.saturating_sub(GRACE_MS * 2),
@@ -1450,7 +1450,7 @@ async fn ephemeral_facade_passes_reads_through_without_a_guard() {
 fn persistence_manifest_adapter_forwards_holds_ref() {
     let runtime: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
     let adapter = PersistenceManifestAdapter(runtime);
-    let attachment_id = AttachmentId::new("adapter-forwarding");
+    let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");
     let intent = AttachmentIntent {
         attachment_id: attachment_id.clone(),
         session_id: "adapter-session".to_string(),

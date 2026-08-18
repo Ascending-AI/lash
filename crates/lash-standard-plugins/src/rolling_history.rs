@@ -590,7 +590,8 @@ mod tests {
                 String::new(),
                 Some(lash_core::session_model::message::PartAttachment {
                     source: lash_core::AttachmentSource::stored(lash_core::AttachmentRef {
-                        id: lash_core::AttachmentId::new(format!("{id}-att")),
+                        id: lash_core::AttachmentId::parse(format!("{id}-att"))
+                            .expect("valid attachment id"),
                         media_type: lash_core::MediaType::parse("image/png").unwrap(),
                         byte_len: bytes.len() as u64,
                         type_metadata: None,

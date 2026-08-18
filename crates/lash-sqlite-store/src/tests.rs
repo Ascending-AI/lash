@@ -215,7 +215,8 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
     let factory = SqliteSessionStoreFactory::new(&root);
 
     let catalog = factory.catalog_path();
-    let attachment_id = lash_core::AttachmentId::new("a".repeat(64));
+    let attachment_id =
+        lash_core::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
     {
         let store = Store::open(&catalog).await.expect("open catalog");
         lash_core::AttachmentManifest::record_intent(
@@ -400,7 +401,8 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
 async fn targeted_attachment_ref_probe_aborts_when_the_factory_catalog_is_missing() {
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("missing-sessions"));
-    let attachment_id = lash_core::AttachmentId::new("b".repeat(64));
+    let attachment_id =
+        lash_core::AttachmentId::parse("b".repeat(64)).expect("valid attachment id");
 
     let result =
         lash_core::AttachmentRootSet::has_live_attachment_ref(&factory, &attachment_id, 0).await;

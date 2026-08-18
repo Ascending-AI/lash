@@ -83,6 +83,20 @@ pub(crate) fn u64_from_sql(
     })
 }
 
+/// Rebuild a stored attachment id, refusing a row that no longer satisfies the
+/// id rule. A malformed stored id is corrupt data, not an id: it must surface
+/// as a read failure rather than travel on as a well-formed-looking value.
+pub(crate) fn attachment_id_from_sql(
+    record_kind: &'static str,
+    field: &'static str,
+    value: String,
+) -> Result<AttachmentId, StoreError> {
+    AttachmentId::parse(&value).map_err(|err| StoreError::StoredDataCorrupt {
+        record_kind,
+        message: format!("{field} is not a valid attachment id: {err}"),
+    })
+}
+
 pub(crate) fn plugin_u64_from_sql(
     record_kind: &'static str,
     field: &'static str,

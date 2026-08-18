@@ -2790,7 +2790,7 @@ fn sample_session_node(session_id: &str, id: &str, parent: Option<&str>) -> Sess
 
 fn attachment_intent(id: &str) -> AttachmentIntent {
     AttachmentIntent {
-        attachment_id: AttachmentId::new(id.to_string()),
+        attachment_id: AttachmentId::parse(id).expect("valid attachment id"),
         session_id: "root".to_string(),
         canonical_uri: format!("sha256:{id}"),
         intent_at_epoch_ms: 100,
@@ -4455,9 +4455,9 @@ async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>
 }
 
 async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn RuntimePersistence>) {
-    let committed_by_runtime = AttachmentId::new("runtime-commit".to_string());
-    let committed_out_of_band = AttachmentId::new("manual-commit".to_string());
-    let orphan = AttachmentId::new("orphan".to_string());
+    let committed_by_runtime = AttachmentId::parse("runtime-commit").expect("valid attachment id");
+    let committed_out_of_band = AttachmentId::parse("manual-commit").expect("valid attachment id");
+    let orphan = AttachmentId::parse("orphan").expect("valid attachment id");
     for id in [&committed_by_runtime, &committed_out_of_band, &orphan] {
         store
             .record_intent(attachment_intent(id.as_str()))
@@ -4507,7 +4507,7 @@ async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn Run
 async fn attachment_manifest_keeps_same_content_ownership_per_session(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let attachment = AttachmentId::new("same-content");
+    let attachment = AttachmentId::parse("same-content").expect("valid attachment id");
     for session_id in ["committed-owner", "orphan-owner"] {
         store
             .record_intent(AttachmentIntent {
@@ -8283,8 +8283,10 @@ async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
 async fn attachment_manifest_reference_tracking_and_gc_root_set(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let intent_id = AttachmentId::new(format!("{:x}", sha256_of(b"intent-only")));
-    let committed_id = AttachmentId::new(format!("{:x}", sha256_of(b"committed")));
+    let intent_id = AttachmentId::parse(format!("{:x}", sha256_of(b"intent-only")))
+        .expect("valid attachment id");
+    let committed_id =
+        AttachmentId::parse(format!("{:x}", sha256_of(b"committed"))).expect("valid attachment id");
     let intent = |id: &AttachmentId, at: u64| AttachmentIntent {
         attachment_id: id.clone(),
         session_id: "root".to_string(),
@@ -8323,7 +8325,10 @@ async fn attachment_manifest_reference_tracking_and_gc_root_set(
     );
     assert!(
         !store
-            .holds_ref("root", &AttachmentId::new("sha256:never-referenced"))
+            .holds_ref(
+                "root",
+                &AttachmentId::parse("sha256:never-referenced").expect("valid attachment id")
+            )
             .expect("no ref for unknown id"),
         "an id never referenced holds no ref"
     );
@@ -8486,7 +8491,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
         )
         .await
         .expect("enqueue queued work");
-    let attachment = AttachmentId::new("reopen-attachment".to_string());
+    let attachment = AttachmentId::parse("reopen-attachment").expect("valid attachment id");
     factory
         .open
         .record_intent(AttachmentIntent {

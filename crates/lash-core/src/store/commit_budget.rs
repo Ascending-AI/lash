@@ -303,7 +303,8 @@ mod tests {
                 },
             },
         );
-        commit.committed_attachment_ids = vec![crate::AttachmentId::new("budget-attachment")];
+        commit.committed_attachment_ids =
+            vec![crate::AttachmentId::parse("budget-attachment").expect("valid attachment id")];
 
         let expected_graph_bytes = serde_json::to_vec(&node).expect("encode graph node").len();
         let expected_session_config_bytes = serde_json::to_vec(&commit.config)

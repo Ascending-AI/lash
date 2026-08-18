@@ -901,7 +901,10 @@ async fn reclamation_fence_backoff(attempt: u32) {
 }
 
 pub fn content_id(bytes: &[u8]) -> AttachmentId {
-    AttachmentId::new(format!("{:x}", Sha256::digest(bytes)))
+    // A SHA-256 hex digest is 64 lowercase hex characters — statically within
+    // every attachment-id rule, so this cannot fail.
+    AttachmentId::parse(format!("{:x}", Sha256::digest(bytes)))
+        .expect("sha-256 hex digest is a valid attachment id")
 }
 
 /// The concrete, session-bound facade over a flat [`AttachmentStore`] backend —
