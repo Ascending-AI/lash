@@ -80,7 +80,8 @@ jobs:
   # link) that every read-only debug-profile job restores. The nextest run is
   # sharded out to the test-shard matrix below.
   #
-  # This job is deliberately *only* the cache superset and the doctests. Every
+  # This job is deliberately *only* the cache superset (which now includes the
+  # trybuild fixture graph, see the step) and the doctests. Every
   # gate that neither warms nor needs that superset — the repository gates, the
   # public-API coverage gate, the package feature checks, the default-off runtime
   # boundary — used to queue behind it as serial steps, which made this job the
@@ -136,6 +137,46 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo test --doc --workspace --locked ${LASH_CI_FEATURES}
+
+      # The trybuild API-sealing suite (crates/lash/tests/ui.rs) compiles its
+      # fixtures in a private cargo project under `target/tests/trybuild` — a
+      # second full build of lash and its dependency graph, and the one part of
+      # the test suite the shared cache never carried. The shards restore that
+      # cache read-only, so whatever they build there dies with the job, and the
+      # three shards holding a `ui` test each paid the cold fixture build every
+      # run (184s, 106s and 103s of shard time).
+      #
+      # Building it here is what puts it in the cache: this job is the sole
+      # writer, and rust-cache already knows `target/tests/trybuild` is a target
+      # directory to keep rather than a stray file to sweep. trybuild rewrites
+      # the fixture manifest on every run, so a warm fixture directory is its
+      # normal operating mode, not a staleness hazard.
+      #
+      # What the shards get back is the fixture's *dependency* graph, not the
+      # whole build: rust-cache's save-time cleaning keeps only artifacts of
+      # packages from outside the workspace, so the fixture's copy of lash and
+      # its sibling crates is swept and rebuilt. Measured on the same machine —
+      # cold fixture 505s, cache-cleaned fixture 184s, untouched fixture 20s —
+      # which is why this buys most of the shard cost back and not all of it.
+      # The rest is sccache's job: the fixture compiles under a `--target`
+      # triple, so its rustc invocations are keyed apart from the ordinary host
+      # build and this step is the first to prime them for the shards.
+      #
+      # The cache only takes the fixture on a run whose cache key misses —
+      # rust-cache skips the save outright on a full key match — so the warming
+      # lands with the next toolchain, manifest or Cargo.lock change, not on the
+      # merge of this step.
+      #
+      # `--test ui` builds that one test target, not the workspace's other test
+      # binaries. The step is named for what it runs, not for the caching:
+      # compile_fail drift now fails here first, minutes ahead of the shard that
+      # would otherwise report it, and a red step named for a cache would send
+      # the reader hunting a caching bug. The shards still run the suite;
+      # nothing here replaces their coverage.
+      - name: Seal-test the API surface (warms the trybuild fixture cache)
+        run: |
+          # shellcheck disable=SC2086
+          cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
 
       - name: Report sccache stats
         if: always()

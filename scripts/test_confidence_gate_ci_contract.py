@@ -1337,6 +1337,14 @@ derive_mutation_jobs() {{
         test_doc = workflow_job_block(workflow, "test-doc")
         self.assertIn("cargo check --workspace --all-targets --locked", test_doc)
         self.assertIn("cargo test --doc --workspace --locked", test_doc)
+        # The trybuild fixture graph is part of that superset. It only reaches
+        # the shared cache if the writer builds it, and it is invisible in the
+        # workflow's shape — dropping this step costs no gate and no red run,
+        # just three shards rebuilding a second copy of lash forever.
+        self.assertIn(
+            "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
+            test_doc,
+        )
         for foreign in (
             "python3 scripts/check_api_example_coverage.py",
             "python3 scripts/lint_docs.py",
