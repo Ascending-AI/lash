@@ -10603,7 +10603,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimings::renew_interval", "lash_core::store::lease_timings::LeaseTimings::renew_interval"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::LeaseTimings::renew_interval` directly; the gate reaches the same item a second time through `lash_core::runtime::host::RuntimeHostConfig::with_lease_timings`. Consumer class: the core test harness and core runtime internals -- this function is exercised in-repo at crates/lash-core/src/testing/conformance/turn_crash_matrix.rs:1758, crates/lash-core/src/testing/conformance/turn_crash_matrix.rs:1807, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::LeaseTimings::renew_interval` directly; the gate reaches the same item a second time through `lash_core::runtime::host::RuntimeHostConfig::with_lease_timings`. Consumer class: the core test harness and core runtime internals -- this function is exercised in-repo at crates/lash-core/src/testing/conformance/turn_crash_matrix/cold_process.rs:228, crates/lash-core/src/testing/conformance/turn_crash_matrix/cold_process.rs:320, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::LeaseTimings::renew_interval_ms"
@@ -11354,7 +11354,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::RuntimeHostConfig::with_lease_timings", "lash_core::runtime::host::RuntimeHostConfig::with_lease_timings"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::RuntimeHostConfig::with_lease_timings` directly; the gate reaches the same item a second time through `lash_core::plugin::runtime_impl::PluginHost::install_process_engine_contributions`. Consumer class: core runtime internals and the core test harness -- this function is exercised in-repo at crates/lash-core/src/runtime/process_worker/recovery_tests/worker_fixtures.rs:169, crates/lash-core/src/testing/conformance/turn_crash_matrix.rs:1296, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::RuntimeHostConfig::with_lease_timings` directly; the gate reaches the same item a second time through `lash_core::plugin::runtime_impl::PluginHost::install_process_engine_contributions`. Consumer class: core runtime internals and the core test harness -- this function is exercised in-repo at crates/lash-core/src/runtime/process_worker/recovery_tests/worker_fixtures.rs:169, crates/lash-core/src/testing/conformance/turn_crash_matrix.rs:1371, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::RuntimeHostConfig::with_managed_turn_concurrency_limit"
