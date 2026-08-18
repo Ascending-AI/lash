@@ -2,6 +2,7 @@ use super::*;
 use lash_core::facade_support;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
+mod leases;
 #[path = "process_registry/parent_end.rs"]
 mod parent_end;
 mod segment_handover;
@@ -742,6 +743,29 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
+    async fn record_caller_departure(
+        &self,
+        process_id: &str,
+    ) -> Result<ProcessRecord, lash_core::PluginError> {
+        let process_id = process_id.to_string();
+        let now = self.clock.timestamp_ms();
+        let wake_delivery_config = self.wake_delivery_config;
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_conn(tx, &process_id)?;
+                    if record.status == lash_core::ProcessStatus::CallerDeparted {
+                        return Ok(record);
+                    }
+                    let append = ProcessEventAppendRequest::caller_departed(&process_id);
+                    Self::append_event_conn(tx, &mut record, append, now, wake_delivery_config)?;
+                    Ok(record)
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
@@ -1298,113 +1322,17 @@ impl ProcessRegistry for SqliteProcessRegistry {
         owner: &LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
-        let process_id = process_id.to_string();
-        let owner = owner.clone();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome((|| {
-                    Self::require_process_conn(tx, &process_id)?;
-                    let current = Self::load_process_lease_conn(tx, &process_id)?;
-                    let fencing_token = match registry_transitions::decide_process_lease_claim(
-                        current.as_ref(),
-                        &owner,
-                        now,
-                        lease_ttl_ms,
-                    ) {
-                        registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease {
-                            lease,
-                        } => {
-                            // Same incarnation re-enters its own live lease:
-                            // extend the expiry, keep token and fencing token.
-                            tx.execute(
-                                "UPDATE process_leases
-                                 SET lease_expires_at_ms = ?2
-                                 WHERE process_id = ?1",
-                                params![process_id, lease.expires_at_epoch_ms as i64],
-                            )
-                            .map_err(process_sqlite_error)?;
-                            return Ok(ProcessLeaseClaimOutcome::Acquired(lease));
-                        }
-                        registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {
-                            return Ok(ProcessLeaseClaimOutcome::Busy { holder });
-                        }
-                        registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {
-                            // Read the raw fencing token directly: a
-                            // completed/abandoned lease nulls the owner/token
-                            // columns but retains the monotonically-increasing
-                            // `lease_fencing_token`, so a re-claim never reuses
-                            // a stale writer's token.
-                            let retained =
-                                Self::retained_process_lease_fencing_token_conn(tx, &process_id)?;
-                            registry_transitions::next_process_lease_fencing_token(retained)?
-                        }
-                    };
-                    Ok(ProcessLeaseClaimOutcome::Acquired(
-                        Self::acquire_process_lease_conn(
-                            tx,
-                            &process_id,
-                            &owner,
-                            fencing_token,
-                            now,
-                            lease_ttl_ms,
-                        )?,
-                    ))
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        leases::claim_process_lease(self, process_id, owner, lease_ttl_ms).await
     }
 
     async fn reclaim_process_lease(
         &self,
         process_id: &str,
         owner: &LeaseOwnerIdentity,
-        _observed_holder: &ProcessLease,
+        observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
-        let process_id = process_id.to_string();
-        let owner = owner.clone();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome((|| {
-                    Self::require_process_conn(tx, &process_id)?;
-                    let current = Self::load_process_lease_conn(tx, &process_id)?;
-                    let fencing_token = match registry_transitions::decide_process_lease_reclaim(
-                        current.as_ref(),
-                        now,
-                    )? {
-                        registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
-                            // Free (or released) lease: acquire on the retained
-                            // fencing token like a plain claim would.
-                            let retained = Self::retained_process_lease_fencing_token_conn(
-                                tx,
-                                &process_id,
-                            )?;
-                            registry_transitions::next_process_lease_fencing_token(retained)?
-                        }
-                        registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
-                            fencing_token,
-                        } => fencing_token,
-                        registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
-                            return Ok(ProcessLeaseClaimOutcome::Busy { holder });
-                        }
-                    };
-                    Ok(ProcessLeaseClaimOutcome::Acquired(
-                        Self::acquire_process_lease_conn(
-                            tx,
-                            &process_id,
-                            &owner,
-                            fencing_token,
-                            now,
-                            lease_ttl_ms,
-                        )?,
-                    ))
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        leases::reclaim_process_lease(self, process_id, owner, observed_holder, lease_ttl_ms).await
     }
 
     async fn renew_process_lease(
@@ -1412,72 +1340,21 @@ impl ProcessRegistry for SqliteProcessRegistry {
         lease: &ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLease, lash_core::PluginError> {
-        let lease = lease.clone();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                Ok(tx_outcome((|| {
-                    let current = Self::load_process_lease_conn(tx, &lease.process_id)?;
-                    registry_transitions::authorize_process_lease_write(
-                        &lease.process_id,
-                        &lease,
-                        current.as_ref(),
-                        now,
-                    )?;
-                    let renewed = ProcessLease {
-                        expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
-                        ..lease.clone()
-                    };
-                    tx.execute(
-                        "UPDATE process_leases
-                         SET lease_expires_at_ms = ?2
-                         WHERE process_id = ?1 AND lease_token = ?3",
-                        params![
-                            renewed.process_id.as_str(),
-                            renewed.expires_at_epoch_ms as i64,
-                            renewed.lease_token.as_str(),
-                        ],
-                    )
-                    .map_err(process_sqlite_error)?;
-                    Ok(renewed)
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
+        leases::renew_process_lease(self, lease, lease_ttl_ms).await
     }
 
     async fn get_process_lease(
         &self,
         process_id: &str,
     ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
-        let process_id = process_id.to_string();
-        self.conn
-            .call(move |conn| Ok(Self::load_process_lease_conn(conn, &process_id)))
-            .await
-            .map_err(process_sqlite_error)?
+        leases::get_process_lease(self, process_id).await
     }
 
     async fn complete_process_lease(
         &self,
         completion: &ProcessLeaseCompletion,
     ) -> Result<(), lash_core::PluginError> {
-        let process_id = completion.process_id.clone();
-        let lease_token = completion.lease_token.clone();
-        self.conn
-            .call(move |conn| {
-                conn.execute(
-                    "UPDATE process_leases
-                     SET lease_owner_id = NULL,
-                         lease_token = NULL,
-                         lease_claimed_at_ms = 0,
-                         lease_expires_at_ms = 0
-                     WHERE process_id = ?1 AND lease_token = ?2",
-                    params![process_id, lease_token],
-                )
-            })
-            .await
-            .map_err(process_sqlite_error)?;
-        Ok(())
+        leases::complete_process_lease(self, completion).await
     }
 
     async fn prune_terminal_processes(

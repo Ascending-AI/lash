@@ -206,9 +206,10 @@ impl Processes {
         ) {
             return Err(EmbedError::Plugin(lash_core::PluginError::Session(
                 format!(
-                    "process retention filter selects the non-terminal status `{}`, \
+                    "process retention filter selects the live status `{}`, \
                      which no prunable row can hold; pass \
-                     `ProcessStatusFilter::Any` or a terminal status",
+                     `ProcessStatusFilter::Any`, a terminal status, or \
+                     `CallerDeparted`",
                     filter.status.label().unwrap_or("any")
                 ),
             )));
@@ -468,25 +469,29 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Host-scheduled retention lever (ADR 0017): physically delete terminal
+    /// Host-scheduled retention lever (ADR 0017): physically delete retired
     /// process rows (and their events, observer edges, leases) older than
-    /// `cutoff_epoch_ms`, returning what was reclaimed. The configured trigger
+    /// `cutoff_epoch_ms`, returning what was reclaimed. Retired is the terminal
+    /// outcomes plus
+    /// [`ProcessStatus::CallerDeparted`](lash_core::ProcessStatus::CallerDeparted),
+    /// which nothing may ever honestly terminalize. The configured trigger
     /// store also removes delivery reservations for processes now represented
-    /// by tombstones; unrelated trigger rows are retained. Non-terminal rows
-    /// are never touched. Lash exposes no finite maximum waiter lifetime: the host
-    /// must retain rows beyond every still-replayable await, and a later await
-    /// after pruning receives the typed `ProcessNoLongerRetained` outcome. Pass
+    /// by tombstones; unrelated trigger rows are retained. Live rows — running
+    /// and waiting — are never touched. Lash exposes no finite maximum waiter
+    /// lifetime: the host must retain rows beyond every still-replayable await,
+    /// and a later await after pruning receives the typed
+    /// `ProcessNoLongerRetained` outcome. Pass
     /// either the projector's acknowledged
     /// [`ProjectionWatermark::UpTo`](lash_core::ProjectionWatermark::UpTo)
     /// cursor or an explicit
     /// [`ProjectionWatermark::NoProjector`](lash_core::ProjectionWatermark::NoProjector).
     ///
-    /// `filter` narrows *which* eligible terminal rows this call reclaims (ADR
+    /// `filter` narrows *which* eligible retired rows this call reclaims (ADR
     /// 0023): retention is differentiated host policy, so a host expresses
     /// "reclaim the work this deleted session originated" and "reclaim terminal
     /// subagent debris after a day" as two scheduled calls over the same lever.
-    /// `None` considers every terminal row. Because retention only ever deletes
-    /// terminal rows, a filter that selects
+    /// `None` considers every retired row. Because retention only ever deletes
+    /// retired rows, a filter that selects
     /// [`ProcessStatusFilter::Running`](lash_core::ProcessStatusFilter::Running)
     /// or [`Waiting`](lash_core::ProcessStatusFilter::Waiting) — including the
     /// `Running` default a `..Default::default()` filter carries — can never
@@ -503,7 +508,13 @@ impl Processes {
             .await?;
         for process in candidates
             .into_iter()
-            .filter(|process| process.is_terminal() && process.updated_at_ms < cutoff_epoch_ms)
+            // Survey exactly the rows the prune SQL deletes: the retired
+            // partition, which includes `CallerDeparted` alongside the
+            // terminal outcomes. Surveying only terminal rows would leak the
+            // effect journal of every caller-departed row the SQL reclaims.
+            .filter(|process| {
+                process.status.is_retired() && process.updated_at_ms < cutoff_epoch_ms
+            })
         {
             if let Err(err) = self
                 .core

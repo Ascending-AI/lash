@@ -285,6 +285,17 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
+    async fn report_caller_departure(
+        &self,
+        session_id: &str,
+        process_id: &str,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.services
+            .processes
+            .report_process_caller_departure(&self.services.current, session_id, process_id)
+            .await
+    }
+
     async fn await_process(
         &self,
         process_id: &str,
@@ -595,6 +606,17 @@ impl crate::ProcessService for ModelToolSessionProcessService {
         };
         crate::ProcessService::complete_external(&host, session_id, process_id, await_output, scope)
             .await
+    }
+
+    async fn report_caller_departure(
+        &self,
+        session_id: &str,
+        process_id: &str,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let host = RuntimeSessionProcessService {
+            services: Arc::clone(&self.services),
+        };
+        crate::ProcessService::report_caller_departure(&host, session_id, process_id).await
     }
 
     async fn await_process(

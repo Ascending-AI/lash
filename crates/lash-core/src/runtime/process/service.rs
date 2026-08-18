@@ -92,6 +92,26 @@ pub trait ProcessService: Send + Sync {
         ))
     }
 
+    /// Record that the caller which registered an Externally-Owned row this
+    /// session observes departed before any outcome could be written
+    /// (FIG-1383).
+    ///
+    /// Controller-free on purpose. This is the one process write whose whole
+    /// reason to exist is that the caller's effect scope is already gone: it
+    /// runs *because* the borrowed tool/effect scope was torn down, so it can
+    /// take no `ProcessOpScope`. It is a reconciliation write, not a journaled
+    /// effect, and it is idempotent, so nothing about replay depends on it.
+    async fn report_caller_departure(
+        &self,
+        session_id: &str,
+        process_id: &str,
+    ) -> Result<ProcessRecord, PluginError> {
+        let _ = (session_id, process_id);
+        Err(PluginError::Session(
+            "caller-departure reporting is unavailable in this service".to_string(),
+        ))
+    }
+
     async fn await_process(
         &self,
         process_id: &str,

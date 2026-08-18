@@ -9,10 +9,10 @@ use super::process_references::{
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
-// The shared registry fixture performs 45 successful registrations and two
-// prunes; the cold refold fixture below adds the 46th registration.
-const REOPEN_BASELINE_SPAWNS: usize = 46;
-const REOPEN_BASELINE_PRUNED: usize = 2;
+// The shared registry fixture performs 48 successful registrations and three
+// prunes; the cold refold fixture below adds the 49th registration.
+const REOPEN_BASELINE_SPAWNS: usize = 49;
+const REOPEN_BASELINE_PRUNED: usize = 3;
 
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
@@ -394,6 +394,8 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
+    caller_departure_state_machine(Arc::clone(&registry)).await;
+    caller_departed_rows_are_reclaimed_by_retention(Arc::clone(&registry)).await;
     terminal_completion_atomically_retains_parent_end_plan(registry).await;
 }
 
@@ -1999,4 +2001,236 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
     assert_process_count_conservation(&handles.reopen, conservation)
         .await
         .expect("process counts conserve after reopen");
+}
+
+/// The complete caller-departure state machine, pinned identically on every
+/// backend (FIG-1383).
+///
+/// Every transition in the model is exercised here, legal and illegal alike:
+/// the state is durable, reachable only from a running Externally-Owned row,
+/// idempotent, refused from every other source state and disposition, closable
+/// by external reconciliation, and never terminal.
+async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
+    let process_id = "caller-departure-machine";
+    let observer_session = "caller-departure-observer";
+    let registered = registry
+        .register_process_with_observers(registration(process_id), &[observer_session.to_string()])
+        .await
+        .expect("register externally-owned audit row");
+    assert_eq!(registered.status, ProcessStatus::Running);
+
+    // running -> caller_departed.
+    let departed = registry
+        .record_caller_departure(process_id)
+        .await
+        .expect("running externally-owned row records a caller departure");
+    assert_eq!(departed.status, ProcessStatus::CallerDeparted);
+    assert!(
+        !departed.is_terminal(),
+        "the state must never claim an outcome lash cannot observe"
+    );
+    assert!(
+        departed.outcome.is_none(),
+        "a caller-departed row carries no outcome"
+    );
+    assert!(departed.status.is_retired());
+
+    // The transition is a durable event, so the fold reproduces it.
+    let events = registry
+        .events_after(process_id, 0)
+        .await
+        .expect("read caller-departure events");
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event_type == "process.caller_departed"),
+        "the transition must be an appended lifecycle event, not a silent column write"
+    );
+    assert_refold_matches_stored_projection(&registry, &registered, process_id, "caller departure")
+        .await;
+
+    // caller_departed -> caller_departed is idempotent.
+    let again = registry
+        .record_caller_departure(process_id)
+        .await
+        .expect("repeat departure is idempotent");
+    assert_eq!(again.status, ProcessStatus::CallerDeparted);
+    assert_eq!(again.updated_at_ms, departed.updated_at_ms);
+
+    // A caller-departed row is not live: recovery must never pick it up, and a
+    // live listing must not present it as work still in flight.
+    let worklist = registry
+        .list_non_terminal_page(
+            std::num::NonZeroUsize::new(256).expect("non-zero page size"),
+            None,
+        )
+        .await
+        .expect("read recovery worklist")
+        .records;
+    assert!(
+        !worklist.iter().any(|record| record.id == process_id),
+        "recovery may never act on a caller-departed row"
+    );
+    let live = registry
+        .list_processes(&ProcessListFilter {
+            status: crate::ProcessStatusFilter::Running,
+            ..ProcessListFilter::default()
+        })
+        .await
+        .expect("list running rows");
+    assert!(!live.iter().any(|record| record.id == process_id));
+    // The session-scoped live view is the same partition: a caller-departed
+    // row is retired, so every ProcessListMode::Live reader must stop showing
+    // it as in flight, while the unfiltered observation view still carries it.
+    let live_observed = registry
+        .list_live_observed_by(observer_session)
+        .await
+        .expect("list live observed rows");
+    assert!(
+        !live_observed.iter().any(|record| record.id == process_id),
+        "a caller-departed row must never appear in a live observation listing"
+    );
+    let all_observed = registry
+        .list_observed_by(observer_session)
+        .await
+        .expect("list all observed rows");
+    assert!(
+        all_observed.iter().any(|record| record.id == process_id),
+        "the observer edge survives the departure; only the live partition drops it"
+    );
+    // ...but external reconciliation can enumerate it by name on any backend.
+    let departed_rows = registry
+        .list_processes(&ProcessListFilter {
+            status: crate::ProcessStatusFilter::CallerDeparted,
+            ..ProcessListFilter::default()
+        })
+        .await
+        .expect("list caller-departed rows");
+    assert!(
+        departed_rows.iter().any(|record| record.id == process_id),
+        "external reconciliation must be able to find the state on every backend"
+    );
+
+    // Illegal: waiting is an execution state an externally-owned row never has.
+    let wait_refusal = registry
+        .set_process_wait(
+            process_id,
+            WaitState {
+                since_ms: departed.updated_at_ms,
+                kind: WaitKind::Signal {
+                    name: "resume".to_string(),
+                    event_type: "signal.resume".to_string(),
+                    key: format!("{process_id}:signal.resume:1"),
+                    ordinal: 1,
+                },
+            },
+        )
+        .await;
+    assert!(
+        wait_refusal.is_err(),
+        "a caller-departed row must not enter a wait state"
+    );
+
+    // Illegal: departures belong to rows lash never executes.
+    let mut owner_bound = registration("caller-departure-owner-bound");
+    owner_bound.disposition = RecoveryDisposition::OwnerBound;
+    registry
+        .register_process(owner_bound)
+        .await
+        .expect("register owner-bound row");
+    let disposition_refusal = registry
+        .record_caller_departure("caller-departure-owner-bound")
+        .await;
+    assert!(
+        disposition_refusal.is_err(),
+        "only an externally-owned row can record a caller departure"
+    );
+
+    // Illegal: an unknown row.
+    assert!(
+        registry
+            .record_caller_departure("caller-departure-missing")
+            .await
+            .is_err(),
+        "an unknown process cannot record a caller departure"
+    );
+
+    // Legal: external reconciliation closes the row with observed truth.
+    registry
+        .complete_process(
+            process_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::json!({"reconciled": true}),
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("external reconciliation closes a caller-departed row");
+    let closed = registry
+        .get_process(process_id)
+        .await
+        .expect("read reconciled row")
+        .expect("reconciled row remains stored");
+    assert_eq!(
+        closed.status,
+        ProcessStatus::Completed,
+        "reconciliation, not lash, supplies the outcome"
+    );
+
+    // Illegal: a terminal row cannot go back.
+    assert!(
+        registry.record_caller_departure(process_id).await.is_err(),
+        "a recorded outcome cannot be retracted into a caller departure"
+    );
+}
+
+/// Retention reclaims caller-departed rows on every backend (FIG-1383).
+///
+/// Nothing may ever honestly terminalize such a row, so excluding it from
+/// retention would leak rows without bound. Reclaiming is not an outcome
+/// claim: the tombstone records the label the row actually carried.
+async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn ProcessRegistry>) {
+    let reclaimed_id = "caller-departure-reclaimed";
+    let retained_id = "caller-departure-retained";
+    registry
+        .register_process(registration(reclaimed_id))
+        .await
+        .expect("register reclaimable row");
+    registry
+        .register_process(registration(retained_id))
+        .await
+        .expect("register still-running row");
+    let departed = registry
+        .record_caller_departure(reclaimed_id)
+        .await
+        .expect("record caller departure");
+    let (_, projection_cursor) = registry
+        .processes_changed_since(crate::ProcessChangeCursor::initial(), 4096)
+        .await
+        .expect("project rows before pruning");
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    registry
+        .prune_terminal_processes(
+            departed.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::UpTo(projection_cursor),
+        )
+        .await
+        .expect("prune retired rows");
+    assert!(
+        matches!(
+            registry.get_process(reclaimed_id).await,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ),
+        "retention must reclaim a row nothing may ever terminalize"
+    );
+    assert!(
+        registry
+            .get_process(retained_id)
+            .await
+            .expect("read still-running row")
+            .is_some(),
+        "an externally-owned row whose caller is still present must survive retention"
+    );
 }

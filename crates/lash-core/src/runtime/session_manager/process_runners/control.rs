@@ -567,6 +567,34 @@ impl ProcessCapability {
             .await
     }
 
+    /// Record the caller departure of an Externally-Owned row this session
+    /// observes (FIG-1383).
+    ///
+    /// Deliberately scope-free, mirroring
+    /// [`list_model_tool_process_handles_for_attempt`](Self::list_model_tool_process_handles_for_attempt):
+    /// the effect controller this write would otherwise ride is exactly the
+    /// thing that has gone away. Visibility is still enforced — only a session
+    /// that observes the row may report its caller gone — and the registry
+    /// enforces the rest of the state machine.
+    pub(in crate::runtime::session_manager) async fn report_process_caller_departure(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        process_id: &str,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let registry = current.host.process_registry.as_ref().ok_or_else(|| {
+            crate::PluginError::Session(
+                "process registry is unavailable in this runtime".to_string(),
+            )
+        })?;
+        if !registry.is_observer(session_id, process_id).await? {
+            return Err(crate::PluginError::Session(format!(
+                "process handle `{process_id}` is not visible in this session"
+            )));
+        }
+        registry.record_caller_departure(process_id).await
+    }
+
     pub(in crate::runtime::session_manager) async fn list_process_handles(
         &self,
         current: &CurrentSessionCapability,

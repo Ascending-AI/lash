@@ -151,6 +151,44 @@ pub fn apply_process_status_projection(
     record.updated_at_ms = updated_at_ms;
 }
 
+/// Apply the caller-departure transition to a process record fold.
+///
+/// The legal transitions are exactly `running -> caller_departed` and the
+/// idempotent `caller_departed -> caller_departed`. Everything else is
+/// refused, which is what keeps the state honest:
+///
+/// * only an `ExternallyOwned` row can reach it, because only a row lash never
+///   executes can outlive the caller that registered it with no outcome
+///   anybody could write;
+/// * a terminal row can never reach it, because an outcome is already
+///   recorded and departure cannot retract it;
+/// * a waiting row can never reach it, because waiting is an execution state
+///   an externally-owned row never enters.
+pub(super) fn apply_caller_departure(record: &mut ProcessRecord) -> Result<(), PluginError> {
+    if record.disposition != crate::RecoveryDisposition::ExternallyOwned {
+        return Err(PluginError::Session(format!(
+            "process `{}` is not externally-owned and cannot record a caller departure",
+            record.id
+        )));
+    }
+    match record.status {
+        ProcessStatus::CallerDeparted => Ok(()),
+        ProcessStatus::Running => {
+            record.status = ProcessStatus::CallerDeparted;
+            Ok(())
+        }
+        status if status.is_terminal() => Err(PluginError::Session(format!(
+            "terminal process `{}` cannot record a caller departure",
+            record.id
+        ))),
+        status => Err(PluginError::Session(format!(
+            "process `{}` cannot record a caller departure from `{}`",
+            record.id,
+            status.label()
+        ))),
+    }
+}
+
 /// Apply one persisted event to the process record fold.
 ///
 /// Callers must supply events in sequence order when rebuilding a record. The
@@ -200,10 +238,22 @@ pub fn apply_process_event_projection(
                     record.id
                 )));
             }
+            if record.status == ProcessStatus::CallerDeparted {
+                return Err(PluginError::Session(format!(
+                    "caller-departed process `{}` cannot enter a wait state",
+                    record.id
+                )));
+            }
             record.wait = Some(lifecycle_payload(event, "wait")?);
             record.status = ProcessStatus::Waiting;
         }
         "process.resumed" => {
+            if record.status == ProcessStatus::CallerDeparted {
+                return Err(PluginError::Session(format!(
+                    "caller-departed process `{}` cannot resume",
+                    record.id
+                )));
+            }
             record.wait = None;
             record.status = ProcessStatus::Running;
         }
@@ -239,6 +289,9 @@ pub fn apply_process_event_projection(
                     )));
                 }
             }
+        }
+        "process.caller_departed" => {
+            apply_caller_departure(record)?;
         }
         _ => {}
     }
@@ -318,6 +371,11 @@ fn repair_lifecycle_projection(
             let value = Box::new(lifecycle_payload(event, "request")?);
             let changed = repaired.abandon_request.as_ref() != Some(&value);
             repaired.abandon_request = Some(value);
+            changed
+        }
+        "process.caller_departed" => {
+            let changed = repaired.status != ProcessStatus::CallerDeparted;
+            apply_caller_departure(&mut repaired)?;
             changed
         }
         "process.waiting" => {
@@ -545,7 +603,11 @@ pub fn prepare_process_registration(
 }
 
 const LEGACY_PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 2;
-const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 3;
+// Bumped to 4 (FIG-1383): the definition preimage's process-status tag registry
+// gained `caller_departed`. The versioned-surface guard fails closed on any
+// preimage edit, so the family version moves with it even though tag 7 is
+// additive and every pre-existing preimage encodes byte-identically.
+const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 4;
 
 fn process_registration_family_version(registration: &ProcessRegistration) -> u8 {
     match registration.input.as_ref() {
@@ -571,8 +633,8 @@ fn process_registration_family_version(registration: &ProcessRegistration) -> u8
 /// schemas are each one canonical opaque bytes leaf. Tool output contracts: 1
 /// static, 2 from-input-schema. Value selectors: 1
 /// payload, 2 pointer, 3 const, 4 template, 5 present. Process statuses: 1
-/// running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned.
-/// Retired tags remain burned.
+/// running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned,
+/// 7 caller departed. Retired tags remain burned.
 fn process_registration_fingerprint_preimage(
     registration: &ProcessRegistration,
     observers: &[SessionId],
@@ -760,6 +822,7 @@ fn project_registration_event_type(
             super::model::ProcessStatus::Failed => 4,
             super::model::ProcessStatus::Cancelled => 5,
             super::model::ProcessStatus::Abandoned => 6,
+            super::model::ProcessStatus::CallerDeparted => 7,
         });
         identity.optional(await_output.as_ref(), project_registration_value_selector);
     });

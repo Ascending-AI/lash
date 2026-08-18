@@ -1010,10 +1010,10 @@ pub use tool_intent::{
     ToolResultDone, derive_tool_intent_identity,
 };
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, InternalProcessAdmin,
-    InternalProcessContext, InternalProcessToolCall, PreparedToolBatch, PreparedToolBatchCall,
-    PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant, ToolPrepareCall,
-    ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,
+    InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, PreparedToolBatch,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
+    ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 
 #[cfg(test)]

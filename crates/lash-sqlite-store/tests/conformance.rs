@@ -2432,7 +2432,7 @@ async fn assert_waiting_process_is_live_not_prunable(
 
 /// A waiting process is live, not prunable.
 ///
-/// `lash_core::facade_support::registry_transitions::NON_TERMINAL_PROCESS_STATUS_LABELS`
+/// `lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS`
 /// is the shared retention contract, but this backend's SQL spells the label set
 /// out as `status IN ('running', 'waiting')` and `status NOT IN (…)`. The law test
 /// in core proves the constant partitions `ProcessStatus`; this is the
@@ -2453,7 +2453,7 @@ async fn sqlite_waiting_processes_are_live_not_prunable() {
 
 /// Lexical half of the retention contract: every `status IN`/`status NOT IN`
 /// literal in this backend's SQL must spell exactly the label list rendered
-/// from `NON_TERMINAL_PROCESS_STATUS_LABELS`. The partition law proves the
+/// from `LIVE_PROCESS_STATUS_LABELS`. The partition law proves the
 /// constant tracks `ProcessStatus`; the behavioural referee above proves
 /// today's labels retain; this closes the remaining gap where a future label
 /// grows the constant while a stale SQL literal silently prunes live rows.
@@ -2461,7 +2461,7 @@ async fn sqlite_waiting_processes_are_live_not_prunable() {
 fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     let expected = format!(
         "({})",
-        lash_core::facade_support::registry_transitions::NON_TERMINAL_PROCESS_STATUS_LABELS
+        lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS
             .iter()
             .map(|label| format!("'{label}'"))
             .collect::<Vec<_>>()
@@ -2484,7 +2484,7 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
                 assert!(
                     site.starts_with(&expected),
                     "{name}: a `{delimiter}` list literal diverged from \
-                     NON_TERMINAL_PROCESS_STATUS_LABELS: expected {expected}, found {}",
+                     LIVE_PROCESS_STATUS_LABELS: expected {expected}, found {}",
                     &site[..site.len().min(40)]
                 );
                 total += 1;

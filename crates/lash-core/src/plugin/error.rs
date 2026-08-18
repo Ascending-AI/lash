@@ -108,6 +108,17 @@ pub enum PluginError {
         terminal_label: String,
         pruned_at_ms: u64,
     },
+    /// A wait was requested on a row whose registering caller departed before
+    /// any outcome could be recorded (FIG-1383).
+    ///
+    /// The wait is refused rather than parked: the row is non-terminal, no
+    /// actor is left to terminalize it, and lash may never invent an outcome
+    /// for it. Closure comes from external reconciliation writing the observed
+    /// truth, or from retention reclaiming the row.
+    #[error(
+        "process `{process_id}` recorded a caller departure before any outcome; awaiting it would never resolve"
+    )]
+    ProcessCallerDeparted { process_id: String },
     /// One bounded transport attachment elapsed while the durable process wait
     /// remained live. Hosts must re-attach using the same process id.
     #[error(

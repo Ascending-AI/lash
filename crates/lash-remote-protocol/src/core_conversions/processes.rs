@@ -283,6 +283,7 @@ impl From<lash_core::ProcessStatus> for RemoteProcessStatus {
             lash_core::ProcessStatus::Failed => Self::Failed,
             lash_core::ProcessStatus::Cancelled => Self::Cancelled,
             lash_core::ProcessStatus::Abandoned => Self::Abandoned,
+            lash_core::ProcessStatus::CallerDeparted => Self::CallerDeparted,
         }
     }
 }
@@ -296,6 +297,7 @@ impl From<RemoteProcessStatus> for lash_core::ProcessStatus {
             RemoteProcessStatus::Failed => Self::Failed,
             RemoteProcessStatus::Cancelled => Self::Cancelled,
             RemoteProcessStatus::Abandoned => Self::Abandoned,
+            RemoteProcessStatus::CallerDeparted => Self::CallerDeparted,
         }
     }
 }
@@ -1761,6 +1763,7 @@ impl From<lash_core::ProcessStatusFilter> for RemoteProcessStatusFilter {
             lash_core::ProcessStatusFilter::Failed => Self::Failed,
             lash_core::ProcessStatusFilter::Cancelled => Self::Cancelled,
             lash_core::ProcessStatusFilter::Abandoned => Self::Abandoned,
+            lash_core::ProcessStatusFilter::CallerDeparted => Self::CallerDeparted,
             lash_core::ProcessStatusFilter::Any => Self::Any,
         }
     }
@@ -1775,6 +1778,7 @@ impl From<RemoteProcessStatusFilter> for lash_core::ProcessStatusFilter {
             RemoteProcessStatusFilter::Failed => Self::Failed,
             RemoteProcessStatusFilter::Cancelled => Self::Cancelled,
             RemoteProcessStatusFilter::Abandoned => Self::Abandoned,
+            RemoteProcessStatusFilter::CallerDeparted => Self::CallerDeparted,
             RemoteProcessStatusFilter::Any => Self::Any,
         }
     }

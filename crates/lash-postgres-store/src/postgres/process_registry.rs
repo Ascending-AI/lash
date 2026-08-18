@@ -912,6 +912,29 @@ impl ProcessRegistry for PostgresProcessRegistry {
         Ok(record)
     }
 
+    async fn record_caller_departure(
+        &self,
+        process_id: &str,
+    ) -> Result<ProcessRecord, PluginError> {
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let mut record = require_process_tx(&mut tx, process_id).await?;
+        if record.status == lash_core::ProcessStatus::CallerDeparted {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(record);
+        }
+        let append = ProcessEventAppendRequest::caller_departed(process_id);
+        append_process_event_tx(
+            &mut tx,
+            &mut record,
+            append,
+            self.clock.timestamp_ms(),
+            self.wake_delivery_config,
+        )
+        .await?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(record)
+    }
+
     async fn set_process_wait_with_authority(
         &self,
         process_id: &str,

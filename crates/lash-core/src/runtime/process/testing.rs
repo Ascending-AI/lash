@@ -30,6 +30,7 @@ use super::validation::{
 mod continuation;
 #[cfg(test)]
 mod identity;
+mod leases;
 mod local_helpers;
 #[path = "testing/parent_end.rs"]
 mod parent_end;
@@ -937,6 +938,23 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         Ok(record.record.clone())
     }
 
+    async fn record_caller_departure(
+        &self,
+        process_id: &str,
+    ) -> Result<ProcessRecord, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let mut managed = self.managed.lock().await;
+        let Some(record) = managed.get_mut(process_id) else {
+            return Err(self.process_miss(process_id).await);
+        };
+        if record.record.status == crate::ProcessStatus::CallerDeparted {
+            return Ok(record.record.clone());
+        }
+        let append = ProcessEventAppendRequest::caller_departed(process_id);
+        self.append_managed_event(record, append).await?;
+        Ok(record.record.clone())
+    }
+
     async fn set_process_wait_with_authority(
         &self,
         process_id: &str,
@@ -1331,7 +1349,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let managed = self.managed.lock().await;
         Ok(managed
             .values()
-            .filter(|record| !record.record.is_terminal())
+            .filter(|record| !record.record.status.is_retired())
             .count())
     }
 
@@ -1341,55 +1359,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
-        if let Some(error) = self.process_lease_claim_error.lock().await.clone() {
-            return Err(error);
-        }
-        let _transaction = self.transaction.lock().await;
-        // A lease is authority over a retained row: the SQL backends gate every
-        // lease write on `require_process_conn`; same guard here (FIG-953).
-        if !self.managed.lock().await.contains_key(process_id) {
-            return Err(self.process_miss(process_id).await);
-        }
-        let mut leases = self.leases.lock().await;
-        let now = self.clock.timestamp_ms();
-        // The same pure tables the durable backends consult (this double's
-        // hand-rolled copy drifted once — FIG-953). An empty-token row is a
-        // retained fence, not an observable lease, per `ProcessLeaseRow::project`.
-        let observed = leases
-            .get(process_id)
-            .filter(|current| !current.lease_token.is_empty())
-            .cloned();
-        match registry_transitions::decide_process_lease_claim(
-            observed.as_ref(),
-            owner,
-            now,
-            lease_ttl_ms,
-        ) {
-            registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {
-                leases.insert(process_id.to_string(), lease.clone());
-                Ok(ProcessLeaseClaimOutcome::Acquired(lease))
-            }
-            registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {
-                Ok(ProcessLeaseClaimOutcome::Busy { holder })
-            }
-            registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {
-                // A released lease retains its fencing token for its successor.
-                let fencing_token = registry_transitions::next_process_lease_fencing_token(
-                    leases
-                        .get(process_id)
-                        .map_or(0, |current| current.fencing_token),
-                )?;
-                let lease = registry_transitions::acquired_process_lease(
-                    process_id,
-                    owner,
-                    fencing_token,
-                    now,
-                    lease_ttl_ms,
-                );
-                leases.insert(process_id.to_string(), lease.clone());
-                Ok(ProcessLeaseClaimOutcome::Acquired(lease))
-            }
-        }
+        leases::claim_process_lease(self, process_id, owner, lease_ttl_ms).await
     }
 
     async fn reclaim_process_lease(
@@ -1399,39 +1369,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut leases = self.leases.lock().await;
-        let now = self.clock.timestamp_ms();
-        let observed = leases
-            .get(process_id)
-            .filter(|current| !current.lease_token.is_empty())
-            .cloned();
-        let _ = observed_holder;
-        let fencing_token =
-            match registry_transitions::decide_process_lease_reclaim(observed.as_ref(), now)? {
-                registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
-                    return Ok(ProcessLeaseClaimOutcome::Busy { holder });
-                }
-                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
-                    registry_transitions::next_process_lease_fencing_token(
-                        leases
-                            .get(process_id)
-                            .map_or(0, |current| current.fencing_token),
-                    )?
-                }
-                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
-                    fencing_token,
-                } => fencing_token,
-            };
-        let lease = registry_transitions::acquired_process_lease(
-            process_id,
-            owner,
-            fencing_token,
-            now,
-            lease_ttl_ms,
-        );
-        leases.insert(process_id.to_string(), lease.clone());
-        Ok(ProcessLeaseClaimOutcome::Acquired(lease))
+        leases::reclaim_process_lease(self, process_id, owner, observed_holder, lease_ttl_ms).await
     }
 
     async fn renew_process_lease(
@@ -1439,62 +1377,21 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         lease: &ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLease, PluginError> {
-        if let Some(error) = self.process_lease_renew_error.lock().await.clone() {
-            return Err(error);
-        }
-        let mut leases = self.leases.lock().await;
-        let now = self.clock.timestamp_ms();
-        let live = leases.get(&lease.process_id).filter(|current| {
-            !current.lease_token.is_empty()
-                && current.owner.same_incarnation(&lease.owner)
-                && current.lease_token == lease.lease_token
-                && current.fencing_token == lease.fencing_token
-                && current.expires_at_epoch_ms > now
-        });
-        if live.is_none() {
-            return Err(process_lease_expired(&lease.process_id));
-        }
-        let renewed = ProcessLease {
-            expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
-            ..lease.clone()
-        };
-        leases.insert(lease.process_id.clone(), renewed.clone());
-        Ok(renewed)
+        leases::renew_process_lease(self, lease, lease_ttl_ms).await
     }
 
     async fn get_process_lease(
         &self,
         process_id: &str,
     ) -> Result<Option<ProcessLease>, PluginError> {
-        Ok(self
-            .leases
-            .lock()
-            .await
-            .get(process_id)
-            .filter(|lease| !lease.lease_token.is_empty())
-            .cloned())
+        leases::get_process_lease(self, process_id).await
     }
 
     async fn complete_process_lease(
         &self,
         completion: &ProcessLeaseCompletion,
     ) -> Result<(), PluginError> {
-        if let Some(error) = self.process_lease_release_error.lock().await.clone() {
-            return Err(error);
-        }
-        let mut leases = self.leases.lock().await;
-        // Release (don't drop) the lease, fenced by the completion token, so a
-        // stale completion cannot release a newer owner's lease and the
-        // `fencing_token` is preserved for the next claim.
-        if let Some(current) = leases.get_mut(&completion.process_id)
-            && current.lease_token == completion.lease_token
-        {
-            current.owner = crate::LeaseOwnerIdentity::opaque("", "");
-            current.lease_token = String::new();
-            current.claimed_at_epoch_ms = 0;
-            current.expires_at_epoch_ms = 0;
-        }
-        Ok(())
+        leases::complete_process_lease(self, completion).await
     }
 
     async fn prune_terminal_processes(
@@ -1527,7 +1424,8 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             let mut prunable: Vec<String> = managed
                 .iter()
                 .filter(|(_, record)| {
-                    record.record.is_terminal() && record.record.updated_at_ms < cutoff_epoch_ms
+                    record.record.status.is_retired()
+                        && record.record.updated_at_ms < cutoff_epoch_ms
                 })
                 .filter(|(_, record)| {
                     filter

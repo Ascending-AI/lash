@@ -536,6 +536,14 @@ pub trait ProcessRegistry: Send + Sync {
 
     async fn list_observed_by(&self, session_id: &str) -> Result<Vec<ProcessRecord>, PluginError>;
 
+    /// List the observed rows that are still live for the session.
+    ///
+    /// "Live" is the un-retired partition — exactly the rows the recovery
+    /// worklist keeps (`status IN ('running', 'waiting')`), not merely the
+    /// non-terminal ones. A [`ProcessStatus::CallerDeparted`](super::model::ProcessStatus::CallerDeparted) row is
+    /// non-terminal yet retired: lash will never observe an outcome for it, so
+    /// presenting it as live would show a caller a launch still in flight that
+    /// nothing can ever advance.
     async fn list_live_observed_by(
         &self,
         session_id: &str,
@@ -544,7 +552,7 @@ pub trait ProcessRegistry: Send + Sync {
             .list_observed_by(session_id)
             .await?
             .into_iter()
-            .filter(|record| !record.is_terminal())
+            .filter(|record| !record.status.is_retired())
             .collect())
     }
 
@@ -803,6 +811,24 @@ pub trait ProcessRegistry: Send + Sync {
         process_id: &str,
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError>;
+
+    /// Record that the caller which registered an Externally-Owned row
+    /// departed before any outcome could be written (FIG-1383).
+    ///
+    /// This is the honest closure of the audit-before-side-effect window: the
+    /// row committed, the caller then vanished, and lash cannot observe
+    /// whether the external work it was recording ever happened. Writing
+    /// `Cancelled` or `Failed` here would assert an outcome lash never saw, so
+    /// the row instead moves to the durable, non-terminal
+    /// [`ProcessStatus::CallerDeparted`](super::model::ProcessStatus::CallerDeparted),
+    /// which external reconciliation can
+    /// find, awaits refuse instead of parking on, and retention may reclaim.
+    ///
+    /// Idempotent: a row already in that state is returned unchanged. Refused
+    /// for rows that are not Externally-Owned and for rows that already
+    /// recorded a terminal outcome.
+    async fn record_caller_departure(&self, process_id: &str)
+    -> Result<ProcessRecord, PluginError>;
 
     async fn set_process_wait_with_authority(
         &self,

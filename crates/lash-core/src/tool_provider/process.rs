@@ -167,6 +167,29 @@ impl InternalProcessAdmin<'_> {
             .await
     }
 
+    /// Arm the caller-departure audit for an Externally-Owned row this body
+    /// just registered but has not yet resolved (FIG-1383).
+    ///
+    /// A detached launch registers its durable audit row *before* the host
+    /// side effect, so the row can outlive the caller: cancellation between
+    /// the two drops this body's future while the blocking launch continues.
+    /// Holding the returned value across that window closes it — dropping it
+    /// still armed durably marks the row
+    /// [`ProcessStatus::CallerDeparted`](crate::ProcessStatus::CallerDeparted)
+    /// instead of leaving it forever indistinguishable from a launch still in
+    /// flight. Call [`ExternalLaunchAudit::resolved`] once an outcome has been
+    /// recorded.
+    ///
+    /// This is ADR 0051's protocol and process-engine implementor class.
+    pub fn external_launch_audit(&self, process_id: &str) -> ExternalLaunchAudit {
+        ExternalLaunchAudit {
+            processes: Arc::clone(&self.processes),
+            session_id: self.session_id.clone(),
+            process_id: process_id.to_string(),
+            armed: true,
+        }
+    }
+
     /// Await a process started from this session to its terminal output.
     ///
     /// This is ADR 0051's protocol and process-engine implementor class.
@@ -258,6 +281,64 @@ impl InternalProcessAdmin<'_> {
                 self.process_scope(),
             )
             .await
+    }
+}
+
+/// Armed caller-departure audit for one unresolved Externally-Owned row.
+///
+/// The value is the window itself: it exists from the moment the durable audit
+/// row commits until an outcome is recorded. Dropping it while armed — which
+/// is what cancelling the caller does — reports the departure, because at that
+/// point nobody is left who could ever write the row's outcome and lash may
+/// not invent one.
+///
+/// The report is issued from `Drop`, so it is spawned rather than awaited: the
+/// scope that would have carried it is being torn down. That is also why
+/// [`ProcessService::report_caller_departure`](crate::ProcessService::report_caller_departure)
+/// is controller-free and idempotent.
+///
+/// This is ADR 0051's protocol and process-engine implementor class.
+pub struct ExternalLaunchAudit {
+    processes: Arc<dyn crate::ProcessService>,
+    session_id: String,
+    process_id: String,
+    armed: bool,
+}
+
+impl ExternalLaunchAudit {
+    /// Disarm the audit because the row's outcome has been recorded.
+    pub fn resolved(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ExternalLaunchAudit {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                process_id = %self.process_id,
+                "caller-departure audit dropped outside a runtime; the row stays unresolved",
+            );
+            return;
+        };
+        let processes = Arc::clone(&self.processes);
+        let session_id = std::mem::take(&mut self.session_id);
+        let process_id = std::mem::take(&mut self.process_id);
+        handle.spawn(async move {
+            if let Err(error) = processes
+                .report_caller_departure(&session_id, &process_id)
+                .await
+            {
+                tracing::warn!(
+                    process_id = %process_id,
+                    error = %error,
+                    "failed to record the caller departure of an unresolved external launch",
+                );
+            }
+        });
     }
 }
 

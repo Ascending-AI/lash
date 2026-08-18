@@ -354,17 +354,38 @@ pub fn absent_process_error(
     }
 }
 
-/// The `status` column labels a process row carries while it is still live.
+/// The `status` column labels a process row carries while it is still live —
+/// that is, while lash may still act on it.
 ///
 /// Both registries' retention SQL is written against exactly this set —
 /// `status IN ('running', 'waiting')` selects live rows, `status NOT IN (…)`
-/// selects prune candidates — so every non-terminal
-/// [`ProcessStatus`](crate::ProcessStatus) variant must appear here. The set is
-/// a constant rather than a query fragment on purpose: the registries keep
-/// their literal SQL, and
-/// `non_terminal_status_labels_match_the_process_status_partition` is what fails
-/// if a new variant would silently become prunable.
-pub const NON_TERMINAL_PROCESS_STATUS_LABELS: [&str; 2] = ["running", "waiting"];
+/// selects retention candidates. The set is a constant rather than a query
+/// fragment on purpose: the registries keep their literal SQL, and
+/// `process_status_labels_partition_live_from_retired` is what fails if a new
+/// variant would silently land on the wrong side.
+///
+/// Live is **not** the complement of terminal.
+/// [`ProcessStatus::CallerDeparted`](crate::ProcessStatus::CallerDeparted) is
+/// neither: lash may never act on such a row and may never assert an outcome
+/// for it, so it is excluded here (recovery must not pick it up) and included
+/// in [`RETIRED_PROCESS_STATUS_LABELS`] (retention may reclaim it).
+pub const LIVE_PROCESS_STATUS_LABELS: [&str; 2] = ["running", "waiting"];
+
+/// The `status` column labels retention may reclaim, i.e. the exact complement
+/// of [`LIVE_PROCESS_STATUS_LABELS`] that both registries' prune SQL selects
+/// with `status NOT IN ('running', 'waiting')`.
+///
+/// Reclaiming a row is a retention act, never an outcome claim, which is why
+/// the non-terminal `caller_departed` label belongs here: nothing may ever
+/// honestly terminalize such a row, so excluding it would let a host
+/// accumulate unresolvable rows without bound.
+pub const RETIRED_PROCESS_STATUS_LABELS: [&str; 5] = [
+    "completed",
+    "failed",
+    "cancelled",
+    "abandoned",
+    "caller_departed",
+];
 
 /// Every [`ProcessStatus`] variant, exhaustively, so the retention-label law can
 /// partition the enum instead of a hand-kept sample of it.
@@ -372,7 +393,8 @@ pub const NON_TERMINAL_PROCESS_STATUS_LABELS: [&str; 2] = ["running", "waiting"]
 /// The `match` in this function has no wildcard arm: adding a variant to
 /// `ProcessStatus` stops the crate compiling until the new variant is
 /// classified here, and the law test then decides whether
-/// [`NON_TERMINAL_PROCESS_STATUS_LABELS`] must grow with it.
+/// [`LIVE_PROCESS_STATUS_LABELS`] or [`RETIRED_PROCESS_STATUS_LABELS`] must
+/// grow with it.
 #[cfg(test)]
 fn all_process_statuses() -> Vec<ProcessStatus> {
     let statuses = vec![
@@ -382,6 +404,7 @@ fn all_process_statuses() -> Vec<ProcessStatus> {
         ProcessStatus::Failed,
         ProcessStatus::Cancelled,
         ProcessStatus::Abandoned,
+        ProcessStatus::CallerDeparted,
     ];
     for status in &statuses {
         // Exhaustive, wildcard-free: a new variant fails to compile here.
@@ -391,7 +414,8 @@ fn all_process_statuses() -> Vec<ProcessStatus> {
             | ProcessStatus::Completed
             | ProcessStatus::Failed
             | ProcessStatus::Cancelled
-            | ProcessStatus::Abandoned => {}
+            | ProcessStatus::Abandoned
+            | ProcessStatus::CallerDeparted => {}
         }
     }
     statuses
@@ -1000,39 +1024,58 @@ mod tests {
     }
 
     #[test]
-    fn non_terminal_status_labels_match_the_process_status_partition() {
+    fn process_status_labels_partition_live_from_retired() {
         let statuses = all_process_statuses();
         assert_eq!(
             statuses.len(),
-            6,
+            7,
             "every ProcessStatus variant must be listed for the partition to be a law"
         );
         let live: Vec<&'static str> = statuses
             .iter()
-            .filter(|status| !status.is_terminal())
+            .filter(|status| !status.is_retired())
             .map(ProcessStatus::label)
             .collect();
         assert_eq!(
             live,
-            NON_TERMINAL_PROCESS_STATUS_LABELS.to_vec(),
-            "the registries' retention SQL is written against exactly these labels"
+            LIVE_PROCESS_STATUS_LABELS.to_vec(),
+            "the registries' live SQL is written against exactly these labels"
         );
-        let terminal: Vec<&'static str> = statuses
+        let retired: Vec<&'static str> = statuses
             .iter()
-            .filter(|status| status.is_terminal())
+            .filter(|status| status.is_retired())
             .map(ProcessStatus::label)
             .collect();
-        for label in &terminal {
+        assert_eq!(
+            retired,
+            RETIRED_PROCESS_STATUS_LABELS.to_vec(),
+            "the registries' retention SQL reclaims exactly these labels"
+        );
+        for label in &retired {
             assert!(
-                !NON_TERMINAL_PROCESS_STATUS_LABELS.contains(label),
-                "terminal label `{label}` must not be treated as live"
+                !LIVE_PROCESS_STATUS_LABELS.contains(label),
+                "retired label `{label}` must not be treated as live"
             );
         }
         assert_eq!(
-            live.len() + terminal.len(),
+            live.len() + retired.len(),
             statuses.len(),
             "the partition must be total"
         );
+    }
+
+    #[test]
+    fn caller_departed_is_retired_without_being_terminal() {
+        // The refusal this ticket ratifies, as a law: a caller-departed row is
+        // reclaimable by retention and yet never carries a terminal outcome
+        // claim, because lash cannot observe one.
+        assert!(!ProcessStatus::CallerDeparted.is_terminal());
+        assert!(ProcessStatus::CallerDeparted.is_retired());
+        assert!(
+            RETIRED_PROCESS_STATUS_LABELS.contains(&ProcessStatus::CallerDeparted.label()),
+            "retention must be able to reclaim a row nothing may terminalize"
+        );
+        assert!(!LIVE_PROCESS_STATUS_LABELS.contains(&ProcessStatus::CallerDeparted.label()));
     }
 
     // --- C1 / C2 / C3: wake reconciliation vocabulary ---------------------

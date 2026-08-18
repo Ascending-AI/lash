@@ -105,7 +105,7 @@ fn selected_value_to_await_output(
             }),
             control: None,
         },
-        ProcessStatus::Running | ProcessStatus::Waiting => {
+        ProcessStatus::Running | ProcessStatus::Waiting | ProcessStatus::CallerDeparted => {
             return Err(PluginError::Session(format!(
                 "terminal event semantics used non-terminal status `{}`",
                 status.label()
