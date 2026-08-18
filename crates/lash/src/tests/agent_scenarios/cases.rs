@@ -283,7 +283,7 @@ finish result"#,
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
-        root                     turn_state            stored logical=387B
+        root                     turn_state            stored logical=361B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=346B
         root                     execution_state       stored logical=unknown
@@ -434,7 +434,7 @@ finish result"#,
         root         outcome   turn.final_value        value={"len":2}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=257B
+        root                     turn_state            stored logical=231B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
@@ -495,7 +495,7 @@ finish result"#,
         root         outcome   turn.final_value        value={"parent":"done"}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=257B
+        root                     turn_state            stored logical=231B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
@@ -559,7 +559,7 @@ finish result"#,
         root         exec      cell.failed             calls=0 error="[ERROR] unknown name `task` --> line 1, column 7 await task.fail({ reaso…"
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=257B
+        root                     turn_state            stored logical=231B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=342B
         root                     execution_state       stored logical=unknown
@@ -643,7 +643,7 @@ finish { joined: [left_value, right_value] }"#,
         root         outcome   turn.final_value        value={"joined":["left","right"]}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=257B
+        root                     turn_state            stored logical=231B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown

@@ -104,10 +104,15 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
     // Durable session facts are read as recorded and written set-if-unset
     // (ADR 0066). Absence is a distinct answer from the default: this session
     // never stated a termination, so it reads as `None` rather than `Natural`.
-    use lash::rlm::{RlmSessionConfig, RlmSessionConfigError, RlmSessionExt as _, RlmTermination};
+    use lash::rlm::{
+        RlmSessionConfig, RlmSessionConfigConflict, RlmSessionConfigError, RlmSessionExt as _,
+        RlmTermination,
+    };
 
+    let stated = Some(RlmDialect::Typescript);
+    assert_eq!(typescript.rlm_config().dialect, stated);
+    assert!(RlmSessionConfig::new().is_empty());
     let recorded = typescript.rlm_config();
-    assert_eq!(recorded.dialect, Some(RlmDialect::Typescript));
     assert_eq!(recorded.termination, None);
 
     // `assert` is host code: compare the read against what you require.
@@ -123,20 +128,29 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         )
         .await
         .map_err(|error| anyhow::anyhow!("{error}"))?;
-    assert_eq!(
-        written.termination,
-        Some(RlmTermination::FinishRequired { schema: None })
-    );
+    let term = written.termination;
+    assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));
 
     // Disagreeing with a recorded fact is a typed refusal, never a fallback:
     // the host reads the two values off the error instead of its prose.
     let refused = typescript
         .set_rlm_config_if_unset(RlmSessionConfig::new().dialect(RlmDialect::Lashlang))
         .await;
-    let Err(RlmSessionConfigError::Conflict(conflict)) = refused else {
+    assert!(matches!(refused, Err(RlmSessionConfigError::Conflict(_))));
+    let Err(RlmSessionConfigError::Conflict(conflict)) = &refused else {
         anyhow::bail!("a recorded dialect must refuse a different one");
     };
     assert_eq!(conflict.field(), "dialect");
+    assert!(matches!(conflict, RlmSessionConfigConflict::Dialect { .. }));
+    let RlmSessionConfigConflict::Dialect {
+        recorded,
+        requested,
+    } = conflict
+    else {
+        anyhow::bail!("a refused dialect names the dialect fact it refused");
+    };
+    assert_eq!(*recorded, RlmDialect::Typescript);
+    assert_eq!(*requested, RlmDialect::Lashlang);
     // docs:end:rlm-core
     Ok(())
 }

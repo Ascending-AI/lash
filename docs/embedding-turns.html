@@ -336,13 +336,22 @@ let natural = session
           </div>
           <p>Use <code>require_finish_schema(...)</code> when the final value must match a JSON Schema. Select TypeScript durably at session creation with <code>RlmSessionBuilderExt::rlm_dialect(RlmDialect::Typescript)</code>; omission selects Lashlang. Use <code>RlmSessionBuilderExt::final_answer_format(...)</code> to set the session's normal final-value presentation: root RLM sessions default to Markdown guidance, managed child sessions default to raw finish values, and schema-required turns ignore the presentation preference.</p>
           <pre data-lang="rust" data-snippet="embedding_turns#finish-schema"><code>use lash::rlm::{
-    RlmDialect, RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _,
+    RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat,
+    RlmTurnBuilderExt as _,
 };
 
+// Durable session facts are stated once through the plugin options seam and
+// applied as a guarded set-if-unset write (ADR 0066).
 let session = core
     .session("analysis")
-    .rlm_dialect(RlmDialect::Typescript)?
-    .final_answer_format(RlmFinalAnswerFormat::RawFinalValue)?
+    .plugin_option(
+        RLM_PROTOCOL_PLUGIN_ID,
+        RlmCreateExtras {
+            dialect: Some(RlmDialect::Typescript),
+            final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+            ..RlmCreateExtras::default()
+        },
+    )?
     .open()
     .await?;
 
