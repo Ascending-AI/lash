@@ -694,6 +694,164 @@ async fn a_thread_fork_shares_a_committed_channel_turn_by_provenance() {
 }
 
 #[tokio::test]
+async fn the_child_prompt_names_its_thread_root_among_the_inherited_prefix() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::new([
+        Step::Text("Channel answer.".to_string()),
+        Step::Text("Thread answer.".to_string()),
+    ]);
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let channel = platform.channel("thread-root-recall").await;
+    let ada = platform.identify("ada").await;
+
+    // The root, then unrelated room traffic, then the mention that drains all
+    // three into one committed channel turn. The child forks at that turn's
+    // boundary, so its inherited prefix extends well past the root.
+    let root = platform.say(&channel, &ada, "the root says cobalt").await;
+    platform
+        .say(&channel, &ada, "someone else says cedar")
+        .await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None).await.expect("fold room traffic");
+    }
+    platform
+        .say(
+            &channel,
+            &ada,
+            &format!("{} recall the room", platform.mention()),
+        )
+        .await;
+    let channel_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(channel_mention, None)
+        .await
+        .expect("commit channel turn");
+
+    platform
+        .say_thread(
+            &channel,
+            &ada,
+            root,
+            &format!("{} what did the root say?", platform.mention()),
+        )
+        .await;
+    let thread_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(thread_mention, None)
+        .await
+        .expect("run forked thread turn");
+
+    let requests = script.requests();
+    assert_eq!(requests.len(), 2);
+    // Inheritance alone is not the property: all three channel lines are in the
+    // prefix. The child must be told which one the thread hangs from.
+    assert!(
+        requests[1].contains("the root says cobalt")
+            && requests[1].contains("someone else says cedar")
+            && requests[1].contains("recall the room"),
+        "the child inherits the committed channel turn: {}",
+        requests[1]
+    );
+    let seed = format!(
+        "{}ada: the root says cobalt",
+        crate::bot::threads::THREAD_ROOT_SEED_PREFIX
+    );
+    assert!(
+        requests[1].contains(&seed),
+        "the host must seed the thread root so the child can tell it apart: {}",
+        requests[1]
+    );
+    assert!(
+        !requests[1].contains(&format!(
+            "{}ada: someone else says cedar",
+            crate::bot::threads::THREAD_ROOT_SEED_PREFIX
+        )),
+        "only the root is seeded: {}",
+        requests[1]
+    );
+    assert!(
+        label_always_starts_a_line(&requests[1], crate::bot::threads::THREAD_ROOT_SEED_PREFIX),
+        "the seed label must start its own line: {}",
+        requests[1]
+    );
+}
+
+/// Whether every occurrence of `label` in the request's text starts a line.
+///
+/// Queued text inputs concatenate into one user message with no separator, so a
+/// label is only readable as a label when nothing precedes it on its line. The
+/// request is inspected as JSON because that is how the scripted provider
+/// records it — searching the encoded string would compare against `\n` escapes.
+fn label_always_starts_a_line(request: &str, label: &str) -> bool {
+    let mut stack = vec![serde_json::from_str::<serde_json::Value>(request).expect("request json")];
+    let mut seen = false;
+    let mut all_at_line_start = true;
+    while let Some(node) = stack.pop() {
+        match node {
+            serde_json::Value::String(text) => {
+                for (index, _) in text.match_indices(label) {
+                    seen = true;
+                    all_at_line_start &= index == 0 || text.as_bytes()[index - 1] == b'\n';
+                }
+            }
+            serde_json::Value::Array(items) => stack.extend(items),
+            serde_json::Value::Object(fields) => stack.extend(fields.into_values()),
+            _ => {}
+        }
+    }
+    seen && all_at_line_start
+}
+
+#[tokio::test]
+async fn the_seeded_root_label_starts_its_line_behind_copied_queued_context() {
+    let scratch = scratch();
+    let platform = TestPlatform::start(scratch.path()).await;
+    let script = Script::prose("Thread answer.");
+    let bot = start_bot(&platform, &bot_dir(scratch.path()), &script).await;
+    let channel = platform.channel("thread-queued-root-label").await;
+    let ada = platform.identify("ada").await;
+    let grace = platform.identify("grace").await;
+
+    // Nothing drains the channel, so both lines are still queued when the thread
+    // forks: the earlier line is copied into the child verbatim and the root
+    // follows it as the labelled seed, with no separator of Lash's making.
+    platform
+        .say(&channel, &ada, "the earlier line mentions basalt")
+        .await;
+    let root = platform
+        .say(&channel, &ada, "the deploy target is EU west")
+        .await;
+    for envelope in platform.drain_envelopes().await {
+        bot.ingest(envelope, None).await.expect("fold room traffic");
+    }
+
+    platform
+        .say_thread(
+            &channel,
+            &grace,
+            root,
+            &format!("{} where are we deploying?", platform.mention()),
+        )
+        .await;
+    let thread_mention = only_event(&platform.drain_envelopes().await, "app_mention");
+    bot.ingest(thread_mention, None)
+        .await
+        .expect("run forked thread turn");
+
+    let requests = script.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0].contains("the earlier line mentions basalt"),
+        "the copied queued context precedes the seed: {}",
+        requests[0]
+    );
+    assert!(
+        label_always_starts_a_line(&requests[0], crate::bot::threads::THREAD_ROOT_SEED_PREFIX),
+        "the seed label must not run out of the line copied ahead of it: {}",
+        requests[0]
+    );
+}
+
+#[tokio::test]
 async fn recovery_records_the_applied_turns_boundary_after_a_later_turn_commits() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;

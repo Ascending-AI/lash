@@ -31,6 +31,7 @@ checkpoint.
 | Bot phases 0-2 | Boot/identity/silence and two ambient admissions, with no turn |
 | Bot phase 3 | One mention, folded context, dropped twin, one native `list_channels` tool and one reply |
 | Bot phase 3T | Retained thread fork, inherited root, both-direction post-fork isolation, two thread replies |
+| Bot phase 3T root recall | The child's first answer names the thread root and not the later room mention; the child's first provider request carries the host's thread-root seed exactly once, on a line of its own — queued text inputs concatenate with no separator, so a seed behind copied pre-root context would start mid-line and stop being a label. Inheritance is read from the fork lineage's ancestor chain, never from the child's own graph rows — `fork_at` writes no nodes into the child, so an isolation gate written against those rows passes vacuously |
 | Bot phase 4 | Exact event-envelope redelivery, durable delivery increment, no new turn or reply |
 | Bot phase 5 | Provider-entry/accepted-stage kill, durable claim evidence, real live-lease deferral, timed reclaim/retry, one recovered reply, live DOM mutation history |
 | Bot phase 5T | **NONE** — the deterministic suite proves the same kill/recovery machinery on the channel route; child-route mid-turn recovery remains judged/manual and has focused Rust coverage |

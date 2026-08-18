@@ -103,12 +103,24 @@ impl State {
             return text("The thread still remembers FIG1341-AMBIENT-ONE and remains isolated.");
         }
         if marker == Some("FIG1341-THREAD-ONE") {
-            return text("The thread inherited FIG1341-AMBIENT-ONE from its channel root.");
+            // Root recall is answered from the host's seed, never from a canned
+            // string: a scripted answer that names the root without reading it
+            // would pass the gate on a child that was never told its root.
+            return match thread_root_seed(request) {
+                Some(root) => text(&format!("The thread root said: {root}")),
+                None => text("I cannot tell which message this thread started from."),
+            };
         }
         if marker == Some("FIG1341-ROOM-MENTION") {
             return match self.next("room") {
                 0 => tool("list_channels", json!({})),
-                _ => text("Ada's ambient facts are retained, and #general exists."),
+                // Quoting the recalled facts back is what a real model does with
+                // this prompt, and the driver must survive a channel reply that
+                // carries the same markers as the human messages it recalls.
+                _ => text(
+                    "Ada's ambient facts are retained — FIG1341-AMBIENT-ONE says cobalt and \
+                     FIG1341-AMBIENT-TWO says cedar — and #general exists.",
+                ),
             };
         }
         text("Deterministic slack-clone E2E reply.")
@@ -121,6 +133,35 @@ impl State {
         *call += 1;
         current
     }
+}
+
+/// The thread root the host seeded into this child, if it seeded one.
+///
+/// The seed is one labelled line inside an ordinary user message, so the read is
+/// prefix-then-line: queued admissions concatenate, and everything after the
+/// label's own line belongs to the next admission.
+fn thread_root_seed(request: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(request).ok()?;
+    value
+        .get("messages")?
+        .as_array()?
+        .iter()
+        .filter_map(|message| message.get("blocks").and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(|block| {
+            block
+                .pointer("/Text/text")
+                .or_else(|| block.get("text"))
+                .and_then(serde_json::Value::as_str)
+        })
+        // The label is only a label if it starts its own line: queued text inputs
+        // concatenate with no separator, so a seed that lands mid-line reads as
+        // the tail of whatever was copied ahead of it. Only line-leading labels
+        // count, which is what makes this answer evidence rather than decoration.
+        .flat_map(str::lines)
+        .filter_map(|line| line.strip_prefix(super::threads::THREAD_ROOT_SEED_PREFIX))
+        .map(|root| root.trim().to_string())
+        .find(|root| !root.is_empty())
 }
 
 fn latest_journey_marker(request: &str) -> Option<&'static str> {
