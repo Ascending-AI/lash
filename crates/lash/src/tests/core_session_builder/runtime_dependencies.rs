@@ -250,8 +250,13 @@ struct NoopProcessRunHandle;
 
 #[async_trait]
 impl lash_core::facade_support::ProcessRunHandle for NoopProcessRunHandle {
-    async fn claim_and_run_pending(&self) -> std::result::Result<(), lash_core::PluginError> {
-        Ok(())
+    async fn claim_and_run_pending(
+        &self,
+    ) -> std::result::Result<
+        lash_core::facade_support::ProcessAdmissionReport,
+        lash_core::PluginError,
+    > {
+        Ok(lash_core::facade_support::ProcessAdmissionReport::default())
     }
 }
 

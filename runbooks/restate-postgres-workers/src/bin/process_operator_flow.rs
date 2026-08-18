@@ -108,10 +108,37 @@ async fn register_started(
     Ok(())
 }
 
+/// Records every [`ProcessWorkerFault`] the sweep reports.
+///
+/// A drive admits rows and returns; a claim, read, terminal write, or lease
+/// release that fails afterwards has no other way back to this runbook. The
+/// judged scenarios assert the recorded list is empty, so a fault can never
+/// hide behind a clean-looking drive.
+#[derive(Clone, Default)]
+struct RecordingWorkerFaultSink {
+    faults: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl lash::process::ProcessEventSink for RecordingWorkerFaultSink {
+    async fn emit(&self, _event: &lash::process::ProcessEvent) {}
+
+    async fn emit_worker_fault(&self, fault: &lash::process::ProcessWorkerFault) {
+        self.faults.lock_recover().push(format!("{fault:?}"));
+    }
+}
+
+impl RecordingWorkerFaultSink {
+    fn recorded(&self) -> Vec<String> {
+        self.faults.lock_recover().clone()
+    }
+}
+
 fn process_worker(
     storage: &PostgresStorage,
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
+    fault_sink: &RecordingWorkerFaultSink,
 ) -> lash::durability::DurableProcessWorker {
     let config = lash::durability::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
@@ -123,7 +150,8 @@ fn process_worker(
         registry,
         lease_owner,
     )
-    .with_trigger_store(Arc::new(storage.trigger_store()));
+    .with_trigger_store(Arc::new(storage.trigger_store()))
+    .with_process_event_sink(Arc::new(fault_sink.clone()));
     lash::durability::DurableProcessWorker::new(config)
 }
 
@@ -662,7 +690,13 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
 
     // The process worker's run tasks are represented by released leases here;
     // now the worker executes its documented terminal-writing shutdown lever.
-    let worker = process_worker(storage, Arc::clone(&registry), drain_owner.clone());
+    let fault_sink = RecordingWorkerFaultSink::default();
+    let worker = process_worker(
+        storage,
+        Arc::clone(&registry),
+        drain_owner.clone(),
+        &fault_sink,
+    );
     let waiter_core = core.clone();
     let waiter = tokio::spawn(async move { waiter_core.processes().await_output(MINE).await });
     let report = worker.drain_owner_bound_work().await?;
@@ -694,9 +728,15 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     core.flush_trace_sink().context("flush trace sink")?;
     let records = records_json(&registry).await?;
     assert_drain_records(&records)?;
+    let drain_faults = fault_sink.recorded();
+    ensure!(
+        drain_faults.is_empty(),
+        "drain reported worker faults: {drain_faults:?}"
+    );
 
     emit(json!({
         "checkpoint": "graceful_drain_observed",
+        "drain_worker_faults": drain_faults.len(),
         "ingress_accepting": ingress_accepting.load(Ordering::SeqCst),
         "new_turn_admitted": new_turn_admitted,
         "provider_calls": provider.calls.load(Ordering::SeqCst),
@@ -904,8 +944,9 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "lease lapse terminalized the row before the sweep"
     );
 
-    let worker = process_worker(storage, Arc::clone(&registry), sweep_owner);
-    worker.drive_pending_processes().await?;
+    let fault_sink = RecordingWorkerFaultSink::default();
+    let worker = process_worker(storage, Arc::clone(&registry), sweep_owner, &fault_sink);
+    let admission = worker.drive_pending_processes().await?;
     let terminal = loop {
         let observed = core
             .processes()
@@ -956,9 +997,16 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         }),
         "observer did not see the reconciled terminal"
     );
+    let sweep_faults = fault_sink.recorded();
+    ensure!(
+        sweep_faults.is_empty(),
+        "sweep reported worker faults: {sweep_faults:?}"
+    );
 
     emit(json!({
         "checkpoint": "abandon_request_reconciled",
+        "sweep_admitted": admission.admitted.len(),
+        "sweep_worker_faults": sweep_faults.len(),
         "process_id": REQUEST_PROCESS_ID,
         "lapsed_before_sweep_status": format!("{:?}", lapsed_observation.lifecycle),
         "lapsed_before_sweep_terminal": lapsed_observation.terminal,

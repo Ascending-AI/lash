@@ -15,10 +15,13 @@ use std::time::Duration;
 use lash_core::{
     AbandonEvidence, AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope,
     PluginError, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionContext,
-    ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, RecoveryDisposition,
-    Resolution, RuntimeError, ScopedEffectController, facade_support::DurableProcessWorker,
-    facade_support::ProcessAttach, facade_support::ProcessEventSink,
-    facade_support::ProcessRunHandle, facade_support::ProcessWorkDriver,
+    ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
+    RecoveryDisposition, Resolution, RuntimeError, ScopedEffectController,
+    facade_support::DurableProcessWorker, facade_support::ProcessAdmissionDeferred,
+    facade_support::ProcessAdmissionReport, facade_support::ProcessAttach,
+    facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptDisposition,
+    facade_support::ProcessRecoveryOperation, facade_support::ProcessRunHandle,
+    facade_support::ProcessWorkDriver, facade_support::ProcessWorkerFault,
     facade_support::watch_process_registry_with_sink,
 };
 use restate_sdk::context::ContextPromises;
@@ -309,6 +312,7 @@ pub struct RestateProcessIngressRunner {
     ingress: RestateIngressClient,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    event_sink: Option<Arc<dyn ProcessEventSink>>,
 }
 
 impl RestateProcessIngressRunner {
@@ -323,10 +327,54 @@ impl RestateProcessIngressRunner {
             ingress: RestateIngressClient::new(connection),
             registry,
             continuations,
+            event_sink: None,
         }
     }
 
-    async fn submit_record(&self, record: ProcessRecord) -> Result<(), PluginError> {
+    /// Report this handle's worker faults to `sink`.
+    ///
+    /// `RestateProcessDeployment::new_with_sink` installs the host's sink here,
+    /// because a per-row deferral only reaches a host that reads the report —
+    /// and every in-tree caller of `claim_and_run_pending` discards it. The
+    /// fault surface is the path that does not depend on anyone reading a
+    /// return value.
+    pub(crate) fn with_event_sink(mut self, sink: Option<Arc<dyn ProcessEventSink>>) -> Self {
+        self.event_sink = sink;
+        self
+    }
+
+    /// Push one worker fault to the host-facing sink, or to `tracing` when this
+    /// handle has none — the same floor the inline worker keeps.
+    async fn emit_worker_fault(
+        &self,
+        process_id: &str,
+        operation: ProcessRecoveryOperation,
+        error: &PluginError,
+    ) {
+        let fault = ProcessWorkerFault::RecoveryBackendError {
+            process_id: process_id.to_string(),
+            operation,
+            error: error.to_string(),
+        };
+        let Some(sink) = self.event_sink.as_ref() else {
+            tracing::error!(
+                target: "lash_restate::process",
+                event = "process_worker.fault",
+                fault = "recovery_backend_error",
+                process_id = %process_id,
+                operation = operation.label(),
+                error = %error,
+                "restate ingress sweep fault (no process event sink wired)"
+            );
+            return;
+        };
+        sink.emit_worker_fault(&fault).await;
+    }
+
+    async fn submit_record(
+        &self,
+        record: ProcessRecord,
+    ) -> Result<IngressSubmitOutcome, PluginError> {
         let process_id = record.id.clone();
         // ExternallyOwned rows are never executed by Lash (ADR 0019). Defensively
         // refuse to POST a run for one even when reached directly, so both the
@@ -334,17 +382,17 @@ impl RestateProcessIngressRunner {
         // external actor calling `complete_process` or a reconciled Abandon
         // Request (see `claim_and_run_pending`).
         if record.disposition == RecoveryDisposition::ExternallyOwned {
-            return Ok(());
+            return Ok(IngressSubmitOutcome::ExternallyOwned);
         }
         // The record may have reached a terminal state between the list and the submit.
         // Idempotent by process_id: never re-submit a finished process.
-        if self
+        if let Some(current) = self
             .registry
             .get_process(&process_id)
             .await?
-            .is_some_and(|current| current.is_terminal())
+            .filter(|current| current.is_terminal())
         {
-            return Ok(());
+            return Ok(IngressSubmitOutcome::SettledByPeer(current.status));
         }
         let latest_handover = self
             .continuations
@@ -402,7 +450,7 @@ impl RestateProcessIngressRunner {
                 },
             )
             .await
-            .map(|_| ())
+            .map(|_| IngressSubmitOutcome::Submitted)
     }
 
     /// Reconcile a pending Abandon Request on an externally-owned row into an
@@ -447,14 +495,32 @@ impl RestateProcessIngressRunner {
 
 #[async_trait::async_trait]
 impl ProcessRunHandle for RestateProcessIngressRunner {
-    async fn claim_and_run_pending(&self) -> Result<(), PluginError> {
+    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
+        let mut report = ProcessAdmissionReport::default();
         let limit = std::num::NonZeroUsize::MIN.saturating_add(255);
         let mut continuation = None;
         loop {
-            let page = self
+            let page = match self
                 .registry
                 .list_non_terminal_page(limit, continuation)
-                .await?;
+                .await
+            {
+                Ok(page) => page,
+                Err(error) => {
+                    // The only remaining escape: a page read that fails after
+                    // earlier pages already admitted rows. `ProcessRunHandle`
+                    // documents that an `Err` may follow partial admission;
+                    // name the admitted ids so they are not silently lost.
+                    if !report.admitted.is_empty() {
+                        tracing::error!(
+                            admitted = report.admitted.len(),
+                            error = %error,
+                            "restate process worklist scan failed after partial admission"
+                        );
+                    }
+                    return Err(error);
+                }
+            };
             let next = page.continuation;
             for record in page.records {
                 // ExternallyOwned rows are never submitted to ingress (ADR 0019):
@@ -464,20 +530,93 @@ impl ProcessRunHandle for RestateProcessIngressRunner {
                 // `reconcile_externally_owned_abandon`; rows without a request are
                 // left untouched for their external owner to complete.
                 if record.disposition == RecoveryDisposition::ExternallyOwned {
-                    if record.abandon_request.is_some() {
-                        self.reconcile_externally_owned_abandon(&record.id).await?;
+                    let process_id = record.id.clone();
+                    if record.abandon_request.is_some()
+                        && let Err(error) =
+                            self.reconcile_externally_owned_abandon(&process_id).await
+                    {
+                        // A failed reconcile is this row's outcome, not the
+                        // whole pass's: rows already submitted to the ingress
+                        // stay in the report instead of being discarded by `?`.
+                        report.deferred.push(ProcessAdmissionDeferred {
+                            process_id: process_id.clone(),
+                            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                                operation: ProcessRecoveryOperation::WriteTerminal,
+                                error: error.to_string(),
+                            },
+                        });
+                        self.emit_worker_fault(
+                            &process_id,
+                            ProcessRecoveryOperation::WriteTerminal,
+                            &error,
+                        )
+                        .await;
+                        continue;
                     }
+                    // Lash never executes an externally-owned row on any tier;
+                    // the inline worker reports the same typed deferral.
+                    report.deferred.push(ProcessAdmissionDeferred {
+                        process_id,
+                        disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+                    });
                     continue;
                 }
-                self.submit_record(record).await?;
+                let process_id = record.id.clone();
+                match self.submit_record(record).await {
+                    Ok(IngressSubmitOutcome::Submitted) => report.admitted.push(process_id),
+                    Ok(IngressSubmitOutcome::ExternallyOwned) => {
+                        report.deferred.push(ProcessAdmissionDeferred {
+                            process_id,
+                            disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+                        });
+                    }
+                    Ok(IngressSubmitOutcome::SettledByPeer(terminal_status)) => {
+                        report.deferred.push(ProcessAdmissionDeferred {
+                            process_id,
+                            disposition: ProcessRecoveryAttemptDisposition::SettledByPeer {
+                                terminal_status,
+                            },
+                        });
+                    }
+                    Err(error) => {
+                        // Per-row submit failure is a per-row deferral. Failing
+                        // the whole call here would throw away the ids that
+                        // already reached the ingress in this same pass.
+                        report.deferred.push(ProcessAdmissionDeferred {
+                            process_id: process_id.clone(),
+                            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                                operation: ProcessRecoveryOperation::SubmitRun,
+                                error: error.to_string(),
+                            },
+                        });
+                        // The deferral only reaches a host that reads the
+                        // report; the fault surface reaches one that does not.
+                        self.emit_worker_fault(
+                            &process_id,
+                            ProcessRecoveryOperation::SubmitRun,
+                            &error,
+                        )
+                        .await;
+                    }
+                }
             }
             let Some(next) = next else {
                 break;
             };
             continuation = Some(next);
         }
-        Ok(())
+        Ok(report)
     }
+}
+
+/// What one ingress submit attempt did with a row.
+enum IngressSubmitOutcome {
+    /// The row's workflow run was submitted to the ingress.
+    Submitted,
+    /// Lash never executes the row (externally owned); nothing was submitted.
+    ExternallyOwned,
+    /// The row was already terminal when re-read just before submitting.
+    SettledByPeer(ProcessStatus),
 }
 
 #[async_trait::async_trait]
@@ -545,12 +684,16 @@ impl RestateProcessDeployment {
         sink: Option<Arc<dyn ProcessEventSink>>,
     ) -> Self {
         let connection = connection.into();
+        let fault_sink = sink.clone();
         let (registry, hub) = watch_process_registry_with_sink(registry, sink);
-        let ingress_runner = Arc::new(RestateProcessIngressRunner::new(
-            connection.clone(),
-            Arc::clone(&registry),
-            Arc::clone(&continuations),
-        ));
+        let ingress_runner = Arc::new(
+            RestateProcessIngressRunner::new(
+                connection.clone(),
+                Arc::clone(&registry),
+                Arc::clone(&continuations),
+            )
+            .with_event_sink(fault_sink),
+        );
         let run_handle: Arc<dyn ProcessRunHandle> = ingress_runner.clone();
         let attach: Arc<dyn ProcessAttach> = ingress_runner;
         let driver = ProcessWorkDriver::from_watched(registry, hub, run_handle).with_attach(attach);

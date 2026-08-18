@@ -8,12 +8,14 @@ use lash_core::runtime::{
 };
 use std::collections::HashSet;
 
+mod advanced_builder;
 mod drain;
 mod queued_work;
 mod runtime_host_config;
 mod session_policy;
 mod worker_capacity;
 
+pub use advanced_builder::AdvancedLashCoreBuilder;
 pub use drain::DeploymentDrainStatus;
 use queued_work::{InlineQueuedWorkRunConfig, InlineQueuedWorkRunHandle};
 #[derive(Clone)]
@@ -34,6 +36,10 @@ pub struct LashCore {
     pub(crate) worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     /// Shared across core clones so inline drivers are constructed at most once.
     pub(crate) work_driver: Arc<InlineWorkDriverSlot>,
+    /// Host-facing process event sink, retained so a worker config built from
+    /// this core reports its worker faults to the same sink the registry
+    /// decorator emits events on.
+    pub(crate) process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     /// Store-less session ids rejected for reuse by this core.
     pub(crate) ephemeral_session_ids: Arc<std::sync::Mutex<HashSet<String>>>,
     pub(crate) tool_intent_submission_gates:
@@ -897,6 +903,9 @@ impl LashCore {
         if let Some(trigger_store) = self.env.trigger_store.as_ref() {
             config = config.with_trigger_store(Arc::clone(trigger_store));
         }
+        if let Some(sink) = self.process_event_sink.as_ref() {
+            config = config.with_process_event_sink(Arc::clone(sink));
+        }
         if let Some(driver) = self.work_driver.configured_process_work_driver() {
             config = config
                 .with_change_hub(driver.change_hub())
@@ -1225,11 +1234,12 @@ impl LashCoreBuilder {
         let policy = self.session_spec.resolve_against(&base_policy);
 
         let mut core = self.resolve_runtime_host_config()?;
+        let process_event_sink = self.process_event_sink.clone();
         let process_work_source = self
             .process_work_source
             .clone()
             .with_runtime_clock(Arc::clone(&core.clock))
-            .watched(self.process_event_sink.clone());
+            .watched(process_event_sink.clone());
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
                 Arc::new(facade_support::SingleProviderResolver::new(provider));
@@ -1285,6 +1295,7 @@ impl LashCoreBuilder {
             process_execution_concurrency,
             worker_slot_supplier.clone(),
             session_execution_owner.clone(),
+            process_event_sink.clone(),
         )?;
 
         let live_replay_clock = Arc::clone(&core.clock);
@@ -1362,6 +1373,7 @@ impl LashCoreBuilder {
             process_execution_concurrency,
             worker_slot_supplier,
             work_driver: Arc::new(InlineWorkDriverSlot::new(work_driver)),
+            process_event_sink,
             ephemeral_session_ids: Arc::new(std::sync::Mutex::new(HashSet::new())),
             tool_intent_submission_gates: Default::default(),
         })
@@ -1389,6 +1401,7 @@ impl LashCoreBuilder {
         process_execution_concurrency: usize,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
+        process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     ) -> Result<ProcessWorkDriverSetup> {
         let (process_registry, process_change_hub) = match process_work_source {
             ProcessWorkSource::None => return Ok(ProcessWorkDriverSetup::None),
@@ -1432,6 +1445,10 @@ impl LashCoreBuilder {
         }
         if let Some(hub) = process_change_hub {
             config = config.with_change_hub(hub);
+        }
+        // The drive is admission-only, so worker faults have no other way home.
+        if let Some(sink) = process_event_sink {
+            config = config.with_process_event_sink(sink);
         }
         let config = Box::new(config);
         Ok(ProcessWorkDriverSetup::LazyDefault { config })
@@ -1497,9 +1514,19 @@ impl LashCoreBuilder {
     /// log. Observe completion via the await seam even though the terminal
     /// append is also emitted. See [`ProcessEventSink`] for the full contract.
     ///
-    /// Applies to the inline registry path ([`Self::process_registry`]); a host
-    /// that supplies its own [`ProcessWorkDriver`](facade_support::ProcessWorkDriver)
-    /// installs the sink through the driver's constructor instead.
+    /// Event emission applies to the inline registry path
+    /// ([`Self::process_registry`]); a host that supplies its own
+    /// [`ProcessWorkDriver`](facade_support::ProcessWorkDriver) installs the
+    /// sink through the driver's constructor for those.
+    ///
+    /// Worker faults are not registry events and do not follow that split: the
+    /// durable process worker this core configures reports every
+    /// [`ProcessWorkerFault`](facade_support::ProcessWorkerFault) to the sink
+    /// installed here, whichever registry path the host chose. A host that
+    /// drives pending processes wants this installed, because the drive is an
+    /// admission call and a fault after admission has no other way home.
+    ///
+    /// [`ProcessWorkerFault`]: facade_support::ProcessWorkerFault
     ///
     /// [`ProcessEventSink`]: facade_support::ProcessEventSink
     pub fn process_event_sink(mut self, sink: Arc<dyn facade_support::ProcessEventSink>) -> Self {
@@ -1554,25 +1581,5 @@ pub(crate) fn build_plugin_host(
 impl PromptLayerSink for LashCoreBuilder {
     fn prompt_layer_mut(&mut self) -> &mut PromptLayer {
         self.prompt.get_or_insert_with(PromptLayer::new)
-    }
-}
-
-pub struct AdvancedLashCoreBuilder {
-    builder: LashCoreBuilder,
-}
-
-impl AdvancedLashCoreBuilder {
-    pub fn runtime_host_config(mut self, core: facade_support::RuntimeHostConfig) -> Self {
-        self.builder.runtime_host_config = Some(core);
-        self
-    }
-
-    pub fn plugin_host(mut self, plugin_host: PluginHost) -> Self {
-        self.builder.plugin_host = Some(plugin_host);
-        self
-    }
-
-    pub fn build(self, session_execution_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
-        self.builder.build(session_execution_owner)
     }
 }

@@ -25,8 +25,8 @@ use crate::trace::value_digest;
 mod process_lifecycle;
 
 use process_lifecycle::{
-    LifecycleSuccessEngine, lifecycle_process_fact, lifecycle_worker, record_lifecycle_started,
-    register_lifecycle_row, register_rerunnable_lifecycle_row,
+    LifecycleSuccessEngine, RecordingWorkerFaultSink, lifecycle_process_fact, lifecycle_worker,
+    record_lifecycle_started, register_lifecycle_row, register_rerunnable_lifecycle_row,
 };
 
 const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
@@ -967,13 +967,15 @@ impl RuntimeBoundaryHarness {
             })?;
 
         // (c): the disposition-driven recovery sweep.
+        let fault_sink = RecordingWorkerFaultSink::default();
         let worker = lifecycle_worker(
             Arc::clone(&registry),
             sweep_owner.clone(),
             runtime_host,
             policy,
+            &fault_sink,
         );
-        worker.drive_pending_processes().await.map_err(|err| {
+        let _ = worker.drive_pending_processes().await.map_err(|err| {
             RuntimeBoundaryError::new(format!("recovery sweep dispatch failed: {err}"))
         })?;
         let awaiter = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry));
@@ -1006,11 +1008,22 @@ impl RuntimeBoundaryHarness {
         )
         .await?;
 
+        // The sweep admits and returns; a fault after that return is the only
+        // thing that could leave these verdicts describing work that never
+        // happened. Recording zero of them is part of the observation.
+        let sweep_faults = fault_sink.recorded();
+        if !sweep_faults.is_empty() {
+            return Err(RuntimeBoundaryError::new(format!(
+                "recovery sweep reported worker faults: {sweep_faults:?}"
+            )));
+        }
+
         Ok(json!({
             "session": session,
             "process_lifecycle": true,
             "runtime_process_lifecycle": {
                 "sweep_driven": true,
+                "sweep_worker_faults": sweep_faults.len(),
                 "processes": [ob_crashed, rerun_crashed, ob_abandon_req],
             },
         }))

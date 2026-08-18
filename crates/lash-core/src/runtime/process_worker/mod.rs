@@ -16,6 +16,7 @@ mod parent_end;
 mod permit;
 mod recovery;
 mod registration;
+mod worklist;
 
 #[cfg(test)]
 use permit::{PROCESS_EXECUTION_PERMIT, ProcessExecutionPermit};
@@ -25,9 +26,12 @@ pub(crate) use permit::{
 };
 pub(super) use permit::{scope_process_execution_permit, scope_queued_work_execution_permit};
 
+use self::recovery::ProcessRecoveryOutcome;
+
 pub use self::recovery::{
-    ProcessDrainDeferred, ProcessDrainReport, ProcessRecoveryAttemptDisposition,
-    ProcessRecoveryOperation,
+    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
+    ProcessDrainReport, ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
+    ProcessWorkerFault,
 };
 
 use super::effect::ProcessRunner;
@@ -93,6 +97,12 @@ pub struct DurableProcessWorkerConfig {
     pub session_store_factory: Arc<dyn SessionStoreFactory>,
     pub process_registry: Arc<dyn ProcessRegistry>,
     pub process_change_hub: Option<crate::ProcessChangeHub>,
+    /// Host-facing sink this worker reports [`ProcessWorkerFault`]s on.
+    ///
+    /// Wire the same sink the registry decorator was built with: a drive
+    /// admits rows and returns, so the faults that strand an admitted row
+    /// afterwards have no other honest way back to the host.
+    pub process_event_sink: Option<Arc<dyn crate::ProcessEventSink>>,
     pub trigger_store: Arc<dyn crate::TriggerStore>,
     pub process_work_driver: Option<ProcessWorkDriver>,
     pub queued_work_driver: Option<QueuedWorkDriver>,
@@ -136,6 +146,7 @@ impl DurableProcessWorkerConfig {
             session_store_factory,
             process_registry,
             process_change_hub: None,
+            process_event_sink: None,
             trigger_store: Arc::new(crate::InMemoryTriggerStore::with_clock(clock)),
             process_work_driver: None,
             queued_work_driver: None,
@@ -189,6 +200,12 @@ impl DurableProcessWorkerConfig {
 
     pub fn with_change_hub(mut self, hub: crate::ProcessChangeHub) -> Self {
         self.process_change_hub = Some(hub);
+        self
+    }
+
+    /// Report this worker's [`ProcessWorkerFault`]s to `sink`.
+    pub fn with_process_event_sink(mut self, sink: Arc<dyn crate::ProcessEventSink>) -> Self {
+        self.process_event_sink = Some(sink);
         self
     }
 
@@ -275,7 +292,6 @@ struct ProcessExecutionSchedulerState {
     dispatcher_running: bool,
     worklist_scan: ProcessWorklistScan,
     rescan_requested: bool,
-    scan_incomplete: Option<PluginError>,
 }
 
 #[derive(Default)]
@@ -596,8 +612,28 @@ impl DurableProcessWorker {
             .map_err(crate::ProcessInfraError::into_plugin_error)
     }
 
-    /// Page through non-terminal processes as execution capacity frees and run
-    /// the claimable rows inline, driving each to a terminal state.
+    /// Admit claimable non-terminal processes to this worker's execution
+    /// scheduler and return what this call admitted.
+    ///
+    /// **This is an admission call, not a completion call.** It reads one intake
+    /// page, hands those rows to the worker-scoped dispatcher, and returns; the
+    /// dispatcher claims, runs, terminalizes, and pages onward in the
+    /// background. A returned [`ProcessAdmissionReport`] therefore says which
+    /// rows *entered* execution, never that any of them finished. Faults that
+    /// strand an admitted row afterwards — a failed claim, read, terminal write,
+    /// lease release, or runtime rebuild — and a worklist scan that stopped
+    /// short are reported as [`ProcessWorkerFault`]s on the wired
+    /// [`ProcessEventSink`](crate::runtime::ProcessEventSink); `Err` is reserved
+    /// for this call's own failures (its parent-end pass, its trigger-delivery
+    /// reconcile, or its own intake read).
+    ///
+    /// Waiting for a terminal outcome is the engine seam's job, not this one:
+    /// use [`ProcessWorkDriver::await_terminal`](crate::ProcessWorkDriver::await_terminal).
+    ///
+    /// The report covers the rows this call took intake responsibility for: its
+    /// own page. When a scan is already in flight this call records a rescan for
+    /// it and reports nothing, and the continuation pages of a pass are admitted
+    /// by the dispatcher after the starting call has returned.
     ///
     /// This is the sole inline executor for every process start: live tool and
     /// subagent starts, trigger deliveries, admin starts, session-open passes,
@@ -621,9 +657,13 @@ impl DurableProcessWorker {
     /// and a process that became terminal between the list and the claim is
     /// detected after claiming and skipped, so re-running a recovery sweep does
     /// not double-execute completed work.
-    pub async fn drive_pending_processes(&self) -> Result<(), PluginError> {
+    pub async fn drive_pending_processes(&self) -> Result<ProcessAdmissionReport, PluginError> {
         self.drive_pending_parent_end_actions().await?;
-        self.reconcile_trigger_deliveries().await?;
+        // Trigger-delivery reconcile can re-enter the work driver, and rows it
+        // admits are this call's admissions. Absorbing its report keeps the
+        // outer call from reporting its own just-admitted rows as somebody
+        // else's `Busy` when the scan below sees them already scheduled.
+        let nested = self.reconcile_trigger_deliveries().await?;
         let available = std::num::NonZeroUsize::new(
             self.execution_scheduler
                 .slots
@@ -631,7 +671,7 @@ impl DurableProcessWorker {
                 .clamp(1, MAX_INTAKE_PAGE),
         )
         .expect("the clamped intake page bound is non-zero");
-        let (fetch_initial_page, should_start_dispatcher, scan_incomplete) = {
+        let (fetch_initial_page, should_start_dispatcher) = {
             let mut state = self.execution_scheduler.state.lock_recover();
             let fetch_initial_page = if matches!(state.worklist_scan, ProcessWorklistScan::Idle) {
                 state.worklist_scan = ProcessWorklistScan::Fetching(None);
@@ -646,12 +686,17 @@ impl DurableProcessWorker {
                 state.dispatcher_running = true;
                 true
             };
-            (
-                fetch_initial_page,
-                should_start_dispatcher,
-                state.scan_incomplete.take(),
-            )
+            (fetch_initial_page, should_start_dispatcher)
         };
+        // Coalesced until this call proves otherwise: an empty report from a
+        // call that never read the worklist must not read as "nothing pending".
+        let mut report = ProcessAdmissionReport {
+            intake: ProcessAdmissionIntake::Coalesced,
+            ..ProcessAdmissionReport::default()
+        };
+        if let Some(nested) = nested {
+            report.absorb(nested);
+        }
         if let Some(limit) = fetch_initial_page {
             let page = match self
                 .config
@@ -682,17 +727,14 @@ impl DurableProcessWorker {
                     return Err(error);
                 }
             };
-            self.install_worklist_page(page);
+            report.absorb(self.install_worklist_page(page));
         }
         self.execution_scheduler.changed.notify_one();
         if should_start_dispatcher {
             let worker = self.detached_for_task();
             crate::task::spawn(async move { worker.run_process_execution_dispatcher().await });
         }
-        match scan_incomplete {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        Ok(report)
     }
 
     async fn run_process_execution_dispatcher(&self) {
@@ -710,15 +752,20 @@ impl DurableProcessWorker {
                 };
                 crate::task::spawn(async move {
                     let _completion = completion;
+                    let process_id = record.id.clone();
                     // Install the execution budget only at the inline worker
                     // boundary, never in the shared process-segment path.
-                    Box::pin(scope_process_execution_permit(
+                    let outcome = Box::pin(scope_process_execution_permit(
                         Arc::clone(&worker.execution_scheduler.slots),
                         permit,
                         Arc::clone(&worker.execution_scheduler.changed),
                         worker.recover_process(record),
                     ))
                     .await;
+                    // The admitting call has long since returned Ok; this is the
+                    // only surface left that can tell the host the row did not
+                    // reach a terminal outcome.
+                    worker.observe_recovery_outcome(&process_id, outcome).await;
                 });
             }
 
@@ -727,15 +774,26 @@ impl DurableProcessWorker {
                     .fetch_worklist_page_with_retry(limit, continuation.clone())
                     .await
                 {
-                    Ok(page) => self.install_worklist_page(page),
+                    Ok(page) => {
+                        // Later pages are admitted by this dispatcher, past the
+                        // return of the call that started the pass.
+                        let _admitted = self.install_worklist_page(page);
+                    }
                     Err(error) => {
                         tracing::warn!(error = %error, "process worklist scan remains incomplete after retry exhaustion");
-                        let mut state = self.execution_scheduler.state.lock_recover();
-                        state.worklist_scan = ProcessWorklistScan::Ready(continuation);
-                        state.rescan_requested = true;
-                        state.scan_incomplete = Some(error);
-                        state.dispatcher_running = false;
+                        {
+                            let mut state = self.execution_scheduler.state.lock_recover();
+                            state.worklist_scan = ProcessWorklistScan::Ready(continuation);
+                            state.rescan_requested = true;
+                            state.dispatcher_running = false;
+                        }
                         dispatcher_guard.disarm();
+                        // Pass-scoped: the pass whose scan failed reports it. It
+                        // is never folded into a later call's outcome.
+                        self.emit_worker_fault(ProcessWorkerFault::WorklistScanIncomplete {
+                            error: error.to_string(),
+                        })
+                        .await;
                         return;
                     }
                 }
@@ -762,127 +820,16 @@ impl DurableProcessWorker {
         }
     }
 
-    fn install_worklist_page(&self, page: crate::ProcessWorklistPage) {
-        let mut state = self.execution_scheduler.state.lock_recover();
-        for record in page.records {
-            if state.scheduled.insert(record.id.clone()) {
-                state.pending.push_back(record);
-            } else {
-                // Coalesce a newer host-driven pass instead of dropping it.
-                // The row may have gained an Abandon Request or other
-                // execution-relevant state while its prior attempt was still
-                // queued or finishing.
-                state.rerun.insert(record.id.clone(), record);
-            }
-        }
-        state.worklist_scan = match page.continuation {
-            Some(continuation) => ProcessWorklistScan::Ready(Some(continuation)),
-            None if state.rescan_requested => {
-                state.rescan_requested = false;
-                ProcessWorklistScan::Ready(None)
-            }
-            None => ProcessWorklistScan::Idle,
-        };
-        self.execution_scheduler.metrics.intake_depth(
-            super::WorkerSlotKind::Process,
-            state.pending.len() + state.rerun.len(),
-        );
-    }
-
-    fn next_worklist_page_request(
+    /// Start any trigger deliveries whose process row was never registered, and
+    /// return the admission report of the re-entrant drive that follows, when
+    /// one ran. `None` means this reconcile admitted nothing of its own, so the
+    /// caller's report keeps whatever intake state the caller established.
+    async fn reconcile_trigger_deliveries(
         &self,
-    ) -> Option<(std::num::NonZeroUsize, Option<crate::ProcessWorklistCursor>)> {
-        let available = self
-            .execution_scheduler
-            .slots
-            .available_slots(super::WorkerSlotKind::Process);
-        let mut state = self.execution_scheduler.state.lock_recover();
-        if !state.pending.is_empty() {
-            return None;
-        }
-        if available == 0 && state.active != 0 {
-            return None;
-        }
-        let limit = std::num::NonZeroUsize::new(available.clamp(1, MAX_INTAKE_PAGE))
-            .expect("the clamped intake page bound is non-zero");
-        let ProcessWorklistScan::Ready(continuation) = &state.worklist_scan else {
-            return None;
-        };
-        let continuation = continuation.clone();
-        state.worklist_scan = ProcessWorklistScan::Fetching(continuation.clone());
-        Some((limit, continuation))
-    }
-
-    async fn fetch_worklist_page_with_retry(
-        &self,
-        limit: std::num::NonZeroUsize,
-        continuation: Option<crate::ProcessWorklistCursor>,
-    ) -> Result<crate::ProcessWorklistPage, PluginError> {
-        let mut retry_after = WORKLIST_FETCH_RETRY_BASE;
-        for attempt in 1..=WORKLIST_FETCH_ATTEMPTS {
-            match self
-                .config
-                .process_registry
-                .list_non_terminal_page(limit, continuation.clone())
-                .await
-            {
-                Ok(page) => return Ok(page),
-                Err(error) if attempt == WORKLIST_FETCH_ATTEMPTS => return Err(error),
-                Err(error) => {
-                    tracing::warn!(
-                        error = %error,
-                        attempt,
-                        "retrying incomplete process worklist scan"
-                    );
-                    tokio::time::sleep(retry_after).await;
-                    retry_after = retry_after.saturating_mul(2);
-                }
-            }
-        }
-        unreachable!("the non-zero worklist retry budget returns from the loop")
-    }
-
-    async fn next_process_execution(&self) -> Option<(ProcessRecord, super::WorkerSlotPermit)> {
-        if self
-            .execution_scheduler
-            .state
-            .lock_recover()
-            .pending
-            .is_empty()
-        {
-            return None;
-        }
-        let reserve = self
-            .execution_scheduler
-            .slots
-            .reserve_slot(super::WorkerSlotKind::Process);
-        tokio::pin!(reserve);
-        let permit = tokio::select! {
-            biased;
-            () = self.execution_scheduler.shutdown.cancelled() => return None,
-            permit = &mut reserve => permit,
-        };
-        if self.execution_scheduler.shutdown.is_cancelled() {
-            drop(permit);
-            return None;
-        }
-        let mut state = self.execution_scheduler.state.lock_recover();
-        let Some(record) = state.pending.pop_front() else {
-            drop(permit);
-            return None;
-        };
-        state.active += 1;
-        self.execution_scheduler.metrics.intake_depth(
-            super::WorkerSlotKind::Process,
-            state.pending.len() + state.rerun.len(),
-        );
-        Some((record, permit))
-    }
-
-    async fn reconcile_trigger_deliveries(&self) -> Result<(), PluginError> {
+    ) -> Result<Option<ProcessAdmissionReport>, PluginError> {
         let candidates = self.config.trigger_store.list_deliveries().await?;
         if candidates.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let candidate_process_ids = candidates
             .iter()
@@ -939,11 +886,13 @@ impl DurableProcessWorker {
             }
         }
         if started_any && let Some(driver) = self.config.process_work_driver.as_ref() {
-            driver
-                .claim_and_run_pending("trigger_delivery_reconcile")
-                .await?;
+            return Ok(Some(
+                driver
+                    .claim_and_run_pending("trigger_delivery_reconcile")
+                    .await?,
+            ));
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Terminalize one of this host's started OwnerBound rows as
@@ -978,7 +927,7 @@ impl DurableProcessWorker {
                 };
             }
             RecoveryReadDisposition::BackendError(error) => {
-                self.release_or_log(&lease).await;
+                let _ = self.release_or_log(&lease).await;
                 return RecoveryCompletionDisposition::BackendError(error);
             }
         };
@@ -1038,16 +987,19 @@ impl DurableProcessWorker {
     /// Every Abandoned write goes through `complete_process_with_lease`, which
     /// atomically validates this sweep's fence, appends the terminal, and clears
     /// the lease so a revenant's stale token is rejected.
-    async fn recover_process(&self, record: ProcessRecord) {
+    ///
+    /// Returns the typed outcome of the attempt rather than swallowing it: the
+    /// dispatcher reports the fault-worthy ones on the worker's fault surface.
+    async fn recover_process(&self, record: ProcessRecord) -> ProcessRecoveryOutcome {
         let process_id = record.id.clone();
         // ExternallyOwned: lash never executes the row. The only recovery action
         // is reconciling a pending Abandon Request; there is no owner lease to
         // wait out.
         if record.disposition == RecoveryDisposition::ExternallyOwned {
             if record.abandon_request.is_some() {
-                self.reconcile_externally_owned_abandon(&process_id).await;
+                return self.reconcile_externally_owned_abandon(&process_id).await;
             }
-            return;
+            return ProcessRecoveryOutcome::LeftToOwner;
         }
 
         let lease_ttl_ms = self.lease_timings().ttl_ms();
@@ -1059,28 +1011,48 @@ impl DurableProcessWorker {
             .await
         {
             RecoveryClaimDisposition::Acquired(lease) => lease,
-            RecoveryClaimDisposition::Busy | RecoveryClaimDisposition::BackendError(_) => return,
+            RecoveryClaimDisposition::Busy => {
+                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Busy);
+            }
+            RecoveryClaimDisposition::BackendError(error) => {
+                return ProcessRecoveryOutcome::Deferred(error.into_public());
+            }
         };
         // Terminal between the list and the claim. Idempotent by process_id: do
         // not re-execute or re-terminalize a finished process.
         let record = match self.read_for_recovery(&process_id).await {
             RecoveryReadDisposition::Found(record) => *record,
-            RecoveryReadDisposition::Absent | RecoveryReadDisposition::BackendError(_) => {
-                self.release_or_log(&lease).await;
-                return;
+            RecoveryReadDisposition::Absent => {
+                return self
+                    .release_or_outcome(
+                        &lease,
+                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Absent),
+                    )
+                    .await;
+            }
+            RecoveryReadDisposition::BackendError(error) => {
+                let _ = self.release_or_log(&lease).await;
+                return ProcessRecoveryOutcome::Deferred(error.into_public());
             }
         };
         if record.is_terminal() {
-            self.release_or_log(&lease).await;
-            return;
+            let terminal_status = record.status;
+            return self
+                .release_or_outcome(
+                    &lease,
+                    ProcessRecoveryOutcome::Deferred(
+                        ProcessRecoveryAttemptDisposition::SettledByPeer { terminal_status },
+                    ),
+                )
+                .await;
         }
         if record.disposition == RecoveryDisposition::Rerunnable
             && let (Some(max_attempts), Some(started)) =
                 (record.max_attempts, record.first_started.as_deref())
             && started.attempt >= max_attempts
         {
-            Self::observe_recovery_completion(
-                self.complete_and_release(
+            return self
+                .complete_and_release(
                     &lease,
                     &process_id,
                     ProcessAwaitOutput::Abandoned {
@@ -1092,9 +1064,8 @@ impl DurableProcessWorker {
                         control: None,
                     },
                 )
-                .await,
-            );
-            return;
+                .await
+                .into_outcome();
         }
 
         match record.disposition {
@@ -1123,27 +1094,31 @@ impl DurableProcessWorker {
                     None
                 };
                 match evidence {
-                    Some(evidence) => {
-                        Self::observe_recovery_completion(
-                            self.complete_and_release(
-                                &lease,
-                                &process_id,
-                                ProcessAwaitOutput::Abandoned {
-                                    evidence: Box::new(evidence),
-                                    control: None,
-                                },
-                            )
-                            .await,
-                        );
+                    Some(evidence) => self
+                        .complete_and_release(
+                            &lease,
+                            &process_id,
+                            ProcessAwaitOutput::Abandoned {
+                                evidence: Box::new(evidence),
+                                control: None,
+                            },
+                        )
+                        .await
+                        .into_outcome(),
+                    None => {
+                        self.release_or_outcome(&lease, ProcessRecoveryOutcome::LeftToOwner)
+                            .await
                     }
-                    None => self.release_or_log(&lease).await,
                 }
             }
             // OwnerBound, never started: first execution is not re-execution, so
             // any worker may run it; the runner records first_started first.
             RecoveryDisposition::OwnerBound => Box::pin(self.run_and_complete(record, lease)).await,
             // Filtered above; releasing keeps the lease honest if reached.
-            RecoveryDisposition::ExternallyOwned => self.release_or_log(&lease).await,
+            RecoveryDisposition::ExternallyOwned => {
+                self.release_or_outcome(&lease, ProcessRecoveryOutcome::LeftToOwner)
+                    .await
+            }
         }
     }
 
@@ -1156,7 +1131,7 @@ impl DurableProcessWorker {
     /// `Abandoned{reconciled_request}` terminal. Lash never executed the row, so
     /// there is no owner lease to wait out — but the sweep claims its own lease
     /// and completes through the atomic fenced path so it stays the single writer.
-    async fn reconcile_externally_owned_abandon(&self, process_id: &str) {
+    async fn reconcile_externally_owned_abandon(&self, process_id: &str) -> ProcessRecoveryOutcome {
         let lease_ttl_ms = self.lease_timings().ttl_ms();
         let owner = self.recovery_lease_owner();
         let lease = match self
@@ -1164,18 +1139,38 @@ impl DurableProcessWorker {
             .await
         {
             RecoveryClaimDisposition::Acquired(lease) => lease,
-            RecoveryClaimDisposition::Busy | RecoveryClaimDisposition::BackendError(_) => return,
+            RecoveryClaimDisposition::Busy => {
+                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Busy);
+            }
+            RecoveryClaimDisposition::BackendError(error) => {
+                return ProcessRecoveryOutcome::Deferred(error.into_public());
+            }
         };
         let current = match self.read_for_recovery(process_id).await {
             RecoveryReadDisposition::Found(current) => *current,
-            RecoveryReadDisposition::Absent | RecoveryReadDisposition::BackendError(_) => {
-                self.release_or_log(&lease).await;
-                return;
+            RecoveryReadDisposition::Absent => {
+                return self
+                    .release_or_outcome(
+                        &lease,
+                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Absent),
+                    )
+                    .await;
+            }
+            RecoveryReadDisposition::BackendError(error) => {
+                let _ = self.release_or_log(&lease).await;
+                return ProcessRecoveryOutcome::Deferred(error.into_public());
             }
         };
         if current.is_terminal() {
-            self.release_or_log(&lease).await;
-            return;
+            let terminal_status = current.status;
+            return self
+                .release_or_outcome(
+                    &lease,
+                    ProcessRecoveryOutcome::Deferred(
+                        ProcessRecoveryAttemptDisposition::SettledByPeer { terminal_status },
+                    ),
+                )
+                .await;
         }
         let evidence = AbandonEvidence {
             writer: AbandonWriter::ReconciledRequest,
@@ -1183,22 +1178,25 @@ impl DurableProcessWorker {
             owner: None,
             epoch_ms: self.now_ms(),
         };
-        Self::observe_recovery_completion(
-            self.complete_and_release(
-                &lease,
-                process_id,
-                ProcessAwaitOutput::Abandoned {
-                    evidence: Box::new(evidence),
-                    control: None,
-                },
-            )
-            .await,
-        );
+        self.complete_and_release(
+            &lease,
+            process_id,
+            ProcessAwaitOutput::Abandoned {
+                evidence: Box::new(evidence),
+                control: None,
+            },
+        )
+        .await
+        .into_outcome()
     }
 
     /// (Re-)run a claimed row under its renewed lease and write the terminal
     /// outcome, the same live-owner-is-single-writer path used before ADR 0019.
-    async fn run_and_complete(&self, record: ProcessRecord, lease: ProcessLease) {
+    async fn run_and_complete(
+        &self,
+        record: ProcessRecord,
+        lease: ProcessLease,
+    ) -> ProcessRecoveryOutcome {
         let process_id = record.id.clone();
         let registration = registration_from_record(record);
         let execution_context = ProcessExecutionContext::default();
@@ -1215,14 +1213,14 @@ impl DurableProcessWorker {
                 // Ran to a terminal outcome (success or a process-level failure) while
                 // holding the lease: this owner is the single writer of the terminal.
                 Ok(crate::ProcessRunOutcome::Terminal(output)) => {
-                    self.finish_terminal_run(&lease, &process_id, output, Vec::new())
+                    return self
+                        .finish_terminal_run(&lease, &process_id, output, Vec::new())
                         .await;
-                    return;
                 }
                 Ok(crate::ProcessRunOutcome::TerminalWithParentEnd { output, actions }) => {
-                    self.finish_terminal_run(&lease, &process_id, output, actions)
+                    return self
+                        .finish_terminal_run(&lease, &process_id, output, actions)
                         .await;
-                    return;
                 }
                 Ok(crate::ProcessRunOutcome::SegmentBoundary(next)) => {
                     tracing::debug!(
@@ -1237,13 +1235,19 @@ impl DurableProcessWorker {
                 // outcome or release the lease: that would race the new owner and
                 // could record a succeeded process as Failed. Leave the row to the
                 // lease holder; it will finish (or another sweep retries it).
-                Err(RecoverFailure::LeaseLost(_error)) => return,
-                Err(RecoverFailure::BackendError(_error)) => {
+                Err(RecoverFailure::LeaseLost(_error)) => {
+                    return ProcessRecoveryOutcome::Deferred(
+                        ProcessRecoveryAttemptDisposition::LeaseLost {
+                            operation: ProcessRecoveryOperation::RenewLease,
+                        },
+                    );
+                }
+                Err(RecoverFailure::BackendError(error)) => {
                     // The typed backend event was emitted at the failing
                     // operation. Token-fenced release makes the row claimable
                     // for a healthy retry without risking a successor's lease.
-                    self.release_or_log(&lease).await;
-                    return;
+                    let _ = self.release_or_log(&lease).await;
+                    return ProcessRecoveryOutcome::Deferred(error.into_public());
                 }
                 // Rebuild/store-facet failures are infrastructure failures, not
                 // producer outcomes. Release the claim without a terminal so a
@@ -1254,8 +1258,8 @@ impl DurableProcessWorker {
                         error = %err,
                         "process execution infrastructure failed; leaving process claimable",
                     );
-                    self.release_or_log(&lease).await;
-                    return;
+                    let _ = self.release_or_log(&lease).await;
+                    return ProcessRecoveryOutcome::RunFailed(err);
                 }
             }
         }

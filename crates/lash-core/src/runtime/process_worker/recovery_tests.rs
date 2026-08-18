@@ -13,6 +13,8 @@ use crate::{
 };
 
 mod attachment_owner_tests;
+mod drain_report_tests;
+mod fault_surface_tests;
 mod pagination_tests;
 #[path = "recovery_disposition_tests.rs"]
 mod recovery_disposition_tests;
@@ -91,7 +93,7 @@ struct LateBoundProcessRunHandle {
 }
 
 impl LateBoundProcessRunHandle {
-    async fn enable_and_drive(&self) -> Result<(), PluginError> {
+    async fn enable_and_drive(&self) -> Result<ProcessAdmissionReport, PluginError> {
         self.enabled.store(true, Ordering::SeqCst);
         self.worker
             .get()
@@ -103,9 +105,9 @@ impl LateBoundProcessRunHandle {
 
 #[async_trait::async_trait]
 impl crate::ProcessRunHandle for LateBoundProcessRunHandle {
-    async fn claim_and_run_pending(&self) -> Result<(), PluginError> {
+    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
         if !self.enabled.load(Ordering::SeqCst) {
-            return Ok(());
+            return Ok(ProcessAdmissionReport::default());
         }
         self.worker
             .get()
@@ -205,6 +207,88 @@ fn inline_worker_with_trigger_store(
         )
         .with_trigger_store(trigger_store),
     )
+}
+
+/// A worker whose trigger-delivery reconcile can re-enter the work driver: the
+/// driver's run handle drives this same worker, which is the shape the facade
+/// builds and the shape that produced the "a call reports its own admission as
+/// `Busy`" defect.
+fn reentrant_worker_with_trigger_store(
+    registry: Arc<dyn ProcessRegistry>,
+    lease_owner: LeaseOwnerIdentity,
+    trigger_store: Arc<dyn TriggerStore>,
+    run_handle: Arc<LateBoundProcessRunHandle>,
+) -> DurableProcessWorker {
+    let driver = crate::ProcessWorkDriver::new(
+        Arc::clone(&registry),
+        Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
+    );
+    let worker = DurableProcessWorker::new(
+        DurableProcessWorkerConfig::new(
+            Arc::new(PluginHost::new(Vec::new())),
+            RuntimeHostConfig::in_memory(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            ),
+            Arc::new(InlineSessionStoreFactory),
+            driver.process_registry(),
+            lease_owner,
+        )
+        .with_trigger_store(trigger_store)
+        .with_change_hub(driver.change_hub())
+        .with_process_work_driver(driver),
+    );
+    run_handle
+        .worker
+        .set(worker.clone())
+        .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
+    worker
+}
+
+/// End-to-end shape of the re-entrancy F1 came from: the reconcile registers a
+/// process and drives it through the work driver, then the outer pass's own
+/// scan sees that row already scheduled. The row belongs to this one call, so
+/// it must appear once as admitted and never as another owner's contention.
+#[tokio::test]
+async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
+    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
+    let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
+    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    run_handle.enabled.store(true, Ordering::SeqCst);
+    let worker = reentrant_worker_with_trigger_store(
+        Arc::clone(&registry),
+        local_owner("reentrant-worker", "host-a", "claimant-start"),
+        Arc::clone(&trigger_store),
+        Arc::clone(&run_handle),
+    );
+
+    let report = worker
+        .drive_pending_processes()
+        .await
+        .expect("sweep dispatches");
+
+    assert_eq!(
+        report
+            .admitted
+            .iter()
+            .filter(|id| *id == &delivery.process_id)
+            .count(),
+        1,
+        "the reconciled row is this call's admission, exactly once: {report:?}"
+    );
+    assert!(
+        !report
+            .deferred
+            .iter()
+            .any(|entry| entry.process_id == delivery.process_id),
+        "a call must never report its own admission as a deferral: {report:?}"
+    );
+    assert_eq!(
+        report.intake,
+        ProcessAdmissionIntake::Scanned,
+        "the outer pass read the worklist itself"
+    );
 }
 
 /// A registration with an explicit disposition; the disposition-driven sweep keys off the
@@ -660,7 +744,8 @@ impl crate::ProcessEngine for ProductionChainEngine {
                     reply.output
                 );
             }
-            self.state
+            let _ = self
+                .state
                 .run_handle
                 .enable_and_drive()
                 .await
@@ -806,7 +891,7 @@ async fn run_production_chain(
         .await
         .expect("seed chain launcher");
     tokio::time::timeout(Duration::from_secs(10), async {
-        worker
+        let _ = worker
             .drive_pending_processes()
             .await
             .expect("drive chain launcher");
@@ -981,7 +1066,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         .expect("register production session-turn process");
 
     tokio::time::timeout(Duration::from_secs(10), async {
-        run_handle
+        let _ = run_handle
             .enable_and_drive()
             .await
             .expect("drive production session-turn process");
@@ -1048,7 +1133,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         .await
         .expect("register process");
 
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("drive process");
@@ -1081,7 +1166,7 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
@@ -1106,7 +1191,7 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
             && subscription_revision == delivery.subscription.revision
     ));
 
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("second sweep dispatches");
@@ -1235,7 +1320,7 @@ async fn sweep_recovers_reserved_v1_snapshot_after_v2_update_exactly_once() {
     let (registry, _trigger_store, delivery, payloads, worker) =
         snapshot_recovery_fixture(false).await;
 
-    worker.drive_pending_processes().await.expect("recover v1");
+    let _ = worker.drive_pending_processes().await.expect("recover v1");
     await_terminal(&registry, &delivery.process_id).await;
     let terminal = registry
         .get_process(&delivery.process_id)
@@ -1247,7 +1332,7 @@ async fn sweep_recovers_reserved_v1_snapshot_after_v2_update_exactly_once() {
         "recovered delivery must complete: {:?}",
         terminal.status
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("repeat recovery sweep");
@@ -1272,7 +1357,7 @@ async fn sweep_recovers_reserved_v1_snapshot_after_tombstone_exactly_once() {
         "the live subscription is tombstoned before recovery"
     );
 
-    worker.drive_pending_processes().await.expect("recover v1");
+    let _ = worker.drive_pending_processes().await.expect("recover v1");
     await_terminal(&registry, &delivery.process_id).await;
     let terminal = registry
         .get_process(&delivery.process_id)
@@ -1284,7 +1369,7 @@ async fn sweep_recovers_reserved_v1_snapshot_after_tombstone_exactly_once() {
         "recovered delivery must complete: {:?}",
         terminal.status
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("repeat recovery sweep");
@@ -1316,7 +1401,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store_dyn),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
@@ -1382,7 +1467,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
             if receipt.disposition == crate::TriggerMutationDisposition::Created
     ));
 
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("post-prune sweep dispatches");
@@ -1415,7 +1500,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
         local_owner("trigger-worker", "host-a", "claimant-start"),
         trigger_store,
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
@@ -1450,10 +1535,34 @@ async fn sweep_never_claims_externally_owned_rows() {
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
-    worker
+    let report = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
+    // The row is not an admission on either tier: lash never executes it, so
+    // one registry reads the same whichever tier drove it.
+    assert!(report.admitted.is_empty());
+    assert_eq!(
+        report.deferred,
+        vec![ProcessAdmissionDeferred {
+            process_id: "proc-ext".to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+        }]
+    );
+    // A second pass before the dispatcher drains the row must say the same
+    // thing: an externally-owned row is never this worker's contention.
+    let second = worker
+        .drive_pending_processes()
+        .await
+        .expect("second sweep");
+    assert!(second.admitted.is_empty());
+    assert_eq!(
+        second.deferred,
+        vec![ProcessAdmissionDeferred {
+            process_id: "proc-ext".to_string(),
+            disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+        }]
+    );
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let record = registry
@@ -1508,7 +1617,7 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
         Arc::clone(&registry),
         local_owner("recovery-worker", "host-b", "recovery-start"),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches exhausted process");
@@ -1551,7 +1660,7 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
@@ -1605,7 +1714,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
@@ -1664,7 +1773,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
@@ -1698,7 +1807,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
-    worker
+    let _ = worker
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
@@ -1774,7 +1883,7 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
         ))
         .await
         .expect("register missing engine row");
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("drive missing engine row");
@@ -1838,7 +1947,7 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
         ))
         .await
         .expect("register fail-once engine row");
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("drive failing artifact read");
@@ -1866,7 +1975,7 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
     .await
     .expect("transient engine error releases its claim");
 
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("drive retry after artifact recovery");
@@ -2015,7 +2124,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
         .register_process(registration)
         .await
         .expect("register owner-bound engine");
-    run_handle
+    let _ = run_handle
         .enable_and_drive()
         .await
         .expect("drive owner-bound engine");
@@ -2127,268 +2236,4 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         .expect("retry owner drain");
     assert_eq!(retry.abandoned, vec![process_id.to_string()]);
     assert!(retry.deferred.is_empty());
-}
-
-#[tokio::test]
-async fn drain_reports_claim_backend_error_and_retries() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let owner = local_owner("drain-claim-failure", "host-a", "start-a");
-    let process_id = "owner-bound-claim-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryDisposition::OwnerBound,
-        ))
-        .await
-        .expect("register owner-bound row");
-    registry
-        .record_first_started(
-            process_id,
-            ProcessStarted {
-                owner: owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .expect("record first start");
-    registry
-        .set_process_lease_claim_error(Some(PluginError::Session(
-            "injected claim failure".to_string(),
-        )))
-        .await;
-
-    let worker = inline_worker(registry.clone(), owner);
-    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
-    let report = report.expect("owner drain");
-    assert!(report.abandoned.is_empty());
-    assert_eq!(
-        report.deferred,
-        vec![ProcessDrainDeferred {
-            process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
-                operation: ProcessRecoveryOperation::ClaimLease,
-                error: "plugin session error: injected claim failure".to_string(),
-            },
-        }]
-    );
-    assert_recovery_backend_error_event(
-        &capture,
-        process_id,
-        "claim_lease",
-        "plugin session error: injected claim failure",
-    );
-
-    registry.set_process_lease_claim_error(None).await;
-    let retry = worker
-        .drain_owner_bound_work()
-        .await
-        .expect("retry owner drain");
-    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
-    assert!(retry.deferred.is_empty());
-}
-
-#[tokio::test]
-async fn drain_reports_lease_renewal_backend_error_and_retries() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let owner = local_owner("drain-renew-failure", "host-a", "start-a");
-    let process_id = "owner-bound-renew-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryDisposition::OwnerBound,
-        ))
-        .await
-        .expect("register owner-bound row");
-    registry
-        .record_first_started(
-            process_id,
-            ProcessStarted {
-                owner: owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .expect("record first start");
-    registry
-        .set_process_lease_renew_error(Some(PluginError::Session(
-            "injected lease-renewal failure".to_string(),
-        )))
-        .await;
-
-    let worker = inline_worker(registry.clone(), owner);
-    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
-    let report = report.expect("owner drain");
-    assert!(report.abandoned.is_empty());
-    assert_eq!(
-        report.deferred,
-        vec![ProcessDrainDeferred {
-            process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
-                operation: ProcessRecoveryOperation::RenewLease,
-                error: "plugin session error: injected lease-renewal failure".to_string(),
-            },
-        }]
-    );
-    assert_recovery_backend_error_event(
-        &capture,
-        process_id,
-        "renew_lease",
-        "plugin session error: injected lease-renewal failure",
-    );
-
-    registry.set_process_lease_renew_error(None).await;
-    let retry = worker
-        .drain_owner_bound_work()
-        .await
-        .expect("retry owner drain");
-    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
-    assert!(retry.deferred.is_empty());
-}
-
-#[tokio::test]
-async fn drain_reports_registry_read_error_instead_of_absent() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let owner = local_owner("drain-read-failure", "host-a", "start-a");
-    let process_id = "owner-bound-read-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryDisposition::OwnerBound,
-        ))
-        .await
-        .expect("register owner-bound row");
-    registry
-        .record_first_started(
-            process_id,
-            ProcessStarted {
-                owner: owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .expect("record first start");
-    registry
-        .set_process_read_error(Some(PluginError::Session(
-            "injected registry read failure".to_string(),
-        )))
-        .await;
-
-    let worker = inline_worker(registry.clone(), owner);
-    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
-    let report = report.expect("owner drain");
-    assert!(report.abandoned.is_empty());
-    assert_eq!(
-        report.deferred,
-        vec![ProcessDrainDeferred {
-            process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
-                operation: ProcessRecoveryOperation::ReadProcess,
-                error: "plugin session error: injected registry read failure".to_string(),
-            },
-        }]
-    );
-    assert_recovery_backend_error_event(
-        &capture,
-        process_id,
-        "read_process",
-        "plugin session error: injected registry read failure",
-    );
-
-    registry.set_process_read_error(None).await;
-    let retry = worker
-        .drain_owner_bound_work()
-        .await
-        .expect("retry owner drain");
-    assert_eq!(retry.abandoned, vec![process_id.to_string()]);
-    assert!(retry.deferred.is_empty());
-}
-
-#[tokio::test]
-async fn drain_distinguishes_busy_and_absent_rows() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let owner = local_owner("drain-legitimate-deferrals", "host-a", "start-a");
-    for process_id in ["owner-bound-busy", "owner-bound-absent"] {
-        registry
-            .register_process(registration_with_disposition(
-                process_id,
-                RecoveryDisposition::OwnerBound,
-            ))
-            .await
-            .expect("register owner-bound row");
-        registry
-            .record_first_started(
-                process_id,
-                ProcessStarted {
-                    owner: owner.clone(),
-                    fencing_token: 0,
-                    attempt: 1,
-                    started_at_ms: 1,
-                },
-            )
-            .await
-            .expect("record first start");
-    }
-    registry
-        .claim_process_lease(
-            "owner-bound-busy",
-            &LeaseOwnerIdentity::opaque("live-peer", "live-peer-incarnation"),
-            60_000,
-        )
-        .await
-        .expect("claim live peer lease")
-        .acquired()
-        .expect("peer acquires lease");
-    let worker = inline_worker(registry.clone(), owner);
-
-    let busy = worker.drain_owner_bound_work().await.expect("busy drain");
-    assert_eq!(
-        busy.deferred,
-        vec![ProcessDrainDeferred {
-            process_id: "owner-bound-busy".to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::Busy,
-        }]
-    );
-    assert_eq!(busy.abandoned, vec!["owner-bound-absent".to_string()]);
-
-    let absent_id = "owner-bound-read-as-absent";
-    registry
-        .register_process(registration_with_disposition(
-            absent_id,
-            RecoveryDisposition::OwnerBound,
-        ))
-        .await
-        .expect("register read-as-absent row");
-    registry
-        .record_first_started(
-            absent_id,
-            ProcessStarted {
-                owner: worker.config().lease_owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await
-        .expect("record read-as-absent start");
-    registry.set_process_read_absent(true).await;
-    let absent = worker.drain_owner_bound_work().await.expect("absent drain");
-    assert_eq!(
-        absent.deferred,
-        vec![
-            ProcessDrainDeferred {
-                process_id: "owner-bound-busy".to_string(),
-                disposition: ProcessRecoveryAttemptDisposition::Busy,
-            },
-            ProcessDrainDeferred {
-                process_id: absent_id.to_string(),
-                disposition: ProcessRecoveryAttemptDisposition::Absent,
-            },
-        ]
-    );
 }

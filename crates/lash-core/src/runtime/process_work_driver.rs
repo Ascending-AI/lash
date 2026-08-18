@@ -5,6 +5,7 @@ use super::process::{
     ProcessAttach, ProcessAwaiter, ProcessChangeHub, ProcessEvent, ProcessEventSink,
     ProcessRegistry, watch_process_registry_with_sink,
 };
+use super::process_worker::ProcessAdmissionReport;
 use crate::{PluginError, ProcessAwaitOutput};
 
 /// Registry and run handle for process work owned outside
@@ -164,28 +165,57 @@ impl ProcessWorkDriver {
         .await
     }
 
-    pub async fn claim_and_run_pending(&self, reason: &str) -> Result<(), PluginError> {
-        if let Err(err) = self.run_handle.claim_and_run_pending().await {
-            tracing::warn!("process work drive ({reason}) failed: {err}");
-            return Err(err);
+    /// Admit this owner's claimable pending processes, returning what the drive
+    /// admitted. See [`ProcessRunHandle::claim_and_run_pending`] for the
+    /// admission-not-completion contract.
+    pub async fn claim_and_run_pending(
+        &self,
+        reason: &str,
+    ) -> Result<ProcessAdmissionReport, PluginError> {
+        match self.run_handle.claim_and_run_pending().await {
+            Ok(report) => Ok(report),
+            Err(err) => {
+                tracing::warn!("process work drive ({reason}) failed: {err}");
+                Err(err)
+            }
         }
-        Ok(())
     }
 }
 
-/// One lease-protected drive of the registry's pending (non-terminal) processes.
+/// One pass admitting the registry's pending (non-terminal) processes to
+/// execution.
 ///
-/// Implementations claim the single-owner [`ProcessLease`](crate::ProcessLease)
-/// per non-terminal row to fence execution, so a concurrent drive on another
-/// owner skips an already-leased process and a process runs exactly once.
+/// Implementations fence execution per row — the inline handle claims the
+/// single-owner [`ProcessLease`](crate::ProcessLease), the Restate handle
+/// coalesces by workflow key — so a concurrent drive on another owner skips a
+/// row already being executed and a process runs exactly once.
 #[async_trait::async_trait]
 pub trait ProcessRunHandle: Send + Sync {
-    /// Claim and run every pending process this owner can claim, driving each to
-    /// a terminal state. Idempotent: leased and terminal rows are skipped.
-    async fn claim_and_run_pending(&self) -> Result<(), PluginError>;
+    /// Admit every pending process this owner can take, returning the per-row
+    /// [`ProcessAdmissionReport`] for this pass. Idempotent: rows already being
+    /// executed and terminal rows are skipped.
+    ///
+    /// **Admission, not completion.** Implementations return once the rows are
+    /// handed to their executor; a returned `Ok` says the pass started work, not
+    /// that any row reached a terminal state, and rows past the pass's own
+    /// intake may still be admitted afterwards. Faults that strand an admitted
+    /// row are reported as
+    /// [`ProcessWorkerFault`](crate::runtime::ProcessWorkerFault)s on the wired
+    /// [`ProcessEventSink`]; a terminal outcome is awaited through
+    /// [`ProcessWorkDriver::await_terminal`].
+    ///
+    /// **`Err` may follow partial admission.** A pass that reads the worklist in
+    /// pages can fail a later page after earlier pages already handed rows to
+    /// the executor. Those rows are running; the error says this pass stopped
+    /// short, never that nothing was admitted. Per-row failures are reported as
+    /// deferred rows with a typed
+    /// [`BackendError`](crate::runtime::ProcessRecoveryAttemptDisposition::BackendError)
+    /// disposition rather than failing the call, so a partial report survives.
+    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError>;
 }
 
-/// Inline run handle: drives the worker's own lease-protected sweep in-process.
+/// Inline run handle: admits rows to the worker's own lease-protected sweep
+/// in-process.
 ///
 /// Delegates to [`DurableProcessWorker::drive_pending_processes`], the existing
 /// `list_non_terminal_page -> claim lease -> run -> complete -> release` loop, so the
@@ -202,7 +232,7 @@ impl InlineProcessRunHandle {
 
 #[async_trait::async_trait]
 impl ProcessRunHandle for InlineProcessRunHandle {
-    async fn claim_and_run_pending(&self) -> Result<(), PluginError> {
+    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
         self.worker.drive_pending_processes().await
     }
 }

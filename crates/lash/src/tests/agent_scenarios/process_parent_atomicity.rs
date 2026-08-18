@@ -553,7 +553,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .register_process(segmented_registration(env_ref.clone()).await)
         .await
         .expect("register PostgreSQL segmented process parent");
-    first_worker
+    let _ = first_worker
         .drive_pending_processes()
         .await
         .expect("drive PostgreSQL segmented parent through public worker path");
@@ -773,8 +773,8 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         final_worker_a.drive_pending_processes(),
         final_worker_b.drive_pending_processes()
     );
-    scan_a.expect("first concurrent PostgreSQL startup scan");
-    scan_b.expect("second concurrent PostgreSQL startup scan");
+    let _ = scan_a.expect("first concurrent PostgreSQL startup scan");
+    let _ = scan_b.expect("second concurrent PostgreSQL startup scan");
     assert!(
         registry
             .get_pending_parent_end_plan(SEGMENTED_PARENT)
@@ -842,7 +842,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .lock()
         .expect("PostgreSQL final frame lock")
         .len();
-    final_worker_a
+    let _ = final_worker_a
         .drive_pending_processes()
         .await
         .expect("redrive after PostgreSQL plan clear");
@@ -877,7 +877,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         )
         .await
         .expect("register PostgreSQL ToolCall process parent");
-    final_worker_a
+    let _ = final_worker_a
         .drive_pending_processes()
         .await
         .expect("drive PostgreSQL ToolCall parent through public worker path");
@@ -891,7 +891,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
             control: None,
         }
     );
-    final_worker_a
+    let _ = final_worker_a
         .drive_pending_processes()
         .await
         .expect("settle PostgreSQL ToolCall parent teardown");

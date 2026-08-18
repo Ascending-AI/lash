@@ -99,8 +99,11 @@ Read `abandon_request_reconciled` and require:
 - final status is terminal `Abandoned`;
 - evidence writer is `ReconciledRequest` and names `request-abandon-live-owner`;
 - the observer lens sees the terminal;
-- `await_output` returned the same evidence; and
-- the sweep's fenced completion cleared the process lease.
+- `await_output` returned the same evidence;
+- the sweep's fenced completion cleared the process lease; and
+- `sweep_admitted` is at least one and `sweep_worker_faults` is zero — the drive is an
+  admission call, so the companion wires a `ProcessEventSink` and requires the worker to
+  report no `ProcessWorkerFault` while reaching that terminal.
 
 **Judgment — FAIL if:** wall-clock expiry terminalizes the row, the worker re-executes the
 OwnerBound input, reconciliation occurs before expiry, the evidence names a different

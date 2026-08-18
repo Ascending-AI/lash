@@ -316,7 +316,7 @@ async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
         )
         .await;
 
-    let ((), capture) = capturing(|| worker.recover_process(record)).await;
+    let (_outcome, capture) = capturing(|| worker.recover_process(record)).await;
 
     assert_recovery_backend_error_event(
         &capture,
@@ -364,7 +364,7 @@ async fn recovered_live_renewal_uses_backend_error_telemetry() {
         )))
         .await;
 
-    let ((), capture) = capturing(|| worker.recover_process(record)).await;
+    let (_outcome, capture) = capturing(|| worker.recover_process(record)).await;
 
     assert_recovery_backend_error_event(
         &capture,

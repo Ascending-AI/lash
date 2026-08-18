@@ -266,6 +266,9 @@ pub mod facade_support {
     pub use crate::runtime::OutputState;
     pub use crate::runtime::PROCESS_LEASE_SCHEMA_VERSION;
     pub use crate::runtime::ParkedSession;
+    pub use crate::runtime::ProcessAdmissionDeferred;
+    pub use crate::runtime::ProcessAdmissionIntake;
+    pub use crate::runtime::ProcessAdmissionReport;
     pub use crate::runtime::ProcessAttach;
     pub use crate::runtime::ProcessAwaiter;
     pub use crate::runtime::ProcessChangeHub;
@@ -289,6 +292,7 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWorkDriver;
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
+    pub use crate::runtime::ProcessWorkerFault;
     pub use crate::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD;
     pub use crate::runtime::QueuedDrainCandidate;
     pub use crate::runtime::QueuedDrainPolicy;

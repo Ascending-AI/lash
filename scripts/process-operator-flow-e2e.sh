@@ -133,6 +133,8 @@ if scenario == "drain":
         fail(f"drain touched the wrong rows: {observed}")
     if observed["drain_report_deferred"] != []:
         fail(f"drain left rows deferred: {observed}")
+    if observed["drain_worker_faults"] != 0:
+        fail(f"drain reported worker faults: {observed}")
     if observed["observer_abandon_writer"] != "OwnerDrain":
         fail(f"drain terminal carried the wrong writer: {observed}")
     rows = {row["process_id"]: row for row in observed["processes"]}
@@ -169,6 +171,10 @@ else:
         fail(f"wrong reconciliation writer: {reconciled}")
     if not reconciled["observer_terminal_visible"] or not reconciled["lease_cleared"]:
         fail(f"observer/lease terminal contract failed: {reconciled}")
+    if reconciled["sweep_admitted"] < 1:
+        fail(f"sweep admitted no rows: {reconciled}")
+    if reconciled["sweep_worker_faults"] != 0:
+        fail(f"sweep reported worker faults: {reconciled}")
     print("request-abandon gates: marker pending, live lease unchanged, lapse non-terminal, sweep reconciled")
 PY
 

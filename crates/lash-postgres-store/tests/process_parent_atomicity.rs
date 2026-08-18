@@ -493,8 +493,8 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
         worker_a.drive_pending_processes(),
         worker_b.drive_pending_processes()
     );
-    scan_a.expect("first synchronized PostgreSQL parent-end scan");
-    scan_b.expect("second synchronized PostgreSQL parent-end scan");
+    let _ = scan_a.expect("first synchronized PostgreSQL parent-end scan");
+    let _ = scan_b.expect("second synchronized PostgreSQL parent-end scan");
 
     assert_eq!(
         state

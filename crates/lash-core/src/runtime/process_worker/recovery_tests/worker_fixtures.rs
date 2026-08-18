@@ -52,12 +52,100 @@ pub(super) async fn worker_with_engine_registry_and_timings(
     .await
 }
 
+/// Records every [`ProcessWorkerFault`] a worker reports, so a test can assert
+/// on the unconditional fault surface instead of a swallowed disposition.
+#[derive(Default)]
+pub(super) struct RecordingProcessEventSink {
+    faults: Mutex<Vec<ProcessWorkerFault>>,
+}
+
+impl RecordingProcessEventSink {
+    pub(super) fn faults(&self) -> Vec<ProcessWorkerFault> {
+        self.faults.lock_recover().clone()
+    }
+
+    /// Wait for at least one fault, failing the test rather than hanging.
+    pub(super) async fn await_first_fault(&self, description: &str) -> ProcessWorkerFault {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(fault) = self.faults().into_iter().next() {
+                    return fault;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {description}"))
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessEventSink for RecordingProcessEventSink {
+    async fn emit(&self, _event: &crate::ProcessEvent) {}
+
+    async fn emit_worker_fault(&self, fault: &ProcessWorkerFault) {
+        self.faults.lock_recover().push(fault.clone());
+    }
+}
+
+/// Worker wired to a recording fault sink, for the admission-honesty tests.
+pub(super) async fn worker_with_engine_and_fault_sink(
+    concurrency: usize,
+    engine: Arc<dyn crate::ProcessEngine>,
+    run_handle: Arc<LateBoundProcessRunHandle>,
+) -> (
+    DurableProcessWorker,
+    Arc<dyn ProcessRegistry>,
+    Arc<LateBoundProcessRunHandle>,
+    ProcessExecutionEnvRef,
+    Arc<TestLocalProcessRegistry>,
+    Arc<RecordingProcessEventSink>,
+) {
+    let sink = Arc::new(RecordingProcessEventSink::default());
+    let (worker, registry, run_handle, env_ref, test_registry) =
+        worker_with_engine_registry_timings_supplier_and_sink(
+            concurrency,
+            engine,
+            run_handle,
+            None,
+            None,
+            Some(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>),
+        )
+        .await;
+    (worker, registry, run_handle, env_ref, test_registry, sink)
+}
+
 pub(super) async fn worker_with_engine_registry_timings_and_supplier(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
     run_handle: Arc<LateBoundProcessRunHandle>,
     lease_timings: Option<crate::LeaseTimings>,
     supplier: Option<Arc<dyn crate::WorkerSlotSupplier>>,
+) -> (
+    DurableProcessWorker,
+    Arc<dyn ProcessRegistry>,
+    Arc<LateBoundProcessRunHandle>,
+    ProcessExecutionEnvRef,
+    Arc<TestLocalProcessRegistry>,
+) {
+    worker_with_engine_registry_timings_supplier_and_sink(
+        concurrency,
+        engine,
+        run_handle,
+        lease_timings,
+        supplier,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
+    concurrency: usize,
+    engine: Arc<dyn crate::ProcessEngine>,
+    run_handle: Arc<LateBoundProcessRunHandle>,
+    lease_timings: Option<crate::LeaseTimings>,
+    supplier: Option<Arc<dyn crate::WorkerSlotSupplier>>,
+    sink: Option<Arc<dyn crate::ProcessEventSink>>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
@@ -101,6 +189,9 @@ pub(super) async fn worker_with_engine_registry_timings_and_supplier(
     .with_process_work_driver(driver);
     if let Some(supplier) = supplier {
         config = config.with_worker_slot_supplier(supplier);
+    }
+    if let Some(sink) = sink {
+        config = config.with_process_event_sink(sink);
     }
     let worker = DurableProcessWorker::new(config);
     run_handle

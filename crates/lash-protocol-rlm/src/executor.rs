@@ -2405,7 +2405,7 @@ mod tests {
             Some(serde_json::json!("signal-sent"))
         );
 
-        worker
+        let _ = worker
             .drive_pending_processes()
             .await
             .expect("drive signalled TypeScript process");
