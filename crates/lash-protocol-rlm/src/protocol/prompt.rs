@@ -302,6 +302,7 @@ fn render_language_section(
     bullets.push(operator_language_bullet());
     bullets.push(assignment_language_bullet());
     bullets.push(list_comprehension_language_bullet());
+    bullets.push(functions_language_bullet());
     if has_operations {
         bullets.push(module_operations_language_bullet());
     }
@@ -347,6 +348,10 @@ fn assignment_language_bullet() -> String {
 
 fn list_comprehension_language_bullet() -> String {
     "- List comprehensions: `[expr for name in iterable]` and `[expr for name in iterable if condition]`; multiple `for`/`if` clauses run left-to-right like Python. Comprehension bindings are local and do not overwrite outer variables. Use explicit loops when you need mutation, `break`, or `continue`.".to_string()
+}
+
+fn functions_language_bullet() -> String {
+    "- Functions: declare reusable pure logic at the top level with `fn name(param: type, ...) -> type { body }`; parameter types and the return type are required, the last expression is the result, and the body sees only its parameters. Call one like a builtin: `name(arg)`. Arithmetic always produces a float, so a body that computes with `+ - * / %` returns `float`, not `int` — declare `-> float` there, and use `int` only for values you pass straight through. Functions may call each other and themselves in any declaration order. Effects are not allowed inside a function body — no module operations, `await`, `start`, `sleep`, `print`, or `finish` — so keep those at the top level and pass their results in as arguments.".to_string()
 }
 
 fn module_operations_language_bullet() -> String {

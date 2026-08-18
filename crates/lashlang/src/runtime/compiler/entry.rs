@@ -101,6 +101,7 @@ impl Compiler {
             pending_finally_sites: Vec::new(),
             functions: Vec::new(),
             pending_functions: Vec::new(),
+            declared_functions: FxHashMap::default(),
         }
     }
 
@@ -374,7 +375,48 @@ impl Compiler {
         })
     }
 
+    /// Registers every declared `fn` as a compiled function before any code is
+    /// emitted.
+    ///
+    /// Registration is deliberately separate from emission. Bodies are compiled
+    /// by `compile_pending_functions` *after* the root code, so declaring a
+    /// function adds no instruction ahead of `main` and shifts no root ip: a
+    /// program that gains an unused declaration produces a byte-identical
+    /// continuation. Registering all of them up front is also what makes the
+    /// call graph order-free — a body reaches any other declared function, in
+    /// either direction, because a call site names a chunk function index
+    /// rather than a value that had to exist first.
+    fn register_declared_functions(&mut self, program: &Program) {
+        for declaration in &program.declarations {
+            let Declaration::Function(function) = declaration else {
+                continue;
+            };
+            let index = self.pending_functions.len();
+            let definition = FunctionExpr {
+                // No self-binding slot: a recursive call re-materializes the
+                // callee from the chunk, so the body never needs to see itself
+                // as a value.
+                name: None,
+                params: function
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect(),
+                captures: Vec::new(),
+                body: Box::new(function.body.clone()),
+            };
+            self.copy_expression_metadata(&function.body, &definition.body);
+            self.pending_functions.push(Some(PendingFunction {
+                definition,
+                parameter_model: ClosureParameterModel::Exact,
+            }));
+            self.declared_functions
+                .insert(function.name.to_string(), index);
+        }
+    }
+
     fn compile_program_block(&mut self, program: &Program) {
+        self.register_declared_functions(program);
         match &program.main {
             Expr::Block(expressions) => {
                 self.compile_block_value_with_spans(expressions, &program.expression_spans);
@@ -998,6 +1040,7 @@ impl Compiler {
             Expr::Block(_)
             | Expr::Function(_)
             | Expr::Call { .. }
+            | Expr::FunctionCall { .. }
             | Expr::Map { .. }
             | Expr::Try(_)
             | Expr::Throw(_)

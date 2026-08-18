@@ -11,11 +11,36 @@ enum Binding {
     },
 }
 
+/// The declared signature of a user function, as the call sites see it.
+///
+/// Both halves are always present: the parser makes parameter types and the
+/// return type mandatory, so a call site never has to guess and a recursive
+/// call is checked against the declaration rather than against a fixpoint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FunctionSignature {
+    params: Vec<(String, TypeExpr)>,
+    return_ty: TypeExpr,
+}
+
+fn function_signature(function: &crate::ast::FunctionDecl) -> FunctionSignature {
+    FunctionSignature {
+        params: function
+            .params
+            .iter()
+            .map(|param| (param.name.to_string(), param.ty.clone()))
+            .collect(),
+        return_ty: function.return_ty.clone(),
+    }
+}
+
 struct Linker<'module> {
     program: &'module Program,
     surface: &'module LashlangHostEnvironment,
     process_names: BTreeSet<String>,
     process_types: BTreeMap<String, TypeExpr>,
+    /// Declared function signatures, keyed by name. Collected before any body
+    /// is lowered so a function may call one declared later, and itself.
+    function_signatures: BTreeMap<String, FunctionSignature>,
     type_names: BTreeSet<String>,
     type_defs: BTreeMap<String, TypeExpr>,
     expression_spans: BTreeMap<usize, Span>,
@@ -36,6 +61,7 @@ impl<'module> Linker<'module> {
             dialect: crate::CompilationDialect::Lashlang,
             process_names: BTreeSet::new(),
             process_types: BTreeMap::new(),
+            function_signatures: BTreeMap::new(),
             type_names: BTreeSet::new(),
             type_defs: BTreeMap::new(),
             expression_spans: expression_spans_by_pointer(program),
@@ -114,6 +140,19 @@ impl<'module> Linker<'module> {
                     self.ensure_feature(self.surface.abilities.processes, "processes", span)?;
                     ("process", decl.name.as_str())
                 }
+                // Functions need nothing from the host — no journal, no
+                // scheduler, no durability tier — so unlike `process` they are
+                // not gated on an ability. There is deliberately no host switch
+                // to turn them off.
+                Declaration::Function(decl) => {
+                    if crate::builtins::is_builtin(decl.name.as_str()) {
+                        return Err(LinkError::FunctionShadowsBuiltin {
+                            name: decl.name.to_string(),
+                            span,
+                        });
+                    }
+                    ("function", decl.name.as_str())
+                }
             };
             if !names.insert((namespace, name.to_string())) {
                 return Err(LinkError::DuplicateDeclaration {
@@ -121,13 +160,26 @@ impl<'module> Linker<'module> {
                     span,
                 });
             }
-            if let Declaration::Process(decl) = declaration {
-                self.process_names.insert(decl.name.to_string());
+            match declaration {
+                Declaration::Process(decl) => {
+                    self.process_names.insert(decl.name.to_string());
+                }
+                Declaration::Function(decl) => {
+                    self.function_signatures
+                        .insert(decl.name.to_string(), function_signature(decl));
+                }
+                Declaration::Type(_) => {}
             }
         }
         for declaration in &self.program.declarations {
             match declaration {
                 Declaration::Type(type_decl) => self.validate_type_refs(&type_decl.ty, None)?,
+                Declaration::Function(function) => {
+                    for param in &function.params {
+                        self.validate_type_refs(&param.ty, None)?;
+                    }
+                    self.validate_type_refs(&function.return_ty, None)?;
+                }
                 Declaration::Process(process) => {
                     for param in &process.params {
                         self.validate_type_refs(&param.ty, None)?;
@@ -761,6 +813,191 @@ impl<'module> Linker<'module> {
                     body,
                 })
             }
+            Declaration::Function(function) => {
+                Declaration::Function(self.lower_function_decl(function, span)?)
+            }
         })
+    }
+
+    /// Links one `fn` declaration: purity first, then types.
+    ///
+    /// The purity walk runs before the body is lowered so that a body which
+    /// both performs an effect and mentions an unknown name reports the effect.
+    /// That ordering matters for the model-facing diagnostic: the effect ban is
+    /// the rule a reader has to learn, and an incidental name error would hide
+    /// it.
+    fn lower_function_decl(
+        &self,
+        function: &crate::ast::FunctionDecl,
+        span: Option<Span>,
+    ) -> Result<crate::ast::FunctionDecl, LinkError> {
+        self.reject_effects_in_function(function, &function.body, span)?;
+        let mut scope = Scope::new(false, span);
+        scope.expected_return = Some(function.return_ty.clone());
+        let mut seen = BTreeSet::new();
+        for param in &function.params {
+            if !seen.insert(param.name.to_string()) {
+                return Err(LinkError::DuplicateFunctionParam {
+                    name: param.name.to_string(),
+                    span,
+                });
+            }
+            self.reject_function_name_binding(param.name.as_str(), span)?;
+            scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
+        }
+        // A function body's *variable* scope holds its parameters and nothing
+        // else. Host globals are turn state: letting a body read them would
+        // make one call's result depend on when it ran, which is exactly the
+        // property the effect ban exists to guarantee is absent. Names that are
+        // not variables at all still resolve, though -- a declared process name
+        // lowers to a process reference -- which is why the ban is re-applied
+        // to the lowered body below.
+        let (body, binding) = self.lower_expr(&function.body, &mut scope)?;
+        // Lowering is a resolver, not just a rewriter: it turns a bare
+        // identifier into whatever the name denotes, so it can *introduce* a
+        // forbidden node that the parsed body never contained. Walking the
+        // parsed body alone made `fn peek() -> any { worker }` link clean with
+        // an `Expr::ProcessRef` in its body. Checking both sides keeps the ban
+        // a property of the lowered program -- the thing that actually runs --
+        // while the parsed walk above still owns the precise span for effects
+        // a reader wrote themselves.
+        self.reject_effects_in_function(function, &body, span)?;
+        let output = binding_type(binding.as_ref());
+        if !self.is_type_assignable(&output, &function.return_ty) {
+            return Err(LinkError::IncompatibleFunctionReturn {
+                function: function.name.to_string(),
+                expected: format_type_expr(&self.resolve_type_aliases(&function.return_ty)),
+                actual: format_type_expr(&self.resolve_type_aliases(&output)),
+                span,
+            });
+        }
+        Ok(crate::ast::FunctionDecl {
+            name: function.name.clone(),
+            params: function.params.clone(),
+            return_ty: function.return_ty.clone(),
+            body,
+        })
+    }
+
+    /// Rejects every effectful construct inside a function body.
+    ///
+    /// This is the whole safety argument of the feature in one pass. Effects
+    /// keep their exactly-once identity from the syntactic site that performs
+    /// them, and continuation snapshots are taken at effect suspension points;
+    /// a function that could suspend would give one syntactic site many dynamic
+    /// occurrences and put a call frame into every snapshot. Refusing effects
+    /// outright keeps both properties true by construction rather than by
+    /// bookkeeping, which is why the ban is a link error and not a warning.
+    ///
+    /// Run on both the parsed and the lowered body: the parsed pass gives a
+    /// reader the precise span of an effect they wrote, and the lowered pass is
+    /// what makes the ban complete, because resolution can create a forbidden
+    /// node from an identifier that looked inert in the source.
+    fn reject_effects_in_function(
+        &self,
+        function: &crate::ast::FunctionDecl,
+        body: &Expr,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        let mut pending = vec![body];
+        while let Some(expr) = pending.pop() {
+            if let Some(construct) = forbidden_function_construct(expr) {
+                return Err(LinkError::ForbiddenInFunction {
+                    function: function.name.to_string(),
+                    construct,
+                    span: self
+                        .expression_spans
+                        .get(&(expr as *const Expr as usize))
+                        .copied()
+                        .or(span),
+                });
+            }
+            pending.extend(expr.children());
+        }
+        Ok(())
+    }
+
+    /// Rejects binding or reading a declared function name as a variable.
+    ///
+    /// Functions are called, never passed: there is no function type in the
+    /// surface type grammar, so a name that resolved to both a function and a
+    /// value would have no type to report at the value use. Reserving the name
+    /// keeps `name(...)` meaning exactly one thing everywhere in the program.
+    fn reject_function_name_binding(
+        &self,
+        name: &str,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        if self.function_signatures.contains_key(name) {
+            return Err(LinkError::FunctionNameIsNotAValue {
+                name: name.to_string(),
+                span,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Names the construct a function body may not contain, or `None` when the node
+/// is pure.
+///
+/// The match is exhaustive on purpose: a new `Expr` variant has to be classified
+/// here before it compiles, so an effect can never be added to the language and
+/// silently become legal inside a function.
+fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
+    match expr {
+        Expr::ReceiverCall { .. } => Some("a module operation call"),
+        Expr::Await(_) => Some("await"),
+        Expr::SleepFor(_) => Some("sleep for"),
+        Expr::SleepUntil(_) => Some("sleep until"),
+        Expr::WaitSignal { .. } => Some("wait_signal"),
+        Expr::SignalRun { .. } => Some("signal_run"),
+        Expr::Cancel(_) => Some("cancel"),
+        Expr::StartProcess(_) => Some("start"),
+        Expr::ProcessRef { .. } => Some("a process reference"),
+        Expr::Print(_) => Some("print"),
+        Expr::Yield(_) => Some("yield"),
+        Expr::Wake(_) => Some("wake"),
+        Expr::Finish(_) => Some("finish"),
+        Expr::Fail(_) => Some("fail"),
+        // A label names a step in the workflow graph, and a pure body
+        // contributes no steps: the annotation would be silently inert.
+        Expr::LabelAnnotated { .. } => Some("@label"),
+        Expr::Block(_)
+        | Expr::Null
+        | Expr::Undefined
+        | Expr::Bool(_)
+        | Expr::Number(_)
+        | Expr::String(_)
+        | Expr::Variable(_)
+        | Expr::Tuple(_)
+        | Expr::List(_)
+        | Expr::ListComprehension { .. }
+        | Expr::Record(_)
+        | Expr::Assign { .. }
+        | Expr::If { .. }
+        | Expr::For { .. }
+        | Expr::While { .. }
+        | Expr::Break
+        | Expr::Continue
+        | Expr::HostDescriptorConstructor { .. }
+        | Expr::ResourceRef(_)
+        | Expr::ResultUnwrap(_)
+        | Expr::BuiltinCall { .. }
+        | Expr::Function(_)
+        | Expr::Call { .. }
+        | Expr::FunctionCall { .. }
+        | Expr::Map { .. }
+        | Expr::Try(_)
+        | Expr::Throw(_)
+        | Expr::Return(_)
+        | Expr::Field { .. }
+        | Expr::Index { .. }
+        | Expr::Unary { .. }
+        | Expr::Binary { .. }
+        | Expr::JavaScriptUnary { .. }
+        | Expr::JavaScriptBinary { .. }
+        | Expr::JavaScriptLogical { .. }
+        | Expr::TypeLiteral(_) => None,
     }
 }

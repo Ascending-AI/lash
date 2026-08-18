@@ -1409,3 +1409,83 @@ async fn prompt_mentions_every_builtin_we_document() {
         );
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Claim: "Functions: declare reusable pure logic at the top level with
+// `fn name(param: type, ...) -> type { body }` ... Effects are not
+// allowed inside a function body."
+// ─────────────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "current_thread")]
+async fn declared_functions_behave_as_the_prompt_describes() {
+    let host = MockHost::default();
+    let mut state = State::new();
+    let outcome = execute(
+        r#"
+        fn label(name: str, count: int) -> str {
+          format("{}: {}", name, count)
+        }
+
+        fn shout(name: str) -> str {
+          upper(label(name, 2))
+        }
+
+        finish shout("items")
+        "#,
+        &mut state,
+        &host,
+    )
+    .await
+    .expect("declared functions should execute");
+
+    assert!(
+        matches!(&outcome, ExecutionOutcome::Finished(Value::String(text)) if &**text == "ITEMS: 2"),
+        "unexpected outcome: {outcome:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_prompt_is_honest_that_effects_are_banned_inside_a_function() {
+    for source in [
+        r#"fn f(path: str) -> str { (await files.read({ path: path }))? }"#,
+        r#"fn f(n: int) -> int { print n
+          n }"#,
+        r#"fn f(n: int) -> int { finish n }"#,
+        r#"fn f(n: int) -> int { sleep for "1s"
+          n }"#,
+    ] {
+        let program = parse(&format!("{source}\n\nfinish f(1)\n")).expect("source should parse");
+        let error = lashlang::LinkedModule::link(program, test_host_environment())
+            .expect_err("linking should reject the effect");
+        assert!(
+            matches!(error, lashlang::LinkError::ForbiddenInFunction { .. }),
+            "unexpected error for {source}: {error:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_prompt_is_honest_that_function_arithmetic_returns_float() {
+    // The bullet warns that `-> int` on a computing body is a link error,
+    // because that is the first thing a reader who trusts `int` will hit.
+    let link = |source: &str| {
+        lashlang::LinkedModule::link(
+            parse(source).expect("source should parse"),
+            test_host_environment(),
+        )
+    };
+
+    let error = link("fn double(n: int) -> int {\n  n * 2\n}\n\nfinish double(21)\n")
+        .expect_err("an int return on a computing body should be refused");
+    assert!(
+        matches!(
+            &error,
+            lashlang::LinkError::IncompatibleFunctionReturn { expected, actual, .. }
+                if expected == "int" && actual == "float"
+        ),
+        "unexpected error: {error:?}"
+    );
+
+    link("fn double(n: int) -> float {\n  n * 2\n}\n\nfinish double(21)\n")
+        .expect("the documented `-> float` spelling should link");
+}

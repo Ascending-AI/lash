@@ -12,8 +12,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::ast::{
-    AssignTarget, Declaration, Expr, LabelMetadata, ListComprehensionClause, ProcessDecl,
-    ProcessParam, ProcessSignalDecl, Program, TypeDecl, TypeExpr,
+    AssignTarget, Declaration, Expr, FunctionDecl, LabelMetadata, ListComprehensionClause,
+    ProcessDecl, ProcessParam, ProcessSignalDecl, Program, TypeDecl, TypeExpr,
 };
 use crate::linker::WorkflowLinkAnalysis;
 use crate::runtime::is_pure_expr;
@@ -35,7 +35,7 @@ pub use execution_sites::runtime_execution_site_for_workflow_site;
 pub use facets::*;
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 3;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 4;
 
 /// A deterministic node identifier minted from canonical source and AST position.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -95,6 +95,15 @@ impl WorkflowGraph {
 pub enum WorkflowDeclaration {
     Type(TypeDecl),
     Process(WorkflowProcess),
+    /// A declared pure function, carried through the document unprojected.
+    ///
+    /// A process becomes a container with a child subgraph because its body is
+    /// made of durable steps the editor has to show and reorder. A function's
+    /// body contains no effects by construction, so it contributes no steps and
+    /// no execution sites: projecting it into nodes would invent graph
+    /// structure with nothing behind it. It travels verbatim instead, exactly
+    /// as `Type` does, so a round trip through the document is lossless.
+    Function(FunctionDecl),
 }
 
 /// A named process is a container with its own child subgraph.
@@ -394,6 +403,9 @@ impl<'a> GraphProjector<'a> {
                 Declaration::Type(ty) => declarations.push(WorkflowDeclaration::Type(ty.clone())),
                 Declaration::Process(process) => {
                     declarations.push(WorkflowDeclaration::Process(self.project_process(process)))
+                }
+                Declaration::Function(function) => {
+                    declarations.push(WorkflowDeclaration::Function(function.clone()))
                 }
             }
         }
@@ -976,6 +988,7 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
     for declaration in &graph.declarations {
         declarations.push(match declaration {
             WorkflowDeclaration::Type(ty) => Declaration::Type(ty.clone()),
+            WorkflowDeclaration::Function(function) => Declaration::Function(function.clone()),
             WorkflowDeclaration::Process(process) => {
                 let label =
                     (process.name_source == WorkflowNodeNameSource::Label).then(|| LabelMetadata {

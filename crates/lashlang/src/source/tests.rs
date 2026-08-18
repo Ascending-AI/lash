@@ -313,3 +313,37 @@ fn non_sourceable_type_shapes_are_rejected() {
         ));
     }
 }
+
+#[test]
+fn function_declarations_round_trip_through_canonical_source() {
+    let linked = assert_linked_source_round_trip(
+        "fn describe(name: str, count: int) -> str {\n  format(\"{}: {}\", name, count)\n}\n\nfinish describe(\"items\", 2)\n",
+    );
+    let rendered = linked
+        .artifact
+        .canonical_source()
+        .expect("render canonical source");
+    assert!(
+        rendered.contains("fn describe(name: str, count: int) -> str {"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn a_function_body_is_part_of_the_module_identity() {
+    // The body is executable code reached from main, so two modules that differ
+    // only inside a function must not share a hash.
+    let surface = host_environment();
+    let link = |body: &str| {
+        LinkedModule::link(
+            parse(&format!(
+                "fn scale(n: int) -> float {{\n  {body}\n}}\n\nfinish scale(2)\n"
+            ))
+            .expect("parse"),
+            &surface,
+        )
+        .expect("link")
+        .module_ref
+    };
+    assert_ne!(link("n * 2"), link("n * 3"));
+}
