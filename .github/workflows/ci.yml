@@ -185,6 +185,9 @@ jobs:
       - name: Check test quarantine metadata
         run: python3 scripts/check_test_quarantines.py
 
+      - name: Check judged build geometry
+        run: python3 scripts/check_judged_build_geometry.py
+
       - name: Test repository scripts
         run: |
           python3 scripts/test_check_api_example_coverage.py
@@ -201,6 +204,7 @@ jobs:
           python3 scripts/test_slack_clone_full_host_e2e_contract.py
           python3 scripts/test_slack_clone_live_model_e2e_contract.py
           python3 scripts/test_judged_runbook_matrix.py
+          python3 scripts/test_check_judged_build_geometry.py
           python3 scripts/test_release_notes.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
@@ -292,6 +296,11 @@ jobs:
       # target that calls it. That gap shipped a `missing field` break to the
       # Functional E2E leg, twenty minutes of docker away, when a local
       # workspace battery was entirely green. Compile it here in seconds.
+      # `cargo check -p agent-workbench` (no `--all-targets`) is also the judged
+      # lane's compile leg: it resolves the host without dev-dependencies, which
+      # is exactly the feature set a judged runbook boots. The workspace check
+      # unifies `testing` back in through dev-dependencies and would not notice
+      # the host losing it.
       - name: Check package-scoped testing consumers
         run: |
           cargo check -p lash-protocol-rlm --features testing --locked

@@ -36,7 +36,7 @@ changes, not model prose.
 
 - Require `OPENROUTER_API_KEY`.
 - Use a fresh `<data-dir>` and free `<port>`, then boot with:
-  `AGENT_SERVICE_DATA_DIR=<data-dir> AGENT_SERVICE_ADDR=127.0.0.1:<port> cargo run -p agent-service`.
+  `AGENT_SERVICE_DATA_DIR=<data-dir> AGENT_SERVICE_ADDR=127.0.0.1:<port> cargo run -p agent-service --profile judged`.
   Gate on the listening line and `GET /api/settings` → 200.
 - Restart with the same command, port, and data directory after terminating only the
   service process. Teardown the process at the end.

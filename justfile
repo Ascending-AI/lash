@@ -68,7 +68,7 @@ workflow-graph-roundtrip port='3031':
   npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" ci
   npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" run build
   WORKFLOW_GRAPH_ADDR="127.0.0.1:{{port}}" CARGO_TARGET_DIR="$target_dir" \
-    cargo run -p workflow-graph-roundtrip
+    cargo run -p workflow-graph-roundtrip --profile judged
 
 workflow-graph-integration-verify:
   npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" ci

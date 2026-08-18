@@ -40,7 +40,7 @@ The model plays O however it likes — do not gate on which cell it picks or its
   AGENT_SERVICE_ADDR=127.0.0.1:<port> \
   AGENT_SERVICE_DATA_DIR=<fresh-tmp>/agent-service-e2e \
   OPENROUTER_API_KEY=... \
-  cargo run -p agent-service
+  cargo run -p agent-service --profile judged
   ```
   Readiness: the `agent-service listening on http://...` line, then `GET /api/settings` →
   200.
