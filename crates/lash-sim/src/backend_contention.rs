@@ -56,8 +56,24 @@ pub struct BackendContentionOperation {
     pub evidence: Value,
 }
 
+/// Runs the contention report against the configured shared Postgres database.
 pub async fn run_backend_contention_report(
     artifact_root: impl AsRef<Path>,
+) -> Result<BackendContentionReport, String> {
+    let postgres_database_url = std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .ok()
+        .filter(|database_url| !database_url.is_empty());
+    run_backend_contention_report_against(artifact_root, postgres_database_url).await
+}
+
+/// Runs the contention report against an explicitly chosen Postgres database,
+/// or SQLite only when `postgres_database_url` is `None`.
+///
+/// The explicit form exists so a test can point the Postgres lane at its own
+/// isolated database instead of the shared one every other suite writes to.
+pub async fn run_backend_contention_report_against(
+    artifact_root: impl AsRef<Path>,
+    postgres_database_url: Option<String>,
 ) -> Result<BackendContentionReport, String> {
     let artifact_root = artifact_root.as_ref();
     std::fs::create_dir_all(artifact_root).map_err(|err| err.to_string())?;
@@ -76,8 +92,8 @@ pub async fn run_backend_contention_report(
         .await?,
     );
 
-    match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-        Ok(database_url) => {
+    match postgres_database_url {
+        Some(database_url) => {
             let storage = Arc::new(
                 lash_postgres_store::PostgresStorage::connect(&database_url)
                     .await
@@ -96,7 +112,7 @@ pub async fn run_backend_contention_report(
                 .await?,
             );
         }
-        Err(_) => scenarios.push(BackendContentionScenario {
+        None => scenarios.push(BackendContentionScenario {
             backend: "postgres".to_string(),
             status: "skipped".to_string(),
             store_factory: "lash_postgres_store::PostgresSessionStoreFactory".to_string(),
@@ -760,9 +776,16 @@ mod tests {
     #[tokio::test]
     async fn backend_contention_report_runs_sqlite_and_records_artifact() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let report = super::run_backend_contention_report(tmp.path())
-            .await
-            .expect("backend contention report");
+        // The Postgres lane runs against a database created for this test
+        // alone: the shared database is truncated out from under it by the
+        // conformance suites running in sibling processes.
+        let database = crate::postgres_test_isolation::isolated_database().await;
+        let report = super::run_backend_contention_report_against(
+            tmp.path(),
+            database.as_ref().map(|database| database.url().to_string()),
+        )
+        .await
+        .expect("backend contention report");
         assert_eq!(report.status, "passed");
         assert!(report.summary.passed >= 1);
         assert!(

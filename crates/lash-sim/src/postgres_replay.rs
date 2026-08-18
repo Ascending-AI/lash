@@ -1282,13 +1282,13 @@ mod tests {
 
     #[tokio::test]
     async fn postgres_replay_observes_checkpoint_writes_when_configured() {
-        let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-            Ok(database_url) if !database_url.is_empty() => database_url,
-            _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
-                panic!("LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1")
-            }
-            _ => return,
+        // Replay against a database created for this test alone. Against the
+        // shared database the conformance suites truncate this replay's session
+        // metadata mid-run, which surfaces as a spurious commit failure.
+        let Some(database) = crate::postgres_test_isolation::isolated_database().await else {
+            return;
         };
+        let database_url = database.url().to_string();
         let workload = generate_workload(7, "fast-random", 24).expect("workload");
         let mut trace = run_generated_workload_for_fixture(workload, "postgres-observer")
             .await

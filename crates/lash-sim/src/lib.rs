@@ -15,6 +15,8 @@ pub mod generator;
 pub mod minimize;
 pub mod oracles;
 pub mod postgres_replay;
+#[cfg(test)]
+mod postgres_test_isolation;
 pub mod provider;
 pub mod provider_mutations;
 #[cfg(test)]
