@@ -169,7 +169,7 @@ fn standard_core(
         provider,
         tools,
         trace,
-        Arc::new(lash_core::facade_support::OpenAttachmentSourcePolicy),
+        Arc::new(lash_core::test_support::OpenAttachmentSourcePolicy),
     )
 }
 
@@ -177,7 +177,7 @@ fn standard_core_with_attachment_policy(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
-    attachment_source_policy: Arc<dyn lash_core::facade_support::AttachmentSourcePolicy>,
+    attachment_source_policy: Arc<dyn lash_core::test_support::AttachmentSourcePolicy>,
 ) -> lash::LashCore {
     lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -505,13 +505,13 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     #[derive(Debug)]
     struct DenyAttachments;
 
-    impl lash_core::facade_support::AttachmentSourcePolicy for DenyAttachments {
+    impl lash_core::test_support::AttachmentSourcePolicy for DenyAttachments {
         fn authorize(
             &self,
-            producer: &lash_core::facade_support::AttachmentProducer,
+            producer: &lash_core::test_support::AttachmentProducer,
             _source: &lash_core::AttachmentSource,
-        ) -> Result<(), lash_core::facade_support::AttachmentSourcePolicyError> {
-            Err(lash_core::facade_support::AttachmentSourcePolicyError {
+        ) -> Result<(), lash_core::test_support::AttachmentSourcePolicyError> {
+            Err(lash_core::test_support::AttachmentSourcePolicyError {
                 producer: producer.clone(),
                 reason: "attachment denied for logical-turn settlement test".to_string(),
             })

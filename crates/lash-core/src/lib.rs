@@ -34,6 +34,9 @@ pub mod task;
 pub mod sync {
     pub use lash_sansio::sync::*;
 }
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub mod test_support;
 #[cfg(test)]
 mod test_watchdog;
 #[cfg(any(test, feature = "testing"))]
@@ -144,15 +147,11 @@ pub mod facade_support {
     }
 
     pub use crate::attachments::AttachmentGcFence;
-    pub use crate::attachments::AttachmentProducer;
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
-    pub use crate::attachments::AttachmentSourcePolicy;
-    pub use crate::attachments::AttachmentSourcePolicyError;
     pub use crate::attachments::EmptyRootSetPolicy;
     pub use crate::attachments::FileAttachmentStore;
     pub use crate::attachments::InMemoryAttachmentStore;
-    pub use crate::attachments::OpenAttachmentSourcePolicy;
     pub use crate::attachments::SessionAttachmentStore;
     pub use crate::attachments::reclaim_unreferenced_attachments;
     pub use crate::chronological::BorrowedChronologicalEntry;
@@ -192,7 +191,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginLifecycleEvent;
     pub use crate::plugin::PluginLifecycleEventHook;
     pub use crate::plugin::PluginOperation;
-    pub use crate::plugin::PluginOperationFailure;
     pub use crate::plugin::PluginOperationInvokeError;
     pub use crate::plugin::PluginOwned;
     pub use crate::plugin::PluginQuery;
@@ -204,12 +202,9 @@ pub mod facade_support {
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTaskReceipt;
     pub use crate::plugin::PromptHookContext;
-    pub use crate::plugin::RuntimeServices;
     pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
-    pub use crate::plugin::SessionObservedProcessOutcome;
-    pub use crate::plugin::SessionObservedProcessResult;
     pub use crate::plugin::SessionParam;
     pub use crate::plugin::SessionPlugin;
     pub use crate::plugin::SessionStateChangedContext;
@@ -342,7 +337,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnOptions;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
-    pub use crate::runtime::UnavailableProcessService;
     pub use crate::runtime::UsageReportRow;
     pub use crate::runtime::UsageTotals;
     pub use crate::runtime::WakeDeliveryDriveReport;
@@ -433,12 +427,10 @@ pub mod facade_support {
     pub use lash_sansio::ProviderSchemaCapabilities;
     pub use lash_sansio::ResolvedSchema;
     pub use lash_sansio::Response;
-    pub use lash_sansio::SchemaDialect;
     pub use lash_sansio::SchemaPurpose;
     pub use lash_sansio::SchemaResolutionError;
     pub use lash_sansio::SchemaResolutionRequest;
     pub use lash_sansio::SessionStreamEvent;
-    pub use lash_sansio::ToolCatalogBuildInput;
     pub use lash_sansio::TurnFinish;
     pub use lash_sansio::TurnOutcome;
     pub use lash_sansio::TurnStop;
@@ -451,7 +443,6 @@ pub mod facade_support {
     pub use lash_sansio::render_turn_causes_prompt;
     pub use lash_sansio::resolve_schema;
     pub use lash_sansio::shared_parts;
-    pub use lash_sansio::validate_tool_input;
     pub use lash_sansio::visible_response_text_from_parts;
     pub use lash_trace::JsonlTraceSink;
     pub use lash_trace::TraceBranchSelection;
@@ -466,6 +457,20 @@ pub mod facade_support {
 }
 
 pub(crate) use facade_support::*;
+
+// `facade_support` is the workspace's internal cross-crate seam, and membership
+// in it means some crate's *shipped* code needs the item (FIG-1223). These
+// twelve had test-only consumers, so their public path is `test_support` and
+// only their crate-internal short path lives here: `test_support` is
+// feature-gated and `crate::X` has to resolve in every build.
+pub(crate) use crate::attachments::{
+    AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
+};
+pub(crate) use crate::plugin::{
+    RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessResult,
+};
+pub(crate) use crate::runtime::UnavailableProcessService;
+pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
 
 pub mod sansio {
     pub(crate) use lash_sansio::sansio::LogEvent;

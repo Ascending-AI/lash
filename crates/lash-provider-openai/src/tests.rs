@@ -990,7 +990,7 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
                 "properties": {"raw": {"const": "x"}}
             }))
             .with_override(
-                lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
+                lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
                 json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }

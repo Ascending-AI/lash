@@ -187,7 +187,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
                 "properties": { "raw": { "const": "x" } }
             }))
             .with_override(
-                lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
+                lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS,
                 serde_json::json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }
@@ -298,7 +298,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     ));
     assert_eq!(
         core.tools[0].input_schema.projection.overrides[0].dialect,
-        lash_core::facade_support::SchemaDialect::OPENAI_TOOL_PARAMETERS
+        lash_core::test_support::SchemaDialect::OPENAI_TOOL_PARAMETERS
     );
 
     let response_metadata = BTreeMap::from([

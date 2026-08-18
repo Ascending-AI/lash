@@ -11,8 +11,8 @@ use lash_core::runtime::RuntimeSessionState;
 use lash_core::{
     SessionPolicy, TestLocalProcessRegistry, facade_support::LashRuntime,
     facade_support::PluginFactory, facade_support::PluginHost, facade_support::ProcessRuntimeHost,
-    facade_support::RuntimeHostConfig, facade_support::RuntimeServices,
-    facade_support::TraceRuntimeSubject,
+    facade_support::RuntimeHostConfig, facade_support::TraceRuntimeSubject,
+    test_support::RuntimeServices,
 };
 use lash_core::{ToolArgumentProjectionPolicy, ToolOutputContract, TurnInput};
 use lash_lashlang_runtime::{

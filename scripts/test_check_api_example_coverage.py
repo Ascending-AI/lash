@@ -189,9 +189,19 @@ class CoreSurfaceTests(unittest.TestCase):
         self.assertIn("gated_core_modules", str(raised.exception))
 
     def test_rejects_a_gated_module_the_crate_no_longer_exports(self):
+        # Judged against the all-features document: a module missing from *that*
+        # pass is missing everywhere, which is what retirement means.
         with self.assertRaises(AssertionError) as raised:
-            lash_core_surface(fixture(), False, {"support", "retired_support"})
+            lash_core_surface(fixture(), True, {"support", "retired_support"})
         self.assertIn("retired_support", str(raised.exception))
+
+    def test_tolerates_a_feature_gated_gated_module_absent_by_default(self):
+        # FIG-1223: `test_support` is `#[cfg(any(test, feature = "testing"))]`,
+        # so the default-features pass never sees it. Absent-without-the-feature
+        # is what that module is supposed to be, not a retirement, and only the
+        # all-features pass answers for existence.
+        surface = lash_core_surface(fixture(), False, {"support", "test_support"})
+        self.assertIn(("lash_core::support::Bridged", "struct"), surface)
 
     def test_excludes_unreached_public_module_internals(self):
         self.assertEqual(

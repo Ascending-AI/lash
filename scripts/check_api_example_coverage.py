@@ -161,8 +161,10 @@ them into an amnesty channel (FIG-1223):
   from its source rather than from the path root the ledger keys it under.
 * `internal-test-only` -- the only consumers are tests.  The anchor must sit in
   a test tier, and the reason says so; an item that is not already behind the
-  `testing` feature carries a `Relocate:` note, because "a test imports it" is
-  exactly the level of justification that let a dead session picker look alive.
+  `testing` feature -- `lash_core::testing` or `lash_core::test_support`, see
+  `FEATURE_GATED_TEST_HOMES` -- carries a `Relocate:` note, because "a test
+  imports it" is exactly the level of justification that let a dead session
+  picker look alive.
 
 `unused-remove` verdicts leave a tombstone.  `[[removal_verdict]]` records every
 item that has ever carried one, and a verdict may only be discharged by actually
@@ -262,6 +264,11 @@ DISPOSITION_TIERS = {
 #: one-line diff beside the row that was upgraded.  Raising it is the bleeding
 #: this gate exists to stop, so an increase fails.
 EXAMPLE_TEST_TIER_RATCHET = 1914
+#: Module paths that put an item behind the `testing` feature, which is what
+#: makes a test-only consumer a home rather than an excuse.  `test_support` is
+#: the doc-hidden one lash-core relocates cross-crate test-only items into;
+#: `testing` is the documented fixture surface downstream crates share.
+FEATURE_GATED_TEST_HOMES = ("::testing", "::test_support")
 PUBLIC_KINDS = {
     "assoc_const",
     "assoc_type",
@@ -733,7 +740,9 @@ def lash_core_surface(
     inventory rather than derived from `#[doc(hidden)]` alone, so neither adding
     a hidden support module nor un-hiding an existing one changes what the gate
     covers without an explicit edit: an unlisted hidden root module is an error,
-    and a listed module that has vanished is an error too.
+    and a listed module that has vanished is an error too -- judged against the
+    all-features document, so that a feature-gated support module is allowed to
+    be absent from the default pass without reading as retired.
     """
     index = document["index"]
     paths = document["paths"]
@@ -781,7 +790,12 @@ def lash_core_surface(
             "not a ledger exemption -- add each to gated_core_modules in "
             f"{INVENTORY.name} and disposition its paths."
         )
-    missing = sorted(gated - walked)
+    # Only the all-features pass answers for existence: a support module may be
+    # feature-gated (`test_support` is `#[cfg(any(test, feature = "testing"))]`),
+    # and absent-without-the-feature is what that module is supposed to be, not
+    # a retirement. Retiring one still errors, because it is then missing from
+    # this pass too.
+    missing = sorted(gated - walked) if all_features else []
     if missing:
         raise AssertionError(
             f"gated_core_modules names modules lash-core no longer exports: "
@@ -3251,7 +3265,10 @@ def check() -> int:
                         f"{symbol}: internal-test-only requires a reason; the anchor "
                         "says a test consumes it, not why that is the whole story"
                     )
-                elif "::testing" not in symbol and "Relocate:" not in reason_text:
+                elif (
+                    not any(home in symbol for home in FEATURE_GATED_TEST_HOMES)
+                    and "Relocate:" not in reason_text
+                ):
                     errors.append(
                         f"{symbol}: internal-test-only outside a testing module "
                         "requires a Relocate: note naming where the item goes, "
