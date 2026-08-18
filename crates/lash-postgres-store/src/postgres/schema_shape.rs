@@ -240,7 +240,11 @@ pub enum ColumnValueSource {
 
 impl ColumnValueSource {
     /// Whether an insert may omit the column and still get a value.
-    fn supplies_own_value(self) -> bool {
+    ///
+    /// `pub(crate)` because the migration gate reads it too: a column that
+    /// supplies its own value supplies it for every existing row, which is a
+    /// table rewrite and therefore not creation-only.
+    pub(crate) fn supplies_own_value(self) -> bool {
         !matches!(self, Self::Supplied)
     }
 

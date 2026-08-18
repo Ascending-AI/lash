@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 53
+version 54
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -213,12 +213,23 @@ table lash_queued_work_items
   column payload_json text not-null
   primary-key (batch_id, item_index)
   foreign-key (batch_id) references lash_queued_work_batches (batch_id) on delete cascade
+table lash_runtime_effect_group
+  column children bigint not-null
+  column created_at_ms bigint not-null
+  column group_key text not-null
+  column loser_disposition text not-null
+  column next_seq bigint not-null default
+  column scope_id text not-null
+  column session_id text nullable
+  column wake text not-null
+  primary-key (group_key)
 table lash_runtime_effect_replay
   column created_at_ms bigint not-null
   column due_at_ms bigint nullable
   column envelope_hash text not-null
   column envelope_json text not-null
   column error_json text nullable
+  column group_key text nullable
   column lease_expires_at_ms bigint not-null default
   column lease_owner_id text nullable
   column lease_token text nullable
@@ -226,8 +237,10 @@ table lash_runtime_effect_replay
   column replay_key text not-null
   column scope_id text not-null
   column session_id text nullable
+  column settlement_seq bigint nullable
   column status text not-null
   column updated_at_ms bigint not-null
+  unique (group_key, settlement_seq) where (group_key is not null) and (settlement_seq is not null)
   primary-key (scope_id, replay_key)
 table lash_runtime_turn_commits
   column committed_at_ms bigint not-null

@@ -233,12 +233,13 @@ PostgreSQL tables. The operations runbook reset consequently clears
 
 Figments coordination is one Lash revision. SQLite durable-core schema 37 includes
 the keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover. PostgreSQL schema 53 includes those cutovers,
-the indexed recovery worklist, and the session-metadata payload cutover.
-Process-registry schema 24 adds atomic pending process-parent teardown to the v3
-process-environment reference cutover; trigger schema 5 carries its existing
-contract. Effect schema 10 carries both the agent-frame-key and recorded
-tool-intent cutovers.
+immutable graph-generation cutover. PostgreSQL schema 54 includes those cutovers,
+the indexed recovery worklist, the session-metadata payload cutover, and the
+durable effect-group journal. Process-registry schema 24 adds atomic pending
+process-parent teardown to the v3 process-environment reference cutover; trigger
+schema 5 carries its existing contract. Effect schema 11 carries the
+agent-frame-key and recorded tool-intent cutovers plus the effect-group journal,
+which SQLite reaches by reject-and-recreate.
 Development/test stores must be recreated.
 Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.

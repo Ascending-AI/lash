@@ -56,40 +56,61 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// run.
 const MIGRATION_FLOOR_VERSION: i32 = 50;
 /// Tables the component generations *above* the floor introduced, newest first
-/// (52: attachment GC fence; 51: parent-end plans and tool-intent submissions).
-/// Dropping them leaves the published floor catalog: the set is exactly the
-/// floor migration's `source_missing_tables`.
-const POST_FLOOR_TABLES: [&str; 3] = [
+/// (54: the effect-group journal; 52: attachment GC fence; 51: parent-end plans
+/// and tool-intent submissions). Dropping them leaves the published floor
+/// catalog: the set is exactly the floor migration's `source_missing_tables`.
+const POST_FLOOR_TABLES: [&str; 4] = [
+    "lash_runtime_effect_group",
     "lash_attachment_condemnations",
     "lash_tool_intent_submissions",
     "lash_process_parent_end_plans",
 ];
 /// Indexes those generations added to tables the floor catalog already had, so
-/// dropping the post-floor tables does not take them with it (53: the
-/// ingress-family ordering pair). This list is the post-floor
-/// `introduced_relations` that are not themselves post-floor tables and do not
-/// belong to one, which is what `scripts/check_version_bump_fixtures.py` proves.
-const POST_FLOOR_INDEXES: [&str; 2] = [
+/// dropping the post-floor tables does not take them with it (54: the settlement
+/// uniqueness guard on the effect-replay table; 53: the ingress-family ordering
+/// pair). This list is the post-floor `introduced_relations` that are not
+/// themselves post-floor tables and do not belong to one, which is what
+/// `scripts/check_version_bump_fixtures.py` proves.
+const POST_FLOOR_INDEXES: [&str; 3] = [
     "idx_lash_queued_work_session_command_order",
     "idx_lash_pending_turn_input_order",
+    "uq_lash_runtime_effect_replay_group_seq",
+];
+/// Columns those generations added to tables the floor catalog already had, so
+/// dropping the post-floor tables does not take them with it either (54: the two
+/// effect-group columns on the effect-replay table). Without this axis the
+/// "published floor catalog" the fixture reconstructs is a floor catalog with
+/// current-generation columns bolted on, and the refusal it proves is not the
+/// one a genuinely older store gets. The set is exactly the floor migration's
+/// `source_missing_columns`, which `scripts/check_version_bump_fixtures.py`
+/// proves.
+const POST_FLOOR_COLUMNS: [(&str, &str); 2] = [
+    ("lash_runtime_effect_replay", "group_key"),
+    ("lash_runtime_effect_replay", "settlement_seq"),
 ];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 6] = [
+const POST_FLOOR_ARTIFACTS: [&str; 10] = [
     "idx_lash_pending_turn_input_order",
     "idx_lash_queued_work_session_command_order",
+    "idx_lash_runtime_effect_group_scope",
+    "idx_lash_runtime_effect_group_session",
     "idx_lash_tool_intent_submissions_scope",
     "lash_attachment_condemnations",
     "lash_process_parent_end_plans",
+    "lash_runtime_effect_group",
     "lash_tool_intent_submissions",
+    "uq_lash_runtime_effect_replay_group_seq",
 ];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 2] = [
-    "idx_lash_queued_work_session_command_order",
-    "idx_lash_pending_turn_input_order",
+const DIVERGENT_ARTIFACTS: [&str; 4] = [
+    "lash_runtime_effect_group",
+    "idx_lash_runtime_effect_group_session",
+    "idx_lash_runtime_effect_group_scope",
+    "uq_lash_runtime_effect_replay_group_seq",
 ];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
@@ -633,7 +654,8 @@ async fn refuse(database_url: &str) -> Result<()> {
     // that introduces a relation must add it here — a table to
     // `POST_FLOOR_TABLES`, an index over a table the floor already had to
     // `POST_FLOOR_INDEXES` — and to `POST_FLOOR_ARTIFACTS`, or the fixture
-    // silently stops being the published floor shape;
+    // silently stops being the published floor shape. A column added to a table
+    // the floor already had goes to `POST_FLOOR_COLUMNS` for the same reason;
     // `scripts/check_version_bump_fixtures.py` is what makes that impossible.
     for artifact in POST_FLOOR_TABLES {
         sqlx::query(&format!("DROP TABLE {artifact}"))
@@ -655,6 +677,32 @@ async fn refuse(database_url: &str) -> Result<()> {
             .execute(&pool)
             .await
             .with_context(|| format!("remove post-floor index {index} for older-store check"))?;
+    }
+    for (table, column) in POST_FLOOR_COLUMNS {
+        sqlx::query(&format!("ALTER TABLE {table} DROP COLUMN {column}"))
+            .execute(&pool)
+            .await
+            .with_context(|| {
+                format!("remove post-floor column {table}.{column} for older-store check")
+            })?;
+    }
+    for (table, column) in POST_FLOOR_COLUMNS {
+        let survived: i64 = sqlx::query_scalar(
+            "SELECT count(*)
+               FROM information_schema.columns
+              WHERE table_schema = current_schema()
+                AND table_name = $1
+                AND column_name = $2",
+        )
+        .bind(table)
+        .bind(column)
+        .fetch_one(&pool)
+        .await
+        .context("probe post-floor columns in the older-store fixture")?;
+        anyhow::ensure!(
+            survived == 0,
+            "older-store fixture retained the current-only column {table}.{column}"
+        );
     }
     let current_artifact_count: i64 = sqlx::query_scalar(
         "SELECT count(*)

@@ -113,6 +113,6 @@ async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
     };
     assert_eq!(
         error.to_string(),
-        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 10, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions.\")"
+        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 11, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions.\")"
     );
 }

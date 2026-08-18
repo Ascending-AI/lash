@@ -654,6 +654,8 @@ CREATE TABLE IF NOT EXISTS runtime_effect_replay (
     lease_token          TEXT,
     lease_expires_at_ms  INTEGER NOT NULL DEFAULT 0,
     due_at_ms            INTEGER,
+    group_key            TEXT,
+    settlement_seq       INTEGER,
     created_at_ms        INTEGER NOT NULL,
     updated_at_ms        INTEGER NOT NULL,
     PRIMARY KEY (scope_id, replay_key)
@@ -664,6 +666,33 @@ CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_lease
 
 CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_session
     ON runtime_effect_replay(session_id);
+
+-- Backstop for the group counter, not the allocator. Ranks are allocated by a
+-- single-row bump on runtime_effect_group; this index is what makes a
+-- regression to a read-then-max allocator fail closed on a constraint violation
+-- instead of silently seating two children at one rank. It doubles as the
+-- ordered index the rank read scans, which is why its predicate is exactly the
+-- read's filter.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_group_seq
+    ON runtime_effect_replay(group_key, settlement_seq)
+    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS runtime_effect_group (
+    group_key          TEXT PRIMARY KEY,
+    scope_id           TEXT NOT NULL,
+    session_id         TEXT,
+    wake               TEXT NOT NULL,
+    loser_disposition  TEXT NOT NULL,
+    children           INTEGER NOT NULL,
+    next_seq           INTEGER NOT NULL DEFAULT 0,
+    created_at_ms      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_session
+    ON runtime_effect_group(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_scope
+    ON runtime_effect_group(scope_id);
 
 CREATE TABLE IF NOT EXISTS await_event_meta (
     singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -706,7 +735,13 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // still carries the pre-cutover `frame_id` field.
 // Version 10 adds the versioned tool-intent carrier to recorded tool-attempt
 // outcomes and the typed execution outcomes to completed tool batches.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 10;
+// Version 11 adds the durable effect-group journal (FIG-1416, ADR 0065): the
+// `runtime_effect_group` counter row, the `group_key`/`settlement_seq` columns
+// that seat a child in its group's settlement order, and the unique backstop
+// over the pair. Effect databases follow the crate's reject-and-recreate
+// convention, so an existing effect database is deleted on upgrade rather than
+// migrated — release-notes material, not a host's discovery.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 11;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

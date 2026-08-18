@@ -406,6 +406,22 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_items (
 
 
 --
+-- Name: lash_runtime_effect_group; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group (
+    group_key text NOT NULL,
+    scope_id text NOT NULL,
+    session_id text,
+    wake text NOT NULL,
+    loser_disposition text NOT NULL,
+    children bigint NOT NULL,
+    next_seq bigint DEFAULT 0 NOT NULL,
+    created_at_ms bigint NOT NULL
+);
+
+
+--
 -- Name: lash_runtime_effect_replay; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -422,6 +438,8 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
     lease_token text,
     lease_expires_at_ms bigint DEFAULT 0 NOT NULL,
     due_at_ms bigint,
+    group_key text,
+    settlement_seq bigint,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL
 );
@@ -876,10 +894,16 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:e0ebf5
 
 
 --
+-- Data for Name: lash_runtime_effect_group; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_runtime_effect_replay; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', '0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1', '{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"durable-read-exec-effect\",\"kind\":\"exec_code\"},\"replay\":{\"key\":\"durable-read-exec-replay\"}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":["durable read effect"],"observation_truncation":[],"tool_calls":[],"executed_calls":[],"images":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, 1700000000000, 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', '0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1', '{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"durable-read-exec-effect\",\"kind\":\"exec_code\"},\"replay\":{\"key\":\"durable-read-exec-replay\"}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":["durable read effect"],"observation_truncation":[],"tool_calls":[],"executed_calls":[],"images":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 1700000000000, 1700000000000);
 
 
 --
@@ -895,7 +919,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 53);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 54);
 
 
 --
@@ -1245,6 +1269,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_items
 
 
 --
+-- Name: lash_runtime_effect_group lash_runtime_effect_group_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_runtime_effect_group
+    ADD CONSTRAINT lash_runtime_effect_group_pkey PRIMARY KEY (group_key);
+
+
+--
 -- Name: lash_runtime_effect_replay lash_runtime_effect_replay_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1559,6 +1591,20 @@ CREATE INDEX idx_lash_queued_work_session_command_order ON lash_durable_read_fix
 
 
 --
+-- Name: idx_lash_runtime_effect_group_scope; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_runtime_effect_group_scope ON lash_durable_read_fixture.lash_runtime_effect_group USING btree (scope_id);
+
+
+--
+-- Name: idx_lash_runtime_effect_group_session; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_runtime_effect_group_session ON lash_durable_read_fixture.lash_runtime_effect_group USING btree (session_id);
+
+
+--
 -- Name: idx_lash_runtime_effect_replay_lease; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1633,6 +1679,13 @@ CREATE INDEX idx_lash_wake_deliveries_group_sequence ON lash_durable_read_fixtur
 --
 
 CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_process_wake_deliveries USING btree (next_attempt_at_ms, target_session_id, process_id, sequence) WHERE (state = ANY (ARRAY['pending'::text, 'enqueuing'::text]));
+
+
+--
+-- Name: uq_lash_runtime_effect_replay_group_seq; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_group_seq ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (group_key, settlement_seq) WHERE ((group_key IS NOT NULL) AND (settlement_seq IS NOT NULL));
 
 
 --

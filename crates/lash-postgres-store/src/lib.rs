@@ -190,7 +190,14 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // earliest pending session command with the earliest pending turn input without
 // hydrating either queue. Both indexes cover columns 52 already stores, so
 // version-50, -51, and -52 stores take a creation-only migration at open.
-const SCHEMA_VERSION: i32 = 53;
+// Version 54 adds the durable effect-group journal: a `lash_runtime_effect_group`
+// row per open group carrying the settlement-sequence allocator, plus the
+// `group_key` and `settlement_seq` columns that tie a journalled child to its
+// group. Both columns are nullable with no default, so PostgreSQL adds them as
+// catalog metadata and every already-journalled effect keeps its recorded
+// `envelope_hash` — and therefore its lease fence — across the upgrade. Stores at
+// 50 through 53 take a creation-only migration at open.
+const SCHEMA_VERSION: i32 = 54;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

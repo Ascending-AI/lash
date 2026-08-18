@@ -393,6 +393,8 @@ CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
     lease_token TEXT,
     lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
     due_at_ms BIGINT,
+    group_key TEXT,
+    settlement_seq BIGINT,
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
     PRIMARY KEY (scope_id, replay_key)
@@ -401,6 +403,31 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
     ON lash_runtime_effect_replay(status, lease_expires_at_ms);
 CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
     ON lash_runtime_effect_replay(session_id);
+-- Settlement ranks are read by position, so a group must never record the same
+-- sequence twice; the partial index leaves ungrouped and unsettled children
+-- (both NULL-bearing) entirely unconstrained.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
+    ON lash_runtime_effect_replay(group_key, settlement_seq)
+    WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
+
+-- One row per open effect group. `next_seq` is the group's settlement counter:
+-- a finalizing child bumps it inside its own fenced transaction, which is the
+-- only allocator that cannot lose an update the way `MAX(settlement_seq) + 1`
+-- can under concurrent finalize.
+CREATE TABLE IF NOT EXISTS lash_runtime_effect_group (
+    group_key TEXT PRIMARY KEY,
+    scope_id TEXT NOT NULL,
+    session_id TEXT,
+    wake TEXT NOT NULL,
+    loser_disposition TEXT NOT NULL,
+    children BIGINT NOT NULL,
+    next_seq BIGINT NOT NULL DEFAULT 0,
+    created_at_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_session
+    ON lash_runtime_effect_group(session_id);
+CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
+    ON lash_runtime_effect_group(scope_id);
 
 CREATE TABLE IF NOT EXISTS lash_await_event_meta (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
@@ -493,7 +520,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 53)
+VALUES ('lash-postgres-store', 54)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)
