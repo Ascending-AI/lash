@@ -93,6 +93,22 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
+
+      # GitHub-side `actions/checkout` 429 storms have failed whole runs whose
+      # content was green. One jittered retry rides out the rate-limit window;
+      # the retry attempt is not `continue-on-error`, so a genuine checkout
+      # failure still fails the job.
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
@@ -151,6 +167,18 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-tags: true
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
@@ -225,6 +253,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
@@ -265,6 +303,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
@@ -345,6 +393,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
@@ -417,6 +475,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
@@ -477,6 +545,18 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -682,6 +762,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
@@ -730,6 +820,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download confidence fast shard artifacts
@@ -792,6 +892,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
@@ -847,6 +957,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
@@ -910,6 +1030,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
@@ -949,6 +1079,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
@@ -1039,6 +1179,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
@@ -1120,6 +1270,16 @@ jobs:
 
     steps:
       - name: Check out repository
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Back off before checkout retry
+        if: steps.checkout.outcome == 'failure'
+        run: sleep $((45 + RANDOM % 46))
+
+      - name: Check out repository (retry)
+        if: steps.checkout.outcome == 'failure'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Reclaim runner disk
