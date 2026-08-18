@@ -213,6 +213,7 @@ copy of everything.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 from pathlib import Path
@@ -1683,12 +1684,13 @@ def toml_escape(value: str) -> str:
 #: Roots an evidence anchor may point into.  `examples/` is host coverage;
 #: `crates/` is where an internal seam's consumer lives.
 ANCHOR_ROOTS = ("examples", "crates")
-#: A `#[cfg(test)]` gate, including the `#[cfg(any(test, ...))]` spelling the
-#: workspace uses for fixtures shared with the `testing` feature.
 #: The `cfg` predicate of an attribute, however the predicate is spelled.
 CFG_ATTRIBUTE = re.compile(r"#\[cfg\(")
-#: `not(...)`, whose contents invert: `#[cfg(not(test))]` is shipped code.
-CFG_NEGATION = re.compile(r"\bnot\s*\(")
+#: How many free cfg atoms a predicate may carry before the evaluator stops
+#: enumerating assignments.  Real predicates carry two or three; a predicate
+#: past this bound is read as shipped, the answer that keeps evidence honest by
+#: refusing to call code test-only without having shown it.
+CFG_ATOM_LIMIT = 12
 #: A module declared without a body: the code is in another file.
 OUT_OF_LINE_MODULE = re.compile(
     r"(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;"
@@ -1729,26 +1731,134 @@ def balanced_group(text: str, start: int) -> str:
     return text[start + 1 :]
 
 
+def split_predicates(text: str) -> list[str]:
+    """The comma-separated predicates of a `cfg` list, respecting nesting."""
+    parts: list[str] = []
+    depth = 0
+    quoted = False
+    current: list[str] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if quoted:
+            if character == "\\":
+                current.append(text[index : index + 2])
+                index += 2
+                continue
+            if character == '"':
+                quoted = False
+        elif character == '"':
+            quoted = True
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif character == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(character)
+        index += 1
+    parts.append("".join(current))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def parse_cfg(text: str) -> tuple[str, object]:
+    """A `cfg` predicate as a tree of `("all"|"any"|"not"|"atom", payload)`.
+
+    The operand of an `all`/`any`/`not` is a list of subtrees; the payload of an
+    atom is the name a build turns on, so `feature = "testing"` and `unix` are
+    both just names to assign.
+    """
+    text = text.strip()
+    for operator in ("all", "any", "not"):
+        if text.startswith(operator):
+            rest = text[len(operator) :].lstrip()
+            if rest.startswith("("):
+                inner = balanced_group(rest, 0)
+                return operator, [parse_cfg(part) for part in split_predicates(inner)]
+    return "atom", text
+
+
+def cfg_atoms(tree: tuple[str, object]) -> set[str]:
+    """Every atom name a predicate tree mentions."""
+    operator, payload = tree
+    if operator == "atom":
+        return {str(payload)}
+    names: set[str] = set()
+    for child in payload:  # type: ignore[union-attr]
+        names |= cfg_atoms(child)  # type: ignore[arg-type]
+    return names
+
+
+def evaluate_cfg(tree: tuple[str, object], enabled: set[str]) -> bool:
+    """Whether a predicate holds for a build that turned on exactly `enabled`."""
+    operator, payload = tree
+    if operator == "atom":
+        return str(payload) in enabled
+    children = [
+        evaluate_cfg(child, enabled)  # type: ignore[arg-type]
+        for child in payload  # type: ignore[union-attr]
+    ]
+    if operator == "all":
+        return all(children)
+    if operator == "any":
+        return any(children)
+    return not all(children)
+
+
 def cfg_gates_test(line: str) -> bool:
     """Whether a `cfg` attribute on this line compiles the item for tests only.
 
-    The predicate is a tree, not a prefix: `test`, `any(test, ...)`,
-    `all(test, feature = "testing")` and deeper nestings all gate on tests, while
-    anything under `not(...)` says the opposite.  A prefix match read
-    `#[cfg(all(test, ...))]` as shipped code, which is how a provider's
-    conformance route counted as another crate's `src/` (FIG-1223).
+    The question a tier has to answer is not "does this predicate mention
+    `test`" but "can this item reach a shipped build" -- and the answer needs the
+    predicate evaluated, because `test` reads differently under every operator.
+    `all(test, feature = "testing")` never ships; `any(test, feature =
+    "core-conversions")` ships whenever that feature is on, and reading it as
+    test code filed a whole directory of shipped conversions as tests
+    (FIG-1533).  `not(test)` inverts again, and nesting composes all three.
+
+    So: pin `test` off, leave every other atom free -- features a downstream
+    build may turn on, platform predicates a target may satisfy -- and ask
+    whether any assignment still compiles the item.  If one does, the item
+    ships.  Only when none does is the item test-only.
     """
     match = CFG_ATTRIBUTE.search(line)
     if match is None:
         return False
-    predicate = balanced_group(line, match.end() - 1)
-    while True:
-        negation = CFG_NEGATION.search(predicate)
-        if negation is None:
-            break
-        inner = balanced_group(predicate, negation.end() - 1)
-        predicate = predicate.replace(f"{negation.group(0)}{inner})", " ", 1)
-    return re.search(r"(?<![A-Za-z0-9_])test(?![A-Za-z0-9_])", predicate) is not None
+    tree = parse_cfg(balanced_group(line, match.end() - 1))
+    free = sorted(cfg_atoms(tree) - {"test"})
+    if len(free) > CFG_ATOM_LIMIT:
+        return False
+    for assignment in itertools.product((False, True), repeat=len(free)):
+        enabled = {name for name, on in zip(free, assignment) if on}
+        if evaluate_cfg(tree, enabled):
+            return False
+    return True
+
+
+def after_cfg_attribute(line: str) -> str:
+    """What a line says after its `cfg` attribute closes.
+
+    A gate and its item share a line often enough that the item's own shape --
+    a body, or a semicolon -- has to be read from the remainder rather than
+    from the whole line.
+    """
+    match = CFG_ATTRIBUTE.search(line)
+    if match is None:
+        return line
+    start = match.end() - 1
+    depth = 0
+    for index in range(start, len(line)):
+        if line[index] == "(":
+            depth += 1
+        elif line[index] == ")":
+            depth -= 1
+            if depth == 0:
+                closing = line.find("]", index)
+                return line[closing + 1 :] if closing != -1 else ""
+    return ""
 
 
 def test_regions(lines: list[str]) -> list[tuple[int, int]]:
@@ -1759,19 +1869,33 @@ def test_regions(lines: list[str]) -> list[tuple[int, int]]:
     example's host code from the tests beside it, and the separation is the whole
     point of the tier -- 84% of this inventory's "exercised by an example"
     evidence turned out to be an example's own tests (FIG-1223).
+
+    A gate belongs to exactly one item, so it has to be released by the item it
+    was written for.  A bodyless `#[cfg(test)] mod support;` ends at its
+    semicolon; leaving the gate pending handed it to the next braced item in
+    the file, which is how an unrelated shipped module read as a test region
+    and swallowed a real gate further down (FIG-1533).
     """
     regions: list[list[int]] = []
     depth = 0
     gate: int | None = None
     for number, line in enumerate(lines, start=1):
+        tail = line
         if gate is None and cfg_gates_test(line.strip()):
             gate = number
             gate_depth = depth
+            tail = after_cfg_attribute(line)
         opened = line.count("{")
         after = depth + opened - line.count("}")
-        if gate is not None and opened:
-            regions.append([gate, 0, gate_depth])
-            gate = None
+        if gate is not None:
+            brace = tail.find("{")
+            semicolon = tail.find(";")
+            if brace != -1 and (semicolon == -1 or brace < semicolon):
+                regions.append([gate, 0, gate_depth])
+                gate = None
+            elif semicolon != -1:
+                # The gated item ended without a body: nothing here to span.
+                gate = None
         for region in regions:
             if not region[1] and after <= region[2]:
                 region[1] = number

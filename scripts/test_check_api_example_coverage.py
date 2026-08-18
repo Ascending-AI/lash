@@ -838,7 +838,7 @@ class TestRegionTests(unittest.TestCase):
         "    }",                     # 5
         "}",                         # 6
         "fn more_host() {}",         # 7
-        "#[cfg(any(test, feature = \"testing\"))]",  # 8
+        "#[cfg(all(test, feature = \"testing\"))]",  # 8
         "mod fixtures {",            # 9
         "}",                         # 10
     ]
@@ -850,6 +850,45 @@ class TestRegionTests(unittest.TestCase):
         regions = test_regions(self.SOURCE)
         self.assertFalse(any(start <= 1 <= end for start, end in regions))
         self.assertFalse(any(start <= 7 <= end for start, end in regions))
+
+    def test_releases_a_gate_at_the_semicolon_of_a_bodyless_item(self):
+        # FIG-1533: `#[cfg(test)] mod support;` is satisfied by the declaration
+        # it sits on. Holding the gate open until the next brace handed it to
+        # an unrelated shipped module, which then read as test code.
+        source = [
+            "#[cfg(test)]",            # 1
+            "mod support;",            # 2
+            "",                        # 3
+            "pub mod shipped {",       # 4
+            "    pub fn api() {}",     # 5
+            "}",                       # 6
+        ]
+        self.assertEqual(test_regions(source), [])
+
+    def test_releases_a_gate_written_on_the_declaration_line(self):
+        source = [
+            "#[cfg(test)] mod support;",  # 1
+            "pub mod shipped {",          # 2
+            "}",                          # 3
+        ]
+        self.assertEqual(test_regions(source), [])
+
+    def test_still_sees_a_real_gate_after_a_bodyless_declaration(self):
+        # The swallowed-gate half of the same defect: the leaked region ran to
+        # the end of the file, so the `#[cfg(test)] mod tests { .. }` below it
+        # never opened a region of its own.
+        source = [
+            "#[cfg(test)]",            # 1
+            "mod support;",            # 2
+            "pub mod shipped {",       # 3
+            "    pub fn api() {}",     # 4
+            "}",                       # 5
+            "#[cfg(test)]",            # 6
+            "mod tests {",             # 7
+            "    fn probe() {}",       # 8
+            "}",                       # 9
+        ]
+        self.assertEqual(test_regions(source), [(6, 9)])
 
 
 class OutOfLineTestModuleTests(unittest.TestCase):
@@ -879,14 +918,46 @@ class OutOfLineTestModuleTests(unittest.TestCase):
     def test_reads_every_cfg_predicate_that_gates_on_tests(self):
         self.assertTrue(cfg_gates_test("#[cfg(test)]"))
         self.assertTrue(cfg_gates_test('#[cfg(all(test, feature = "testing"))]'))
-        self.assertTrue(cfg_gates_test('#[cfg(any(test, feature = "sim"))]'))
-        self.assertTrue(cfg_gates_test('#[cfg(all(any(test, miri), unix))]'))
+        self.assertTrue(cfg_gates_test('#[cfg(all(test, any(unix, windows)))]'))
         # A prefix match read `all(test, ...)` as shipped code, which is how a
         # provider's conformance route counted as another crate's src/.
         self.assertFalse(cfg_gates_test("#[cfg(not(test))]"))
         self.assertFalse(cfg_gates_test("#[cfg(all(not(test), unix))]"))
         self.assertFalse(cfg_gates_test('#[cfg(feature = "testing")]'))
         self.assertFalse(cfg_gates_test("fn test_helper() {}"))
+
+    def test_reads_an_any_gate_as_the_shipped_code_it_compiles_to(self):
+        # FIG-1533: `any(test, ...)` ships whenever the other arm is on, so the
+        # item is shipped code that tests also happen to see. Reading the bare
+        # mention of `test` as a test gate filed a whole directory of shipped
+        # feature-gated conversions as tests.
+        self.assertFalse(cfg_gates_test('#[cfg(any(test, feature = "sim"))]'))
+        self.assertFalse(
+            cfg_gates_test('#[cfg(any(feature = "core-conversions", test))]')
+        )
+        self.assertFalse(cfg_gates_test('#[cfg(all(any(test, feature = "sim")))]'))
+        self.assertFalse(
+            cfg_gates_test('#[cfg(any(all(test, unix), feature = "sim"))]')
+        )
+        # Nesting an `any` under an `all` that also demands `test` still never
+        # reaches a shipped build.
+        self.assertTrue(
+            cfg_gates_test('#[cfg(all(test, any(feature = "sim", unix)))]')
+        )
+
+    def test_tiers_an_any_test_module_as_shipped_source(self):
+        # `crates/lash-remote-protocol/src/lib.rs` declares `core_conversions`
+        # under `any(feature = "core-conversions", test)`: the module ships with
+        # that feature on, so neither it nor its directory is test code.
+        self.assertFalse(
+            test_path("crates/lash-remote-protocol/src/core_conversions.rs")
+        )
+        self.assertEqual(
+            anchor_tier(
+                "crates/lash-remote-protocol/src/core_conversions.rs:40#let _ = x;"
+            ),
+            "crate-src",
+        )
 
     def test_reads_the_modules_a_test_gate_declares(self):
         self.assertEqual(
