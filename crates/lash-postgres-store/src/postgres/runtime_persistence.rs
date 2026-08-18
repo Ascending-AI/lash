@@ -2812,10 +2812,14 @@ async fn checkpoint_work_pending_postgres(
     }
     let head_candidate =
         postgres_queued_work_head_candidate_cte(QueuedWorkClaimBoundary::ActiveTurnCheckpoint);
+    let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql(
+        "ingress_json::jsonb ->> 'min_boundary'",
+        checkpoint,
+    );
     let sql = format!(
         "WITH {head_candidate}
          SELECT (
-            $5 > 0 AND EXISTS (
+            $4 > 0 AND EXISTS (
                 SELECT 1
                 FROM lash_pending_turn_inputs
                 WHERE session_id = $1
@@ -2823,17 +2827,11 @@ async fn checkpoint_work_pending_postgres(
                   AND (claim_token IS NULL OR claim_session_lease_generation <> $2)
                   AND ingress_json::jsonb ->> 'scope' = 'active_turn'
                   AND ingress_json::jsonb ->> 'turn_id' = $3
-                  AND (
-                      $4 = 'before_completion'
-                      OR COALESCE(
-                          ingress_json::jsonb ->> 'min_boundary',
-                          'after_work'
-                      ) = 'after_work'
-                  )
+                  AND {admitted_min_boundary}
                 LIMIT 1
             )
          ) OR (
-            $6 > 0 AND EXISTS (
+            $5 > 0 AND EXISTS (
                 SELECT 1
                 FROM lash_queued_work_items AS item
                 JOIN queued_work_head_candidate AS head
@@ -2847,10 +2845,6 @@ async fn checkpoint_work_pending_postgres(
         .bind(session_id)
         .bind(sql_session_lease_generation(generation)?)
         .bind(turn_id)
-        .bind(match checkpoint {
-            lash_core::CheckpointKind::AfterWork => "after_work",
-            lash_core::CheckpointKind::BeforeCompletion => "before_completion",
-        })
         .bind(max_inputs as i64)
         .bind(max_batches as i64)
         .fetch_one(pool)
@@ -3014,11 +3008,13 @@ async fn claim_pending_turn_inputs_postgres_tx(
             .push(" AND ingress_json::jsonb ->> 'scope' = 'active_turn'")
             .push(" AND ingress_json::jsonb ->> 'turn_id' = ")
             .push_bind(turn_id.as_str());
-        if *checkpoint == lash_core::CheckpointKind::AfterWork {
-            query.push(
-                " AND COALESCE(ingress_json::jsonb ->> 'min_boundary', 'after_work') = 'after_work'",
-            );
-        }
+        query.push(format!(
+            " AND {}",
+            lash_core::store_backend_support::admitted_min_boundary_sql(
+                "ingress_json::jsonb ->> 'min_boundary'",
+                *checkpoint,
+            )
+        ));
     }
     query
         .push(" ORDER BY enqueue_seq ASC LIMIT ")
@@ -3162,11 +3158,13 @@ async fn claim_pending_turn_inputs_postgres(
             .push(" AND ingress_json::jsonb ->> 'scope' = 'active_turn'")
             .push(" AND ingress_json::jsonb ->> 'turn_id' = ")
             .push_bind(turn_id.as_str());
-        if *checkpoint == lash_core::CheckpointKind::AfterWork {
-            query.push(
-                " AND COALESCE(ingress_json::jsonb ->> 'min_boundary', 'after_work') = 'after_work'",
-            );
-        }
+        query.push(format!(
+            " AND {}",
+            lash_core::store_backend_support::admitted_min_boundary_sql(
+                "ingress_json::jsonb ->> 'min_boundary'",
+                *checkpoint,
+            )
+        ));
     }
     query
         .push(" ORDER BY enqueue_seq ASC LIMIT ")
