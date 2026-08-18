@@ -436,11 +436,11 @@ pub async fn start_bot(
         .context_window_tokens(200_000)
         .build()
         .expect("valid mock model metadata");
-    let core = runtime::build_core(&runtime_config, script.provider(), model, Arc::clone(&api))
+    let built = runtime::build_core(&runtime_config, script.provider(), model, Arc::clone(&api))
         .await
         .expect("build test core");
     let bot = Arc::new(ChannelBot::new(
-        core,
+        built.core,
         api,
         EventLedger::new(ledger_database),
         identity,

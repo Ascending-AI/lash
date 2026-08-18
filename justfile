@@ -29,8 +29,9 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
-# The slack-clone example is two processes: the platform on `port` and the bot on
-# `port + 1`. `up` starts both and waits for the bot to register for events.
+# The slack-clone example is three processes: the platform on `port`, the bot on
+# `port + 1`, and the runtime-attachable HTTP MCP server on `port + 2`. `up`
+# starts them and waits for the bot to register for events.
 slack-clone port='3040':
   ./scripts/slack-clone-dev.sh up --port "{{port}}"
 

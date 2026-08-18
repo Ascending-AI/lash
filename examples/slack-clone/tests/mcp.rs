@@ -12,14 +12,16 @@ use lash::direct::LlmOutputPart;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::tools::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolProvider, ToolResult};
 use lash::{ModelSpec, TurnInput};
-use lash_plugin_mcp::McpServerConfig;
+use lash_plugin_mcp::{McpServerConfig, TimeoutDisconnectPolicy};
 use serde_json::{Value, json};
-use slack_clone::bot::runtime::{self, RuntimeConfig};
+use slack_clone::bot::mcp_admin;
+use slack_clone::bot::runtime::{self, BotRuntime, RuntimeConfig};
 use slack_clone::bot::slack_api::SlackApi;
 use slack_clone::mcp_server::{
     API_BASE_URL_ENV, BOT_TOKEN_ENV, ELICIT_CONFIRMATION_TOOL, LIST_CHANNELS_SUMMARY_TOOL,
     LIST_HOST_ROOTS_TOOL, SAMPLE_SUMMARY_TOOL, URL_ELICITATION_TOOL, WORKSPACE_STATS_TOOL,
 };
+use slack_clone::{mcp_http_server, mcp_server};
 use tokio::sync::Notify;
 
 const TEST_TOKEN: &str = "mcp-integration-test-token";
@@ -340,9 +342,24 @@ async fn build_core(
     script: &Script,
     server: McpServerConfig,
 ) -> lash::LashCore {
+    build_runtime(root, api_base_url, script, Some(server))
+        .await
+        .core
+}
+
+async fn build_runtime(
+    root: &std::path::Path,
+    api_base_url: &str,
+    script: &Script,
+    server: Option<McpServerConfig>,
+) -> BotRuntime {
     let mut config = RuntimeConfig::new(root);
     config.trace_to_stderr = false;
-    config.mcp_servers.insert("slack_clone".to_string(), server);
+    if let Some(server) = server {
+        config
+            .mcp_servers
+            .insert(mcp_server::SERVER_NAME.to_string(), server);
+    }
     let api = Arc::new(SlackApi::new(api_base_url, TEST_TOKEN).expect("build API client"));
     let model = ModelSpec::builder("mock/model")
         .context_window_tokens(200_000)
@@ -649,4 +666,779 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
         1,
         "the original MCP tool remains authoritative"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The bundled streamable-HTTP server: the other transport lash supports, the
+// runtime attach/detach lifecycle, and the three host policies that only this
+// transport's configuration can express.
+// ---------------------------------------------------------------------------
+
+/// Serve the bundled HTTP MCP server on an ephemeral loopback port.
+async fn http_mcp_server(token: &str) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind HTTP MCP server");
+    let addr = listener.local_addr().expect("HTTP MCP server address");
+    let router = mcp_http_server::router(token.to_string());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.expect("serve HTTP MCP");
+    });
+    (
+        format!("http://{addr}{}", mcp_http_server::MCP_PATH),
+        server,
+    )
+}
+
+async fn catalog_names(core: &lash::LashCore, session_id: &str) -> Vec<String> {
+    core.session(session_id)
+        .open()
+        .await
+        .expect("open session")
+        .tools()
+        .active_manifests()
+        .await
+        .expect("read catalog")
+        .into_iter()
+        .map(|manifest| manifest.name)
+        .collect()
+}
+
+fn status_of(runtime: &BotRuntime, server_name: &str) -> lash_plugin_mcp::McpServerStatus {
+    runtime
+        .mcp
+        .server_statuses()
+        .into_iter()
+        .find(|status| status.server_name == server_name)
+        .unwrap_or_else(|| panic!("no MCP status for `{server_name}`"))
+}
+
+#[tokio::test]
+async fn the_configured_http_header_is_what_lets_the_transport_connect() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([Step::Text("unused")]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+
+    runtime
+        .mcp
+        .attach_server(
+            mcp_http_server::SERVER_NAME.to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token"),
+        )
+        .await
+        .expect("attach the HTTP MCP server");
+    let accepted = status_of(&runtime, mcp_http_server::SERVER_NAME);
+    assert!(accepted.connected, "last_error: {:?}", accepted.last_error);
+    assert_eq!(accepted.tool_count, 5);
+    assert_eq!(accepted.last_error, None);
+
+    // Same server, same URL, wrong credential: attach still succeeds, because a
+    // server that is refusing right now is a server the pool keeps retrying.
+    // The evidence that the header did anything is the status row.
+    runtime
+        .mcp
+        .attach_server(
+            "workspace_http_denied".to_string(),
+            runtime::http_mcp_server_config(&url, "wrong-token"),
+        )
+        .await
+        .expect("attach registers a server the credential is rejected by");
+    let refused = status_of(&runtime, "workspace_http_denied");
+    assert!(!refused.connected);
+    assert_eq!(refused.tool_count, 0);
+    let last_error = refused.last_error.unwrap_or_default();
+    assert!(
+        last_error.contains("401") || last_error.to_lowercase().contains("unauthorized"),
+        "the rejection must name the credential failure: {last_error}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+#[tokio::test]
+async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_catalog() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Text("The HTTP integration answered."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+
+    let before = catalog_names(&runtime.core, "mcp-http-before").await;
+    assert!(
+        !before
+            .iter()
+            .any(|name| name.starts_with("mcp__workspace_http__")),
+        "no HTTP MCP tools before the attach: {before:?}"
+    );
+
+    runtime
+        .mcp
+        .attach_server(
+            mcp_http_server::SERVER_NAME.to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token"),
+        )
+        .await
+        .expect("attach the HTTP MCP server");
+
+    let attached = catalog_names(&runtime.core, "mcp-http-attached").await;
+    for tool in [
+        mcp_http_server::WORKSPACE_BADGE_TOOL,
+        mcp_http_server::ROOTS_CHANGE_REPORT_TOOL,
+        mcp_http_server::ELICIT_PICK_COUNT_TOOL,
+        mcp_http_server::STALL_TOOL,
+    ] {
+        assert!(attached.iter().any(|name| name == tool), "missing {tool}");
+    }
+
+    // A session opened after the attach can actually route to the new server,
+    // not merely list it.
+    let session = runtime
+        .core
+        .session("mcp-http-call")
+        .open()
+        .await
+        .expect("open session");
+    let turn = session
+        .turn(TurnInput::text("@lashbot check the HTTP integration"))
+        .run()
+        .await
+        .expect("run a turn against the attached server");
+    assert_eq!(turn.result.tool_calls.len(), 1);
+    let output = turn.result.tool_calls[0].output.value_for_projection();
+    assert_eq!(
+        output["notifications_seen"], 0,
+        "no roots change has been published yet: {output}"
+    );
+
+    runtime
+        .mcp
+        .detach_server(mcp_http_server::SERVER_NAME)
+        .await
+        .expect("detach the HTTP MCP server");
+    let after = catalog_names(&runtime.core, "mcp-http-after").await;
+    assert!(
+        !after
+            .iter()
+            .any(|name| name.starts_with("mcp__workspace_http__")),
+        "the detached server's tools must leave the catalog: {after:?}"
+    );
+    assert!(
+        runtime
+            .mcp
+            .server_statuses()
+            .iter()
+            .all(|status| status.server_name != mcp_http_server::SERVER_NAME),
+        "a detached server must not remain in the pool's status list"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+/// Every file the host's attachment store holds, as raw bytes.
+fn stored_attachment_bytes(root: &std::path::Path) -> Vec<Vec<u8>> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                found.push(bytes);
+            }
+        }
+    }
+    found
+}
+
+#[tokio::test]
+async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::WORKSPACE_BADGE_TOOL),
+        Step::Text("Badge stored."),
+        Step::Tool("mcp__workspace_inline__workspace_badge"),
+        Step::Text("Badge inline."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+
+    // Same server, same tool, two host policies.
+    runtime
+        .mcp
+        .attach_server(
+            mcp_http_server::SERVER_NAME.to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token"),
+        )
+        .await
+        .expect("attach the attachment-persisting server");
+    runtime
+        .mcp
+        .attach_server(
+            "workspace_inline".to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token")
+                .with_binary_content_attachments(false),
+        )
+        .await
+        .expect("attach the inline server");
+
+    let session = runtime
+        .core
+        .session("mcp-http-badge")
+        .open()
+        .await
+        .expect("open session");
+    let stored = session
+        .turn(TurnInput::text("@lashbot fetch the badge"))
+        .run()
+        .await
+        .expect("run the opted-in badge turn");
+    let stored_output = stored.result.tool_calls[0].output.value_for_projection();
+    let attachment = stored_output
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["$lash_tool_value"] == "attachment")
+        })
+        .unwrap_or_else(|| panic!("no attachment in the opted-in result: {stored_output}"));
+    assert_eq!(attachment["source"]["source"], "stored");
+    assert_eq!(
+        attachment["source"]["attachment_ref"]["media_type"],
+        mcp_http_server::BADGE_MEDIA_TYPE
+    );
+    assert_eq!(
+        attachment["source"]["attachment_ref"]["byte_len"],
+        mcp_http_server::BADGE_BYTES.len()
+    );
+    let files = stored_attachment_bytes(&scratch.path().join("attachments"));
+    assert!(
+        files
+            .iter()
+            .any(|bytes| bytes == mcp_http_server::BADGE_BYTES),
+        "the host's attachment store must hold the server's exact bytes"
+    );
+
+    let inline = session
+        .turn(TurnInput::text("@lashbot fetch the badge again"))
+        .run()
+        .await
+        .expect("run the opted-out badge turn");
+    let inline_output = inline.result.tool_calls[0].output.value_for_projection();
+    let encoded = inline_output.to_string();
+    assert!(
+        !encoded.contains("\"$lash_tool_value\":\"attachment\""),
+        "an opted-out server's binary content must stay inline: {inline_output}"
+    );
+    assert!(
+        encoded.contains(mcp_http_server::BADGE_URI),
+        "the inline result must carry the resource itself: {inline_output}"
+    );
+    assert_eq!(
+        stored_attachment_bytes(&scratch.path().join("attachments")).len(),
+        files.len(),
+        "the opted-out call must not write to the attachment store"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+#[tokio::test]
+async fn a_stalled_call_times_out_as_a_tool_failure_and_keeps_the_connection() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::STALL_TOOL),
+        Step::Text("The stalled call failed cleanly."),
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Text("The connection survived."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    runtime
+        .mcp
+        .attach_server(
+            mcp_http_server::SERVER_NAME.to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token"),
+        )
+        .await
+        .expect("attach the HTTP MCP server");
+
+    let session = runtime
+        .core
+        .session("mcp-http-stall")
+        .open()
+        .await
+        .expect("open session");
+    let stalled = session
+        .turn(TurnInput::text("@lashbot call the stalling tool"))
+        .run()
+        .await
+        .expect("the call timeout is model-visible, not a turn failure");
+    let failure = stalled.result.tool_calls[0].output.value_for_projection();
+    assert_eq!(failure["class"], "timeout");
+    assert_eq!(failure["code"], "mcp_call_timeout");
+
+    // The host keeps the default disconnect policy, so the timeout triggers a
+    // liveness probe. This server is alive and answers it, which is exactly the
+    // case the default is for: a slow tool is reported as a typed timeout and
+    // the connection is kept.
+    let status = status_of(&runtime, mcp_http_server::SERVER_NAME);
+    assert!(status.connected, "last_error: {:?}", status.last_error);
+    session
+        .turn(TurnInput::text("@lashbot check the integration again"))
+        .run()
+        .await
+        .expect("the next call reuses the same connection");
+    let requests = script.requests();
+    assert!(
+        requests[3].contains("notifications_seen"),
+        "the surviving connection answers the next call: {}",
+        requests[3]
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+/// The opt-out a host reaches for when a timeout must never cost the peer.
+///
+/// `TimeoutDisconnectPolicy::Never` is deliberately *not* what
+/// [`runtime::http_mcp_server_config`] ships: with the default liveness probe
+/// interval of `0`, nothing else ever tests the peer, so a server that died
+/// mid-call would keep reporting `connected: true`. A host that sets it is
+/// buying "one slow tool never costs the connection" with "a dead peer looks
+/// healthy", and this test is where that trade is written down.
+#[tokio::test]
+async fn a_host_can_opt_out_of_timeout_disconnects_entirely() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::STALL_TOOL),
+        Step::Text("The stalled call failed cleanly."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    let mut config = runtime::http_mcp_server_config(&url, "integration-token");
+    // There is no builder for this field yet; the transport variant is public,
+    // so a host that wants the opt-out pokes the flattened call policy.
+    let McpServerConfig::StreamableHttp { call_policy, .. } = &mut config else {
+        unreachable!("streamable_http returns the HTTP transport")
+    };
+    call_policy.timeout_disconnect_policy = TimeoutDisconnectPolicy::Never;
+    assert_eq!(
+        call_policy.timeout_disconnect_policy,
+        TimeoutDisconnectPolicy::Never
+    );
+    runtime
+        .mcp
+        .attach_server(mcp_http_server::SERVER_NAME.to_string(), config)
+        .await
+        .expect("attach the HTTP MCP server");
+
+    let session = runtime
+        .core
+        .session("mcp-http-never-disconnect")
+        .open()
+        .await
+        .expect("open session");
+    let stalled = session
+        .turn(TurnInput::text("@lashbot call the stalling tool"))
+        .run()
+        .await
+        .expect("the call timeout is model-visible, not a turn failure");
+    let failure = stalled.result.tool_calls[0].output.value_for_projection();
+    assert_eq!(failure["class"], "timeout");
+    assert_eq!(failure["code"], "mcp_call_timeout");
+    let status = status_of(&runtime, mcp_http_server::SERVER_NAME);
+    assert!(
+        status.connected,
+        "no probe runs under `Never`, so the entry stays connected: {:?}",
+        status.last_error
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+#[tokio::test]
+async fn a_form_the_answer_book_cannot_satisfy_is_declined_rather_than_answered() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::ELICIT_PICK_COUNT_TOOL),
+        Step::Text("The host declined."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    runtime
+        .mcp
+        .attach_server(
+            mcp_http_server::SERVER_NAME.to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token"),
+        )
+        .await
+        .expect("attach the HTTP MCP server");
+
+    let session = runtime
+        .core
+        .session("mcp-http-elicit")
+        .open()
+        .await
+        .expect("open session");
+    let turn = session
+        .turn(TurnInput::text("@lashbot ask how many badges"))
+        .run()
+        .await
+        .expect("run the elicitation turn");
+    let output = turn.result.tool_calls[0].output.value_for_projection();
+    assert_eq!(
+        output["action"], "decline",
+        "the host's textual answer fails the server's integer schema, so it must \
+         decline instead of sending it: {output}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+/// Standing consent is per question, not per field name.
+#[tokio::test]
+async fn a_question_the_host_has_not_read_is_declined_even_with_a_familiar_field() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::ELICIT_UNKNOWN_PROMPT_TOOL),
+        Step::Text("The host declined."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    runtime
+        .mcp
+        .attach_server(
+            mcp_http_server::SERVER_NAME.to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token"),
+        )
+        .await
+        .expect("attach the HTTP MCP server");
+
+    let session = runtime
+        .core
+        .session("mcp-http-unknown-prompt")
+        .open()
+        .await
+        .expect("open session");
+    let turn = session
+        .turn(TurnInput::text("@lashbot ask the unread question"))
+        .run()
+        .await
+        .expect("run the elicitation turn");
+    let output = turn.result.tool_calls[0].output.value_for_projection();
+    // The field is `answer`, which the host answers "yes" to for the prompt it
+    // has read. A different question with the same field must still be
+    // declined, or the host is granting consent it was never asked for.
+    assert_eq!(
+        output["action"], "decline",
+        "a trusted server asking an unread question must still be declined: {output}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+/// The operator credential is not the platform's event authenticator.
+///
+/// The verification token is embedded by the platform in every event envelope
+/// it delivers, so it says who is calling, not what they may do. Attaching a
+/// tool source is a privileged act and gets its own credential.
+#[test]
+fn the_admin_credential_is_configured_separately_from_the_verification_token() {
+    let config = slack_clone::bot::BotConfig::from_env().expect("read bot config defaults");
+    assert_ne!(
+        config.admin_token, config.verification_token,
+        "the MCP admin API must not be unlocked by the token the platform already holds"
+    );
+}
+
+#[tokio::test]
+async fn publishing_a_root_notifies_the_connected_server_which_re_reads_the_list() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Text("Roots reported."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    runtime
+        .mcp
+        .attach_server(
+            mcp_http_server::SERVER_NAME.to_string(),
+            runtime::http_mcp_server_config(&url, "integration-token"),
+        )
+        .await
+        .expect("attach the HTTP MCP server");
+
+    let published = runtime
+        .roots
+        .publish(
+            "file:///srv/slack-clone/exports".to_string(),
+            Some("exports".to_string()),
+        )
+        .await;
+    assert_eq!(published, 2, "the workspace root plus the published one");
+    runtime
+        .mcp
+        .notify_roots_changed()
+        .await
+        .expect("notify connected servers");
+
+    let session = runtime
+        .core
+        .session("mcp-http-roots")
+        .open()
+        .await
+        .expect("open session");
+    let turn = session
+        .turn(TurnInput::text("@lashbot report the roots"))
+        .run()
+        .await
+        .expect("run the roots-report turn");
+    let output = turn.result.tool_calls[0].output.value_for_projection();
+    assert_eq!(
+        output["notifications_seen"], 1,
+        "the server must have received exactly one roots-changed notification: {output}"
+    );
+    let roots = output["roots"].as_array().cloned().unwrap_or_default();
+    assert!(
+        roots.iter().any(|root| root == "exports"),
+        "the re-read list must contain the newly published root: {output}"
+    );
+    assert!(
+        roots.iter().any(|root| root == "slack-clone"),
+        "the original workspace root must survive publication: {output}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+// ---------------------------------------------------------------------------
+// The operator surface. Attaching an integration is an operator action on the
+// bot's own HTTP API, never a tool the model can reach.
+// ---------------------------------------------------------------------------
+
+const ADMIN_TOKEN: &str = "slack-clone-admin-test-token";
+
+async fn serve_admin(runtime: &BotRuntime) -> String {
+    let admin = mcp_admin::McpAdmin::new(runtime, ADMIN_TOKEN);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind admin API");
+    let addr = listener.local_addr().expect("admin API address");
+    tokio::spawn(async move {
+        axum::serve(listener, mcp_admin::router(admin))
+            .await
+            .expect("serve admin API");
+    });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn the_operator_api_attaches_lists_and_detaches_an_integration() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([Step::Text("unused")]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    let admin_url = serve_admin(&runtime).await;
+    let client = reqwest::Client::new();
+
+    let unauthorized = client
+        .get(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .send()
+        .await
+        .expect("send unauthenticated request");
+    assert_eq!(
+        unauthorized.status(),
+        reqwest::StatusCode::UNAUTHORIZED,
+        "the MCP admin API must not be reachable without the bot's shared secret"
+    );
+
+    let attached: Value = client
+        .post(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({
+            "name": mcp_http_server::SERVER_NAME,
+            "url": url,
+            "token": "integration-token",
+        }))
+        .send()
+        .await
+        .expect("attach through the admin API")
+        .json()
+        .await
+        .expect("attach response body");
+    assert_eq!(attached["connected"], true);
+    assert_eq!(attached["tool_count"], 5);
+
+    let listed: Value = client
+        .get(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .expect("list servers")
+        .json()
+        .await
+        .expect("list response body");
+    let tools = listed["servers"][0]["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool == mcp_http_server::WORKSPACE_BADGE_TOOL),
+        "an operator view has to name the tools the integration advertises: {listed}"
+    );
+
+    let detached = client
+        .delete(format!(
+            "{admin_url}/admin/mcp/servers/{}",
+            mcp_http_server::SERVER_NAME
+        ))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .expect("detach through the admin API");
+    assert_eq!(detached.status(), reqwest::StatusCode::OK);
+    let listed: Value = client
+        .get(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .expect("list servers after detach")
+        .json()
+        .await
+        .expect("list response body");
+    assert_eq!(
+        listed["servers"].as_array().map(Vec::len),
+        Some(0),
+        "the detached integration must leave the operator view: {listed}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+#[tokio::test]
+async fn an_invalid_server_name_is_the_operators_error_not_a_gateway_failure() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([Step::Text("unused")]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    let admin_url = serve_admin(&runtime).await;
+
+    // `__` is the tool-name separator, so it cannot appear in a server name.
+    let rejected = reqwest::Client::new()
+        .post(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({ "name": "bad__name", "url": url, "token": "integration-token" }))
+        .send()
+        .await
+        .expect("attach an invalid server name");
+    assert_eq!(rejected.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: Value = rejected.json().await.expect("rejection body");
+    assert!(
+        body["error"].as_str().unwrap_or_default().contains("__"),
+        "the typed configuration error must reach the operator: {body}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+#[tokio::test]
+async fn publishing_a_root_through_the_operator_api_reaches_the_connected_server() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([
+        Step::Tool(mcp_http_server::ROOTS_CHANGE_REPORT_TOOL),
+        Step::Text("Roots reported."),
+    ]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    let admin_url = serve_admin(&runtime).await;
+    let client = reqwest::Client::new();
+    client
+        .post(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({
+            "name": mcp_http_server::SERVER_NAME,
+            "url": url,
+            "token": "integration-token",
+        }))
+        .send()
+        .await
+        .expect("attach through the admin API");
+
+    let published: Value = client
+        .post(format!("{admin_url}{}", mcp_admin::ROOTS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({ "uri": "file:///srv/slack-clone/exports", "name": "exports" }))
+        .send()
+        .await
+        .expect("publish a root")
+        .json()
+        .await
+        .expect("publish response body");
+    assert_eq!(published["roots"], 2);
+    assert_eq!(published["notified"], true);
+
+    let session = runtime
+        .core
+        .session("mcp-admin-roots")
+        .open()
+        .await
+        .expect("open session");
+    let turn = session
+        .turn(TurnInput::text("@lashbot report the roots"))
+        .run()
+        .await
+        .expect("run the roots-report turn");
+    let output = turn.result.tool_calls[0].output.value_for_projection();
+    assert_eq!(output["notifications_seen"], 1);
+    assert!(
+        output["roots"]
+            .as_array()
+            .is_some_and(|roots| roots.iter().any(|root| root == "exports")),
+        "the operator's published root must reach the server: {output}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
 }

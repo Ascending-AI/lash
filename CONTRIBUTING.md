@@ -72,10 +72,11 @@ offsets are stable:
 - `+10` push/confidence PostgreSQL, `+11` push MinIO, `+12` mutation PostgreSQL;
 - `+20..+23` agent-service Restate and endpoint;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
+- `+35..+37` slack-clone full-host platform, bot, and HTTP MCP server;
 - `+40` distributed-worker MinIO;
 - `+41..+46` process-operations MinIO, Restate, and PostgreSQL;
 - `+47` version-bump recreation PostgreSQL.
-- `+48..+49` slack-clone full-host platform and bot.
+- `+48` slack-clone live-model platform.
 
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's

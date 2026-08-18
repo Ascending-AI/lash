@@ -19,13 +19,17 @@ lash_gate_acquire "slack-clone-full-host-e2e"
 # missed this would rebuild the host under a second profile mid-gate.
 export SLACK_CLONE_CARGO_PROFILE=dev
 
-port="${LASH_SLACK_CLONE_E2E_PORT:-$((LASH_E2E_PORT_BASE + 48))}"
-if ! [[ "$port" =~ ^[0-9]+$ ]] || ((10#$port < 1 || 10#$port > 65534)); then
-  echo "slack-clone E2E platform port must be an integer in 1..65534, got '$port'." >&2
+port="${LASH_SLACK_CLONE_E2E_PORT:-$((LASH_E2E_PORT_BASE + 35))}"
+# The run needs three consecutive ports: platform, bot, HTTP MCP server. The
+# default offset is +35, inside this worktree's 50-port block, so the third port
+# never lands on the next slot's offset 0 — the port lock is per slot and would
+# not serialize that collision.
+if ! [[ "$port" =~ ^[0-9]+$ ]] || ((10#$port < 1 || 10#$port > 65533)); then
+  echo "slack-clone E2E platform port must be an integer in 1..65533, got '$port'." >&2
   exit 2
 fi
-if ((10#$port == 3056 || 10#$port == 3057 || 10#$port + 1 == 3056 || 10#$port + 1 == 3057)); then
-  echo "slack-clone E2E refuses reserved ports 3056/3057." >&2
+if ((10#$port >= 3054 && 10#$port <= 3057)); then
+  echo "slack-clone E2E refuses a port whose three-port window covers reserved 3056/3057." >&2
   exit 2
 fi
 
@@ -52,7 +56,7 @@ cleanup() {
     >>"$artifact_dir/teardown.log" 2>&1; then
     teardown_status=1
   fi
-  for candidate_port in "$port" "$((10#$port + 1))"; do
+  for candidate_port in "$port" "$((10#$port + 1))" "$((10#$port + 2))"; do
     if timeout 1 bash -c "</dev/tcp/127.0.0.1/$candidate_port" 2>/dev/null; then
       echo "teardown left port $candidate_port reachable" >>"$artifact_dir/teardown.log"
       teardown_status=1
@@ -72,8 +76,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 start_epoch="$(date +%s)"
-printf '{"platform_port":%s,"bot_port":%s}\n' \
-  "$port" "$((10#$port + 1))" \
+printf '{"platform_port":%s,"bot_port":%s,"mcp_http_port":%s}\n' \
+  "$port" "$((10#$port + 1))" "$((10#$port + 2))" \
   >"$artifact_dir/00-run.json"
 
 bash "$repo/scripts/slack-clone-dev.sh" up --port "$port" \

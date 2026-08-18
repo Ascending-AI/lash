@@ -84,6 +84,7 @@ class SlackCloneFullHostE2eContractTest(unittest.TestCase):
                 "checkpoint_redelivery",
                 "checkpoint_kill_restart",
                 "checkpoint_mcp_depth",
+                "checkpoint_mcp_runtime_attach",
                 "checkpoint_reload",
             }.issubset(methods)
         )

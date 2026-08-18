@@ -33,7 +33,7 @@ chat turns driven by the native tool loop (`LashCore::standard_builder(TurnBudge
 
 ```bash
 export OPENROUTER_API_KEY=sk-...          # the bot needs a model; the platform does not
-just slack-clone                          # platform on :3040, bot on :3041
+just slack-clone                          # platform :3040, bot :3041, HTTP MCP server :3042
 ```
 
 Open <http://127.0.0.1:3040>, pick a display name, and open a second tab with a
@@ -42,8 +42,8 @@ is listening. Mention it (`<@U…>`, shown in the sidebar) and it answers with t
 whole room's recent traffic already in context.
 
 ```bash
-just slack-clone-status        # both processes, plus /healthz
-just slack-clone-logs-follow   # tail both logs
+just slack-clone-status        # every process, plus /healthz
+just slack-clone-logs-follow   # tail the logs
 just slack-clone-down
 ```
 
@@ -65,7 +65,7 @@ source of truth for the CI split:
   workflow runs one RLM agent and one standard agent through OpenRouter. It is
   never triggered by pushes, pull requests, or schedules.
 - **Manual judged:** [`slack-clone-bot`](../../runbooks/slack-clone-bot/runbook.md),
-  whose Phase 3M covers MCP client depth.
+  whose Phase 3M covers MCP client depth and runtime integration attach/detach.
 
 For the executable, token-free downstream acceptance used by CI, run:
 
@@ -73,9 +73,10 @@ For the executable, token-free downstream acceptance used by CI, run:
 just slack-clone-full-host-e2e
 ```
 
-That companion boots the platform and bot as separate processes, lets the bot
-spawn the bundled MCP stdio child, drives two independent headless Chromium
-contexts, kills and restarts the bot during a claimed turn, reloads both humans,
+That companion boots the platform, bot, and HTTP MCP server as separate
+processes, lets the bot spawn the bundled MCP stdio child, drives two independent
+headless Chromium contexts, kills and restarts the bot during a claimed turn,
+attaches and detaches the HTTP MCP server mid-run, reloads both humans,
 and emits a machine-readable DOM/platform/bot/trace scorecard. State and evidence
 live in a temporary directory outside the checkout by default; set
 `LASH_SLACK_CLONE_E2E_ARTIFACT_DIR` to retain them at a chosen location. See the
@@ -198,10 +199,10 @@ native names therefore do not collide. If a host deliberately registers the exac
 same fully prefixed name, Lash rejects the catalog update as a duplicate instead
 of shadowing either implementation.
 
-The bundled process is demonstration wiring, not a deployment prescription. A
-real deployment normally configures `McpServerConfig::streamable_http(...)`, puts
-fixed credentials in `.with_headers(...)` or the deployment's secret injection,
-and points at a separately operated MCP endpoint. `SLACK_CLONE_MCP_SERVER` can override
+The stdio child is demonstration wiring, not a deployment prescription — a real
+deployment more often reaches a separately operated endpoint over
+`McpServerConfig::streamable_http(...)`, which is what the second bundled server
+below demonstrates. `SLACK_CLONE_MCP_SERVER` can override
 the local server executable while developing this example; the bot passes the API
 origin and token to its child process without placing the token in argv. Bot boot
 fails with a clear error when a configured stdio executable cannot be found, so
@@ -252,6 +253,89 @@ When keepalive is enabled, a disconnected entry re-arms a reconnect loop after a
 bounded attempt set is exhausted (including a failed boot connection). With
 keepalive disabled, a server with bounded reconnect attempts stays down after
 exhaustion until it is attached again.
+
+### A second server, over HTTP, attached while the bot runs
+
+`slack-clone-mcp-http-server` is the other transport: an `axum` process on
+loopback (platform port + 2) serving `rmcp`'s streamable-HTTP transport behind a
+bearer-token layer. The bot does **not** wire it at boot. It arrives through the
+bot's operator API (`bot/mcp_admin.rs`), which is the ownership point worth
+copying: **attaching a tool source is an operator act, never a model act**. The
+routes sit behind their own operator credential (`SLACK_CLONE_ADMIN_TOKEN`, not
+the platform's event verification token) and no tool in the catalog can reach
+them; a host that let a turn attach its own server would have handed the model
+its own permission system.
+
+```bash
+curl -sS -X POST http://127.0.0.1:3041/admin/mcp/servers \
+  -H 'authorization: Bearer slack-clone-dev-admin' \
+  -H 'content-type: application/json' \
+  -d '{"name":"workspace_http","url":"http://127.0.0.1:3042/mcp","token":"slack-clone-mcp-http-dev-token"}'
+curl -sS http://127.0.0.1:3041/admin/mcp/servers -H 'authorization: Bearer slack-clone-dev-admin'
+curl -sS -X DELETE http://127.0.0.1:3041/admin/mcp/servers/workspace_http \
+  -H 'authorization: Bearer slack-clone-dev-admin'
+```
+
+`POST` calls `McpPluginFactory::attach_server` and answers with the server's
+status row, because attach registers the server even when the eager connect is
+refused: a wrong token comes back `connected: false` with the 401 in
+`last_error`, and the pool keeps retrying in the background. That is also this
+example's proof that `.with_headers(...)` does something — the server's auth layer
+is the oracle. `GET` merges `McpPluginFactory::server_statuses()` with
+`McpConnectionPool::advertised_tools()`, since "is this integration healthy" needs
+both halves. `DELETE` calls `detach_server`, and the next session the bot opens
+no longer sees the tools. `POST /admin/mcp/roots` publishes a workspace root and
+then calls `notify_roots_changed`, so connected servers re-read `roots/list`.
+
+The five tools exist to make host-side policy observable rather than to be
+useful:
+
+- `mcp__workspace_http__workspace_badge` returns a binary blob resource. This
+  server is attached `.with_binary_content_attachments(true)`, so the blob is
+  persisted through the host's attachment store and reaches the model as an
+  attachment reference; the same call against a server configured without that
+  opt-in stays inline in the tool result.
+- `mcp__workspace_http__roots_change_report` counts the roots-changed
+  notifications the server received and reports the roots it re-read, which is
+  what makes `notify_roots_changed` observable from the server's side.
+- `mcp__workspace_http__elicit_unknown_prompt` asks a question the host has no
+  standing answer for, using a field name the host *does* answer elsewhere. The
+  host declines: its answer book is keyed by prompt and field together, because
+  elicitation is a consent primitive and consent keyed by field name alone is
+  blind consent.
+- `mcp__workspace_http__elicit_pick_count` asks for a form field the host's
+  answer book cannot satisfy; the host declines instead of sending content that
+  fails the server's schema (`McpElicitationValidationError` is what catches it).
+- `mcp__workspace_http__stall` never answers, so the host's configured
+  `with_timeouts(...)` is what ends the call. The host keeps the **default**
+  timeout-disconnect policy, which treats an idle timeout as a question rather
+  than a verdict: it probes the peer, and because this server is alive and
+  answers the probe, the call comes back as a typed tool failure the model sees
+  while the connection survives to serve the next call. A dead peer would fail
+  the probe instead, and the entry would be marked disconnected with the cause
+  recorded and reconnect started. The obvious-looking alternative,
+  `TimeoutDisconnectPolicy::Never`, is not what this host ships: with the
+  default liveness probe interval of `0` nothing else ever tests the peer, so a
+  server that died mid-call would keep reporting `connected: true` forever.
+  `a_host_can_opt_out_of_timeout_disconnects_entirely` in `tests/mcp.rs`
+  exercises that opt-out and records the trade-off.
+
+### What this host does not exercise
+
+Two public `lash-plugin-mcp` types are not reachable from this example, for
+different reasons, and the difference matters to anyone reading the example as
+the coverage story for the crate:
+
+- `McpToolProvider` is registered by the plugin itself when a session is built,
+  so a host that wires MCP through `McpPluginFactory` — the supported path —
+  never names the type. Reaching it here would mean bypassing the plugin, which
+  would make the example lie about how hosts integrate MCP.
+- `McpDeferredToolProvider` **is** reachable, just not from here. The plugin
+  registers the eager provider, so an RLM host that wants MCP tools as deferred
+  grants constructs `McpDeferredToolProvider::new(factory.pool())` itself.
+  slack-clone is a standard-mode host, so it has no deferred-grant seam to hang
+  that on; this is an open coverage gap belonging to an RLM example, not a type
+  no example can use.
 
 ### Plugin lifecycle
 
@@ -767,8 +851,12 @@ src/
   bot/tools.rs        native tools for the standard tool loop
   bot/webhook.rs      the Events API request URL
 
-  mcp_server.rs     rmcp server and read-only workspace tools
-  bin/mcp_server.rs stdio server process entry point
+  bot/mcp_admin.rs  operator API: attach, detach, list, publish a root
+
+  mcp_server.rs          rmcp stdio server and read-only workspace tools
+  bin/mcp_server.rs      stdio server process entry point
+  mcp_http_server.rs     rmcp streamable-HTTP server behind bearer auth
+  bin/mcp_http_server.rs HTTP server process entry point
 
   tests/platform_wire.rs     wire shapes, asserted on raw JSON keys
   tests/bot_events.rs        dedupe, ambient fold, isolation, tool loop
@@ -795,12 +883,15 @@ that method needs the bot token, and a bot token has no business in a browser.
 | `SLACK_CLONE_BOT_PUBLIC_URL` | `http://<bot addr>/slack/events` | bot |
 | `SLACK_CLONE_BOT_TOKEN` | `slack-clone-local-dev-token` | both |
 | `SLACK_CLONE_VERIFICATION_TOKEN` | `slack-clone-dev-verification` | both |
+| `SLACK_CLONE_ADMIN_TOKEN` | `slack-clone-dev-admin` | bot (MCP admin API) |
 | `SLACK_CLONE_BOT_HANDLE` | `lashbot` | platform |
 | `SLACK_CLONE_TEAM_NAME` | `Slack Clone` | platform |
 | `SLACK_CLONE_RETRY_BACKOFF_MS` | `1000` | platform |
 | `SLACK_CLONE_DELIVERY_TIMEOUT_MS` | `3000` | platform |
 | `SLACK_CLONE_BOT_TRACE` | `<bot data dir>/lash/trace.jsonl` | bot |
 | `SLACK_CLONE_MCP_SERVER` | sibling `slack-clone-mcp-server` binary | bot |
+| `SLACK_CLONE_MCP_HTTP_ADDR` | `127.0.0.1:3042` | HTTP MCP server |
+| `SLACK_CLONE_MCP_HTTP_TOKEN` | `slack-clone-mcp-http-dev-token` | HTTP MCP server |
 | `OPENROUTER_API_KEY` | — | bot (required) |
 | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4.6` | bot |
 

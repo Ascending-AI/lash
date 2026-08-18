@@ -17,6 +17,7 @@ use lash::provider::{LlmResponse, ProviderHandle};
 use lash::{ModelSpec, sync::MutexExt as _};
 use serde_json::json;
 
+use crate::mcp_http_server::WORKSPACE_BADGE_TOOL;
 use crate::mcp_server::{
     ELICIT_CONFIRMATION_TOOL, LIST_HOST_ROOTS_TOOL, SAMPLE_SUMMARY_TOOL, URL_ELICITATION_TOOL,
 };
@@ -90,6 +91,19 @@ impl State {
                     "Host-generated summary. Form accepted yes. URL accepted and completion notified. Root slack-clone.",
                 ),
             };
+        }
+        // The two attach markers are answered without consulting the catalog on
+        // purpose: whether the tool is callable is decided by the host's pool,
+        // not by this script, so a detached tool call must fail rather than be
+        // quietly skipped here.
+        if marker == Some("FIG1341-MCP-ATTACH") {
+            return match self.next("mcp-attach") {
+                0 => tool(WORKSPACE_BADGE_TOOL, json!({})),
+                _ => text("The workspace badge came back from the attached HTTP server."),
+            };
+        }
+        if marker == Some("FIG1341-MCP-DETACHED") {
+            return text("The attached HTTP server is gone from this turn's catalog.");
         }
         if marker == Some("FIG1341-KILL-MID-TURN") {
             let entered = self.root.join("kill-provider-entered");
@@ -165,12 +179,14 @@ fn thread_root_seed(request: &str) -> Option<String> {
 }
 
 fn latest_journey_marker(request: &str) -> Option<&'static str> {
-    const MARKERS: [&str; 5] = [
+    const MARKERS: [&str; 7] = [
         "FIG1341-ROOM-MENTION",
         "FIG1341-THREAD-ONE",
         "FIG1341-THREAD-TWO",
         "FIG1341-KILL-MID-TURN",
         "FIG1341-MCP-DEPTH",
+        "FIG1341-MCP-ATTACH",
+        "FIG1341-MCP-DETACHED",
     ];
     let value: serde_json::Value = serde_json::from_str(request).ok()?;
     value

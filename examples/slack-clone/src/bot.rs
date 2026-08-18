@@ -10,6 +10,7 @@ pub mod channel;
 #[cfg(feature = "e2e")]
 mod e2e_provider;
 pub mod ledger;
+pub mod mcp_admin;
 pub mod mcp_client;
 pub mod runtime;
 pub mod slack_api;
@@ -44,6 +45,13 @@ pub struct BotConfig {
     pub bot_token: String,
     /// Expected value of every event envelope's `token`.
     pub verification_token: String,
+    /// Credential the operator presents to the MCP admin API.
+    ///
+    /// Deliberately not the verification token: that one authenticates the
+    /// platform's event envelopes and the platform embeds it in every delivery,
+    /// so it identifies a sender rather than authorizing a privileged act.
+    /// Attaching a tool source is a privileged act.
+    pub admin_token: String,
     /// Root for the bot's ledger and Lash stores.
     pub data_dir: PathBuf,
     /// JSONL trace destination.
@@ -66,6 +74,8 @@ impl BotConfig {
                 .unwrap_or_else(|_| "slack-clone-local-dev-token".to_string()),
             verification_token: std::env::var("SLACK_CLONE_VERIFICATION_TOKEN")
                 .unwrap_or_else(|_| "slack-clone-dev-verification".to_string()),
+            admin_token: std::env::var("SLACK_CLONE_ADMIN_TOKEN")
+                .unwrap_or_else(|_| "slack-clone-dev-admin".to_string()),
             data_dir: std::env::var("SLACK_CLONE_BOT_DATA_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from(".slack-clone/bot")),
@@ -110,10 +120,15 @@ pub async fn run(config: BotConfig) -> Result<()> {
         );
     }
     let (provider, model) = configured_provider()?;
-    let core = runtime::build_core(&runtime_config, provider, model, Arc::clone(&api)).await?;
+    let built = runtime::build_core(&runtime_config, provider, model, Arc::clone(&api)).await?;
+    // The operator surface holds the plugin factory, so MCP integrations can be
+    // attached and detached while the bot serves. The bot's own boot wires only
+    // the bundled stdio server; the HTTP one arrives through this API, behind
+    // the operator credential rather than the platform's event authenticator.
+    let mcp_admin = mcp_admin::McpAdmin::new(&built, config.admin_token.clone());
 
     let bot = Arc::new(ChannelBot::new(
-        core,
+        built.core,
         Arc::clone(&api),
         ledger,
         identity,
@@ -136,9 +151,12 @@ pub async fn run(config: BotConfig) -> Result<()> {
         let server = tokio::spawn({
             let bot = Arc::clone(&bot);
             async move {
-                axum::serve(listener, webhook::router(bot))
-                    .with_graceful_shutdown(shutdown_signal())
-                    .await
+                axum::serve(
+                    listener,
+                    webhook::router(bot).merge(mcp_admin::router(mcp_admin)),
+                )
+                .with_graceful_shutdown(shutdown_signal())
+                .await
             }
         });
 
