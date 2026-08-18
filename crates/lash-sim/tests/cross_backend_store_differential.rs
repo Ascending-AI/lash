@@ -922,17 +922,17 @@ fn decode_lease_owner(
 }
 
 fn normalized_in_memory_node_json(node: &lash_core::SessionNodeRecord) -> Vec<u8> {
-    let mut value = serde_json::to_value(node).expect("encode in-memory durable node");
-    let object = value
-        .as_object_mut()
-        .expect("session node serializes as an object");
-    // SQL stores node identity and parent topology in indexed columns and keeps
-    // only the payload envelope in node_json. Both are compared as dedicated
-    // `DurableNode` fields, so removing them here drops a physical layout
-    // difference from the byte comparison without dropping any coverage.
-    object.remove("node_id");
-    object.remove("parent_node_id");
-    normalized_node_json(value)
+    // The in-memory backend holds records rather than rows, so it has no
+    // `node_json` to read back; this side of the comparison has to produce one.
+    // It produces it with the same storage-body codec the SQL backends write
+    // with, which is what keeps this a comparison of backend semantics instead
+    // of a comparison of two separately maintained envelopes -- the codec already
+    // omits node identity and parent topology, both of which SQL keeps in indexed
+    // columns and which are compared as dedicated `DurableNode` fields.
+    let body = node
+        .encode_storage_body()
+        .expect("encode in-memory durable node");
+    normalized_sql_node_json(&body)
 }
 
 fn normalized_sql_node_json(node_json: &str) -> Vec<u8> {

@@ -13,6 +13,13 @@
 # A surface's diagnostic key is `<constant_path>:<constant>`; use that key with
 # `--surface` when constants such as SCHEMA_VERSION are not globally unique.
 #
+# Adding an entry here does not by itself excuse the bump its shape change
+# would owe. A registration -- an entry whose constant arrives with it, over a
+# shape that moves in the same change -- is burned one at a time into
+# REGISTRATION_BASELINES in check_version_bumps.py, pinned to the surface key
+# and to the exact guarded bytes enrolled. Registering without one fails, and
+# names the fingerprint to burn.
+#
 # This check is deliberately CI-only, unlike the sibling PostgreSQL-payload and
 # durable-read fixture checkers: its merge-base guarantee requires a current
 # fetched target branch. PR protection must require an up-to-date merge ref or
@@ -413,6 +420,154 @@ description = "persisted JSON session-head payload"
 kind = "rust_items"
 paths = ["crates/lash-core/src/store/mod.rs"]
 symbols = ["SessionHeadPayload"]
+
+[[surface]]
+constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
+constant_path = "crates/lash-core/src/session_graph.rs"
+description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
+
+# The node body is the session graph's durable history shape, so its guard
+# follows the shape rather than one file: everything the body can reach and
+# still recover a typed meaning from is guarded here, down to the leaves that
+# are genuinely opaque bytes. A file whose every Serde carrier belongs to the
+# body's family is swept whole and fails closed on a carrier added later; a
+# file that also holds transient stream, prompt, or driver types is named
+# declaration by declaration.
+#
+# `SessionPolicy` is the exception and its guard is a whole-file one: the
+# policy is persisted through a hand-written `impl Serialize`/`impl
+# Deserialize` pair, and no symbol projection here can see an impl block --
+# `rust_items` and `rust_serde_shapes` both match declarations only. That pair
+# therefore lives alone in session_model/session_policy_serde.rs, and the file
+# is guarded whole with `must_cover` markers asserting both impls still exist
+# under those names. Guarding the file that holds only the encoding, rather
+# than the module that also holds the runtime session types, is what keeps the
+# guard from firing on unrelated edits -- a spurious bump is not free here,
+# because under the forward-only fence it makes older binaries refuse rows they
+# could have read.
+#
+# What that buys: any edit to the encoder or to the wire struct inside it
+# demands a bump, and a rename of either impl trips the marker rather than
+# passing silently. What it cannot see is the `SessionPolicy` declaration
+# itself, which stays in session_model/mod.rs -- and does not need to be seen,
+# because the hand-written encoder is the policy's complete durable projection.
+# A field added to the struct is absent from the wire until this file names it,
+# so a struct edit that changes the persisted shape is always also an edit
+# here.
+#
+# Opaque leaves, stated as such rather than as coverage: plugin option bodies
+# and plugin node bodies are `serde_json::Value` owned by the plugin, and the
+# provider replay payloads are provider-owned strings. Their carriers are
+# guarded -- the map, the option, the field that holds them -- but their
+# contents have no shape this repository can version, by design.
+#
+# `ProtocolTurnOptions` is reached only through its own envelope and carries
+# the separate surface declared below.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-core/src/session_graph.rs"]
+must_cover = ["StoredSessionNodeBody", "SessionNodePayload", "SessionNodeRecord"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/session_model/mod.rs"]
+symbols = [
+  "SessionHistoryRecord",
+  "ConversationRecord",
+  "ProtocolEvent",
+  "TurnBudget",
+  "NoProgressBudget",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/session_model/message.rs"]
+symbols = [
+  "Message",
+  "MessageRole",
+  "MessageOrigin",
+  "Part",
+  "PartKind",
+  "PartAttachment",
+  "PruneState",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/plugin/session_types.rs"]
+symbols = ["AgentFrameReason", "AgentFrameAssignment"]
+
+# The frame assignment carries the session policy and the plugin options, so
+# both travel in the body.
+[[surface.guard]]
+kind = "file"
+paths = ["crates/lash-core/src/session_model/session_policy_serde.rs"]
+must_cover = [
+  "impl serde::Serialize for SessionPolicy",
+  "impl<'de> serde::Deserialize<'de> for SessionPolicy",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/plugin/protocol.rs"]
+symbols = ["PluginOptions"]
+
+# The policy's own members: the model spec and its limits, the reasoning and
+# capability vocabulary, and the prompt layer.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/model.rs"]
+symbols = ["ModelSpec", "ModelLimits"]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-sansio/src/llm/capability.rs"]
+must_cover = [
+  "ModelCapability",
+  "ReasoningCapability",
+  "ReasoningSelection",
+  "ReasoningEncoding",
+  "ReasoningDisableEncoding",
+  "SamplingCapability",
+  "StreamTermination",
+  "CacheControlDialect",
+]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-sansio/src/session_model/prompt.rs"]
+must_cover = [
+  "PromptLayer",
+  "PromptTemplate",
+  "PromptTemplateSection",
+  "PromptTemplateEntry",
+  "PromptSlot",
+  "PromptSlotLayer",
+  "PromptBuiltin",
+]
+
+# Message parts reach the LLM type family: the attachment source a part
+# carries, the provider replay metadata pinned to tool-call, reasoning, and
+# text parts, and the generation options the policy holds. That file is a wire
+# shape file whole, so it is swept whole.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-sansio/src/llm/types.rs"]
+must_cover = [
+  "AttachmentSource",
+  "ProviderReplayMeta",
+  "ProviderReasoningReplay",
+  "ResponseTextMeta",
+  "ProviderRouteIdentity",
+  "ProviderFileScope",
+  "GenerationOptions",
+  "NonNegativeFiniteF64",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/attachment.rs"]
+symbols = ["MediaType", "AttachmentRef"]
 
 [[surface]]
 constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
