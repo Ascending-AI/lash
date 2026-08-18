@@ -29,7 +29,7 @@ removal_verdicts_recorded = 767
 # only reads a reference that carries a line, so stripping `:1079` off one turns
 # a checked claim into prose nobody can confirm; pinning the population makes
 # that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2794
+prose_citations_recorded = 2800
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -5759,9 +5759,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId::0", "lash_core::TurnActivityId::0"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:8#id: lash_core::TurnActivityId(id),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnActivityId::new"
@@ -6385,9 +6384,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ChildUsage::model", "lash_core::TurnEvent::ChildUsage::model"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:311#model,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage::protocol_iteration"
@@ -6395,9 +6393,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ChildUsage::protocol_iteration", "lash_core::TurnEvent::ChildUsage::protocol_iteration"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:312#protocol_iteration,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage::session_id"
@@ -6405,9 +6402,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ChildUsage::session_id", "lash_core::TurnEvent::ChildUsage::session_id"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:309#session_id,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage::source"
@@ -6683,9 +6679,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedInputAccepted::applications", "lash_core::TurnEvent::QueuedInputAccepted::applications"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:341#lash_core::TurnEvent::QueuedInputAccepted { applications } => {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedMessagesCommitted"
@@ -6720,9 +6715,8 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted", "lash_core::TurnEvent::QueuedWorkStarted"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:194#lash_core::TurnEvent::QueuedWorkStarted {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::batch_ids"
@@ -6730,9 +6724,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::batch_ids", "lash_core::TurnEvent::QueuedWorkStarted::batch_ids"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:196#batch_ids,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::boundary"
@@ -6740,9 +6733,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::boundary", "lash_core::TurnEvent::QueuedWorkStarted::boundary"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:195#boundary,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::causes"
@@ -6750,9 +6742,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::causes", "lash_core::TurnEvent::QueuedWorkStarted::causes"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:197#causes,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::TurnEvent::ReasoningDelta"
@@ -9323,8 +9314,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::direct::DirectRequest::messages", "lash_core::facade_support::DirectRequest::messages"]
 area = "protocol"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::direct::DirectRequest::messages` directly; the gate reaches the same item a second time through `lash_core::runtime::session_manager::direct::DirectCompletionClient::direct_completion`. Consumer class: the documentation-snippet and Slack-clone example hosts -- this field is exercised in-repo at examples/docs-snippets/src/plugins_tools.rs:34, examples/slack-clone/src/bot/mcp_client.rs:93. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:34#messages: vec![/* ... */],"
+reason = "The docs-snippet tool host writes this field in the DirectRequest literal it hands to the direct-completion client; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
 symbol = "lash::direct::DirectRequest::model"
@@ -9350,8 +9342,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::direct::DirectRequest::model_variant", "lash_core::facade_support::DirectRequest::model_variant"]
 area = "protocol"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::direct::DirectRequest::model_variant` directly; the gate reaches the same item a second time through `lash_core::runtime::session_manager::direct::DirectCompletionClient::direct_completion`. Consumer class: the documentation-snippet and Slack-clone example hosts -- this field is exercised in-repo at examples/docs-snippets/src/plugins_tools.rs:32, examples/slack-clone/src/bot/mcp_client.rs:91. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:32#model_variant: model.model_variant,"
+reason = "The docs-snippet tool host carries the session's model variant into the DirectRequest literal it hands to the direct-completion client; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
 symbol = "lash::direct::DirectRequest::output"
@@ -9395,8 +9388,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::direct::DirectRequest::text", "lash_core::facade_support::DirectRequest::text"]
 area = "protocol"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::direct::DirectRequest::text` directly; the gate reaches the same item a second time through `lash_core::runtime::session_manager::direct::DirectCompletionClient::direct_completion`. Consumer class: core runtime contract tests and the Slack-clone example host -- this function is exercised in-repo at crates/lash-core/src/runtime/tests/plugin_lifecycle.rs:31, examples/slack-clone/src/bot/mcp_client.rs:90. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+disposition = "used-unasserted"
+usage = "examples/slack-clone/src/bot/mcp_client.rs:90#let mut direct = DirectRequest::text(&self.model.id, \"\");"
+reason = "The Slack-clone sampling bridge builds its direct request with this constructor before overriding the fields the MCP request carries; the example host runs it, but no executed assertion observes the constructed request directly."
 
 [[api]]
 symbol = "lash::direct::DirectRequest::with_caused_by"
@@ -12217,9 +12211,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::cursor"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:116#cursor,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::payload"
@@ -12236,9 +12229,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::replay_incarnation_id"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:113#replay_incarnation_id,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::revision"
@@ -12246,9 +12238,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::revision"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:115#revision,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::session_id"
@@ -12256,9 +12247,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::session_id"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:112#session_id,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::turn_id"
@@ -12266,9 +12256,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::turn_id"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:114#turn_id,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload"
@@ -12371,9 +12360,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::QueueChanged::kind"]
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:135#lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::TurnActivity"
@@ -48369,9 +48357,8 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::SyncExecutionEnvironment"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:981#lash_core::RuntimeEffectKind::SyncExecutionEnvironment => Self::SyncExecutionEnvironment,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::ToolAttempt"
@@ -51448,9 +51435,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionPolicy::autonomous"]
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:1086#autonomous,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::runtime::SessionPolicy::context_window_tokens"
@@ -63105,7 +63091,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TriggerEmitReport::empty", "lash_core::triggers::TriggerEmitReport::empty"]
 area = "triggers"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::triggers::TriggerEmitReport::empty` directly; the gate reaches the same item a second time through `lash_core::tool_provider::triggers::ToolTriggerClient::emit`. No in-repo caller invokes this constructor -- every report built in-repo goes through the crate-private `TriggerEmitReport::new` -- so this row deliberately carries no citation: the absence of machine-checked evidence is recorded rather than papered over with a line that merely spells the word `empty`."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::triggers::TriggerEmitReport::empty` directly; the gate reaches the same item a second time through `lash_core::tool_provider::triggers::ToolTriggerClient::emit`. No in-repo caller invokes this constructor -- reports are built either through the crate-private `TriggerEmitReport::new` or, in the remote-protocol conversions, as a bare struct literal -- so this row deliberately carries no citation: the absence of machine-checked evidence is recorded rather than papered over with a line that merely spells the word `empty`."
 
 [[api]]
 symbol = "lash::triggers::TriggerEmitReport::occurrence_id"
@@ -63639,9 +63625,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::payload"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:46#payload,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::session_id"
@@ -63649,9 +63634,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::session_id"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:36#request.session_id = session_id;"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::source"
@@ -63659,9 +63643,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::source"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:35#request.source = source;"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::source_key"
@@ -63669,9 +63652,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::source_key"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:45#source_key,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::source_type"
@@ -63679,9 +63661,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::source_type"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:44#source_type,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::with_source"
@@ -63836,9 +63817,8 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope::Host"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:407#lash_core::TriggerOwnerScope::Host { binding_id } => Self::Host { binding_id },"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope::Host::binding_id"
@@ -63846,9 +63826,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope::Host::binding_id"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:407#lash_core::TriggerOwnerScope::Host { binding_id } => Self::Host { binding_id },"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope::Platform"
@@ -63856,9 +63835,8 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope::Platform"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:408#lash_core::TriggerOwnerScope::Platform => Self::Platform,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope::Session"
@@ -63866,9 +63844,8 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope::Session"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:406#lash_core::TriggerOwnerScope::Session { session_id } => Self::Session { session_id },"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope::Session::session_id"
@@ -63876,9 +63853,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope::Session::session_id"]
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:406#lash_core::TriggerOwnerScope::Session { session_id } => Self::Session { session_id },"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope::host"
@@ -68009,36 +67985,32 @@ symbol = "lash_core::ProjectionMode"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/tools.rs:1#impl From<lash_core::ProjectionMode> for RemoteProjectionMode {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::ProjectionMode::Auto"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/tools.rs:4#lash_core::ProjectionMode::Auto => Self::Auto,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::ProjectionMode::Exact"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/tools.rs:6#lash_core::ProjectionMode::Exact => Self::Exact,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::ProjectionMode::ExplicitOnly"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/tools.rs:5#lash_core::ProjectionMode::ExplicitOnly => Self::ExplicitOnly,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::ProjectorContext"
@@ -68262,9 +68234,8 @@ symbol = "lash_core::ProtocolPosition::ResponseObserved"
 kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:595#core_llm::ProtocolPosition::ResponseObserved => Self::ResponseObserved,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::ProtocolPosition::TerminalObserved"
@@ -68512,36 +68483,32 @@ symbol = "lash_core::RetryDecision"
 kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:602#impl From<core_llm::RetryDecision> for RemoteRetryDecision {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::RetryDecision::delay"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:606#delay,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::RetryDecision::reason"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:607#reason,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::RetryDecision::scheduled"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:605#scheduled,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectReplayMismatchSummary"
@@ -71922,43 +71889,40 @@ symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:1311#vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: crates/lash converts this core type into its own same-named facade type at crates/lash/src/turn/selected_drain.rs:24, and no line in that crate can be qualified by the core enum because the consuming crate declares the name itself. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash/src/turn/selected_drain.rs:28#SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied { batch_id }"
+disposition = "unused-justify"
 
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:27 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core variant into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied::batch_id"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:135#vec![lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied { batch_id }]"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:27 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction::ClaimedNow"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash/src/turn/selected_drain.rs:25#SelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id }"
+disposition = "unused-justify"
 
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:24 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core variant into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction::ClaimedNow::batch_id"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:161#let claimed_exact = vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id }];"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:24 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainError"
@@ -72053,94 +72017,88 @@ symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:234#lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: crates/lash converts this core type into its own same-named facade type at crates/lash/src/turn/selected_drain.rs:40, and no line in that crate can be qualified by the core enum because the consuming crate declares the name itself. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash/src/turn/selected_drain.rs:51#SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy"
+disposition = "unused-justify"
 
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:50 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core variant into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash/src/turn/selected_drain.rs:47#} => SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {"
+disposition = "unused-justify"
 
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:45 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core variant into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition::required_batch_ids"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:238#InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!("
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:46 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash/src/turn/selected_drain.rs:58#} => SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {"
+disposition = "unused-justify"
 
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:53 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core variant into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::batch_enqueue_seq"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/turn/selected_drain.rs:55 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:55 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::batch_id"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:245#batch_id,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:54 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::max_context_tokens"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:245#max_context_tokens,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:57 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::required_context_tokens"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/docs-snippets/src/fig1313_drain_policy.rs:244#required_context_tokens,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:56 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash/src/turn/selected_drain.rs:42#} => SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {"
+disposition = "unused-justify"
 
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:40 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core variant into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether::unclaimed_batch_ids"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "internal-test-only"
-usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:235#unclaimed_batch_ids,"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-justify"
+reason = "FIG-1533: the facade's selected-drain mirror names crates/lash/src/turn/selected_drain.rs:41 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, because crates/lash declares a same-named facade type and converts this core field into it, so no line there can be qualified by the core owner. The consumer is recorded in prose rather than as machine-checked evidence."
 
 [[api]]
 symbol = "lash_core::facade_support::SessionGraphFacadeOps"
@@ -73011,9 +72969,8 @@ symbol = "lash_core::facade_support::TriggerManifestMembership::Orphaned"
 kind = "variant"
 availability = "default+all-features"
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:283#lash_core::facade_support::TriggerManifestMembership::Orphaned => {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::TriggerManifestMembership::PresentInCurrentArtifact"
@@ -73029,9 +72986,8 @@ symbol = "lash_core::facade_support::TriggerManifestMembership::Unknown"
 kind = "variant"
 availability = "default+all-features"
 area = "triggers"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:286#lash_core::facade_support::TriggerManifestMembership::Unknown => {"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::TriggerRouter"
@@ -74495,9 +74451,8 @@ symbol = "lash_core::facade_support::epoch_ms_from_system_time"
 kind = "function"
 availability = "default+all-features"
 area = "processes"
-disposition = "internal-test-only"
+disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:1204#occurred_at_ms: lash_core::facade_support::epoch_ms_from_system_time(occurred_at),"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::evaluate_trigger_mutation"
@@ -77538,23 +77493,25 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::SessionReadView::message_tree` hands `SessionMessageTreeNode` to hosts (runtime embedders). Consumer class: core runtime internals and core session-graph tests -- this field is written where the tree is built at crates/lash-core/src/session_graph.rs:1297 and asserted at crates/lash-core/src/session_graph_tests.rs:488, not by any example, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::SessionReadView::message_tree` hands `SessionMessageTreeNode` to hosts (runtime embedders). Consumer class: core runtime internals and core session-graph tests -- this field is written where the tree is built at crates/lash-core/src/session_graph.rs:1297 and asserted at crates/lash-core/src/session_graph_tests.rs:488. An example's tests do read it -- examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:1720 walks the message tree pairing this flag with each node's message -- but that is example-test evidence, the population the tier ratchet exists to shrink, and this row records no usage anchor, so the disposition stays unused until an example's host code reaches it."
 
 [[api]]
 symbol = "lash_core::session_graph::SessionMessageTreeNode::children"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::SessionReadView::message_tree` hands `SessionMessageTreeNode` to hosts (runtime embedders). Consumer class: core runtime internals and the agent-workbench example host -- this field is written where the tree is built at crates/lash-core/src/session_graph.rs:1296 and walked at examples/agent-workbench/src/main_sections/routes.rs:63. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:63#pending_message_nodes.extend(node.children);"
+reason = "The agent-workbench settled-reconciliation route walks the tree through this field; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
 symbol = "lash_core::session_graph::SessionMessageTreeNode::message"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::SessionReadView::message_tree` hands `SessionMessageTreeNode` to hosts (runtime embedders). Consumer class: core runtime internals and the agent-workbench example host -- this field is written where the tree is built at crates/lash-core/src/session_graph.rs:1294 and read at examples/agent-workbench/src/main_sections/routes.rs:59. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:59#node.message.origin.as_ref()"
+reason = "The agent-workbench settled-reconciliation route reads each node's message to recover the turn that produced it; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
 symbol = "lash_core::session_graph::SessionMessageTreeNode::node_id"
@@ -87752,8 +87709,8 @@ reason = "678d567bf internalized this export behind the doc-hidden facade_suppor
 [[removal_verdict]]
 symbol = "lash_core::TriggerManifestMembership::Orphaned"
 kind = "variant"
-superseded_by = "internal-test-only"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-test-only at lash_core::facade_support::TriggerManifestMembership::Orphaned."
+superseded_by = "internal-consumed"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-consumed at lash_core::facade_support::TriggerManifestMembership::Orphaned."
 
 [[removal_verdict]]
 symbol = "lash_core::TriggerManifestMembership::PresentInCurrentArtifact"
@@ -87764,8 +87721,8 @@ reason = "678d567bf internalized this export behind the doc-hidden facade_suppor
 [[removal_verdict]]
 symbol = "lash_core::TriggerManifestMembership::Unknown"
 kind = "variant"
-superseded_by = "internal-test-only"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-test-only at lash_core::facade_support::TriggerManifestMembership::Unknown."
+superseded_by = "internal-consumed"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: internal-consumed at lash_core::facade_support::TriggerManifestMembership::Unknown."
 
 [[removal_verdict]]
 symbol = "lash_core::TriggerRegistration"

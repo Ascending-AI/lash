@@ -213,6 +213,7 @@ copy of everything.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 from pathlib import Path
@@ -269,6 +270,15 @@ DISPOSITION_TIERS = {
 #: code.  A ratchet, not a target: the count may only fall, and lowering it is a
 #: one-line diff beside the row that was upgraded.  Raising it is the bleeding
 #: this gate exists to stop, so an increase fails.
+#:
+#: A raise is not forbidden, it is *argued*: the population may only grow
+#: because a correctness fix admitted rows the old reading hid, and the PR body
+#: has to state the delta and why the new number is the honest one, with the pin
+#: moving in that same diff so a reviewer reads the raise rather than discovers
+#: it.  PR #492 raised it 1914 -> 1959 on that footing.  Raising it because a
+#: change would otherwise fail the gate is the thing this constant exists to
+#: catch; the honest move there is to record the row's consumer in prose under
+#: an `unused-*` disposition and leave the pin.
 EXAMPLE_TEST_TIER_RATCHET = 1959
 #: Module paths that put an item behind the `testing` feature, which is what
 #: makes a test-only consumer a home rather than an excuse.  `test_support` is
@@ -1683,12 +1693,24 @@ def toml_escape(value: str) -> str:
 #: Roots an evidence anchor may point into.  `examples/` is host coverage;
 #: `crates/` is where an internal seam's consumer lives.
 ANCHOR_ROOTS = ("examples", "crates")
-#: A `#[cfg(test)]` gate, including the `#[cfg(any(test, ...))]` spelling the
-#: workspace uses for fixtures shared with the `testing` feature.
 #: The `cfg` predicate of an attribute, however the predicate is spelled.
 CFG_ATTRIBUTE = re.compile(r"#\[cfg\(")
-#: `not(...)`, whose contents invert: `#[cfg(not(test))]` is shipped code.
-CFG_NEGATION = re.compile(r"\bnot\s*\(")
+#: A char literal, the only shape in which `'` opens one: `'a'`, `'\n'`.  A
+#: lifetime is not one, and reading it as one swallows the rest of the line.
+CHAR_LITERAL = re.compile(r"'(?:\\.|[^'\\])'")
+#: An attribute or comment line: whatever it holds, it never ends the item a
+#: pending `cfg` gate is waiting for.
+CFG_GATE_CONTINUATION = re.compile(r"^\s*(?:#!?\[|//|/\*|\*)")
+#: How many free cfg atoms a predicate may carry before the evaluator stops
+#: enumerating assignments.  Real predicates carry two or three; past this bound
+#: the predicate is read as shipped rather than guessed at.  That is the safer
+#: answer for an internal seam -- a row may not claim test-only without the
+#: enumeration having shown it -- and the weaker one for the example tiers,
+#: where reading an example's test code as host code would let the tier ratchet
+#: fall without the row being upgraded.  The bound is set where no predicate in
+#: this workspace comes near it, so the trade is theoretical; move it rather
+#: than let a real predicate reach it.
+CFG_ATOM_LIMIT = 12
 #: A module declared without a body: the code is in another file.
 OUT_OF_LINE_MODULE = re.compile(
     r"(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;"
@@ -1729,26 +1751,185 @@ def balanced_group(text: str, start: int) -> str:
     return text[start + 1 :]
 
 
+def split_predicates(text: str) -> list[str]:
+    """The comma-separated predicates of a `cfg` list, respecting nesting."""
+    parts: list[str] = []
+    depth = 0
+    quoted = False
+    current: list[str] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if quoted:
+            if character == "\\":
+                current.append(text[index : index + 2])
+                index += 2
+                continue
+            if character == '"':
+                quoted = False
+        elif character == '"':
+            quoted = True
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif character == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(character)
+        index += 1
+    parts.append("".join(current))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def parse_cfg(text: str) -> tuple[str, object]:
+    """A `cfg` predicate as a tree of `("all"|"any"|"not"|"atom", payload)`.
+
+    The operand of an `all`/`any`/`not` is a list of subtrees; the payload of an
+    atom is the name a build turns on, so `feature = "testing"` and `unix` are
+    both just names to assign.  An atom's spacing is not part of its identity --
+    `feature="x"` and `feature = "x"` name one feature -- so the name is
+    normalised rather than left to two spellings that would count as two atoms.
+    """
+    text = text.strip()
+    for operator in ("all", "any", "not"):
+        if text.startswith(operator):
+            rest = text[len(operator) :].lstrip()
+            if rest.startswith("("):
+                inner = balanced_group(rest, 0)
+                return operator, [parse_cfg(part) for part in split_predicates(inner)]
+    return "atom", re.sub(r"\s*=\s*", " = ", " ".join(text.split()))
+
+
+def cfg_atoms(tree: tuple[str, object]) -> set[str]:
+    """Every atom name a predicate tree mentions."""
+    operator, payload = tree
+    if operator == "atom":
+        return {str(payload)}
+    names: set[str] = set()
+    for child in payload:  # type: ignore[union-attr]
+        names |= cfg_atoms(child)  # type: ignore[arg-type]
+    return names
+
+
+def evaluate_cfg(tree: tuple[str, object], enabled: set[str]) -> bool:
+    """Whether a predicate holds for a build that turned on exactly `enabled`.
+
+    `not` takes exactly one predicate in Rust, and the assert says so rather
+    than letting a malformed `not(a, b)` quietly read as "not both".
+    """
+    operator, payload = tree
+    if operator == "atom":
+        return str(payload) in enabled
+    children = [
+        evaluate_cfg(child, enabled)  # type: ignore[arg-type]
+        for child in payload  # type: ignore[union-attr]
+    ]
+    if operator == "all":
+        return all(children)
+    if operator == "any":
+        return any(children)
+    assert len(children) == 1, f"cfg not() takes one predicate, got {len(children)}"
+    return not children[0]
+
+
 def cfg_gates_test(line: str) -> bool:
     """Whether a `cfg` attribute on this line compiles the item for tests only.
 
-    The predicate is a tree, not a prefix: `test`, `any(test, ...)`,
-    `all(test, feature = "testing")` and deeper nestings all gate on tests, while
-    anything under `not(...)` says the opposite.  A prefix match read
-    `#[cfg(all(test, ...))]` as shipped code, which is how a provider's
-    conformance route counted as another crate's `src/` (FIG-1223).
+    The question a tier has to answer is not "does this predicate mention
+    `test`" but "can this item reach a shipped build" -- and the answer needs the
+    predicate evaluated, because `test` reads differently under every operator.
+    `all(test, feature = "testing")` never ships; `any(test, feature =
+    "core-conversions")` ships whenever that feature is on, and reading it as
+    test code filed a whole directory of shipped conversions as tests
+    (FIG-1533).  `not(test)` inverts again, and nesting composes all three.
+
+    So: pin `test` off, leave every other atom free -- features a downstream
+    build may turn on, platform predicates a target may satisfy -- and ask
+    whether any assignment still compiles the item.  If one does, the item
+    ships.  Only when none does is the item test-only.
     """
     match = CFG_ATTRIBUTE.search(line)
     if match is None:
         return False
-    predicate = balanced_group(line, match.end() - 1)
-    while True:
-        negation = CFG_NEGATION.search(predicate)
-        if negation is None:
+    tree = parse_cfg(balanced_group(line, match.end() - 1))
+    free = sorted(cfg_atoms(tree) - {"test"})
+    if len(free) > CFG_ATOM_LIMIT:
+        return False
+    for assignment in itertools.product((False, True), repeat=len(free)):
+        enabled = {name for name, on in zip(free, assignment) if on}
+        if evaluate_cfg(tree, enabled):
+            return False
+    return True
+
+
+def gate_release_text(line: str) -> str:
+    """`line` with comments and literals blanked, for finding where an item ends.
+
+    The brace or semicolon that ends a gated item has to be the code's, not a
+    sentence's: a doc comment between the gate and its item -- `/// Enabled;
+    tests only.` -- would otherwise end the item at a word, and a `"{"` in a
+    string would open a body that is not there.  Lifetimes keep their quote: `'`
+    starts a literal only in the two shapes a char literal has.
+
+    Only `//` is blanked here; a `/* .. */` comment is handled a line at a time
+    by `CFG_GATE_CONTINUATION` instead, which reads a line opening or continuing
+    a block comment as not-yet-the-item and leaves the gate pending.  The
+    continuation therefore covers the common shape -- a block comment on its own
+    lines between gate and item -- and not the rare one where code shares the
+    line that closes the comment, which no `cfg`-gated item here writes.
+    """
+    kept: list[str] = []
+    index, length = 0, len(line)
+    while index < length:
+        if line.startswith("//", index):
             break
-        inner = balanced_group(predicate, negation.end() - 1)
-        predicate = predicate.replace(f"{negation.group(0)}{inner})", " ", 1)
-    return re.search(r"(?<![A-Za-z0-9_])test(?![A-Za-z0-9_])", predicate) is not None
+        character = line[index]
+        if character == '"':
+            index += 1
+            while index < length:
+                if line[index] == "\\":
+                    index += 2
+                    continue
+                if line[index] == '"':
+                    index += 1
+                    break
+                index += 1
+            kept.append(" ")
+            continue
+        literal = CHAR_LITERAL.match(line, index)
+        if literal is not None:
+            kept.append(" ")
+            index = literal.end()
+            continue
+        kept.append(character)
+        index += 1
+    return "".join(kept)
+
+
+def after_cfg_attribute(line: str) -> str:
+    """What a line says after its `cfg` attribute closes.
+
+    A gate and its item share a line often enough that the item's own shape --
+    a body, or a semicolon -- has to be read from the remainder rather than
+    from the whole line.
+    """
+    match = CFG_ATTRIBUTE.search(line)
+    if match is None:
+        return line
+    start = match.end() - 1
+    depth = 0
+    for index in range(start, len(line)):
+        if line[index] == "(":
+            depth += 1
+        elif line[index] == ")":
+            depth -= 1
+            if depth == 0:
+                closing = line.find("]", index)
+                return line[closing + 1 :] if closing != -1 else ""
+    return ""
 
 
 def test_regions(lines: list[str]) -> list[tuple[int, int]]:
@@ -1759,19 +1940,50 @@ def test_regions(lines: list[str]) -> list[tuple[int, int]]:
     example's host code from the tests beside it, and the separation is the whole
     point of the tier -- 84% of this inventory's "exercised by an example"
     evidence turned out to be an example's own tests (FIG-1223).
+
+    A gate belongs to exactly one item, so it has to be released by the item it
+    was written for.  A bodyless `#[cfg(test)] mod support;` ends at its
+    semicolon; leaving the gate pending handed it to the next braced item in
+    the file, which is how an unrelated shipped module read as a test region
+    and swallowed a real gate further down (FIG-1533).
+
+    Released is not discarded.  The statement between the gate and that
+    semicolon is itself test code -- `#[cfg(test)]\\nself.hook();` spans two
+    lines and both of them are gated -- so the release closes a region over the
+    item rather than dropping it, which is the difference between ending a
+    region and never having one.
     """
     regions: list[list[int]] = []
     depth = 0
     gate: int | None = None
     for number, line in enumerate(lines, start=1):
+        tail = line
         if gate is None and cfg_gates_test(line.strip()):
             gate = number
             gate_depth = depth
+            tail = after_cfg_attribute(line)
         opened = line.count("{")
         after = depth + opened - line.count("}")
-        if gate is not None and opened:
-            regions.append([gate, 0, gate_depth])
-            gate = None
+        # An attribute or comment under the gate is not the gated item: only the
+        # gate's own line is read past its attribute, and the rest wait for code.
+        pending = gate is not None and (gate == number or not CFG_GATE_CONTINUATION.match(line))
+        if pending:
+            release = gate_release_text(tail)
+            brace = release.find("{")
+            semicolon = release.find(";")
+            if brace != -1 and (semicolon == -1 or brace < semicolon):
+                regions.append([gate, 0, gate_depth])
+                gate = None
+            elif semicolon != -1:
+                # Known case, named rather than guarded: a braced signature can
+                # carry a `;` ahead of its `{` -- `fn f(b: [u8; 4]) {` -- and
+                # this branch then closes the region at the signature and reads
+                # the body as shipped code. Positions are compared, so only a
+                # semicolon *before* the brace does it, and no `cfg`-gated item
+                # in the workspace has one; parsing types to rule it out would
+                # cost more than the case is worth. Revisit if one appears.
+                regions.append([gate, number, gate_depth])
+                gate = None
         for region in regions:
             if not region[1] and after <= region[2]:
                 region[1] = number
@@ -1896,6 +2108,32 @@ def test_path(relative: str) -> bool:
     )
 
 
+def feature_gated_test_home(relative: str) -> bool:
+    """Whether a file is one of the `testing` / `test_support` homes.
+
+    These are the modules `FEATURE_GATED_TEST_HOMES` names as where a test-only
+    item is *relocated to*: `lash_core::testing`, `lash_core::test_support`, the
+    conformance harness under them, and the same modules in `lash`, `lashlang`
+    and the providers.  Their files are shipped in the sense the compiler cares
+    about -- a downstream build can turn the feature on -- and reading them as
+    `crate-src` would let a row prove an internal seam by citing the test
+    harness, which is the amnesty this ledger spent FIG-1223 closing.  A path
+    rule, deliberately: the registry's own doctrine names these modules as the
+    home a `Relocate:` note points at, so a file that lives in one answers to
+    the test tiers no matter which feature compiles it.
+    """
+    homes = tuple(home.removeprefix("::") for home in FEATURE_GATED_TEST_HOMES)
+    for segment in relative.removesuffix(".rs").split("/"):
+        for home in homes:
+            if (
+                segment == home
+                or segment.startswith(f"{home}_")
+                or segment.endswith(f"_{home}")
+            ):
+                return True
+    return False
+
+
 def anchor_tier(reference: str) -> str | None:
     """Which evidence tier an anchor's path shape places it in.
 
@@ -1915,7 +2153,7 @@ def anchor_tier(reference: str) -> str | None:
     # looked alive because a probe usage sat in one of these inside the crate
     # that defined it, so shipped code and test code cannot share a tier just
     # because they share a file.
-    in_test = test_path(relative) or any(
+    in_test = test_path(relative) or feature_gated_test_home(relative) or any(
         start <= line_number <= end for start, end in regions
     )
     if root == "crates":
