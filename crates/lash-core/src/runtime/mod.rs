@@ -1466,9 +1466,13 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     }
 
     /// Report whether the permanent host-facing session tombstone exists.
-    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
-        Ok(false)
-    }
+    ///
+    /// Required, with no default. This answer decides whether a resume returns
+    /// the caller's conversation or a brand-new empty one under a dead id, so
+    /// an inherited `false` is a factory claiming "no session was ever deleted
+    /// here" without having been asked. A factory that keeps no tombstone says
+    /// so explicitly; a decorator forwards to the store it wraps.
+    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String>;
 
     async fn delete_session(&self, session_id: &str) -> Result<(), String>;
 

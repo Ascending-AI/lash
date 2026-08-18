@@ -1,0 +1,7 @@
+error[E0046]: not all trait items implemented, missing: `session_was_deleted`
+  --> tests/ui/session_store_factory_requires_deletion_answer.rs:45:1
+   |
+45 | impl SessionStoreFactory for SilentFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `session_was_deleted` in implementation
+   |
+   = help: implement the missing item: `fn session_was_deleted<'life0: 'async_trait, 'life1: 'async_trait, 'async_trait>(&'life0 self, _: &'life1 str) -> std::pin::Pin<Box<(dyn Future<Output = Result<bool, std::string::String>> + Send + 'async_trait)>> { todo!() }`

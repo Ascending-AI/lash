@@ -81,6 +81,12 @@ impl SessionStoreFactory for TestSessionStoreFactory {
         Ok(Arc::new(InMemorySessionStore::default()))
     }
 
+    // Stateless: every create_store hands back a fresh in-memory store and no
+    // tombstone is ever recorded, so no session has been deleted.
+    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+
     async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
         Ok(())
     }
@@ -95,6 +101,12 @@ impl SessionStoreFactory for InlineSessionStoreFactory {
         Ok(Arc::new(InMemorySessionStore::default()))
     }
 
+    // Stateless: every create_store hands back a fresh in-memory store and no
+    // tombstone is ever recorded, so no session has been deleted.
+    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+
     async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
         Ok(())
     }
@@ -107,6 +119,12 @@ impl SessionStoreFactory for SegmentBoundarySessionStoreFactory {
         _request: &crate::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
         Ok(Arc::new(InMemorySessionStore::default()))
+    }
+
+    // Stateless: every create_store hands back a fresh in-memory store and no
+    // tombstone is ever recorded, so no session has been deleted.
+    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+        Ok(false)
     }
 
     async fn delete_session(&self, _session_id: &str) -> Result<(), String> {

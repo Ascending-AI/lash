@@ -14235,7 +14235,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::input_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:1023#.input_id"
+usage = "crates/lash-perf/src/runtime_perf/store.rs:1029#.input_id"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::new"
@@ -45875,7 +45875,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::queue_drain"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:6521#ExecutionScope::queue_drain(\"session\", \"drain\"),"
+usage = "crates/lash-restate/src/tests.rs:6528#ExecutionScope::queue_drain(\"session\", \"drain\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -45895,7 +45895,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::session_delete"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:6522#ExecutionScope::session_delete(\"session\"),"
+usage = "crates/lash-restate/src/tests.rs:6529#ExecutionScope::session_delete(\"session\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -47794,7 +47794,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Direct::usage_source"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:4875#usage_source: \"test\".to_string(),"
+usage = "crates/lash-restate/src/tests.rs:4882#usage_source: \"test\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -47949,7 +47949,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::SyncExecutionEnvironment::update_machine_config"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:4912#update_machine_config: true,"
+usage = "crates/lash-restate/src/tests.rs:4919#update_machine_config: true,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -71869,7 +71869,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:1307#vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {"
+usage = "crates/lash/src/tests/turn_streaming.rs:1311#vec![crate::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -72623,7 +72623,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2424#assert_eq!(result.usage.input_tokens, 10);"
+usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2429#assert_eq!(result.usage.input_tokens, 10);"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -76154,7 +76154,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:11170#probe_slot.set_for_session("
+usage = "crates/lash-restate/src/tests.rs:11177#probe_slot.set_for_session("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]

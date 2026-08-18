@@ -44,3 +44,22 @@ fn attachment_gc_requires_explicit_root_set() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/attachment_gc_requires_explicit_root_set.rs");
 }
+
+/// The class-1 store seams carry no silent defaults: an implementor that never
+/// states its delete-time freshness answer or its tombstone answer does not
+/// compile.
+///
+/// Both fixtures assert an `E0046` whose `help:` line renders the async-trait
+/// desugared signature, and rustc abbreviates `std::pin::Pin` to `Pin` in the
+/// dependency-poorer no-default-features graph that the feature-boundary job
+/// compiles. The expectation is therefore pinned to the workspace graph, the
+/// same way the `rlm` fixtures above are.
+#[test]
+fn store_seam_answers_have_no_defaults() {
+    if !cfg!(feature = "rlm") {
+        return;
+    }
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/ui/attachment_store_head_has_no_default.rs");
+    t.compile_fail("tests/ui/session_store_factory_requires_deletion_answer.rs");
+}

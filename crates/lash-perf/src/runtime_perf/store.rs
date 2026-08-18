@@ -540,6 +540,12 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         Ok(Arc::clone(store) as Arc<dyn RuntimePersistence>)
     }
 
+    // The perf harness never deletes: stores are retained for the whole run and
+    // no tombstone is recorded.
+    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+
     async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
         Ok(())
     }

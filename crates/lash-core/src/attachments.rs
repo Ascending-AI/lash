@@ -158,15 +158,25 @@ pub trait AttachmentStore: Send + Sync {
     /// The mark-and-sweep GC calls this immediately before deleting a candidate:
     /// the `last_modified_epoch_ms` captured by the `list` snapshot is stale by
     /// delete time, so a blob that a fresh `put` (a new intent for the same
-    /// content id) touched *after* the snapshot must be spared. The default
-    /// implementation scans `list`; backends override it with a cheap
-    /// stat/`HEAD`.
+    /// content id) touched *after* the snapshot must be spared.
     ///
-    /// Overrides that derive a namespaced path or key from `id` must apply the
-    /// trait-level id-shape guard first.
-    async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        Ok(self.list().await?.into_iter().find(|blob| &blob.id == id))
-    }
+    /// Required, with no default: a backend whose freshness answer is a
+    /// `list` scan it never chose is a delete guard nobody wrote. Backends with
+    /// a cheap stat/`HEAD` use it; backends without one state the scan
+    /// explicitly (`Ok(self.list().await?.into_iter().find(|blob| &blob.id ==
+    /// id))`).
+    ///
+    /// Neither answer risks a delete — the sweep skips the candidate on
+    /// `Ok(None)` (read as a concurrent delete) and on `Err` alike. They differ
+    /// in what the host learns: an `Err` lands in
+    /// [`AttachmentReclamationReport::failed_ids`], while `Ok(None)` passes
+    /// silently. A backend that cannot answer should therefore return an error
+    /// rather than `None`, so a store that has stopped being able to vouch for
+    /// its blobs is visible instead of looking like a steadily empty sweep.
+    ///
+    /// Implementors that derive a namespaced path or key from `id` must apply
+    /// the trait-level id-shape guard first.
+    async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError>;
 }
 
 /// A source of the live attachment root set across every session a store

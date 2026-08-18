@@ -801,6 +801,11 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
         Ok(Arc::clone(&self.store))
     }
 
+    // The single reused store is never dropped and no tombstone is recorded.
+    async fn session_was_deleted(&self, _session_id: &str) -> std::result::Result<bool, String> {
+        Ok(false)
+    }
+
     async fn delete_session(&self, _session_id: &str) -> std::result::Result<(), String> {
         Ok(())
     }
@@ -1197,6 +1202,11 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
         Ok(Arc::new(SnapshotStore::default()))
     }
 
+    // Every create_store hands back a fresh store; nothing is ever tombstoned.
+    async fn session_was_deleted(&self, _session_id: &str) -> std::result::Result<bool, String> {
+        Ok(false)
+    }
+
     async fn delete_session(&self, _session_id: &str) -> std::result::Result<(), String> {
         Ok(())
     }
@@ -1205,6 +1215,7 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
 #[derive(Default)]
 struct DeletingStoreFactory {
     stores: std::sync::Mutex<std::collections::HashMap<String, Arc<SnapshotStore>>>,
+    tombstones: std::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
 // SnapshotStore has a no-op attachment manifest; this deletion fixture
@@ -1257,8 +1268,16 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
             .map(|store| store as Arc<dyn lash_core::RuntimePersistence>))
     }
 
+    // This fixture really deletes, so it really keeps the tombstone.
+    async fn session_was_deleted(&self, session_id: &str) -> std::result::Result<bool, String> {
+        Ok(self.tombstones.lock_recover().contains(session_id))
+    }
+
     async fn delete_session(&self, session_id: &str) -> std::result::Result<(), String> {
         self.stores.lock_recover().remove(session_id);
+        self.tombstones
+            .lock_recover()
+            .insert(session_id.to_string());
         Ok(())
     }
 }
