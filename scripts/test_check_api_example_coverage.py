@@ -24,6 +24,8 @@ from check_api_example_coverage import (
     api_items,
     binds_receiver,
     cfg_gates_test,
+    feature_gated_test_home,
+    parse_cfg,
     declared_test_modules,
     doc_hidden,
     example_test_tier_errors,
@@ -863,7 +865,8 @@ class TestRegionTests(unittest.TestCase):
             "    pub fn api() {}",     # 5
             "}",                       # 6
         ]
-        self.assertEqual(test_regions(source), [])
+        # The declaration itself stays gated; the shipped module below does not.
+        self.assertEqual(test_regions(source), [(1, 2)])
 
     def test_releases_a_gate_written_on_the_declaration_line(self):
         source = [
@@ -871,7 +874,62 @@ class TestRegionTests(unittest.TestCase):
             "pub mod shipped {",          # 2
             "}",                          # 3
         ]
-        self.assertEqual(test_regions(source), [])
+        self.assertEqual(test_regions(source), [(1, 1)])
+
+    def test_keeps_the_gated_statement_a_semicolon_ends(self):
+        # FIG-1533 round 2: releasing the gate at the `;` must close a region
+        # over the statement, not drop it. A `#[cfg(test)]` call spanning three
+        # lines is test code on all three, and reading it as shipped is how a
+        # test-only hook would pass for a crate's src/.
+        source = [
+            "impl Store {",                              # 1
+            "    fn claim(&self) {",                     # 2
+            "        #[cfg(test)]",                      # 3
+            "        self.run_claim_after_lease_hook(",  # 4
+            "            self.session_id(),",            # 5
+            "        );",                                # 6
+            "        self.commit();",                    # 7
+            "    }",                                     # 8
+            "}",                                         # 9
+        ]
+        regions = test_regions(source)
+        self.assertEqual(regions, [(3, 6)])
+        self.assertFalse(any(start <= 7 <= end for start, end in regions))
+
+    def test_keeps_a_gated_use_statement_out_of_shipped_code(self):
+        source = [
+            "#[cfg(test)]",                       # 1
+            "use super::InlineEffectHost;",       # 2
+            "pub fn shipped() {}",                # 3
+        ]
+        self.assertEqual(test_regions(source), [(1, 2)])
+
+    def test_does_not_release_a_gate_on_a_semicolon_inside_a_doc_comment(self):
+        # Between the gate and its item sit doc comments and attributes; a
+        # semicolon in either is prose or metadata, not the end of the item.
+        source = [
+            "#[cfg(test)]",                                  # 1
+            "/// Enabled under test; never in a release.",   # 2
+            "#[allow(clippy::unwrap_used)]",                 # 3
+            "mod tests {",                                   # 4
+            "    fn probe() {}",                             # 5
+            "}",                                             # 6
+            "pub fn shipped() {}",                           # 7
+        ]
+        regions = test_regions(source)
+        self.assertEqual(regions, [(1, 6)])
+        self.assertFalse(any(start <= 7 <= end for start, end in regions))
+
+    def test_does_not_open_a_body_on_a_brace_inside_a_literal(self):
+        source = [
+            "#[cfg(test)]",                          # 1
+            'const PROBE: &str = "{ not a body";',   # 2
+            "pub fn shipped() {",                    # 3
+            "}",                                     # 4
+        ]
+        regions = test_regions(source)
+        self.assertEqual(regions, [(1, 2)])
+        self.assertFalse(any(start <= 3 <= end for start, end in regions))
 
     def test_still_sees_a_real_gate_after_a_bodyless_declaration(self):
         # The swallowed-gate half of the same defect: the leaked region ran to
@@ -888,7 +946,7 @@ class TestRegionTests(unittest.TestCase):
             "    fn probe() {}",       # 8
             "}",                       # 9
         ]
-        self.assertEqual(test_regions(source), [(6, 9)])
+        self.assertEqual(test_regions(source), [(1, 2), (6, 9)])
 
 
 class OutOfLineTestModuleTests(unittest.TestCase):
@@ -944,6 +1002,54 @@ class OutOfLineTestModuleTests(unittest.TestCase):
         self.assertTrue(
             cfg_gates_test('#[cfg(all(test, any(feature = "sim", unix)))]')
         )
+
+    def test_reads_a_de_facto_test_atom_as_the_free_cfg_flag_it_is(self):
+        # Recorded, not incidental: `miri` is a test-runner flag by convention,
+        # but the evaluator knows only `test`. `any(test, miri)` therefore reads
+        # as shipped -- a miri build compiles it without cfg(test) -- and the
+        # tier follows the compiler rather than the convention. Change this
+        # assertion, not the classifier, if the workspace ever wants otherwise.
+        self.assertFalse(cfg_gates_test("#[cfg(all(any(test, miri), unix))]"))
+        self.assertFalse(cfg_gates_test("#[cfg(miri)]"))
+
+    def test_reads_one_feature_however_its_spacing_is_written(self):
+        for predicate in (
+            '#[cfg(any(test, feature = "sim"))]',
+            '#[cfg(any(test,feature="sim"))]',
+            '#[cfg(any(test,  feature   =  "sim"))]',
+        ):
+            self.assertFalse(cfg_gates_test(predicate), predicate)
+        self.assertEqual(
+            parse_cfg('feature="sim"'), parse_cfg('feature = "sim"')
+        )
+
+    def test_keeps_the_feature_gated_test_homes_out_of_the_shipped_tier(self):
+        # FIG-1533 ruling: the `testing` / `test_support` modules are where a
+        # `Relocate:` note sends a test-only item, so their files answer to the
+        # test tiers even though a downstream build can turn the feature on.
+        # Reading them as crate-src would let an internal seam prove itself by
+        # citing the test harness -- the amnesty FIG-1223 closed.
+        for path in (
+            "crates/lash-core/src/testing.rs",
+            "crates/lash-core/src/testing/conformance/artifact_store.rs",
+            "crates/lash-core/src/test_support.rs",
+            "crates/lash-core/src/store/testing.rs",
+            "crates/lash-core/src/runtime/process/testing/continuation.rs",
+            "crates/lash-core/src/runtime/in_memory_store/testing_access.rs",
+            "crates/lash-provider-openai/src/codex/ws_testing.rs",
+            "crates/lash/src/testing.rs",
+            "crates/lashlang/src/testing.rs",
+        ):
+            self.assertTrue(feature_gated_test_home(path), path)
+            self.assertEqual(
+                anchor_tier(f"{path}:1#let _ = x;"), "workspace-tests", path
+            )
+        # A feature-gated module that is not a test home stays shipped code.
+        for path in (
+            "crates/lash-remote-protocol/src/core_conversions.rs",
+            "crates/lash-core/src/runtime/turn_loop.rs",
+        ):
+            self.assertFalse(feature_gated_test_home(path), path)
 
     def test_tiers_an_any_test_module_as_shipped_source(self):
         # `crates/lash-remote-protocol/src/lib.rs` declares `core_conversions`
