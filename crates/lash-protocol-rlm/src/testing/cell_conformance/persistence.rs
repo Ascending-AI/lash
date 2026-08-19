@@ -81,20 +81,37 @@ fn restarting_between_every_pair_of_cells_preserves_the_session(dialect: Dialect
     );
 }
 
-/// The persisted state is the same size either way.
+/// The persisted state is byte-for-byte the same either way.
 ///
-/// Byte-for-byte equality is the stronger claim and the one worth having: if a
-/// restart changed the encoding, two workers would write different snapshots
-/// for the same session and every later comparison would be noise.
+/// Equal *sizes* would be the weak version of this, and it is not the claim
+/// worth having: if a restart changed the encoding without changing its length
+/// — a reordered map, a re-keyed leaf, a differently split component — two
+/// workers would write different snapshots for the same session and every later
+/// comparison of them would be noise. So the root record and every leaf body are
+/// compared directly.
 fn a_restarted_session_persists_the_same_bytes(dialect: Dialect) {
     let cells = representative_session(dialect);
     let (resident, _) = drive(dialect, HarnessMode::Resident, &cells);
     let (restarting, _) = drive(dialect, HarnessMode::RestartBetweenCells, &cells);
+
+    let resident = resident.persisted_state();
+    let restarting = restarting.persisted_state();
     assert_eq!(
-        resident.persisted_bytes(),
-        restarting.persisted_bytes(),
-        "a restart must not change the size of what the session persists"
+        resident.root, restarting.root,
+        "a restart must not change the persisted root record"
     );
+    assert_eq!(
+        resident.components.keys().collect::<Vec<_>>(),
+        restarting.components.keys().collect::<Vec<_>>(),
+        "a restart must not change which leaves the session persists"
+    );
+    for (key, body) in &resident.components {
+        assert_eq!(
+            Some(body),
+            restarting.components.get(key),
+            "a restart changed the persisted body of leaf `{key}`"
+        );
+    }
 }
 
 /// A snapshot taken right after a cell failed restores into a usable session.
@@ -126,12 +143,14 @@ fn restoring_twice_without_running_a_cell_is_a_fixed_point(dialect: Dialect) {
         &representative_session(dialect),
     );
     let bindings = session.user_bindings();
-    let bytes = session.persisted_bytes();
+    let persisted = session.persisted_state();
     session.restart();
     session.restart();
     session.restart();
     assert_eq!(session.user_bindings(), bindings);
-    assert_eq!(session.persisted_bytes(), bytes);
+    let after = session.persisted_state();
+    assert_eq!(after.root, persisted.root);
+    assert_eq!(after.components, persisted.components);
     let outcome = session.run_ok(&Cell::finish("grown").render(dialect));
     assert_eq!(outcome.finish, Some(serde_json::json!([1, 2, 3, 4])));
 }

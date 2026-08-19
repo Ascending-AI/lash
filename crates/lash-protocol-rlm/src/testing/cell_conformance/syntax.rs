@@ -267,12 +267,28 @@ impl Cell {
 }
 
 /// What a cell is required to do.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Expectation {
-    Succeeds,
+    Succeeds {
+        /// The terminal value the cell finishes the session with, which is
+        /// `None` for every cell that is not a finish.
+        ///
+        /// Carrying it here rather than leaving it to the scenarios is what
+        /// makes the generative axis able to see a terminal-value regression:
+        /// thousands of generated sessions end in a finish over a name an
+        /// earlier cell bound, and a session that returned the wrong number
+        /// there would otherwise pass every one of them.
+        finish: Option<serde_json::Value>,
+    },
     /// The cell fails, and says so with a typed error. Nothing else about the
-    /// session may change.
+    /// session may change, and the session does not finish.
     FailsTyped,
+}
+
+impl Expectation {
+    fn succeeds() -> Self {
+        Self::Succeeds { finish: None }
+    }
 }
 
 /// The bindings a session is required to hold, tracked cell by cell.
@@ -304,7 +320,7 @@ impl SessionModel {
         match cell {
             Cell::Bind { name, value } => {
                 self.bindings.insert(name.clone(), value.as_json());
-                Expectation::Succeeds
+                Expectation::succeeds()
             }
             Cell::Derive { name, source } => {
                 let base = self
@@ -313,7 +329,7 @@ impl SessionModel {
                     .and_then(serde_json::Value::as_f64)
                     .expect("a derive cell reads a bound number");
                 self.bindings.insert(name.clone(), number_json(base + 1.0));
-                Expectation::Succeeds
+                Expectation::succeeds()
             }
             Cell::Extend {
                 name,
@@ -329,29 +345,34 @@ impl SessionModel {
                 list.push(number_json(*value));
                 self.bindings
                     .insert(name.clone(), serde_json::Value::Array(list));
-                Expectation::Succeeds
+                Expectation::succeeds()
             }
             Cell::Drop { name } => {
                 self.bindings.insert(name.clone(), serde_json::Value::Null);
-                Expectation::Succeeds
+                Expectation::succeeds()
             }
             Cell::Finish { name } => {
-                assert!(
-                    self.bindings.contains_key(name),
-                    "a finish cell reads a bound name"
-                );
-                Expectation::Succeeds
+                let value = self
+                    .bindings
+                    .get(name)
+                    .expect("a finish cell reads a bound name")
+                    .clone();
+                Expectation::Succeeds {
+                    finish: Some(value),
+                }
             }
             Cell::ClosureGarbage { name } => {
                 self.bindings.insert(name.clone(), number_json(6.0));
-                Expectation::Succeeds
+                Expectation::succeeds()
             }
             // The ruled contract, stated as a model transition: a closure-valued
             // binding does not reach the next cell, so the session holds no
-            // binding of that name afterwards. ADR 0059.
+            // binding of that name afterwards. See
+            // `docs/adr/0059-lashlang-durable-stores-hold-exclusively-owned-copies.md`
+            // (three ADRs carry the number 0059; this is the one).
             Cell::ClosureBinding { name } => {
                 self.bindings.remove(name);
-                Expectation::Succeeds
+                Expectation::succeeds()
             }
             Cell::CompileError | Cell::RuntimeError | Cell::Refusal => Expectation::FailsTyped,
         }

@@ -5,6 +5,17 @@
 //! something an earlier cell did.* Every cell either runs or fails typed, and
 //! the next cell starts from a coherent heap.
 //!
+//! One honest limit, recorded so nobody reads more into a green run than is
+//! there. Through an RLM *Lashlang* cell the closure half of the law is sampled
+//! rather than asserted: a declared `fn` does leave a capture-free closure on
+//! the heap, but whether a stale function index poisons the next cell depends on
+//! what that cell's chunk happens to contain, and the trivial cells here happen
+//! to contain something it lands on. Against the pre-fix revision the whole
+//! Lashlang side of this suite therefore stays green while the TypeScript side
+//! goes red. The Lashlang closure law is asserted where it can be —
+//! `lashlang`'s `tests/functions.rs`, against a next program with no functions
+//! at all — and that test is red before the fix.
+//!
 //! The second half is the one that shipped broken. The reported failure was not
 //! "the session is gone" but a *later* cell failing with `closure function
 //! index 0 is not present in the compiled program` — a diagnostic about the
@@ -12,35 +23,14 @@
 //! therefore checks not only that the next cell succeeds but that when a cell
 //! does fail, it fails for its own reason.
 
-use super::drive;
-use super::harness::{CellOutcome, Dialect, HarnessMode, Session};
+use super::harness::{Dialect, HarnessMode, Session};
 use super::syntax::{Cell, Literal};
+use super::{assert_not_inherited, drive};
 
-/// Fragments of the diagnostics a cell inherits from an earlier cell's program.
-///
-/// No cell may ever produce one of these: a closure index, a capture count, or
-/// a function table are facts about the program that compiled the closure, and
-/// a later cell's program makes no claim about them.
-const INHERITED_DIAGNOSTICS: &[&str] = &[
-    "is not present in the compiled program",
-    "UnknownFunction",
-    "ClosureCaptureCountMismatch",
-    "closure function index",
-];
-
-/// Asserts an outcome is not one cell blaming another.
-fn assert_not_inherited(outcome: &CellOutcome, context: &str) {
-    let Some(error) = outcome.error.as_deref() else {
-        return;
-    };
-    for fragment in INHERITED_DIAGNOSTICS {
-        assert!(
-            !error.contains(fragment),
-            "{context}: a cell failed with a diagnostic about an earlier cell's program \
-             (`{fragment}`): {error}"
-        );
-    }
-}
+// The inherited-diagnostic check this axis is named for lives in the suite root
+// and runs inside `drive` on every outcome of every scenario. The scenarios here
+// call it directly for the sequences they build cell by cell rather than through
+// `drive`.
 
 /// The trivial cell from the FIG-1562 report. A session that cannot run this
 /// cannot run anything.

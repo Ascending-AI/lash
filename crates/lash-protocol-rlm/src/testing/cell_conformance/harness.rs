@@ -245,6 +245,15 @@ impl Session {
             .collect()
     }
 
+    /// The session's persisted execution state: the root record and every leaf
+    /// body, exactly as a host would store them.
+    pub(crate) fn persisted_state(&self) -> lash_core::plugin::HydratedExecutionState {
+        let state = self.state.as_ref().expect("session state is resident");
+        state
+            .hydrated_execution_state()
+            .expect("capture the RLM execution state")
+    }
+
     /// The size of the session's persisted execution state, in bytes.
     ///
     /// The leak regression is stated over this rather than over heap internals
@@ -252,10 +261,7 @@ impl Session {
     /// nothing, and a bounded heap that writes an unbounded snapshot costs it
     /// everything. This is the number that gets stored per turn.
     pub(crate) fn persisted_bytes(&self) -> usize {
-        let state = self.state.as_ref().expect("session state is resident");
-        let hydrated = state
-            .hydrated_execution_state()
-            .expect("capture the RLM execution state");
+        let hydrated = self.persisted_state();
         hydrated.root.len() + hydrated.components.values().map(Vec::len).sum::<usize>()
     }
 }

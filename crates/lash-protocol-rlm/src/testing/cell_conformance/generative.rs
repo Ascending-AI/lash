@@ -17,9 +17,10 @@ use super::drive;
 use super::harness::{Dialect, HarnessMode};
 use super::syntax::{Cell, Literal};
 
-/// Sessions generated per dialect in the resident mode. With ten cells each
-/// this is fifteen thousand cells per dialect, which the executor runs well inside
-/// the suite's budget.
+/// Sessions generated per dialect in the resident mode. Each session is eleven
+/// cells — ten generated plus the terminal finish — so this is sixteen and a
+/// half thousand cells per dialect, which the executor runs well inside the
+/// suite's budget.
 const RESIDENT_SESSIONS: u64 = 1_500;
 /// Sessions generated per dialect in the restart-between-every-cell mode. Each
 /// cell there costs a full capture and restore, so the count is smaller and the
