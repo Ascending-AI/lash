@@ -617,10 +617,12 @@ must_cover = ["VmContinuation"]
 # boundary, which is why the heap files are guarded under both fences rather
 # than under whichever one happens to hold the enum.
 #
-# The heap guard is a whole-directory sweep, not a file list: `heap/*.rs` is
-# where the wire-visible leaves live (`ErrorKind`, `HeapId`), and a Serde
-# carrier added to a sibling heap module later is picked up without anyone
-# remembering to extend this entry.
+# The heap guard is a whole-module sweep, not a file list: the parent `heap.rs`
+# and `heap/*.rs` together are where the wire-visible leaves live (`ErrorKind`,
+# `HeapId`), and a Serde carrier added to any of them later is picked up without
+# anyone remembering to extend this entry. The parent module is named
+# explicitly because the glob does not reach it, and it already holds the heap's
+# own wire types.
 #
 # Stated boundary rather than claimed coverage: `ImageValue` is persisted
 # through a hand-written `impl Serialize`/`impl Deserialize` pair that no
@@ -638,11 +640,17 @@ constant = "LASHLANG_SNAPSHOT_VERSION"
 constant_path = "crates/lashlang/src/runtime/state.rs"
 description = "canonical MessagePack Lashlang snapshot: globals, heap, and value leaves"
 
-# Every Serde carrier in state.rs belongs to the canonical snapshot family, so
-# the file is swept whole and fails closed on a carrier added later.
+# Every Serde carrier in the state module belongs to the canonical snapshot
+# family, so state.rs and its submodules are swept whole and fail closed on a
+# carrier added later -- including one relocated out of state.rs into
+# state/wire.rs or state/canonical_wire.rs, which today hold only encoder
+# functions and would otherwise leave the fence silently.
 [[surface.guard]]
 kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/runtime/state.rs"]
+paths = [
+  "crates/lashlang/src/runtime/state.rs",
+  "crates/lashlang/src/runtime/state/*.rs",
+]
 must_cover = [
   "CanonicalSnapshot",
   "CanonicalHeap",
@@ -652,7 +660,10 @@ must_cover = [
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/runtime/heap/*.rs"]
+paths = [
+  "crates/lashlang/src/runtime/heap.rs",
+  "crates/lashlang/src/runtime/heap/*.rs",
+]
 must_cover = ["ErrorKind", "HeapId"]
 
 [[surface.guard]]
@@ -696,7 +707,10 @@ symbols = ["Span"]
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
-paths = ["crates/lashlang/src/runtime/heap/*.rs"]
+paths = [
+  "crates/lashlang/src/runtime/heap.rs",
+  "crates/lashlang/src/runtime/heap/*.rs",
+]
 must_cover = ["ErrorKind", "HeapId"]
 
 [[surface.guard]]
