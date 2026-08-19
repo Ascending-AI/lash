@@ -41,6 +41,7 @@ pub use load::{
     refresh_persisted_session_state,
 };
 pub use preflight::{
+    DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreBackend, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
     StoreSchemaVerdict,
 };

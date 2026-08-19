@@ -37,9 +37,11 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use lash_core::{
-    StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase, StoreSchemaStatus,
-    StoreSchemaVerdict,
+    DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase,
+    StoreSchemaStatus, StoreSchemaVerdict,
 };
+
+mod walk;
 
 use crate::conn::SqliteConnection;
 use crate::schema::{
@@ -239,6 +241,12 @@ impl StorePreflight for SqliteStorePreflight {
             databases.push(verify_schema_at(path, database).await);
         }
         Ok(StoreSchemaStatus { databases })
+    }
+
+    /// Walk one page of one durable surface. See [`walk`] for the read-only
+    /// discipline, the keyset cursors, and why nothing there decodes a payload.
+    async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {
+        walk::scan_durable(self, scan).await
     }
 }
 

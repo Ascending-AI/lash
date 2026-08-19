@@ -203,8 +203,129 @@ let StoreBackend::Postgres { location } = preflight.backend() else {
 preflight.close().await;</code></pre>
       <aside class="gotcha">
         <strong>A clean schema is not a clean resume</strong>
-        <p>These two surfaces answer different questions and a host generally wants both. The schema status says whether the store will open. The format manifest says what this build can decode once it is open. A store at the expected schema version can still hold parked work written by a build with a different continuation or snapshot version, and that refusal arrives later, on resume, not at startup.</p>
+        <p>These two surfaces answer different questions and a host generally wants both. The schema status says whether the store will open. The format manifest says what this build can decode once it is open. A store at the expected schema version can still hold parked work written by a build with a different continuation or snapshot version, and without a third surface that refusal arrives later, on resume, rather than at startup. The readability probe below is that third surface: it moves the answer forward to where a host can still act on it.</p>
       </aside>
+
+      <h3>Reading whether stored data will open</h3>
+      <p>The probe is one read-only walk over the store answering, per durable format, whether what is stored will open under this build. It reports an expected version, the versions actually found with a count each, and an undecodable bucket for items nobody could read far enough to judge. It never opens the store, never writes, and never disposes of anything: deciding what to delete is an operator's call and lash's collection story is separate.</p>
+      <p>At startup a host wants one decision, not a report. Summary mode gives it: the schema stamps plus the process-registry surfaces, bounded by parked processes and pending wakes rather than by session count, so it is cheap enough to run on every boot. A refusal comes back as a single sentence naming the format, the versions, the number of affected items and the remedy: the sentence a supervisor logs instead of restarting into the same failure forever.</p>
+      <pre data-lang="rust" data-snippet="fig1556_probe#boot-gate"><code>let report = probe_store(handle, PreflightOptions::summary())
+    .await
+    .map_err(|error| format!("could not read the store: {error}"))?;
+if let Some(refusal) = report.refusal_message() {
+    // One line, then exit. Everything an operator needs to act is in it.
+    return Err(refusal);
+}
+let ready = format!(
+    "store preflight: {} ({} mode)",
+    report.outcome.name(),
+    report.mode.name()
+);</code></pre>
+      <p>Before a version bump the question is different, and so is the budget. Deep mode adds the per-session checkpoint walk that summary mode skips, reading each session's root blob to reach the checkpoint manifest and the component encodings behind it. The page size is a round-trip knob rather than a cap: the walk pages every surface to exhaustion, so a smaller page changes what the audit costs and never what it covers.</p>
+      <pre data-lang="rust" data-snippet="fig1556_probe#deep-probe"><code>let options = PreflightOptions::deep().with_page_size(DEFAULT_PAGE_SIZE);
+eprintln!("store audit: {}", options_note(&amp;options));
+let report = probe_store(handle, options).await?;</code></pre>
+      <p>One row per enumerated format comes back in manifest order, including the formats with nothing stored, because a row that vanished when a store held none of it would be indistinguishable from one nobody checked. That distinction is carried explicitly: <em>empty</em> means somebody walked the surface and found nothing, <em>not scanned</em> means nobody walked it, and only the first of those means a drain is unnecessary. Rows also say what their answer rests on: a version read from stored bytes, a version carried by the envelope that embeds this format, or nothing at all for a format that is never persisted.</p>
+      <pre data-lang="rust" data-snippet="fig1556_probe#component-rows"><code>let mut lines = Vec::new();
+for component in &amp;report.components {
+    let mut line = format!(
+        "{}: {} (expected {}, {} probe, {})",
+        component.format,
+        component.verdict.name(),
+        component.expected,
+        component.probe,
+        evidence_label(component.evidence)
+    );
+    write!(line, " scanned={}", component.scanned).expect("a String write cannot fail");
+    for FoundVersion { version, count } in &amp;component.found {
+        write!(line, " found {version} x{count}").expect("a String write cannot fail");
+    }
+    if component.undecodable &gt; 0 {
+        write!(line, " undecodable={}", component.undecodable)
+            .expect("a String write cannot fail");
+    }
+    if component.refused_without_version &gt; 0 {
+        write!(
+            line,
+            " identity-refused={}",
+            component.refused_without_version
+        )
+        .expect("a String write cannot fail");
+    }
+    lines.push(line);
+}</code></pre>
+      <p>The counts say a bump is blocked; they do not say whose work blocks it. The same walk keeps the process and session ids as it goes, so "drain first" arrives as a list an operator can work through rather than an instruction they have to trust. Each entry names the process, its session, the status it is parked in, the format that refuses and both versions.</p>
+      <pre data-lang="rust" data-snippet="fig1556_probe#drain-list"><code>let mut worklist = Vec::new();
+for DrainBlocker {
+    process_id,
+    session_id,
+    status,
+    format,
+    expected,
+    found,
+    detail,
+} in &amp;report.drain
+{
+    let owner = match (process_id, session_id) {
+        (Some(process), Some(session)) =&gt; format!("process {process} (session {session})"),
+        (Some(process), None) =&gt; format!("process {process}"),
+        (None, Some(session)) =&gt; format!("session {session}"),
+        (None, None) =&gt; "an unattributed item".to_string(),
+    };
+    // Bytecode is the one format with no found version to print: its stored
+    // identity says which build wrote it, never which generation, so a
+    // mismatch is reportable and a distance is not.
+    let found = found
+        .as_ref()
+        .map(|version| version.to_string())
+        .unwrap_or_else(|| "a build-specific identity".to_string());
+    worklist.push(format!(
+        "{owner} [{}] holds {format} {found}, expected {expected}: {detail}",
+        status.as_deref().unwrap_or("unknown status")
+    ));
+}</code></pre>
+      <p>Every report names what it did not read. Summary mode's skipped session walk appears here, so does any surface the deployment could not reach, and so do the two enumerated formats no bounded walk enumerates. A report that quietly omitted its own blind spots would read as a complete account of the boundary while being a partial one, which is the failure a preflight exists to prevent.</p>
+      <pre data-lang="rust" data-snippet="fig1556_probe#not-scanned"><code>report
+    .not_scanned
+    .iter()
+    .map(|NotScanned { what, reason }| format!("{what}: {reason}"))
+    .collect()</code></pre>
+      <p>Backends supply the walk and nothing more: they return each item's logical bytes, its owner ids and a cursor, and lash owns every version comparison, so two backends cannot drift into disagreeing about the same boundary. Paging is keyset rather than offset (a cursor names the last item read), so concurrent writes cannot make a page skip or repeat rows. A surface a deployment cannot read reports itself as unscanned with a reason rather than as an empty page, because an empty page is an answer and "I could not look" is not.</p>
+      <pre data-lang="rust" data-snippet="fig1556_probe#scan-surface"><code>if let Some(reason) = self.unreadable.get(&amp;scan.surface) {
+    return Ok(DurableScanPage {
+        items: Vec::new(),
+        next: None,
+        coverage: ScanCoverage::NotScanned {
+            reason: reason.clone(),
+        },
+    });
+}
+let all = self
+    .surfaces
+    .get(&amp;scan.surface)
+    .cloned()
+    .unwrap_or_default();
+// Keyset paging, not offset paging: a cursor names the last item read,
+// so concurrent writes cannot make a page skip or repeat rows.
+let start = match &amp;scan.after {
+    None =&gt; 0,
+    Some(cursor) =&gt; all
+        .iter()
+        .position(|item| &amp;item.cursor == cursor)
+        .map(|index| index + 1)
+        .unwrap_or(all.len()),
+};
+let items: Vec&lt;DurableItem&gt; = all.iter().skip(start).take(scan.limit).cloned().collect();
+let next = if start + items.len() &gt;= all.len() {
+    None
+} else {
+    items.last().map(|item| item.cursor.clone())
+};
+Ok(DurableScanPage {
+    items,
+    next,
+    coverage: ScanCoverage::Scanned,
+})</code></pre>
     </div>
 
     <div class="section" id="version-bumps">

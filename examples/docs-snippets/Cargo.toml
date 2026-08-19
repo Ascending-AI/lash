@@ -28,6 +28,7 @@ lash-sqlite-store = { workspace = true }
 lash-subagents = { workspace = true }
 lash-typescript = { workspace = true }
 lashlang = { workspace = true }
+rmp-serde = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

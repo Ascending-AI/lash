@@ -15,7 +15,10 @@
 //! calls a `PostgresStorage` constructor. The only statements this module's own
 //! code path reaches are the shared advisory-lock acquisition and the
 //! `pg_catalog` reads inside `verify_schema_for`'s `REPEATABLE READ`
-//! transaction: no DDL, no version stamp, no seed row, no write.
+//! transaction: no DDL, no version stamp, no seed row, no write. The durable
+//! walk in [`walk`] adds only plain `SELECT`s over lash's own tables, two of
+//! them inside an explicitly `READ ONLY` transaction — see that module for why
+//! the promise is made engine-enforced rather than merely intended.
 //!
 //! **Credentials never leave.** A preflight report is operator-facing output
 //! that lands in logs and tickets, so the location this handle reports is
@@ -26,12 +29,14 @@
 
 use async_trait::async_trait;
 use lash_core::{
-    StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase, StoreSchemaStatus,
-    StoreSchemaVerdict,
+    DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase,
+    StoreSchemaStatus, StoreSchemaVerdict,
 };
 use sqlx::postgres::{PgPool, PgPoolOptions};
 
 use crate::PostgresStorage;
+
+mod walk;
 
 /// The operator-facing name of the single schema-carrying database a PostgreSQL
 /// deployment holds.
@@ -197,6 +202,17 @@ impl StorePreflight for PostgresStorePreflight {
                 verdict,
             }],
         })
+    }
+
+    /// Walk one page of one durable surface over this handle's pool.
+    ///
+    /// The pool is the one this handle was built from and nothing else is
+    /// constructed to serve the walk — building a `PostgresStorage` to read its
+    /// tables would perform the open the whole surface exists to precede. The
+    /// enumeration itself, and every argument for why each statement is shaped
+    /// the way it is, lives in [`walk`].
+    async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {
+        walk::scan_durable(&self.pool, scan).await
     }
 }
 

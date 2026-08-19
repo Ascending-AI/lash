@@ -99,7 +99,16 @@ fn decode_lashlang_segment_state(
     })
 }
 
-fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
+/// The durable program identity a Lashlang process resumes against.
+///
+/// Public because a readability preflight has no other way to ask the bytecode
+/// question. The identity is a hash whose preimage includes
+/// [`lashlang::BYTECODE_FORMAT_VERSION`], so nothing stored says "this was
+/// compiled by version N": the only check available is to recompute the
+/// identity this build would mint for the same inputs and compare it against
+/// the one the process recorded. That is why the format manifest classifies
+/// bytecode as identity-only rather than comparable.
+pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
     let identity = serde_json::to_vec(&(
         "lashlang-bytecode",
         lashlang::BYTECODE_FORMAT_VERSION,

@@ -55,7 +55,12 @@ depends on that. Treat any judgment that needs the old table shapes as out of sc
 4. **Docs claims are assertions.** Each documented statement about bumping is scored
    against a companion artifact. A claim with no evidence behind it is a finding against
    the docs, not a pass by default.
-5. **No rollback leg exists, and none may be invented.** Do not restore, downgrade, or
+5. **A probe that refuses everything proves nothing.** The readability probe is judged in
+   both directions or not at all: it must report *ready* on the store this build just wrote
+   and on the store the recreation produced, and *refused* on each of the three fixtures.
+   A run that only checked the refusals has evidence for a broken probe and a correct one
+   alike.
+6. **No rollback leg exists, and none may be invented.** Do not restore, downgrade, or
    re-stamp a version to make a previous binary open a recreated store. Attempting one is
    outside the scenario and voids the run.
 
@@ -79,13 +84,24 @@ Run the deterministic companion. Require all of these before judging later phase
 - `00-postgres.json` reports that assigned port; and
 - `01-seed.jsonl` carries `seeded_older_deployment` with two session ids, one live process
   id, one reserved trigger delivery, `committed_sessions` equal to the session count, a
-  pending wake sequence, and a `recorded_version` exactly one below `expected_version`.
+  pending wake sequence, and a `recorded_version` exactly one below `expected_version`; and
+- that same checkpoint carries `probe_before_rewind` and `probe_after_rewind`, two deep
+  readability probes over the same durable bytes with only the schema stamp moved between
+  them.
 
 **Fail if:** PostgreSQL is exposed on a host port other than the assigned derived or
 explicitly overridden port, a seeded session shows no
 committed content (`committed_sessions` below the session count, or `committed_nodes` at
 zero), the seeded process is already terminal, or the script leaves its compose project
 running after exit.
+
+**Also fail if** `probe_before_rewind` is anything but `ready` with an empty `drain` list
+(the probe refusing a store this build wrote minutes earlier is a defect in the probe, not
+a finding about the store), or if `probe_after_rewind` reports drain blockers. Moving the
+schema stamp alone must flip the outcome to `refused` and leave the drain list empty: the
+deployment cannot open, and it holds nothing that could not be carried across. A run where
+both changed has lost the ability to tell those two conditions apart, which is the whole
+purpose of the drain list.
 
 ## Phase 1 — Both refusal directions
 
@@ -102,9 +118,17 @@ expected. The newer-store refusal carries the same kind, names a version one abo
 expected as found, and reports the same expected value, which is the current binary
 standing in for the previous image meeting a recreated store.
 
+Each checkpoint also carries a `probe` report, taken in summary mode (the shape a host runs
+at boot) against the same fixture the open then refused. Each must report `refused`,
+must name the same found and expected versions the refusal names, and must list the
+per-session walk it skipped under `not_scanned` with the checkpoint-manifest row reading
+`not_scanned` rather than `empty`.
+
 **Judgment — FAIL if:** any attempt succeeded, a refusal omits the found or expected
-version, a refusal's `refusal_kind` is not the one its direction exists to prove (a
-non-empty refusal of the wrong kind is not evidence for that direction), the refusals
+version, a probe passed a store the open then refused or disagreed with the refusal about
+either version, a summary-mode probe reported a surface it never walked as empty, a
+refusal's `refusal_kind` is not the one its direction exists to prove (a non-empty refusal
+of the wrong kind is not evidence for that direction), the refusals
 disagree about the expected version, or the newer-store direction is missing (the run then
 proves reject-and-recreate but not forward-only).
 
@@ -121,7 +145,13 @@ committed graph nodes; the recreation dropped every lash-owned table; the recrea
 records exactly the version the refusals named as expected; `surviving_seeded_rows` and
 `surviving_seeded_graph_nodes` are both `0`.
 
-**Judgment — FAIL if:** the recreated store records any other version, a seeded session,
+The checkpoint also carries a deep `probe` of the recreated store, which must report
+`ready` with a matching schema and an empty drain list. This is the control for Phase 1: a
+probe that refused every fixture and this store too would have satisfied every refusal
+assertion while being useless as a deploy gate.
+
+**Judgment — FAIL if:** the probe of the recreated store is anything but ready with an
+empty drain list, the recreated store records any other version, a seeded session,
 process, or committed node survives, or the bump needed a step the docs do not describe (an
 explicit migration, a manual `lash_schema_versions` edit, or a table-level fixup).
 
@@ -159,6 +189,7 @@ capture `05-bump-policy.png` with the forward-only contract and the checklist vi
 | Recreation destroys the deployment's durable state | `03-recreation.jsonl` survival counts |
 | Verification covers sessions, processes, and triggers before ingress reopens | `04-health.jsonl` |
 | The page states no backup or restore ships with lash | rendered page; absence of any restore step in this runbook |
+| A read-only probe answers the readability question before the store is opened, and names what it did not read | `01-seed.jsonl`, `02-refusal.jsonl` probe reports |
 
 Also confirm `docs/PUBLISHING.md` requires a `Breaking:` release note that names
 recreation, states forward-only with no rollback, and points at the checklist. A page that
@@ -187,6 +218,8 @@ and volume no longer exist.
 | Recreation bump | every lash table dropped; fresh open records the expected version | | `03-recreation.jsonl` |
 | Destroyed state | zero surviving seeded rows or committed nodes | | `03-recreation.jsonl` |
 | Post-bump health | turns committed, wake delivered and terminal, one reserved trigger delivery finished | | `04-health.jsonl` |
+| Readability probe | ready on both clean stores, refused on all three fixtures, versions agreeing with each refusal | | `01-seed.jsonl`, `02-refusal.jsonl`, `03-recreation.jsonl` |
+| Drain preflight | schema-only divergence produced no drain blockers | | `01-seed.jsonl` probe pair |
 | Docs agreement | every scored claim matched an artifact | | `05-docs-claims.txt`, `05-bump-policy.png` |
 | Teardown | panic gate clean; no owned containers or volumes remain | | `version-bump-recreation-e2e.log`, container inventory |
 

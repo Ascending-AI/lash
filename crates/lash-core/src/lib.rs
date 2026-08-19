@@ -1032,8 +1032,9 @@ pub use session_model::{NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentManifestEntry, AttachmentWriteFence, BlobRef, GcReport, LeaseClaimNonce,
-    LeaseOwnerIdentity, OrphanedTurnInputScope, QueuedWorkStore, RuntimePersistence,
+    AttachmentManifestEntry, AttachmentWriteFence, BlobRef, DurableItem, DurablePayload,
+    DurableScan, DurableScanPage, DurableSurface, GcReport, LeaseClaimNonce, LeaseOwnerIdentity,
+    OrphanedTurnInputScope, QueuedWorkStore, RuntimePersistence, ScanCoverage,
     SelectedQueuedWorkClaimOutcome, SessionAdmission, SessionBinding, SessionCommitStore,
     SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
