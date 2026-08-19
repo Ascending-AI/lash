@@ -166,6 +166,8 @@ process journals live until host-scheduled terminal-process retention prunes
 the process. SQLite effect schema 6 and PostgreSQL store schema 28 are
 reject-and-recreate cutovers with no compatibility path.
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 Restate keeps its native invocation journal and native retention. Its effect
 host creates and deletes no SQL replay rows, so lifecycle retirement is a
 no-op there. `StoreMaintenance` remains maintenance for the domain session

@@ -100,6 +100,7 @@ mod graph;
 mod lifecycle;
 mod pending_turn_inputs;
 mod persistence;
+mod preflight;
 mod process_registry;
 mod process_registry_change;
 mod process_registry_completion;
@@ -110,10 +111,18 @@ mod session_meta;
 pub mod testing;
 mod triggers;
 
+/// File name of the one durable-core database under a session-store root.
+///
+/// Named once so the factory that creates it and the preflight that reads it
+/// cannot drift onto different files.
+pub(crate) const DURABLE_CORE_DB_FILE: &str = "durable-core.db";
+
 use conn::TxOutcome;
 pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
+pub use preflight::{SqliteDatabase, SqliteStorePreflight, verify_schema_at};
+
 use forks::*;
 use pending_turn_inputs::*;
 use queued_work::*;
@@ -628,7 +637,7 @@ impl SqliteSessionStoreFactory {
     /// Path to the one durable-core database shared by every session created
     /// through this factory.
     pub fn catalog_path(&self) -> PathBuf {
-        self.root.join("durable-core.db")
+        self.root.join(DURABLE_CORE_DB_FILE)
     }
 }
 
@@ -927,7 +936,7 @@ fn warn_process_registry_not_wired() {
 }
 
 async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<(), String> {
-    let path = root.join("durable-core.db");
+    let path = root.join(DURABLE_CORE_DB_FILE);
     if !path.exists() {
         return Ok(());
     }

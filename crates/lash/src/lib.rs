@@ -13,6 +13,7 @@
 pub mod admin;
 mod core;
 mod error;
+pub mod formats;
 mod plugin_binding;
 pub(crate) mod process_admin;
 mod prompt_layer;
@@ -270,8 +271,9 @@ pub mod persistence {
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
         SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionGraph,
         SessionHistoryRecord, SessionMeta, SessionNodeRecord, SessionReadView, SessionRelation,
-        StoreError, StoreMaintenance, TurnId, TurnInputStore, VacuumReport, WorkClaim,
-        WorkCompletion,
+        StoreBackend, StoreError, StoreMaintenance, StorePreflight, StoreSchemaDatabase,
+        StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId, TurnInputStore,
+        VacuumReport, WorkClaim, WorkCompletion,
     };
     /// Committed session history flattened into presentation order, as returned
     /// by [`SessionReadView::chronological_projection`].

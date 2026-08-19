@@ -91,6 +91,8 @@ the allocation counter, live logical bytes, and size-schedule version raises it
 again from v2 to v3. Deployments must drain or recreate parked Lashlang
 processes before the cutover; older continuations are not migrated or decoded.
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 ## Consequences
 
 - Hosts cannot accidentally confuse tool latency, instruction work, and logical

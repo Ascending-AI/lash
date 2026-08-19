@@ -80,10 +80,11 @@ pub(crate) use vm::SlotState;
 pub use vm::{
     ContinuationError, TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,
     TYPESCRIPT_REGEXP_MAX_NESTING, TYPESCRIPT_REGEXP_MAX_PATTERN_CODE_UNITS,
-    TypeScriptRegExpValidationError, Vm, VmContinuation, VmFinallyCompletionContinuation,
-    VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
-    VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
-    validate_typescript_regexp, validate_typescript_regexp_shape,
+    TypeScriptRegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
+    VmProfileContinuation, VmRunOutcome, validate_typescript_regexp,
+    validate_typescript_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

@@ -977,7 +977,8 @@ pub(crate) use session::Session;
 pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};
 pub(crate) use session_graph::SessionMessageTreeNode;
 pub use session_graph::{
-    PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionNodePayload, SessionNodeRecord,
+    PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
+    SessionNodePayload, SessionNodeRecord,
 };
 pub(crate) use session_model::RuntimeSessionPolicy;
 
@@ -991,7 +992,8 @@ pub use store::{
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
     SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
-    StoreError, StoreMaintenance, TurnInputStore, VacuumReport,
+    StoreBackend, StoreError, StoreMaintenance, StorePreflight, StoreSchemaDatabase,
+    StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnInputStore, VacuumReport,
 };
 pub use store::{
     CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, HydratedCheckpointComponent,

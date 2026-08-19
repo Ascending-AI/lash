@@ -219,6 +219,8 @@ facade reconstructs and settles the retained plan after a host scope is rebound;
 `ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind` proves
 that the default `Cancel` policy survives that boundary and is redrive-safe.
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 `shell.start` and its detached form map explicitly to `Abandon`: their
 owner-bound commands intentionally continue across turns, so the generic
 default `Cancel` would contradict the tool lifecycle. Their leaf result prints

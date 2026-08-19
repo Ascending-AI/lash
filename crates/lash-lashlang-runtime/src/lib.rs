@@ -957,8 +957,8 @@ pub use deferred::{
     resolve_and_fold_deferred,
 };
 pub use process::{
-    lashlang_process_event_types, lashlang_process_signal_event_types, lashlang_type_expr_schema,
-    trace_lashlang_main_map,
+    LASHLANG_SEGMENT_STATE_VERSION, lashlang_process_event_types,
+    lashlang_process_signal_event_types, lashlang_type_expr_schema, trace_lashlang_main_map,
 };
 pub use typed_output::parse_output_schema;
 

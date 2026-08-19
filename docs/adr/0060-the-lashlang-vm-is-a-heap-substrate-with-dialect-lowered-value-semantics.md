@@ -139,6 +139,8 @@ ADR 0055's clean-cutover rule applies unchanged: deployments drain or recreate
 parked Lashlang processes, older bytes are neither migrated nor decoded, and no
 compatibility decoder exists at any of these version boundaries.
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 ## Consequences
 
 - One VM, one durable format family, one determinism story, and one metering

@@ -38,6 +38,7 @@ mod fig1294_ingress;
 mod fig1313_drain_policy;
 #[cfg(test)]
 mod fig1348_selected_drain;
+mod fig1556_preflight;
 mod index;
 mod operations;
 mod persistence;

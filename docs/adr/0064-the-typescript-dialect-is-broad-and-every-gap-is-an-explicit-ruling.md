@@ -120,10 +120,14 @@ host memory pressure; it is treated as a P0 wherever found.
 
 ## Consequences
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 - Durable formats moved once, as one coordinated clean cutover. The versions
-  in tree at this revision are bytecode 9, VM continuation 7, snapshot 6, VM
-  ABI `lashlang-vm-abi-v6`, RLM snapshot envelope 12, and Lashlang segment
-  handover 3. Older parked state does not resume across the boundary;
+  in tree when this was ratified were bytecode 9, VM continuation 7,
+  snapshot 6, VM ABI `lashlang-vm-abi-v6`, RLM snapshot envelope 12, and
+  Lashlang segment handover 3. Several have moved since, which is what the
+  note above means: read the current values from `lash::formats`, never from
+  here. Older parked state does not resume across the boundary;
   deployments drain first. Per ADR 0055 there is no migration decoder.
 - The accepted surface is now large enough that its integrity depends on the
   census and the register, not on reviewers' memory. A change that widens or

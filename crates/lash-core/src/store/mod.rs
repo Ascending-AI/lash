@@ -10,6 +10,7 @@ mod fork_plan;
 mod graph_commit;
 mod lease_timings;
 mod load;
+mod preflight;
 pub mod queued_work;
 mod realization;
 mod runtime_commit;
@@ -38,6 +39,10 @@ pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{
     LoadedPersistedSession, load_persisted_session, load_persisted_session_state,
     refresh_persisted_session_state,
+};
+pub use preflight::{
+    StoreBackend, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
+    StoreSchemaVerdict,
 };
 pub use queued_work::{
     PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,

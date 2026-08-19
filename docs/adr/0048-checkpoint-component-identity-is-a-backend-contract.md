@@ -30,6 +30,8 @@ boundary for the incompatible old envelope. Cross-backend conformance covers
 body-to-ref minting, clean ref-only commits, cold hydration, and rejection of
 unknown refs.
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 This does not turn checkpoints into an event log. Each boundary still replaces
 the complete resumable-state snapshot, while component refs let an unchanged
 body be reused without recapturing or rewriting it. Backend storage mechanics

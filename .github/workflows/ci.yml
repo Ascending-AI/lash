@@ -220,6 +220,9 @@ jobs:
       - name: Lint docs
         run: python3 scripts/lint_docs.py
 
+      - name: Check documented format versions
+        run: python3 scripts/check_format_versions.py
+
       - name: Lint orchestrating tools
         run: python3 scripts/lint_orchestrating_tools.py
 
@@ -234,6 +237,7 @@ jobs:
           python3 scripts/test_check_api_example_coverage.py
           python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_durable_read_fixture_version.py
+          python3 scripts/test_check_format_versions.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_version_bumps.py

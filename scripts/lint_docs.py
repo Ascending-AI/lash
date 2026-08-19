@@ -456,6 +456,23 @@ def check_release_version_pins(errors: list[str]) -> None:
         )
 
 
+FORMAT_VERSION_SPAN = re.compile(
+    r"<span\s+data-format-version=\"[A-Za-z0-9_]+\"\s*>(.*?)</span>", re.DOTALL
+)
+
+
+def unwrap_format_version_spans(text: str) -> str:
+    """Read a page as if its version claims were bare numbers.
+
+    ``scripts/check_format_versions.py`` requires every current version claim on
+    a live page to be wrapped in ``<span data-format-version="...">`` so that it
+    can be compared against the source tree. The claim patterns below predate
+    that wrapper and describe the prose around the number, so they are run over
+    an unwrapped copy rather than each being taught the markup.
+    """
+    return FORMAT_VERSION_SPAN.sub(lambda match: match.group(1), text)
+
+
 def check_schema_version_claims(errors: list[str]) -> None:
     """Keep current-schema docs pinned to the Rust constants hosts enforce."""
     for label, source, constant, claims in SCHEMA_VERSION_CLAIMS:
@@ -473,7 +490,7 @@ def check_schema_version_claims(errors: list[str]) -> None:
         expected = int(constant_matches[0])
 
         for doc, pattern in claims:
-            doc_text = doc.read_text(encoding="utf-8")
+            doc_text = unwrap_format_version_spans(doc.read_text(encoding="utf-8"))
             stated = re.findall(pattern, doc_text)
             doc_rel = doc.relative_to(ROOT).as_posix()
             if len(stated) != 1:
@@ -505,7 +522,7 @@ def check_remote_protocol_version(errors: list[str]) -> None:
         return
     documented = re.findall(
         r"REMOTE_PROTOCOL_VERSION\s*==\s*(\d+)",
-        doc.read_text(encoding="utf-8"),
+        unwrap_format_version_spans(doc.read_text(encoding="utf-8")),
     )
     if len(documented) != 1:
         errors.append(

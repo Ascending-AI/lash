@@ -16,10 +16,16 @@ pub use types::{
 
 use super::exceptions::PendingErrorOrigin;
 
-// v8 carries the substrate-minted `EffectError`/`RuntimeError` error brands. A
-// heap error's `error_kind` serializes by name here too, so a v7 reader fails
-// to decode the new names instead of reporting a version boundary.
-pub(crate) const VM_CONTINUATION_FORMAT_VERSION: u32 = 8;
+/// Version of the durable VM-continuation envelope a parked Lashlang segment
+/// carries.
+///
+/// v8 carries the substrate-minted `EffectError`/`RuntimeError` error brands. A
+/// heap error's `error_kind` serializes by name here too, so a v7 reader fails
+/// to decode the new names instead of reporting a version boundary.
+///
+/// Re-exported by the facade's `formats` manifest so a host can read it before
+/// wiring a store.
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum VmRunOutcome {
