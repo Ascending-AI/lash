@@ -60,7 +60,22 @@ impl TurnAttach for RestateTurnAttach {
                 } else {
                     lash_core::RuntimeErrorCode::RestateTurnTerminalAttach
                 };
-                RuntimeError::new(code, err.to_string())
+                // A shared handler: a deployment that never bound the
+                // durable-wait workflow fails every attach this way, and so
+                // does a promise whose invocation the engine no longer holds.
+                // Name both rather than leaving an operator to read a bare
+                // status out of a transport error — or to be sent after a
+                // deployment that is fine.
+                let message = if err.is_service_unregistered() {
+                    crate::ingress::unresolvable_call_target_message(
+                        "LashDurableWaitWorkflow",
+                        "await_resolution",
+                        &err,
+                    )
+                } else {
+                    err.to_string()
+                };
+                RuntimeError::new(code, message)
             })?;
         match resolution {
             Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {

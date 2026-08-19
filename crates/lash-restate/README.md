@@ -100,6 +100,13 @@ fn endpoint(
 }
 ```
 
+A missing binding is itself a deterministic contract failure, so it is treated
+as one: Restate answers an invocation of a service no deployment binds with
+`404`, and the adapter classifies that (`RestateHttpError::is_service_unregistered`)
+and raises the engine's own `404`-class terminal naming the address nothing
+binds. A retryable 404 would turn a forgotten `bind` into an invocation backing
+off forever with no operator told what is wrong.
+
 The wait workflow owns Restate promises and durable deadline timers for every
 Lash execution scope. The virtual-object index serializes wait registration,
 session-wide cancellation, and permanent revocation during session deletion.

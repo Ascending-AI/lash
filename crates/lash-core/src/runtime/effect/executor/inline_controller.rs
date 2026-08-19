@@ -539,10 +539,15 @@ impl InlineEffectGroups {
                 executors.executor_for(child).ok_or_else(|| {
                     group_shape_error(format!(
                         "child {position} of durable effect group {} names a command \
-                         this host has no runner for, so the group is refused before \
+                         this host has no runner for{}, so the group is refused before \
                          it is recorded: a group whose child can never settle holds a \
                          rank no settlement can take",
-                        group.group_key()
+                        group.group_key(),
+                        child
+                            .invocation
+                            .replay_key()
+                            .map(|key| format!(" (replay key {key})"))
+                            .unwrap_or_default(),
                     ))
                 })
             })

@@ -64,6 +64,8 @@ where
     let prefix = format!("group-conformance-{}", uuid::Uuid::new_v4().simple());
     an_unregistered_host_reports_no_groups_and_refuses_all_three(&unwired, &prefix).await;
     a_refused_open_journals_nothing(&unwired, &make, &prefix).await;
+    a_child_with_no_runner_refuses_the_open_and_refuses_the_retry(&make, &prefix).await;
+    a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal(&make, &prefix).await;
     the_capability_flag_and_the_group_surface_agree(&make, &prefix).await;
     duplicate_replay_keys_are_refused_before_a_host_sees_them(&make, &prefix).await;
     the_first_settlement_wakes_the_caller_while_the_loser_still_runs(&make, &prefix).await;
@@ -274,6 +276,163 @@ async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
          no child row for a counter to have moved past"
     );
     close(&scoped, handle, RUN).await.expect("the group closes");
+}
+
+/// A child this host has no runner for refuses the whole open — and refuses the
+/// **retry** the same way, because the refusal journals nothing at all.
+///
+/// The first half is the routing rule ADR 0065 states: a child with no runner is
+/// a routing fact, not an outcome, so the open is refused with the shape code
+/// naming the child rather than opened around a rank no settlement can take.
+///
+/// The second half is the one that is easy to lose and is the whole point of
+/// asking twice. A host that recorded the group row and *then* refused would
+/// answer the operator's retry as a **reopen** — and a reopen passes a routing
+/// miss through by design, so the second attempt would succeed, dispatch only
+/// the children it can route, and park its caller forever on a rank nothing will
+/// allocate. That is a strand one attempt after a refusal: strictly worse than
+/// the refusal it replaced, and exactly the warn-and-strand shape this contract
+/// rules out. Two identical refusals are what "the refusal journals nothing"
+/// means from outside.
+///
+/// The third act proves the key really is untouched: once every child has a
+/// runner the same key opens as a *first* open, with rank 1 still unallocated.
+async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let scoped = host
+        .scoped(scope(prefix, "no-runner"))
+        .expect("a scope binds");
+    let key = group_key(prefix, "no-runner");
+    let missing = format!("{key}:child:1");
+
+    // The retry is asked through a *second* host and a second scope, which is
+    // what an operator's retry after a failed deployment actually looks like and
+    // what makes this law independent of how many milliseconds the two attempts
+    // are apart. A host that recorded the group on the first attempt sees the
+    // second as a different opener of a group it already holds — a reopen.
+    let retry_host = make();
+    let retry = retry_host
+        .scoped(scope(prefix, "no-runner-retry"))
+        .expect("a scope binds on the retrying host");
+    for (attempt, opener) in [(1, &scoped), (2, &retry)] {
+        // Child 0 routes, child 1 does not. Restaged each time, because a
+        // resolution takes the executor it resolves: the second attempt must ask
+        // the host the same question the first did.
+        let staged_group = partially_staged(
+            group(&key, 2, GroupWakePolicy::First, RUN),
+            vec![Some(settles(0)), None],
+        );
+        let refusal = match opener.controller().open_effect_group(staged_group).await {
+            Err(refusal) => refusal,
+            Ok(_) => panic!(
+                "attempt {attempt}: a group whose child this host cannot run must \
+                 be refused, not opened around a child that can never settle"
+            ),
+        };
+        assert_eq!(
+            refusal.code,
+            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+            "attempt {attempt}: a routing miss on a wired host is a shape \
+             refusal, not the capability code an unwired host answers with"
+        );
+        assert!(
+            refusal.message.contains(&missing),
+            "attempt {attempt}: the refusal must name the child that has no \
+             runner — `some child of this group` is not something an operator \
+             can act on; got: {}",
+            refusal.message
+        );
+    }
+
+    let mut handle = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::First,
+        RUN,
+        vec![settles(0), settles(1)],
+    )
+    .await;
+    let settlement = next(&scoped, &mut handle)
+        .await
+        .expect("the refusals left the key untouched, so it opens cleanly");
+    assert_eq!(
+        settlement.sequence, 1,
+        "rank 1 is still unallocated: neither refusal journaled a group row or a \
+         child row for a counter to have moved past"
+    );
+    close(&scoped, handle, RUN).await.expect("the group closes");
+}
+
+/// A group the journal already holds reopens under a deployment that has lost
+/// one child's runner, and still serves the ranks it holds.
+///
+/// The other side of the law above, and the reason that one has to ask the
+/// journal rather than the insert. Once a group is recorded, a missing runner is
+/// a deployment change, not a malformed group: ADR 0065 makes it the drain's
+/// `NoExecutor` case. Refusing here would deny a resuming caller the settlements
+/// the group already recorded — a replayed frame would fail where the original
+/// succeeded, which is the one thing a durable group may never do.
+async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "lost-runner");
+    let host = make();
+    let scoped = host
+        .scoped(scope(prefix, "lost-runner"))
+        .expect("a scope binds");
+    let (loser, gate) = gated(1);
+    let mut handle = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::First,
+        RUN,
+        vec![settles(0), loser],
+    )
+    .await;
+    let first = next(&scoped, &mut handle)
+        .await
+        .expect("the winner takes rank 1");
+    assert_eq!(first.position, 0);
+
+    // The resuming deployment can route neither child. The group is journaled,
+    // so this is not a group to refuse: it is a queue another host can finish.
+    let resumed_host = make();
+    let resumed = resumed_host
+        .scoped(scope(prefix, "lost-runner"))
+        .expect("a scope binds on the resuming host");
+    let mut reopened = resumed
+        .controller()
+        .open_effect_group(partially_staged(
+            group(&key, 2, GroupWakePolicy::First, RUN),
+            vec![None, None],
+        ))
+        .await
+        .expect(
+            "a journaled group reopens under a deployment that lost a runner; \
+             refusing would make the ranks it already holds unreadable",
+        );
+    let replayed = next(&resumed, &mut reopened)
+        .await
+        .expect("the rank the group already holds is served to the resuming caller");
+    assert_eq!(
+        (replayed.position, replayed.sequence),
+        (first.position, first.sequence),
+        "a replayed frame observes the same child at the same rank"
+    );
+
+    gate.release();
+    close(&resumed, reopened, RUN)
+        .await
+        .expect("the resuming caller closes");
+    close(&scoped, handle, RUN)
+        .await
+        .expect("the first caller's close is idempotent");
 }
 
 /// The capability flag is the admission gate, and the scoped view a host is
@@ -1002,16 +1161,28 @@ impl StagedGroupExecutors {
             executors.len(),
             "a test stages one executor per child"
         );
-        let mut staged = self.staged.lock_recover();
         for (child, executor) in group.children().iter().zip(executors) {
-            let replay_key = child
-                .invocation
-                .replay_key()
-                .expect("a group child carries its replay key")
-                .to_string();
-            staged.insert(replay_key, executor);
+            self.stage_one(child, executor);
         }
         group
+    }
+
+    /// Stages one child's executor.
+    ///
+    /// Split out so a law can stage *some* of a group's children and leave the
+    /// rest unroutable, which is how a routing miss is expressed through this
+    /// seam: an unstaged child is a child this host has no runner for.
+    pub(crate) fn stage_one(
+        &self,
+        child: &RuntimeEffectEnvelope,
+        executor: RuntimeEffectLocalExecutor<'static>,
+    ) {
+        let replay_key = child
+            .invocation
+            .replay_key()
+            .expect("a group child carries its replay key")
+            .to_string();
+        self.staged.lock_recover().insert(replay_key, executor);
     }
 }
 
@@ -1048,6 +1219,30 @@ fn staged(
     executors: Vec<RuntimeEffectLocalExecutor<'static>>,
 ) -> RuntimeEffectGroup {
     suite_executors().stage(group, executors)
+}
+
+/// Stages an executor for some of a group's children and deliberately leaves the
+/// rest unroutable.
+///
+/// A `None` is how this suite says "this host has no runner for that child": the
+/// resolver answers from the staging table, so an unstaged child is precisely a
+/// routing miss.
+fn partially_staged(
+    group: RuntimeEffectGroup,
+    executors: Vec<Option<RuntimeEffectLocalExecutor<'static>>>,
+) -> RuntimeEffectGroup {
+    assert_eq!(
+        group.children().len(),
+        executors.len(),
+        "a law stages one slot per child, routable or not"
+    );
+    let staged = suite_executors();
+    for (child, executor) in group.children().iter().zip(executors) {
+        if let Some(executor) = executor {
+            staged.stage_one(child, executor);
+        }
+    }
+    group
 }
 
 /// The outcome a settling child produces, carrying its own position so a

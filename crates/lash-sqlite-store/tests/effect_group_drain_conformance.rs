@@ -35,8 +35,13 @@ async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
     let host = SqliteEffectHost::open_with_options(&path, options)
         .await
         .expect("SQLite effect host");
-    host.register_group_executors(spec.executors)
-        .expect("a freshly opened host has no resolver yet");
+    // `None` is a law's request for a host with no resolver at all, not a
+    // default for this file to fill in: the drain such a host hands out is what
+    // one of the laws is about.
+    if let Some(resolver) = spec.executors {
+        host.register_group_executors(resolver)
+            .expect("a freshly opened host has no resolver yet");
+    }
     let drain = host.group_drain();
     DrainWorld {
         host: Arc::new(host) as Arc<dyn EffectHost>,

@@ -9758,6 +9758,28 @@ impl HttpTransport for CeilingCancelWatchTransport {
     }
 }
 
+/// Answers every cancel-watch attach with Restate's 404 for a service no
+/// registered deployment binds.
+#[derive(Debug, Default)]
+struct UnregisteredCancelWatchTransport;
+
+#[async_trait::async_trait]
+impl HttpTransport for UnregisteredCancelWatchTransport {
+    async fn send(
+        &self,
+        _request: HttpRequest,
+        _timeout: Option<Duration>,
+    ) -> Result<HttpResponse, HttpTransportError> {
+        Ok(HttpResponse {
+            status: 404,
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
+            body: HttpResponseBody::buffered(
+                r#"{"message":"Service 'LashProcessWorkflow' not found"}"#,
+            ),
+        })
+    }
+}
+
 #[derive(Debug, Default)]
 struct BrokenCancelWatchTransport;
 
@@ -10011,6 +10033,125 @@ async fn non_timeout_cancel_watch_error_fails_the_segment() {
     assert!(
         source.to_string().contains("cancel watch transport failed"),
         "unexpected handler error: {error:?}"
+    );
+    assert!(
+        source.to_string().starts_with("Retryable error"),
+        "a transport fault is worth retrying, which is the case the \
+         missing-registration terminal below has to be distinguishable from: \
+         {error:?}"
+    );
+}
+
+/// A cancel watch addressed to a service no deployment binds ends the segment
+/// with the engine's own 404-class **terminal**, not a retryable error the
+/// engine backs off forever (FIG-1579).
+///
+/// The cancel watch is a `loop`, and every error in it that is not a timeout
+/// leaves through one arm. Before this, a 404 left through the same arm as a
+/// broken socket and became `HandlerErrorInner::Retryable`, so a deployment that
+/// forgot to `bind(LashProcessWorkflowImpl…)` produced an invocation retrying
+/// with infinite exponential backoff and no operator ever told what was wrong —
+/// the engine-tier twin of the warn-and-strand this contract rules out. A
+/// missing registration is deterministic: retrying cannot make it appear.
+#[tokio::test]
+async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_indefinite_retry() {
+    let runner = Arc::new(CancellationAwareRunner::default());
+    let workflow = LashProcessWorkflowImpl::new(
+        Arc::clone(&runner),
+        process_registry(),
+        continuation_store(),
+        RestateIngressClient::new(RestateConnection::with_transport(
+            "https://restate.invalid",
+            Arc::new(UnregisteredCancelWatchTransport),
+        )),
+    );
+
+    let error = workflow
+        .run_registration(
+            rerunnable_registration("unregistered-cancel-watch"),
+            ProcessExecutionContext::default(),
+            inline_process_scope("unregistered-cancel-watch"),
+            0,
+            None,
+            workflow.cancellation_signal("unregistered-cancel-watch", 0),
+        )
+        .await
+        .expect_err("a cancel watch against an unbound service must fail the segment");
+    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
+    let rendered = source.to_string();
+
+    assert!(
+        rendered.starts_with("Terminal error [404]"),
+        "a missing registration must leave as the engine's own terminal, so the \
+         invocation ends instead of backing off forever: {error:?}"
+    );
+    assert!(
+        rendered.contains("LashProcessWorkflow/await_cancel"),
+        "the terminal names the address nothing binds, because `404 from \
+         Restate` is not something an operator can act on: {error:?}"
+    );
+}
+
+/// The classifier the terminal above turns on: a `404` is a missing registration
+/// only on a route that addresses a service by name, and only for that status.
+///
+/// The negative half is the one that matters. `404` is not self-describing — on
+/// a **control** route it names a missing *resource*, and most often an
+/// invocation that is already gone: completed, killed, or aged out of retention.
+/// A predicate that read the status alone would let a caller wired onto
+/// `PATCH /invocations/{id}/cancel` terminalize real work over a cancel that
+/// arrived one moment late, which is the opposite of the mistake this exists to
+/// prevent. Routes therefore opt in by name, and an unclassified one keeps the
+/// retryable handling every 404 had before.
+#[test]
+fn only_a_404_on_a_service_call_route_reads_as_a_missing_registration() {
+    let service_call = |operation| crate::RestateHttpError::Status {
+        operation,
+        url: "https://restate.invalid/LashProcessWorkflow/k/await_cancel".to_string(),
+        status: 404,
+        body: "not found".to_string(),
+    };
+    for operation in [
+        "Restate workflow call",
+        "Restate object call",
+        "Restate /send",
+    ] {
+        assert!(
+            service_call(operation).is_service_unregistered(),
+            "`{operation}` addresses a service by name, so its 404 is a missing \
+             registration"
+        );
+        assert!(!service_call(operation).is_timeout());
+    }
+
+    for operation in [
+        "Restate invocation cancel",
+        "Restate invocation kill",
+        "Restate SQL query",
+    ] {
+        let control_route = crate::RestateHttpError::Status {
+            operation,
+            url: "https://restate.invalid/invocations/inv_1/cancel".to_string(),
+            status: 404,
+            body: "invocation not found".to_string(),
+        };
+        assert!(
+            !control_route.is_service_unregistered(),
+            "`{operation}` is a control route: its 404 names a resource that is \
+             gone, and terminalizing on it would end real work over a cancel \
+             that arrived late"
+        );
+    }
+
+    let unavailable = crate::RestateHttpError::Status {
+        operation: "Restate workflow call",
+        url: "https://restate.invalid/LashProcessWorkflow/k/await_cancel".to_string(),
+        status: 503,
+        body: "overloaded".to_string(),
+    };
+    assert!(
+        !unavailable.is_service_unregistered(),
+        "a busy engine is worth retrying; only `no such service or handler` is not"
     );
 }
 

@@ -175,6 +175,21 @@ impl<R> LashProcessWorkflowImpl<R> {
                         // The attach ceiling bounds one transport connection, not the
                         // durable watch. Re-attach to heal a dead or aged connection.
                     }
+                    Err(error) if error.is_service_unregistered() => {
+                        // The one failure in this loop that retrying cannot fix:
+                        // nothing binds the workflow this watch addresses. A
+                        // plain handler error here is retryable, so the engine
+                        // would back this invocation off forever against a
+                        // missing `bind` — the indefinite-retry-on-an-
+                        // unregistered-handler shape FIG-1579 rules out. It
+                        // leaves as the engine's own 404-class terminal instead.
+                        return Err(crate::ingress::unregistered_service_terminal(
+                            "LashProcessWorkflow",
+                            "await_cancel",
+                            &error,
+                        )
+                        .into());
+                    }
                     Err(error) => return Err(HandlerError::from(error)),
                 }
             }

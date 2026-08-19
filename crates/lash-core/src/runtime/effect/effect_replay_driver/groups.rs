@@ -255,16 +255,19 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// and **before the group row is written**, so a refused open journals
     /// nothing at all.
     ///
-    /// On a **first open** every child is then resolved through the resolver
-    /// before any child is dispatched, and any child the resolver declines
-    /// refuses the whole open with a typed group-shape error: a child with no
-    /// runner is a routing fact, not an outcome, and a group whose child can
-    /// never settle makes every rank above it unservable. A **reopen** resolves
-    /// nothing it does not dispatch and refuses nothing: a journaled group
-    /// meeting a deployment that lost one child's runner is a deployment change,
-    /// which the drain reports as `NoExecutor` (ADR 0065) rather than something
-    /// this open may deny — the group is already recorded, and refusing it here
-    /// would only make the ranks it already holds unreadable.
+    /// Every child is resolved through the resolver **before the group row is
+    /// written**, and on a group the journal does not yet hold, any child the
+    /// resolver declines refuses the whole open with a typed group-shape error:
+    /// a child with no runner is a routing fact, not an outcome, and a group
+    /// whose child can never settle makes every rank above it unservable. The
+    /// refusal journals nothing, so the retry an operator makes before fixing
+    /// the wiring is refused the same way rather than being read as a reopen.
+    /// A **reopen** — a group the journal already holds — refuses nothing: a
+    /// journaled group meeting a deployment that lost one child's runner is a
+    /// deployment change, which the drain reports as `NoExecutor` (ADR 0065)
+    /// rather than something this open may deny, since the group is already
+    /// recorded and refusing it here would only make the ranks it already holds
+    /// unreadable. A reopen *inside this process* resolves nothing at all.
     ///
     /// The returned handle is always at `consumed = 0`: only the caller knows
     /// how far it consumed, and a caller resuming from a durable continuation
@@ -281,6 +284,40 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         // groups must journal nothing when it refuses one.
         self.group_executors()?;
         let handle = EffectGroupHandle::new(&group);
+        // Resolved ahead of the group row for the same reason, and it is the
+        // routing refusal that needs it: a refusal that had already written the
+        // group row would turn every later attempt at the same key into a
+        // reopen, and a reopen passes a miss through by design — so the retry
+        // would open *successfully* around a child that can never settle and
+        // park its caller on a rank nothing will ever allocate. A refusal that
+        // strands the caller one attempt later is the strand this seam exists to
+        // refuse, so the refusal costs the key nothing and the retry is refused
+        // identically.
+        //
+        // Moving the read ahead of the insert does widen one window, and it
+        // widens it conservatively: two processes first-opening the same key at
+        // once, where only the peer can route every child. The peer's insert can
+        // land after this host's `read_group` returns `None`, so this host
+        // refuses where the old ordering would have passed the miss through
+        // behind that insert. The refusal is typed and journals nothing, the
+        // peer's open is unaffected, and a retry finds the peer's row and
+        // reopens — so the cost is one refused open in a race, against a strand
+        // that was neither typed nor recoverable.
+        //
+        // Skipped entirely when this process already runs the group: those
+        // children are dispatched and settling, and resolving N executors only
+        // to drop them is work whose sole output would be a refusal for a live
+        // group. The durable fence below still judges the reopen's shape.
+        //
+        // The position map is built here for the same reason: a child with no
+        // replay key can never be claimed, and that refusal must cost the key
+        // nothing either.
+        let prepared = if self.groups.get(group.group_key()).is_some() {
+            None
+        } else {
+            let replay_keys = replay_keys_of(&group)?;
+            Some((replay_keys, self.resolve_group_children(&group).await?))
+        };
         let record = EffectGroupRecord::from_group(
             &group,
             journal_identity.key(),
@@ -289,28 +326,19 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         );
         let persisted = self.persistence.open_group(&record).await?;
         fence_reopen(&record, &persisted)?;
-        // `open_group` inserts `ON CONFLICT DO NOTHING` and returns the row as it
-        // stands, so the row is this open's own exactly when what came back is
-        // what went in — the fence above has already equated the shape columns,
-        // which leaves the opening scope and the open instant as the tell. A
-        // reopen inside the same millisecond of the same scope would read as a
-        // first open, which errs towards resolving all N and refusing a missing
-        // runner: the conservative direction, and the one this code took
-        // unconditionally before.
-        let first_open = persisted == record;
+        let Some((replay_keys, executors)) = prepared else {
+            // Already running here. The durable fence above has judged the
+            // shape, so there is nothing left to check and nothing to dispatch.
+            return Ok(handle);
+        };
         if self.groups.get(group.group_key()).is_some() {
-            // Already running here. The durable fence above has already judged
-            // the shape, so there is nothing left to check, nothing to dispatch,
-            // and no reason to resolve N executors only to drop them.
             return Ok(handle);
         }
 
-        let executors = self.resolve_group_children(&group, first_open)?;
         let dispatched = executors
             .iter()
             .filter(|executor| executor.is_some())
             .count();
-        let replay_keys = replay_keys_of(&group)?;
         let state = {
             let mut open = self.groups.open.write_recover();
             if open.contains_key(group.group_key()) {
@@ -337,49 +365,70 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         Ok(handle)
     }
 
-    /// Resolves each child's executor through this host's registered resolver.
+    /// Resolves each child's executor through this host's registered resolver,
+    /// before anything of this group is written.
     ///
-    /// On a first open this is all or nothing: resolving lazily — child by child
-    /// as each is dispatched — would journal the group first and discover the gap
-    /// after, leaving a recorded group whose missing child permanently owns a
-    /// rank no settlement can take. The refusal names the child's position and
-    /// replay key, because "some child of this group has no runner" is not
-    /// something an operator can act on.
+    /// All of them, not one at a time as each is dispatched: resolving lazily
+    /// would journal the group first and discover the gap after, leaving a
+    /// recorded group whose missing child permanently owns a rank no settlement
+    /// can take. The refusal names the child's position and replay key, because
+    /// "some child of this group has no runner" is not something an operator can
+    /// act on.
     ///
-    /// On a reopen a `None` is passed through instead. The group is already
-    /// journaled, so the damage the refusal exists to prevent has either already
-    /// happened or cannot: what is left is a deployment that lost a runner, which
-    /// ADR 0065 makes the drain's `NoExecutor` case. Refusing here would deny a
-    /// resuming caller the ranks the group already holds.
-    fn resolve_group_children(
+    /// **What a miss means depends on whether the journal already holds the
+    /// group**, and that is a question the journal answers rather than one the
+    /// insert's return value can be read for. An *unrecorded* group is a first
+    /// open: the miss refuses the whole open, and because nothing has been
+    /// written the key is untouched, so a retry under the same unwired
+    /// deployment is refused identically instead of being read as a reopen. A
+    /// *recorded* group is a deployment that lost a runner, which ADR 0065 makes
+    /// the drain's `NoExecutor` case: the `None` is passed through, because
+    /// refusing there would deny a resuming caller the ranks the group already
+    /// holds.
+    ///
+    /// The read costs the healthy path nothing — it happens only once a child
+    /// has actually missed.
+    async fn resolve_group_children(
         &self,
         group: &RuntimeEffectGroup,
-        first_open: bool,
     ) -> Result<Vec<Option<RuntimeEffectLocalExecutor<'static>>>, RuntimeEffectControllerError>
     {
-        let executors = self.group_executors()?;
-        group
-            .children()
-            .iter()
-            .enumerate()
-            .map(|(position, child)| match executors.executor_for(child) {
-                Some(executor) => Ok(Some(executor)),
-                None if !first_open => Ok(None),
-                None => Err(group_shape_error(format!(
-                    "child {position} of durable effect group {} names a command \
-                     this host has no runner for{}, so the group is refused \
-                     before any child of it is journaled: a recorded group whose \
-                     child can never settle holds a rank no settlement can take, \
-                     and every rank above it is unservable",
-                    group.group_key(),
-                    child
-                        .invocation
-                        .replay_key()
-                        .map(|key| format!(" (replay key {key})"))
-                        .unwrap_or_default(),
-                ))),
-            })
-            .collect()
+        let resolver = self.group_executors()?;
+        let mut resolved = Vec::with_capacity(group.children().len());
+        let mut missed = None;
+        for (position, child) in group.children().iter().enumerate() {
+            let executor = resolver.executor_for(child);
+            if executor.is_none() && missed.is_none() {
+                missed = Some((position, child));
+            }
+            resolved.push(executor);
+        }
+        let Some((position, child)) = missed else {
+            return Ok(resolved);
+        };
+        if self
+            .persistence
+            .read_group(group.group_key())
+            .await?
+            .is_some()
+        {
+            return Ok(resolved);
+        }
+        Err(group_shape_error(format!(
+            "child {position} of durable effect group {} names a command this \
+             host has no runner for{}, so the group is refused before anything \
+             of it is journaled: a recorded group whose child can never settle \
+             holds a rank no settlement can take, every rank above it is \
+             unservable, and a group row left behind by this refusal would make \
+             the next attempt a reopen that strands the caller instead of \
+             refusing again",
+            group.group_key(),
+            child
+                .invocation
+                .replay_key()
+                .map(|key| format!(" (replay key {key})"))
+                .unwrap_or_default(),
+        )))
     }
 
     /// Spawns one host-owned task per child this host has a runner for.
