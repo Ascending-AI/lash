@@ -1,5 +1,12 @@
 use thiserror::Error;
 
+/// Version of the durable RLM snapshot envelope stored behind a session
+/// checkpoint component.
+///
+/// Re-exported by the facade's `formats` manifest so a host can read it before
+/// wiring a store; the history below is why each boundary is a version rather
+/// than a decode failure.
+///
 // v13 carries Lashlang snapshot v7 and VM continuation v8: a heap error's brand
 // serializes by name, and the two substrate-minted brands are names an older
 // reader cannot decode, so the boundary has to be a version and not a decode
@@ -13,7 +20,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub(super) const RLM_SNAPSHOT_VERSION: u32 = 13;
+pub const RLM_SNAPSHOT_VERSION: u32 = 13;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

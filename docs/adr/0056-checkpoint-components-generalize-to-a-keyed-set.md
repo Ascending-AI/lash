@@ -154,6 +154,8 @@ encoding version from 1 to 2. It adds no compatibility decoder and no store
 schema change; retained version-1 components are rejected and must be drained
 or recreated.
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 ## Consequences
 
 - A commit grows with its changed execution state rather than every value the

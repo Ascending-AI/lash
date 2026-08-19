@@ -69,6 +69,8 @@ invocations cannot resume across this cutover: operators must drain them or
 purge the Restate state before upgrading, otherwise their old promises are
 orphaned under the prior key.
 
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+
 ## Consequences
 
 - Deleting a session is final for that id in the store. A host reset creates a

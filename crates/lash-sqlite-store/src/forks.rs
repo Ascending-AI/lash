@@ -2,7 +2,7 @@ use super::*;
 
 async fn open_factory_catalog(root: &Path) -> Result<SqliteConnection, lash_core::StoreError> {
     std::fs::create_dir_all(root).map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
-    let conn = SqliteConnection::open(&root.join("durable-core.db"))
+    let conn = SqliteConnection::open(&root.join(DURABLE_CORE_DB_FILE))
         .await
         .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
     ensure_schema(&conn).await.map_err(sqlite_error)?;

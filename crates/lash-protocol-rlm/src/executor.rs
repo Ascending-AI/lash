@@ -3,6 +3,7 @@ mod host_bridge;
 mod snapshot;
 mod state;
 
+pub use snapshot::RLM_SNAPSHOT_VERSION;
 pub use state::RlmExecutionState;
 #[cfg(feature = "testing")]
 pub(crate) use state::capture_scratch_files_for_testing;

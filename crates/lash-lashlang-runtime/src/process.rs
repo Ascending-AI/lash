@@ -40,8 +40,13 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
     tracing::warn!(error = %error, declined_total, "{message}");
 }
 
-// v3 embeds VM continuation v7, including durable RegExp match arrays.
-const LASHLANG_SEGMENT_STATE_VERSION: u32 = 3;
+/// Version of the durable Lashlang segment-handover envelope.
+///
+/// v3 embeds the VM continuation format and Lashlang snapshot format the same
+/// build carries; a segment parked by another version is refused rather than
+/// decoded (ADR 0055). Re-exported by the facade's `formats` manifest so a
+/// host can read it before wiring a store.
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 3;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
