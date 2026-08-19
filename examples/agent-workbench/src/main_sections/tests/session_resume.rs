@@ -227,6 +227,7 @@
             core: resumed_core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&resumed_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&resumed_registry)),

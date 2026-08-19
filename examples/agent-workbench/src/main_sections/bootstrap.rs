@@ -316,6 +316,7 @@ async fn async_main() -> AnyhowResult<()> {
         core,
         rlm_dialect,
         attachment_store,
+        session_store_factory: Arc::clone(&core_store_factory),
         trigger_store,
         process_observer,
         process_work_driver,
@@ -397,6 +398,9 @@ async fn async_main() -> AnyhowResult<()> {
             "/api/admin/trigger-mutation-receipts/prune",
             post(prune_trigger_mutation_receipts),
         )
+        // Deliberately absent from the UI, and deliberately unscheduled: see
+        // the handler's contract.
+        .route("/api/admin/store-maintenance", post(run_store_maintenance))
         .route("/api/accounts", get(list_accounts).post(add_account))
         .route("/api/accounts/{slug}", delete(delete_account))
         .route("/api/accounts/{slug}/messages", post(inject_message))

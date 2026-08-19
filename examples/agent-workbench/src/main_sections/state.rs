@@ -10,6 +10,14 @@ struct AppState {
     /// code that ships.
     rlm_dialect: lash::rlm::RlmDialect,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    /// The deployment's session-store factory, retained beside the core it was
+    /// built with because it is also this host's attachment **root authority**
+    /// (`lash::persistence::AttachmentRootSet`). Store-growth maintenance needs
+    /// it under both hats — to open a session's store for `vacuum`, and to hand
+    /// `reclaim_unreferenced_attachments` an explicit root set — so the route
+    /// names it rather than reaching into the core for a store it did not
+    /// choose.
+    session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     process_observer: lash::process::ProcessWorkObserver,
     process_work_driver: lash::process::ProcessWorkDriver,
@@ -103,6 +111,12 @@ enum WorkbenchAuthorizationAction {
     /// Destructive, deployment-wide maintenance. It is deliberately not
     /// session-scoped: no chat participant should ever be able to reach it.
     PruneTriggerMutationReceipts,
+    /// Destructive, deployment-wide store-growth maintenance: session-store
+    /// vacuum plus attachment reclamation. Operator-only for the same reason
+    /// [`WorkbenchAuthorizationAction::PruneTriggerMutationReceipts`] is — it
+    /// deletes durable rows and bytes across sessions, and the caller owns the
+    /// safety argument.
+    RunStoreMaintenance,
 }
 
 trait WorkbenchAuthorizer: Send + Sync {
@@ -142,6 +156,7 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             }
             WorkbenchAuthorizationAction::ManageApprovals => {}
             WorkbenchAuthorizationAction::PruneTriggerMutationReceipts => {}
+            WorkbenchAuthorizationAction::RunStoreMaintenance => {}
         }
         Ok(())
     }

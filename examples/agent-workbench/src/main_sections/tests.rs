@@ -435,6 +435,7 @@ mod tests {
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
@@ -504,7 +505,7 @@ mod tests {
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
-            .store_factory(store_factory)
+            .store_factory(Arc::clone(&store_factory))
             .process_registry(Arc::clone(&process_registry))
             .build(crate::test_core_owner())
             .expect("build core");
@@ -516,6 +517,7 @@ mod tests {
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
@@ -787,6 +789,7 @@ finish "gap source"
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
@@ -1069,6 +1072,7 @@ finish initial
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
@@ -1267,6 +1271,7 @@ finish initial
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
@@ -1432,6 +1437,7 @@ finish initial
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
             process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
@@ -1912,6 +1918,7 @@ finish initial
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
             attachment_store: test_attachment_store(),
+            session_store_factory: Arc::clone(&core_store_factory),
             trigger_store,
             process_observer,
             process_work_driver: process_deployment.process_work_driver(),
@@ -2336,6 +2343,7 @@ finish initial
     }
 
     include!("tests/attachments_usage.rs");
+    include!("tests/store_maintenance.rs");
     include!("tests/turn_input_application.rs");
     include!("tests/tool_control.rs");
     include!("tests/concurrent_send.rs");

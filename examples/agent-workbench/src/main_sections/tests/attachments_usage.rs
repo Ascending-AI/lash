@@ -145,7 +145,7 @@ async fn run_attachment_usage_gate(
     let system_clock = Arc::new(lash::runtime::SystemClock);
     let core = attachment_usage_gate_core(
         data_dir,
-        first_factory,
+        Arc::clone(&first_factory),
         Arc::clone(&process_registry),
         Arc::clone(&attachment_store),
         Arc::clone(&system_clock) as Arc<dyn lash::runtime::Clock>,
@@ -155,6 +155,7 @@ async fn run_attachment_usage_gate(
     let state = attachment_usage_gate_state(
         core,
         Arc::clone(&attachment_store),
+        first_factory,
         Arc::clone(&process_registry),
         sessions,
     );
@@ -296,7 +297,7 @@ async fn run_attachment_usage_gate(
         .into_handle();
     let resumed_core = attachment_usage_gate_core(
         data_dir,
-        resumed_factory,
+        Arc::clone(&resumed_factory),
         Arc::clone(&process_registry),
         Arc::clone(&resumed_attachment_store),
         Arc::new(lash::runtime::SystemClock),
@@ -309,6 +310,7 @@ async fn run_attachment_usage_gate(
     let resumed_state = attachment_usage_gate_state(
         resumed_core,
         Arc::clone(&resumed_attachment_store),
+        resumed_factory,
         Arc::clone(&process_registry),
         resumed_session_ids,
     );
@@ -383,6 +385,7 @@ fn attachment_usage_gate_core(
 fn attachment_usage_gate_state(
     core: LashCore,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
+    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     process_registry: Arc<dyn lash::process::ProcessRegistry>,
     sessions: WorkbenchSessions,
 ) -> AppState {
@@ -394,6 +397,7 @@ fn attachment_usage_gate_state(
         core,
         rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store,
+        session_store_factory: store_factory,
         trigger_store: in_memory_trigger_store(),
         process_observer,
         process_work_driver: inert_process_work_driver(process_registry),
