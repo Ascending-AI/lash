@@ -31,7 +31,8 @@ pub use plugin::{
     LashlangModuleCompileError, LashlangModuleCompileRequest, ModuleCompileOutput,
     RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmLanguageFeatures, RlmProtocolPluginConfig,
     RlmProtocolPluginFactory, RlmSessionConfigDecodeError, apply_rlm_session_config_if_unset,
-    rlm_lashlang_surface, rlm_protocol_config, rlm_session_config, rlm_session_config_options,
+    apply_rlm_session_config_post_open, rlm_lashlang_surface, rlm_protocol_config,
+    rlm_session_config, rlm_session_config_options,
 };
 pub use projection::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,

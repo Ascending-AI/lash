@@ -120,8 +120,15 @@ pub trait RlmSessionExt {
     /// [`RlmSessionConfigError::Conflict`] — the write never lands and the
     /// session keeps what it recorded.
     ///
+    /// A stated dialect is only ever *compared*, never written. An open session
+    /// is already running one dialect implementation, and a session that
+    /// recorded no dialect resolved the default one, so the comparison is
+    /// against the dialect the session is running rather than against the
+    /// recorded `Option` — writing a dialect here would leave the recorded fact
+    /// disagreeing with the running plugin.
+    ///
     /// The write follows the durability the pin has always had: it lands with
-    /// the session's next commit and is validated at the commit fence.
+    /// the session's next commit.
     async fn set_rlm_config_if_unset(
         &self,
         requested: lash_rlm_types::RlmSessionConfig,
@@ -147,7 +154,7 @@ impl RlmSessionExt for crate::LashSession {
                     err.to_string(),
                 )))
             })?;
-        let resolved = lash_protocol_rlm::apply_rlm_session_config_if_unset(&recorded, &requested)
+        let resolved = lash_protocol_rlm::apply_rlm_session_config_post_open(&recorded, &requested)
             .map_err(RlmSessionConfigError::Conflict)?;
         if resolved != recorded {
             let options = lash_protocol_rlm::rlm_session_config_options(&resolved)

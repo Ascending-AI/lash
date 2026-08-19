@@ -80,8 +80,7 @@ bag and one materialization hook:
    nothing, restating a recorded fact is a no-op, and stating a *different*
    value refuses. Facts the request leaves unstated are carried through
    untouched — which is what closes both clobbers. Durability is unchanged: the
-   pin lands with the session's next commit and is validated at the commit
-   fence.
+   pin lands with the session's next commit.
 
 3. **Typed refusal.** `RlmSessionConfigConflict` names the fact and carries both
    the `recorded` and the `requested` value. Its `Display` is the one place any
@@ -114,8 +113,25 @@ refuses a different one, and a session states its dialect when it opens. That is
 a deliberate boundary, not an oversight: a live dialect re-selection would make
 the one fact this layer exists to pin mutable mid-life, and it is not needed
 once a host can read the recorded dialect *before* opening. That pre-open read is
-FIG-1556's preflight surface. `final_answer_format` and `termination` have no
-such constraint and are writable on an open session today.
+FIG-1556's preflight surface.
+
+The guarded write on an open session is therefore narrower than the engine
+underneath it, and the boundary is worth stating exactly, because two of the
+three facts are already decided by the time a host can call it:
+
+* **Dialect** — compared, never written. A session that recorded no dialect is
+  still *running* one (the plugin resolved the default), so the comparison is
+  against the running dialect rather than against the recorded `Option`.
+  `apply_rlm_session_config_post_open` is the one place that holds the field
+  back; writing it would leave the recorded fact disagreeing with the plugin
+  that is executing.
+* **Final-answer format** — default-filled at the same first open, so post-open
+  a statement can only agree (no-op) or disagree (refuse). It is writable in the
+  engine, and it is what a session's *first* open states; it is not a fact a
+  host adds later.
+* **Termination** — genuinely settable after the fact. It has no default fill,
+  so `None` survives the first open and the guarded write is the way a host
+  records it.
 
 Defaults are filled only on a session that has recorded nothing. That is what
 pins a session's dialect at its first open, exactly as before, while making a
@@ -162,6 +178,12 @@ reopen incapable of re-defaulting — the mechanism behind both clobber fixes.
   the open instead of serving the recorded dialect behind green routes. A fresh
   data directory per row is still required, now for evidence purity rather than
   to avoid a silent mislabel.
+* Default-filling at the first open is now a pin, honestly: a dialect and a
+  final-answer format the host never chose become unchangeable for the life of
+  the session, and a reopen stating a *different* format is refused where it
+  previously won by silently overwriting. That is the price of killing the
+  clobber — the last writer no longer wins — and it is why a host that cares
+  states its facts at the first open rather than later.
 * Sibling facts follow the same shape rather than growing their own request
   parameters: the provider pin is FIG-1558 and the parent-relation rebind is
   FIG-1559.

@@ -25,27 +25,24 @@ impl AppState {
         recorded.unwrap_or_else(|| self.requested_dialect(session_id))
     }
 
-    /// Opens a session and pins the dialect it is meant to run, once.
-    ///
-    /// A dialect becomes durable at the session's first *commit*, not at open,
-    /// so stating it on every open is what makes the pin land — an earlier
-    /// version applied it only where a session was created, and both of those
-    /// call sites open and drop without running a turn, so the pin evaporated
-    /// with the handle and the first real turn committed `lashlang`
-    /// permanently. A workbench told to serve TypeScript served Lashlang.
-    ///
-    /// The write is set-if-unset: a session that already recorded a dialect
-    /// keeps it, and only a genuine disagreement refuses. Which dialect is
-    /// asked for is per session, not per process — a session the operator
-    /// created with a dialect asks for that one for the rest of its life
-    /// (FIG-1306), and a session the roster does not know asks for the ambient
-    /// `LASH_RUNBOOK_DIALECT`.
     /// A builder that *states* the dialect this session is meant to run.
     ///
     /// The statement rides the plugin-agnostic options seam and is applied as a
     /// guarded set-if-unset write (ADR 0066): it lands on a session that
     /// recorded nothing, is a no-op on one that recorded the same dialect, and
     /// refuses on one that recorded another. Nothing catches that refusal.
+    ///
+    /// It is stated on *every* open, not only where a session is created: the
+    /// pin becomes durable at the session's first commit, and both of the
+    /// create call sites open and drop without running a turn. An earlier
+    /// version stated it at create only, so the pin evaporated with the handle
+    /// and the first real turn committed `lashlang` permanently — a workbench
+    /// told to serve TypeScript served Lashlang.
+    ///
+    /// Which dialect is asked for is per session, not per process: a session the
+    /// operator created with a dialect asks for that one for the rest of its
+    /// life (FIG-1306), and a session the roster does not know asks for the
+    /// ambient `LASH_RUNBOOK_DIALECT`.
     fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
         let session_id = session_id.into();
         let dialect = self.requested_dialect(&session_id);
@@ -61,6 +58,8 @@ impl AppState {
             .expect("the typed RLM session options must serialize")
     }
 
+    /// Opens a session through [`Self::session_builder`], so every open states
+    /// the dialect this workbench means that session to run.
     async fn open_session(&self, session_id: &str) -> Result<lash::LashSession, lash::EmbedError> {
         self.session_builder(session_id.to_string()).open().await
     }

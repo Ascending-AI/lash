@@ -421,6 +421,91 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
     Ok(())
 }
 
+/// A host that states no dialect still gets one: the first open records the
+/// default, and that default is a pin like any other. A post-open statement is
+/// compared against the dialect the session is running and never written, so
+/// the recorded fact cannot drift away from the plugin that is executing.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn a_post_open_dialect_is_compared_against_the_running_default_never_written() -> Result<()> {
+    use crate::rlm::RlmSessionExt as _;
+
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("rlm-unrecorded-dialect").open().await?;
+    assert_eq!(
+        session.rlm_config().dialect,
+        Some(RlmDialect::Lashlang),
+        "a host that states no dialect gets the default recorded at its first open"
+    );
+
+    let agreed = session
+        .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Lashlang))
+        .await
+        .expect("stating the dialect the session is running is a no-op");
+    assert_eq!(agreed, session.rlm_config());
+
+    let error = session
+        .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript))
+        .await
+        .expect_err("an open session cannot be moved onto another dialect");
+    let crate::rlm::RlmSessionConfigError::Conflict(
+        crate::rlm::RlmSessionConfigConflict::Dialect {
+            recorded,
+            requested,
+        },
+    ) = error
+    else {
+        panic!("a dialect disagreement must refuse as the typed dialect conflict");
+    };
+    assert_eq!(
+        recorded,
+        RlmDialect::Lashlang,
+        "the conflict names the dialect the session is running, not an absent one"
+    );
+    assert_eq!(requested, RlmDialect::Typescript);
+    Ok(())
+}
+
+/// A guarded write is durable: the fact it lands on is still recorded when the
+/// session is closed and reopened cold.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
+    use crate::rlm::RlmSessionExt as _;
+
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory)
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let session = stating_dialect(core.session("rlm-write-roundtrip"), RlmDialect::Typescript)
+        .open()
+        .await?;
+    session
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new()
+                .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
+        )
+        .await
+        .expect("an unrecorded termination accepts a write");
+    session.close().await?;
+
+    let reopened = core.session("rlm-write-roundtrip").open().await?;
+    let recorded = reopened.rlm_config();
+    assert_eq!(
+        recorded.termination,
+        Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
+        "the written termination is still recorded after a cold reopen"
+    );
+    assert_eq!(recorded.dialect, Some(RlmDialect::Typescript));
+    Ok(())
+}
+
 /// The same refusal reaches a host that states a disagreeing dialect at open:
 /// the open fails rather than quietly running the session in its old dialect.
 #[cfg(feature = "rlm")]

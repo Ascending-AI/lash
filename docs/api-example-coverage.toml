@@ -1813,7 +1813,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1287#let error = AppError::session_open(lash::EmbedError::Session("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1286#let error = AppError::session_open(lash::EmbedError::Session("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -1877,8 +1877,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -5141,7 +5141,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1211#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1210#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5304,7 +5304,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1211#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1210#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5314,8 +5314,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1289#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1297#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1288#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1296#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -5324,8 +5324,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1290#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1297#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1289#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1296#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionSpec"
@@ -18941,8 +18941,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -18952,8 +18952,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1277#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1276#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -20453,7 +20453,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext", "lash_core::plugin::hooks::CheckpointHookContext"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::plugins::CheckpointHookContext` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint` because its canonical identity is the lash-core one. Consumer class: the RLM protocol crate and first-party plugin crates -- this type is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:49, crates/lash-protocol-rlm/src/plugin/protocol_session.rs:597, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: `lash::plugins::CheckpointHookContext` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint` because its canonical identity is the lash-core one. Consumer class: the RLM protocol crate and first-party plugin crates -- this type is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:49, crates/lash-protocol-rlm/src/plugin/protocol_session.rs:629, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::checkpoint"
@@ -20471,7 +20471,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext::session_graph", "lash_core::plugin::hooks::CheckpointHookContext::session_graph"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_graph` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:603, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_graph` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:635, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::session_id"
@@ -20480,7 +20480,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext::session_id", "lash_core::plugin::hooks::CheckpointHookContext::session_id"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:598, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:630, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::session_lifecycle"
@@ -20489,7 +20489,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext::session_lifecycle", "lash_core::plugin::hooks::CheckpointHookContext::session_lifecycle"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_lifecycle` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:602, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_lifecycle` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:634, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::sessions"
@@ -20750,7 +20750,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents", "lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:608, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:640, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitRuntimeEvents::events"
@@ -20759,7 +20759,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents::events", "lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents::events"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents::events` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: the RLM protocol crate and core runtime internals -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:608, crates/lash-core/src/tool_dispatch/directives.rs:104, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents::events` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: the RLM protocol crate and core runtime internals -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:640, crates/lash-core/src/tool_dispatch/directives.rs:104, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitTrace"
@@ -26668,9 +26668,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::originator_id"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:314#originator_id: Some(session_id.to_string()),"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:313#originator_id: Some(session_id.to_string()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1051#assert!(!rail.contains(&reclaimed), \"reclaimed work leaves the rail\");"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:314, which scopes session-delete retention to the rows that session originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1051 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the scoped row left the runtime-wide work rail."
+reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:313, which scopes session-delete retention to the rows that session originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1051 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the scoped row left the runtime-wide work rail."
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::status"
@@ -27096,9 +27096,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessPruneReport::pruned_trigger_deliveries"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:262#\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:261#\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1048#assert_eq!(retention.pruned_trigger_deliveries, 0, \"no delivery reserved\");"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:262, which records what session-delete retention reclaimed; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1048 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that rows holding no trigger delivery reconcile none."
+reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:261, which records what session-delete retention reclaimed; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1048 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that rows holding no trigger delivery reconcile none."
 
 [[api]]
 symbol = "lash::process::ProcessRecord"
@@ -29446,9 +29446,9 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:310#.prune("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:309#.prune("
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1046#assert_eq!(retention.pruned_processes, 1, \"one finished row reclaimed\");"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:310, where deleting a session reclaims the terminal process rows it originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1046 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the reclamation reports one pruned process."
+reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:309, where deleting a session reclaims the terminal process rows it originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1046 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the reclamation reports one pruned process."
 
 [[api]]
 symbol = "lash::process::Processes::redrive_wake_delivery"
@@ -49134,8 +49134,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1215#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1214#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -49144,7 +49144,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::cause"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1218#return match error.cause.as_ref() {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1217#return match error.cause.as_ref() {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::code"
@@ -49163,8 +49163,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1215#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1214#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::is_retryable"
@@ -50656,7 +50656,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::TurnTerminalAwaitTimeout"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:379#err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:378#err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -50702,7 +50702,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::as_str"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1220#Some((session_id.as_str(), Some(error.code.as_str())))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1219#Some((session_id.as_str(), Some(error.code.as_str())))"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::from_wire_code"
@@ -59853,7 +59853,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContext::for_session"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:533#.map(|session_id| TraceContext::default().for_session(session_id))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:532#.map(|session_id| TraceContext::default().for_session(session_id))"
 
 [[api]]
 symbol = "lash::tracing::TraceContext::for_turn"
@@ -60209,7 +60209,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:537#TraceEvent::Custom {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:536#TraceEvent::Custom {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -60219,7 +60219,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom::name"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:538#name: format!(\"agent_workbench.{name}\"),"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:537#name: format!(\"agent_workbench.{name}\"),"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::Custom::payload"
@@ -60228,7 +60228,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom::payload"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:120#payload,"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:119#payload,"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::EffectEnvelopeDiff"
@@ -63782,7 +63782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOperationError::Store::message"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1281#assert_eq!(error.message, deleted_session_message(\"retired-session\"));"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.message, deleted_session_message(\"retired-session\"));"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -71218,7 +71218,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/rlm.rs:207 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash/src/rlm.rs:214 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::facade_support::ProviderFailure"

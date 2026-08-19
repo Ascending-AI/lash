@@ -215,6 +215,38 @@ pub fn apply_rlm_session_config_if_unset(
     Ok(next)
 }
 
+/// The guarded set-if-unset write as an *open session* may perform it.
+///
+/// Same engine as [`apply_rlm_session_config_if_unset`], with one field held
+/// back: the dialect is compared and never written. An open session already
+/// picked its dialect implementation when its plugins were built, and a session
+/// whose bag records no dialect resolved the default one, so the comparison is
+/// against `existing.dialect.unwrap_or_default()` — the dialect the session is
+/// *running*. Writing it here would leave the recorded fact disagreeing with
+/// the plugin that is executing, which is exactly the divergence the typed pin
+/// exists to prevent.
+pub fn apply_rlm_session_config_post_open(
+    existing: &RlmSessionConfig,
+    requested: &RlmSessionConfig,
+) -> Result<RlmSessionConfig, RlmSessionConfigConflict> {
+    if let Some(requested) = requested.dialect {
+        let running = existing.dialect.unwrap_or_default();
+        if running != requested {
+            return Err(RlmSessionConfigConflict::Dialect {
+                recorded: running,
+                requested,
+            });
+        }
+    }
+    apply_rlm_session_config_if_unset(
+        existing,
+        &RlmSessionConfig {
+            dialect: None,
+            ..requested.clone()
+        },
+    )
+}
+
 /// Encode a config back into the durable options bag.
 pub fn rlm_session_config_options(
     config: &RlmSessionConfig,
@@ -618,5 +650,64 @@ mod tests {
         assert!(detail.as_deref().is_some_and(|text| {
             text.contains("120292 tokens used") && text.contains("choose frame switch path")
         }));
+    }
+
+    /// A bag that records no dialect still belongs to a session running the
+    /// default one, so a post-open statement is compared against that default
+    /// and refused when it disagrees -- never written.
+    #[test]
+    fn a_post_open_dialect_is_compared_against_the_running_default() {
+        let bag_without_a_dialect = RlmSessionConfig::new()
+            .termination(lash_rlm_types::RlmTermination::FinishRequired { schema: None });
+        assert_eq!(bag_without_a_dialect.dialect, None);
+
+        let conflict = apply_rlm_session_config_post_open(
+            &bag_without_a_dialect,
+            &RlmSessionConfig::new().dialect(RlmDialect::Typescript),
+        )
+        .expect_err("a session running the default dialect cannot be moved onto another");
+        assert_eq!(
+            conflict,
+            RlmSessionConfigConflict::Dialect {
+                recorded: RlmDialect::Lashlang,
+                requested: RlmDialect::Typescript,
+            },
+            "the conflict names the dialect the session is running, not an absent one"
+        );
+    }
+
+    /// Agreeing with the running default is a no-op: it records nothing, so the
+    /// read half keeps reporting that the session stated no dialect.
+    #[test]
+    fn agreeing_with_the_running_default_dialect_writes_nothing() {
+        let bag_without_a_dialect = RlmSessionConfig::new();
+
+        let resolved = apply_rlm_session_config_post_open(
+            &bag_without_a_dialect,
+            &RlmSessionConfig::new().dialect(RlmDialect::Lashlang),
+        )
+        .expect("stating the dialect the session is running is a no-op");
+        assert_eq!(resolved, bag_without_a_dialect);
+        assert_eq!(resolved.dialect, None);
+    }
+
+    /// The held-back dialect does not hold back the rest: a statement that
+    /// agrees on the dialect still writes the facts the bag has not recorded.
+    #[test]
+    fn a_post_open_write_still_lands_on_the_facts_that_are_unset() {
+        let recorded = RlmSessionConfig::new().dialect(RlmDialect::Typescript);
+
+        let resolved = apply_rlm_session_config_post_open(
+            &recorded,
+            &RlmSessionConfig::new()
+                .dialect(RlmDialect::Typescript)
+                .termination(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
+        )
+        .expect("an unrecorded termination accepts a write");
+        assert_eq!(
+            resolved.termination,
+            Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None })
+        );
+        assert_eq!(resolved.dialect, Some(RlmDialect::Typescript));
     }
 }
