@@ -847,44 +847,67 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
     /// `'static` executors a grouped child needs to outlive its caller have
     /// nowhere to come from — so
     /// [`supports_effect_groups`](EffectReplayDriver::supports_effect_groups)
-    /// answers `false` and an open is refused rather than journaling a group
-    /// nothing can run.
+    /// answers `false` and all three group methods refuse with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
+    /// rather than journaling a group nothing can run.
+    ///
+    /// [`OnceLock::set`] is the arbiter rather than a preceding `get`: a
+    /// get-then-set pair leaves a window in which two threads both read `None`,
+    /// both write, and the loser is told `Ok` while its resolver was dropped on
+    /// the floor — the exact drift this refusal exists to prevent. `set` decides,
+    /// and its `Err` hands back the rejected resolver so the same-resolver case
+    /// stays a no-op.
     pub fn register_group_executors(
         &self,
         executors: Arc<dyn GroupExecutors>,
     ) -> Result<(), RuntimeEffectControllerError> {
-        if let Some(held) = self.group_executors.get() {
-            return if Arc::ptr_eq(held, &executors) {
-                Ok(())
-            } else {
-                Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                    "this effect host already has a different registered group \
-                     executor resolver; one host has one answer to what runs a \
-                     journaled grouped child, and a second answer would make which \
-                     one a path got depend on when it asked",
-                ))
-            };
+        let Err(rejected) = self.group_executors.set(executors) else {
+            return Ok(());
+        };
+        let held = self
+            .group_executors
+            .get()
+            .expect("a rejected set means the lock is initialized");
+        if Arc::ptr_eq(held, &rejected) {
+            Ok(())
+        } else {
+            Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                "this effect host already has a different registered group \
+                 executor resolver; one host has one answer to what runs a \
+                 journaled grouped child, and a second answer would make which \
+                 one a path got depend on when it asked",
+            ))
         }
-        let _ = self.group_executors.set(executors);
-        Ok(())
     }
 
     /// Whether a resolver has been registered, which is exactly whether this
     /// host supports effect groups.
+    ///
+    /// A **per-deployment** fact established at wiring time: deployment
+    /// validation reads it after the registration, and before wiring it reads
+    /// `false` and the three group methods refuse coherently with it.
     pub fn supports_effect_groups(&self) -> bool {
         self.group_executors.get().is_some()
     }
 
-    /// The registered resolver, or the typed refusal that names what is missing.
+    /// The registered resolver, or the refusal that says this host does not
+    /// implement groups at all.
+    ///
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// not a shape refusal: an unwired host is not a host with a bad group, it is
+    /// the host `supports_effect_groups` answers `false` for, and the coherence
+    /// law binds the flag to all three methods. A *per-child* resolver miss on a
+    /// wired host is the other fact and keeps its typed routing refusal.
     pub(super) fn group_executors(
         &self,
     ) -> Result<&Arc<dyn GroupExecutors>, RuntimeEffectControllerError> {
         self.group_executors.get().ok_or_else(|| {
-            groups::group_shape_error(
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::EffectGroupUnsupported,
                 "this effect host has no registered group executor resolver, so \
-                 it cannot run a grouped child at all; register one with \
-                 register_group_executors before opening a group",
+                 it does not implement durable effect groups; register one with \
+                 register_group_executors at wiring time",
             )
         })
     }

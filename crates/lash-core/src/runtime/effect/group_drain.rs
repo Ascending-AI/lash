@@ -116,12 +116,13 @@ use super::group::LoserDisposition;
 /// Returning `None` is a supported answer and the honest one when this host
 /// cannot run the command. It never becomes a settlement: an executor that
 /// fabricated an outcome would journal a terminal no effect ever produced. What
-/// it becomes depends on who asked. An **open** refuses the whole group with a
-/// typed group-shape error before anything is journaled, because a group whose
-/// child can never settle is a group whose ranks above that child can never be
-/// served. A **drain pass** leaves the child alone and reports
-/// [`ChildDrainOutcome::NoExecutor`], because there the group is already
-/// journaled and a queue another host can finish is the accurate description.
+/// it becomes depends on who asked. A **first open** refuses the whole group
+/// with a typed group-shape error before any child of it is journaled, because a
+/// group whose child can never settle is a group whose ranks above that child
+/// can never be served. A **reopen** and a **drain pass** both leave the child
+/// alone and report [`ChildDrainOutcome::NoExecutor`], because there the group is
+/// already journaled and a queue another host can finish is the accurate
+/// description.
 pub trait GroupExecutors: Send + Sync {
     /// The executor for `envelope`, or `None` when this host cannot run it.
     ///

@@ -82,6 +82,17 @@ caller has moved on.
   the one lifetime this contract exists to break. The two capabilities are one
   question and must not drift apart, so on the in-process tiers this answer *is*
   "a resolver is registered" rather than a constant.
+
+  It is therefore a **per-deployment fact established at wiring time**: before
+  the resolver is registered a host answers `false`, and deployment validation
+  reads it *after* wiring, which is where the check belongs in any case — a
+  deployment is validated once it is assembled. The coherence law follows the
+  flag across the whole surface: a host answering `false` refuses
+  `open_effect_group`, `await_next_settlement` and `close_effect_group` alike
+  with `EffectGroupUnsupported`, and journals nothing when it does. An unwired
+  host is not a host with a bad group; it is a host that does not do groups, and
+  one code for the whole surface is what lets a caller tell that from a group it
+  cannot route.
 - `open_effect_group(group)` — returns once the group is durably recorded, **not**
   when a child settles. Its one parameter is the `RuntimeEffectGroup` itself:
   **envelopes, and nothing else.** What code runs a child is answered by the
@@ -102,13 +113,18 @@ caller has moved on.
 
   **A child with no runner is a routing fact, not an outcome.** A resolver that
   answers `None` for a child means the deployment cannot run it — not that the
-  child failed — so no terminal is ever synthesized from a miss. In-process hosts
-  resolve **all N children before journaling anything**: any `None` refuses the
-  whole open with a typed group-shape error and writes nothing, so a group is
-  never half-opened around a child that will never settle. A journaled group can
-  still meet a host that cannot run one of its children — that is a deployment
-  change, not an open — and the drain reports it as `NoExecutor`, leaving the
-  group unreclaimable and visible rather than inventing a terminal for it.
+  child failed — so no terminal is ever synthesized from a miss. On a **first
+  open** in-process hosts resolve **all N children before dispatching any of
+  them**: any `None` refuses the whole open with a typed group-shape error, and
+  no child is journaled, so a group is never half-opened around a child that will
+  never settle. Resolution belongs to the first-open path alone. A **reopen**
+  resolves only what it dispatches and refuses nothing: the group is already
+  journaled, and a journaled group meeting a host that cannot run one of its
+  children is a deployment change rather than an open — the drain reports it as
+  `NoExecutor`, leaving the group unreclaimable and visible rather than inventing
+  a terminal for it. Refusing at a reopen instead would deny a resuming caller
+  the ranks the group already holds, which is the opposite of what the refusal is
+  for.
 
   Each executor is single-execution: `execute` consumes it, so a host that
   retries a child resolves a fresh one through the same registered resolver. A
@@ -367,10 +383,13 @@ been an active corruption source rather than a passive one.
 
 ### Tier split
 
-`supports_effect_groups()` is `true` on every in-tree tier **as target state** —
-no controller answers `true` in the contract layer that introduces these types,
-and each tier flips its own flag as it lands. Groups add **no second durability
-flag**. The durability claim stays the existing
+Every in-tree tier **implements** the group surface as target state — no tier
+does so in the contract layer that introduces these types, and each one lands its
+own implementation. What `supports_effect_groups()` answers is not a property of
+the tier, though: it is the per-deployment fact above, so an in-tree tier whose
+host has not been handed a `GroupExecutors` resolver answers `false` and refuses
+coherently, and answers `true` once wiring registers one. Groups add **no second
+durability flag**. The durability claim stays the existing
 `replay_ownership` / journal-addressing fact, which the contract already warns
 is only a routing fact and not an end-to-end durability claim.
 

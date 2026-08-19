@@ -1449,9 +1449,12 @@ async fn postgres_effect_host_satisfies_the_effect_group_contract_when_configure
         let host = storage.effect_host();
         // Registration is what makes the host support groups at all: since
         // FIG-1578 a group carries envelopes, and what runs a child is the
-        // resolver its host was built with.
-        host.register_group_executors(executors)
-            .expect("a freshly connected host has no resolver yet");
+        // resolver its host was built with. `None` is the unregistered host two
+        // laws are about, over the same database as the wired ones.
+        if let Some(executors) = executors {
+            host.register_group_executors(executors)
+                .expect("a freshly connected host has no resolver yet");
+        }
         Arc::new(host) as Arc<dyn EffectHost>
     })
     .await;
@@ -1486,8 +1489,10 @@ async fn postgres_journals_a_cancelled_child_as_its_terminal_when_configured() {
             // Registration is what makes the host support groups at all: since
             // FIG-1578 a group carries envelopes, and what runs a child is the
             // resolver its host was built with.
-            host.register_group_executors(executors)
-                .expect("a freshly connected host has no resolver yet");
+            if let Some(executors) = executors {
+                host.register_group_executors(executors)
+                    .expect("a freshly connected host has no resolver yet");
+            }
             Arc::new(host) as Arc<dyn EffectHost>
         },
     )

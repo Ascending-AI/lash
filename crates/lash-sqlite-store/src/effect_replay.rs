@@ -115,8 +115,14 @@ impl SqliteEffectHost {
     /// that owns those runners — rather than discovered from whatever session is
     /// in scope, and every path resolves through it, the open of a group, a
     /// retry, and the loser drain alike. Until it is called this host answers
-    /// [`RuntimeEffectController::supports_effect_groups`] `false` and refuses an
-    /// open rather than journaling a group nothing can run.
+    /// [`RuntimeEffectController::supports_effect_groups`] `false` and refuses
+    /// every group method with
+    /// [`EffectGroupUnsupported`](lash_core::RuntimeErrorCode::EffectGroupUnsupported)
+    /// rather than journaling a group nothing can run.
+    ///
+    /// Registering the *same* resolver again is a no-op; registering a different
+    /// one is refused, and the refusal is decided by the write itself, so two
+    /// threads racing here cannot both believe they won.
     pub fn register_group_executors(
         &self,
         executors: Arc<dyn GroupExecutors>,

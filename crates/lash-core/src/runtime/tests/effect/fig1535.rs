@@ -209,11 +209,25 @@ async fn the_inline_host_satisfies_the_shared_effect_group_suite() {
     //
     // The suite hands its own resolver to every factory call, and registering it
     // is what makes this host support groups at all.
+    //
+    // `None` asks for the unregistered host two laws are about, and on this tier
+    // that has to be a *fresh* controller: registration is a property of the
+    // substrate here rather than of a connection to it, so "the same substrate,
+    // unwired" does not exist. The cost is only to the second of those laws — "a
+    // refused open journals nothing" — and it is no cost at all, because this
+    // tier journals nothing to leave behind.
     let controller = Arc::new(InlineRuntimeEffectController::default());
     let host: std::sync::Arc<dyn crate::EffectHost> = std::sync::Arc::new(
         crate::InlineEffectHost::new(Arc::clone(&controller) as Arc<dyn RuntimeEffectController>),
     );
     crate::testing::conformance::effect_group_host_conformance(move |suite_executors| {
+        let Some(suite_executors) = suite_executors else {
+            return std::sync::Arc::new(crate::InlineEffectHost::new(Arc::new(
+                InlineRuntimeEffectController::default(),
+            )
+                as Arc<dyn RuntimeEffectController>))
+                as std::sync::Arc<dyn crate::EffectHost>;
+        };
         controller
             .register_group_executors(suite_executors)
             .expect("the suite registers one resolver on this host");

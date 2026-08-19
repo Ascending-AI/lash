@@ -727,8 +727,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::await_next_settlement"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:299#.await_next_settlement(&mut handle, CancellationToken::new())"
-assertion = "examples/docs-snippets/src/effect_groups.rs:306#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
+usage = "examples/docs-snippets/src/effect_groups.rs:304#.await_next_settlement(&mut handle, CancellationToken::new())"
+assertion = "examples/docs-snippets/src/effect_groups.rs:311#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::close_effect_group"
@@ -737,8 +737,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::close_effect_group"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:454#.close_effect_group(handle, LoserDisposition::Cancel)"
-assertion = "examples/docs-snippets/src/effect_groups.rs:461#assert_eq!(loser_completions.load(Ordering::SeqCst), 0);"
+usage = "examples/docs-snippets/src/effect_groups.rs:459#.close_effect_group(handle, LoserDisposition::Cancel)"
+assertion = "examples/docs-snippets/src/effect_groups.rs:466#assert_eq!(loser_completions.load(Ordering::SeqCst), 0);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::open_effect_group"
@@ -747,8 +747,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::open_effect_group"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:290#        .open_effect_group(executors.stage(group, vec![slow, settles_now()]))"
-assertion = "examples/docs-snippets/src/effect_groups.rs:293#assert_eq!(handle.group_key(), group_key);"
+usage = "examples/docs-snippets/src/effect_groups.rs:295#        .open_effect_group(executors.stage(group, vec![slow, settles_now()]))"
+assertion = "examples/docs-snippets/src/effect_groups.rs:298#assert_eq!(handle.group_key(), group_key);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::supports_effect_groups"
@@ -757,8 +757,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::supports_effect_groups"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:705#assert!(implementing.supports_effect_groups());"
-assertion = "examples/docs-snippets/src/effect_groups.rs:705#assert!(implementing.supports_effect_groups());"
+usage = "examples/docs-snippets/src/effect_groups.rs:710#assert!(implementing.supports_effect_groups());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:710#assert!(implementing.supports_effect_groups());"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectEnvelope::group"
@@ -767,8 +767,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectEnvelope::group"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:245#assert!(child(\"docs:race:0\", 0).group.is_none());"
-assertion = "examples/docs-snippets/src/effect_groups.rs:245#assert!(child(\"docs:race:0\", 0).group.is_none());"
+usage = "examples/docs-snippets/src/effect_groups.rs:246#assert!(child(\"docs:race:0\", 0).group.is_none());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:246#assert!(child(\"docs:race:0\", 0).group.is_none());"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectEnvelope::in_effect_group"
@@ -777,7 +777,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectEnvelope::in_effect_group"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:221#let mispositioned = child(\"docs:race:0\", 0).in_effect_group("
+usage = "examples/docs-snippets/src/effect_groups.rs:222#let mispositioned = child(\"docs:race:0\", 0).in_effect_group("
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::EffectGroupUnsupported"
@@ -786,8 +786,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::EffectGroupUnsupported"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:696#assert_eq!(refused_await.code, RuntimeErrorCode::EffectGroupUnsupported);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:696#assert_eq!(refused_await.code, RuntimeErrorCode::EffectGroupUnsupported);"
+usage = "examples/docs-snippets/src/effect_groups.rs:701#assert_eq!(refused_await.code, RuntimeErrorCode::EffectGroupUnsupported);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:701#assert_eq!(refused_await.code, RuntimeErrorCode::EffectGroupUnsupported);"
 
 [[api]]
 symbol = "lash::TurnCancelOriginHint"
@@ -1326,7 +1326,7 @@ kind = "function"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_conformance.rs:79#    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable("
+usage = "crates/lash-sqlite-store/tests/effect_group_conformance.rs:83#    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable("
 reason = "The durable half of the cancellation contract, kept out of the all-host suite because the inline tier journals nothing; both store test suites call it, and only test code does, which is what the `testing` feature exists for (FIG-1564)."
 
 [[api]]
@@ -1335,7 +1335,7 @@ kind = "function"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_conformance.rs:64#    lash_core::testing::conformance::effect_group_host_conformance(|executors| {"
+usage = "crates/lash-sqlite-store/tests/effect_group_conformance.rs:68#    lash_core::testing::conformance::effect_group_host_conformance(|executors| {"
 reason = "The durable effect-group contract is one matrix three hosts answer, so the suite has to live where all three can reach it; only test code calls it, which is what the `testing` feature exists for (FIG-1564)."
 
 [[api]]
@@ -1344,7 +1344,7 @@ kind = "function"
 availability = "all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2010#lash_core::testing::conformance::process_registry_pagination(registry).await;"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2015#lash_core::testing::conformance::process_registry_pagination(registry).await;"
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -46003,7 +46003,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::InlineRuntimeEffectController::register_group_executors"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:170#        .register_group_executors(Arc::clone(&executors) as Arc<dyn GroupExecutors>)"
+usage = "examples/docs-snippets/src/effect_groups.rs:171#        .register_group_executors(Arc::clone(&executors) as Arc<dyn GroupExecutors>)"
 
 [[api]]
 symbol = "lash::runtime::LashRuntime"
@@ -73759,7 +73759,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:943#            request.group_key.as_deref(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:949#            request.group_key.as_deref(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome"
@@ -73767,7 +73767,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:600#                    return Ok(EffectFinalizeOutcome::FenceMoved);"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:606#                    return Ok(EffectFinalizeOutcome::FenceMoved);"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome::FenceMoved"
@@ -73775,7 +73775,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:600#                    return Ok(EffectFinalizeOutcome::FenceMoved);"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:606#                    return Ok(EffectFinalizeOutcome::FenceMoved);"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome::Written"
@@ -73783,7 +73783,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:637#                Ok(EffectFinalizeOutcome::Written {"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:643#                Ok(EffectFinalizeOutcome::Written {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectFinalizeOutcome::Written::settlement_seq"
@@ -73791,7 +73791,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:610#                        settlement_seq: None,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:616#                        settlement_seq: None,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupColumn"
@@ -73799,7 +73799,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:677#                        record.wake.column(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:683#                        record.wake.column(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupColumn::column"
@@ -73807,7 +73807,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:677#                        record.wake.column(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:683#                        record.wake.column(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord"
@@ -73815,7 +73815,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:658#        record: &EffectGroupRecord,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:664#        record: &EffectGroupRecord,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::group_key"
@@ -73823,7 +73823,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:674#                        record.group_key.as_str(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:680#                        record.group_key.as_str(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::scope_id"
@@ -73831,7 +73831,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:675#                        record.scope_id.as_str(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:681#                        record.scope_id.as_str(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::session_id"
@@ -73839,7 +73839,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:676#                        record.session_id.as_deref(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:682#                        record.session_id.as_deref(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::wake"
@@ -73847,7 +73847,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:677#                        record.wake.column(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:683#                        record.wake.column(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::loser_disposition"
@@ -73855,7 +73855,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:678#                        record.loser_disposition.column(),"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:684#                        record.loser_disposition.column(),"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::children"
@@ -73863,7 +73863,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:679#                        record.children as i64,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:685#                        record.children as i64,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::created_at_ms"
@@ -73871,7 +73871,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:680#                        record.created_at_ms as i64,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:686#                        record.created_at_ms as i64,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupRecord::from_group"
@@ -74287,7 +74287,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:656#    async fn open_group("
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:662#    async fn open_group("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::read_group_settlement"
@@ -74295,7 +74295,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:750#    async fn read_group_settlement("
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:756#    async fn read_group_settlement("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement"
@@ -74303,7 +74303,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:770#                            Ok(StoredGroupSettlement {"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:776#                            Ok(StoredGroupSettlement {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::open_effect_group"
@@ -74311,7 +74311,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:412#        Box::pin(self.inner.open_effect_group(&self.scope, group)).await"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:418#        Box::pin(self.inner.open_effect_group(&self.scope, group)).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::await_next_group_settlement"
@@ -74319,7 +74319,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:420#        Box::pin(self.inner.await_next_group_settlement(handle, cancel)).await"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:426#        Box::pin(self.inner.await_next_group_settlement(handle, cancel)).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::close_effect_group"
@@ -74327,7 +74327,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:428#        Box::pin(self.inner.close_effect_group(&handle, disposition)).await"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:434#        Box::pin(self.inner.close_effect_group(&handle, disposition)).await"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::register_group_executors"
@@ -74335,7 +74335,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:124#        self.inner.register_group_executors(executors)"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:130#        self.inner.register_group_executors(executors)"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayDriver::supports_effect_groups"
@@ -74343,7 +74343,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:400#        self.inner.supports_effect_groups()"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:406#        self.inner.supports_effect_groups()"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectReplayPersistence::read_unsettled_group_children"
@@ -74351,7 +74351,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:716#    async fn read_unsettled_group_children("
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:722#    async fn read_unsettled_group_children("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::UnsettledGroupChild"
@@ -74359,7 +74359,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:731#                        Ok(UnsettledGroupChild {"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:737#                        Ok(UnsettledGroupChild {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::UnsettledGroupChild::scope_id"
@@ -74367,7 +74367,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:732#                            scope_id: row.get(0)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:738#                            scope_id: row.get(0)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::UnsettledGroupChild::replay_key"
@@ -74375,7 +74375,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:733#                            replay_key: row.get(1)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:739#                            replay_key: row.get(1)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::UnsettledGroupChild::envelope_json"
@@ -74383,7 +74383,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:734#                            envelope_json: row.get(2)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:740#                            envelope_json: row.get(2)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::UnsettledGroupChild::status"
@@ -74391,7 +74391,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:735#                            status: row.get(3)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:741#                            status: row.get(3)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::UnsettledGroupChild::lease_expires_at_ms"
@@ -74399,7 +74399,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:736#                            lease_expires_at_ms: u64_from_sql("
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:742#                            lease_expires_at_ms: u64_from_sql("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::EffectGroupColumn::from_column"
@@ -74407,7 +74407,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:1014#    EffectGroupColumn::from_column(value).ok_or_else(|| {"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:1020#    EffectGroupColumn::from_column(value).ok_or_else(|| {"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::sequence"
@@ -74415,7 +74415,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:771#                                sequence: u64_from_sql("
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:777#                                sequence: u64_from_sql("
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::replay_key"
@@ -74423,7 +74423,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:776#                                replay_key: row.get(1)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:782#                                replay_key: row.get(1)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::status"
@@ -74431,7 +74431,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:777#                                status: row.get(2)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:783#                                status: row.get(2)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::outcome_json"
@@ -74439,7 +74439,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:778#                                outcome_json: row.get(3)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:784#                                outcome_json: row.get(3)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredGroupSettlement::error_json"
@@ -74447,7 +74447,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:779#                                error_json: row.get(4)?,"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:785#                                error_json: row.get(4)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::effect_replay_driver::StoredEffectRow"
@@ -74809,7 +74809,7 @@ kind = "constant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2299#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2304#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2). Renamed from NON_TERMINAL_PROCESS_STATUS_LABELS in FIG-1383: live is no longer the complement of terminal."
 
 [[api]]
@@ -84930,8 +84930,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:421#assert_eq!(code, RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:421#assert_eq!(code, RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled);"
+usage = "examples/docs-snippets/src/effect_groups.rs:426#assert_eq!(code, RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:426#assert_eq!(code, RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::RuntimeEffectGroupDrainDeferred"
@@ -84949,8 +84949,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RuntimeEffectGroupShape"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:240#assert_eq!(refused.code, RuntimeErrorCode::RuntimeEffectGroupShape);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:240#assert_eq!(refused.code, RuntimeErrorCode::RuntimeEffectGroupShape);"
+usage = "examples/docs-snippets/src/effect_groups.rs:241#assert_eq!(refused.code, RuntimeErrorCode::RuntimeEffectGroupShape);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:241#assert_eq!(refused.code, RuntimeErrorCode::RuntimeEffectGroupShape);"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle"
@@ -84959,8 +84959,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:370#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
-assertion = "examples/docs-snippets/src/effect_groups.rs:370#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
+usage = "examples/docs-snippets/src/effect_groups.rs:375#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:375#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle::advance"
@@ -84969,8 +84969,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle::advance"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:647#handle.advance()?;"
-assertion = "examples/docs-snippets/src/effect_groups.rs:729#assert!(handle.is_exhausted());"
+usage = "examples/docs-snippets/src/effect_groups.rs:652#handle.advance()?;"
+assertion = "examples/docs-snippets/src/effect_groups.rs:734#assert!(handle.is_exhausted());"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle::children"
@@ -84979,8 +84979,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle::children"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:294#assert_eq!(handle.children(), 2);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:294#assert_eq!(handle.children(), 2);"
+usage = "examples/docs-snippets/src/effect_groups.rs:299#assert_eq!(handle.children(), 2);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:299#assert_eq!(handle.children(), 2);"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle::consumed"
@@ -84989,8 +84989,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle::consumed"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:295#assert_eq!(handle.consumed(), 0);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:295#assert_eq!(handle.consumed(), 0);"
+usage = "examples/docs-snippets/src/effect_groups.rs:300#assert_eq!(handle.consumed(), 0);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:300#assert_eq!(handle.consumed(), 0);"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle::group_key"
@@ -84999,8 +84999,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle::group_key"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:293#assert_eq!(handle.group_key(), group_key);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:293#assert_eq!(handle.group_key(), group_key);"
+usage = "examples/docs-snippets/src/effect_groups.rs:298#assert_eq!(handle.group_key(), group_key);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:298#assert_eq!(handle.group_key(), group_key);"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle::is_exhausted"
@@ -85009,8 +85009,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle::is_exhausted"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:296#assert!(!handle.is_exhausted());"
-assertion = "examples/docs-snippets/src/effect_groups.rs:296#assert!(!handle.is_exhausted());"
+usage = "examples/docs-snippets/src/effect_groups.rs:301#assert!(!handle.is_exhausted());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:301#assert!(!handle.is_exhausted());"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle::new"
@@ -85019,7 +85019,7 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:681#let mut handle = EffectGroupHandle::new(&group);"
+usage = "examples/docs-snippets/src/effect_groups.rs:686#let mut handle = EffectGroupHandle::new(&group);"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupHandle::restored"
@@ -85028,8 +85028,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupHandle::restored"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:370#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
-assertion = "examples/docs-snippets/src/effect_groups.rs:370#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
+usage = "examples/docs-snippets/src/effect_groups.rs:375#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:375#assert!(EffectGroupHandle::restored(group_key, 2, 2).is_ok());"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupMembership"
@@ -85038,7 +85038,7 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupMembership"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:209#let second: &EffectGroupMembership = group.children()[1]"
+usage = "examples/docs-snippets/src/effect_groups.rs:210#let second: &EffectGroupMembership = group.children()[1]"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupMembership::group_key"
@@ -85047,8 +85047,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupMembership::group_key"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:213#assert_eq!(second.group_key, \"docs:race:0\");"
-assertion = "examples/docs-snippets/src/effect_groups.rs:213#assert_eq!(second.group_key, \"docs:race:0\");"
+usage = "examples/docs-snippets/src/effect_groups.rs:214#assert_eq!(second.group_key, \"docs:race:0\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:214#assert_eq!(second.group_key, \"docs:race:0\");"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupMembership::loser_disposition"
@@ -85057,8 +85057,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupMembership::loser_disposition"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:216#assert_eq!(second.loser_disposition, LoserDisposition::RunToCompletion);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:216#assert_eq!(second.loser_disposition, LoserDisposition::RunToCompletion);"
+usage = "examples/docs-snippets/src/effect_groups.rs:217#assert_eq!(second.loser_disposition, LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:217#assert_eq!(second.loser_disposition, LoserDisposition::RunToCompletion);"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupMembership::position"
@@ -85067,8 +85067,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupMembership::position"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:214#assert_eq!(second.position, 1, \"a child's position is its index\");"
-assertion = "examples/docs-snippets/src/effect_groups.rs:214#assert_eq!(second.position, 1, \"a child's position is its index\");"
+usage = "examples/docs-snippets/src/effect_groups.rs:215#assert_eq!(second.position, 1, \"a child's position is its index\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:215#assert_eq!(second.position, 1, \"a child's position is its index\");"
 
 [[api]]
 symbol = "lash::runtime::EffectGroupMembership::wake"
@@ -85077,8 +85077,8 @@ availability = "default+all-features"
 aliases = ["lash_core::EffectGroupMembership::wake"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:215#assert_eq!(second.wake, GroupWakePolicy::First);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:215#assert_eq!(second.wake, GroupWakePolicy::First);"
+usage = "examples/docs-snippets/src/effect_groups.rs:216#assert_eq!(second.wake, GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:216#assert_eq!(second.wake, GroupWakePolicy::First);"
 
 [[api]]
 symbol = "lash::runtime::GroupExecutors"
@@ -85096,7 +85096,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupExecutors::executor_for"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:601#            let Some(executor) = self.executors.executor_for(child) else {"
+usage = "examples/docs-snippets/src/effect_groups.rs:606#            let Some(executor) = self.executors.executor_for(child) else {"
 
 [[api]]
 symbol = "lash::runtime::GroupSettlement"
@@ -85105,7 +85105,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupSettlement"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:298#let settlement: GroupSettlement = controller"
+usage = "examples/docs-snippets/src/effect_groups.rs:303#let settlement: GroupSettlement = controller"
 
 [[api]]
 symbol = "lash::runtime::GroupSettlement::outcome"
@@ -85114,8 +85114,8 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupSettlement::outcome"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:307#assert!(settlement.outcome.is_ok());"
-assertion = "examples/docs-snippets/src/effect_groups.rs:307#assert!(settlement.outcome.is_ok());"
+usage = "examples/docs-snippets/src/effect_groups.rs:312#assert!(settlement.outcome.is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:312#assert!(settlement.outcome.is_ok());"
 
 [[api]]
 symbol = "lash::runtime::GroupSettlement::position"
@@ -85124,8 +85124,8 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupSettlement::position"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:503#assert_eq!(first.position, 0);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:503#assert_eq!(first.position, 0);"
+usage = "examples/docs-snippets/src/effect_groups.rs:508#assert_eq!(first.position, 0);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:508#assert_eq!(first.position, 0);"
 
 [[api]]
 symbol = "lash::runtime::GroupSettlement::sequence"
@@ -85134,8 +85134,8 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupSettlement::sequence"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:306#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
-assertion = "examples/docs-snippets/src/effect_groups.rs:306#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
+usage = "examples/docs-snippets/src/effect_groups.rs:311#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:311#assert_eq!(settlement.sequence, 1, \"the winner holds the first rank\");"
 
 [[api]]
 symbol = "lash::runtime::GroupWakePolicy"
@@ -85144,8 +85144,8 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupWakePolicy"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.wake(), GroupWakePolicy::First);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.wake(), GroupWakePolicy::First);"
+usage = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.wake(), GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.wake(), GroupWakePolicy::First);"
 
 [[api]]
 symbol = "lash::runtime::GroupWakePolicy::All"
@@ -85154,8 +85154,8 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupWakePolicy::All"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:250#assert_eq!(all.wake(), GroupWakePolicy::All);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:250#assert_eq!(all.wake(), GroupWakePolicy::All);"
+usage = "examples/docs-snippets/src/effect_groups.rs:251#assert_eq!(all.wake(), GroupWakePolicy::All);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:251#assert_eq!(all.wake(), GroupWakePolicy::All);"
 
 [[api]]
 symbol = "lash::runtime::GroupWakePolicy::First"
@@ -85164,8 +85164,8 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupWakePolicy::First"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.wake(), GroupWakePolicy::First);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.wake(), GroupWakePolicy::First);"
+usage = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.wake(), GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.wake(), GroupWakePolicy::First);"
 
 [[api]]
 symbol = "lash::runtime::GroupWakePolicy::FirstSuccess"
@@ -85174,8 +85174,8 @@ availability = "default+all-features"
 aliases = ["lash_core::GroupWakePolicy::FirstSuccess"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:493#assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:493#assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);"
+usage = "examples/docs-snippets/src/effect_groups.rs:498#assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:498#assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);"
 
 [[api]]
 symbol = "lash::runtime::LoserDisposition"
@@ -85184,8 +85184,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LoserDisposition"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+usage = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
 
 [[api]]
 symbol = "lash::runtime::LoserDisposition::Cancel"
@@ -85194,8 +85194,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LoserDisposition::Cancel"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:251#assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:251#assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);"
+usage = "examples/docs-snippets/src/effect_groups.rs:252#assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:252#assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);"
 
 [[api]]
 symbol = "lash::runtime::LoserDisposition::RunToCompletion"
@@ -85204,8 +85204,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LoserDisposition::RunToCompletion"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+usage = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
 
 [[api]]
 symbol = "lash::runtime::LoserDisposition::resolve_close"
@@ -85214,8 +85214,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LoserDisposition::resolve_close"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:468#assert!(LoserDisposition::resolve_close(run, cancel).is_ok());"
-assertion = "examples/docs-snippets/src/effect_groups.rs:468#assert!(LoserDisposition::resolve_close(run, cancel).is_ok());"
+usage = "examples/docs-snippets/src/effect_groups.rs:473#assert!(LoserDisposition::resolve_close(run, cancel).is_ok());"
+assertion = "examples/docs-snippets/src/effect_groups.rs:473#assert!(LoserDisposition::resolve_close(run, cancel).is_ok());"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectGroup"
@@ -85233,8 +85233,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectGroup::children"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.children().len(), 2);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.children().len(), 2);"
+usage = "examples/docs-snippets/src/effect_groups.rs:205#assert_eq!(group.children().len(), 2);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:205#assert_eq!(group.children().len(), 2);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectGroup::group_key"
@@ -85243,8 +85243,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectGroup::group_key"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:201#assert_eq!(group.group_key(), \"docs:race:0\");"
-assertion = "examples/docs-snippets/src/effect_groups.rs:201#assert_eq!(group.group_key(), \"docs:race:0\");"
+usage = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.group_key(), \"docs:race:0\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.group_key(), \"docs:race:0\");"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectGroup::invocation"
@@ -85253,8 +85253,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectGroup::invocation"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:207#assert_eq!(group.invocation().replay_key(), Some(\"docs:race:0:group\"));"
-assertion = "examples/docs-snippets/src/effect_groups.rs:207#assert_eq!(group.invocation().replay_key(), Some(\"docs:race:0:group\"));"
+usage = "examples/docs-snippets/src/effect_groups.rs:208#assert_eq!(group.invocation().replay_key(), Some(\"docs:race:0:group\"));"
+assertion = "examples/docs-snippets/src/effect_groups.rs:208#assert_eq!(group.invocation().replay_key(), Some(\"docs:race:0:group\"));"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectGroup::loser_disposition"
@@ -85263,8 +85263,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectGroup::loser_disposition"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+usage = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:204#assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectGroup::try_new"
@@ -85274,7 +85274,7 @@ aliases = ["lash_core::RuntimeEffectGroup::try_new"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/effect_groups.rs:72#RuntimeEffectGroup::try_new("
-assertion = "examples/docs-snippets/src/effect_groups.rs:201#assert_eq!(group.group_key(), \"docs:race:0\");"
+assertion = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.group_key(), \"docs:race:0\");"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectGroup::wake"
@@ -85283,8 +85283,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectGroup::wake"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.wake(), GroupWakePolicy::First);"
-assertion = "examples/docs-snippets/src/effect_groups.rs:202#assert_eq!(group.wake(), GroupWakePolicy::First);"
+usage = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.wake(), GroupWakePolicy::First);"
+assertion = "examples/docs-snippets/src/effect_groups.rs:203#assert_eq!(group.wake(), GroupWakePolicy::First);"
 
 [[api]]
 symbol = "lash_core::store::queued_work::PendingSessionWorkOrdering"
@@ -89622,7 +89622,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/effect_replay.rs:132#    pub fn group_drain(&self) -> Arc<dyn EffectGroupDrain> {"
+usage = "crates/lash-sqlite-store/src/effect_replay.rs:138#    pub fn group_drain(&self) -> Arc<dyn EffectGroupDrain> {"
 
 [[api]]
 symbol = "lash_core::EffectGroupDrain::drain_group"

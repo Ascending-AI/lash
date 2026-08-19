@@ -159,7 +159,8 @@ impl GroupExecutors for DocsGroupExecutors {
 /// Registration is what makes the controller support groups at all: a host with
 /// no resolver has nowhere to get the `'static` executors a child needs in order
 /// to outlive its caller, so it answers `supports_effect_groups` `false` and
-/// refuses an open rather than journaling a group nothing can run.
+/// refuses every group method with `EffectGroupUnsupported` rather than
+/// journaling a group nothing can run.
 fn inline_host() -> (
     lash::runtime::InlineRuntimeEffectController,
     Arc<DocsGroupExecutors>,
@@ -251,17 +252,21 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
     assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);
 
     // Where a child's runner comes from is not part of the group: a group is
-    // envelopes. A host with no registered resolver has no runner for any of
-    // them, so it refuses the open outright rather than journaling children
-    // nothing can run — a child with no runner is a routing fact, not an
-    // outcome.
+    // envelopes. A host with no registered resolver does not do groups at all —
+    // it answers the capability flag `false` and refuses the whole surface with
+    // the capability code, which is the same answer deployment validation gets
+    // before anything is opened. A *child* this host cannot route is the other
+    // fact and carries the routing refusal instead.
     let unwired = lash::runtime::InlineRuntimeEffectController::default();
     assert!(!unwired.supports_effect_groups());
-    let unroutable = unwired
+    let unwired_refusal = unwired
         .open_effect_group(all)
         .await
-        .expect_err("a host with no resolver cannot run any child of this group");
-    assert_eq!(unroutable.code, RuntimeErrorCode::RuntimeEffectGroupShape);
+        .expect_err("a host with no resolver does not implement groups");
+    assert_eq!(
+        unwired_refusal.code,
+        RuntimeErrorCode::EffectGroupUnsupported
+    );
 }
 
 /// The `race` shape: open two arms, resume on the first settlement, leave the

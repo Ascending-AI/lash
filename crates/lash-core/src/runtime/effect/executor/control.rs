@@ -1065,6 +1065,15 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// a journaled child's envelope through cannot run one child, let alone
     /// outlive a caller with it. The capability and the resolver are one
     /// question and must not drift apart.
+    ///
+    /// It is therefore a **per-deployment fact established at wiring time**:
+    /// before the resolver is registered a host answers `false`, and deployment
+    /// validation reads it after wiring. The coherence law that follows binds the
+    /// whole surface — a host answering `false` refuses `open_effect_group`,
+    /// `await_next_settlement` and `close_effect_group` alike with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// because a `false` flag beside a method that works, or an `Ok` from a host
+    /// that says it has no groups, is the drift this relation exists to catch.
     fn supports_effect_groups(&self) -> bool {
         false
     }
@@ -1092,16 +1101,24 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// contract exists to break — it just lives at the resolver now rather than
     /// at the argument.
     ///
-    /// **A child with no runner is a routing fact, not an outcome.** An
-    /// in-process host resolves *all* of the group's children before it journals
-    /// anything, and refuses the whole open with a typed
+    /// **A child with no runner is a routing fact, not an outcome.** On a
+    /// **first open** an in-process host resolves *all* of the group's children
+    /// before it dispatches any of them, and refuses the whole open with a typed
     /// [`RuntimeEffectGroupShape`](crate::RuntimeErrorCode::RuntimeEffectGroupShape)
-    /// error if any child resolves to `None`. Journaling first and discovering
+    /// error if any child resolves to `None`. Dispatching first and discovering
     /// the gap later would leave a recorded group holding a child that can never
     /// settle, so every rank above it is unservable and the caller waits forever
     /// — the same failure the retired executor-vec arity check existed to
     /// prevent, now unrepresentable by absence because there is no vec to
-    /// misalign.
+    /// misalign. On a **reopen** the same miss is not an open refusal: the group
+    /// is already journaled, and a deployment that has lost one child's runner is
+    /// the drain's `NoExecutor` case (ADR 0065).
+    ///
+    /// A host with **no registered resolver at all** is a different fact from a
+    /// child it cannot route, and answers differently: it reports
+    /// `supports_effect_groups() == false` and refuses all three methods with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// which is the flag's coherence law. Such a refusal journals nothing.
     ///
     /// A reopen must be fenced on group shape: a host that finds a recorded group
     /// under this key whose child count or wake rule differs from the group
