@@ -80,7 +80,8 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 - Backend truth: `GET /api/state`; `POST /api/turn`; `POST /api/turn/cancel`; `GET /api/work`.
   `/api/state.active_turns` exposes routing addresses so reload can restore the Stop
   affordance. The cancel response contains `accepted` and `cancellations[]`, each with
-  `address`, gate `outcome`, and authoritative `terminal`.
+  `address`, gate `outcome`, and authoritative `terminal`. The cancel route is
+  `POST /api/turn/cancel` (`POST /api/turn/stop` is not a route).
 - Disk evidence: `<data-dir>/session-id` and `<data-dir>/active-turns.json` retain routing
   state across the web-process restart; `trace.jsonl` records
   `agent_workbench.turn.cancel_requested` with the same evidence.

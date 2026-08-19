@@ -78,7 +78,8 @@ per session. Require identical derived display names, `subscription_key` values,
 types, and source configurations, but distinct `subscription_id` values. Same-name,
 same-key registrations across the two tabs are correct: the owner scope participates in
 `subscription_id`, so neither equality is evidence of a leak. Require each registrations
-rail to render the common name and trigger key with only its own truncated id. Screenshot
+rail to render the common target and trigger source (e.g. `mirror_job ← button.pressed`),
+the common trigger key, the registration alias, and only its own truncated id. Screenshot
 `01-trigger-a.png` and `01-trigger-b.png`.
 
 Perform the first leak hunt now: A's `subscription_id` must be absent from B's API/DOM,

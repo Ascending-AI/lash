@@ -83,7 +83,8 @@ an account filter so the personal emission is a no-op. Wait for the turn to sett
 Poll `GET /api/triggers` until it returns exactly one enabled registration named
 `lifecycle-forwarder`. Save `02-registration.json`, record its `subscription_key`,
 `subscription_id`, source type, and source configuration, and require the registrations
-rail to show the same name with a **disable** action. Screenshot `02-registered.png`.
+rail to show the target and source (e.g. `lifecycle_forwarder ← mail.received`) with the
+registration alias in its details/title and a **disable** action. Screenshot `02-registered.png`.
 
 ## Phase 2 — Fire repeatedly and gate the loop-breaker
 
