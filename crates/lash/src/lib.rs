@@ -51,7 +51,7 @@ pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub use crate::turn::{
     QueuedTurnBuilder, SelectedQueuedTurnBuilder, SelectedQueuedWorkBatchSatisfaction,
-    SelectedQueuedWorkDrainOutcome, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult,
+    SelectedQueuedWorkDrainOutcome, TurnActivityFanout, TurnBuilder, TurnOutput, TurnReport,
     TurnStream, message_role, message_text,
 };
 pub use lash_core::runtime::ExternalCompletionError;
@@ -59,22 +59,22 @@ pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, DrainMode,
     DrainModePolicy, EffectReplayOwnership, FrameKey, InputItem, LlmCallRecord, ModelLimits,
     ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, QueuedDrainCandidate, QueuedDrainPolicy,
     QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, QueuedWorkClaimRefusal,
     Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionStartPoint,
     TurnActivity, TurnActivityId, TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent,
-    TurnInput, TurnInputApplication, facade_support::ExecutionSummary,
-    facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
+    TurnInput, TurnInputApplication, facade_support::GenerationOverlay,
+    facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
     facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
     facade_support::TurnAttach, facade_support::TurnCancelOutcome,
     facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
-    facade_support::TurnCancellationEvidence, facade_support::TurnFinish,
-    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
-    facade_support::WorkerSlotKind, facade_support::WorkerSlotPermit,
-    facade_support::WorkerSlotSupplier,
+    facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
+    facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
+    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
+    facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
+    facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -87,15 +87,16 @@ pub use tokio_util::sync::CancellationToken;
 pub mod prelude {
     pub use crate::{
         AdvancedToolAdmin, CoreTriggerAdmin, DeploymentDrainStatus, EmbedError, EnqueueTurnBuilder,
-        ExecutionSummary, InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits,
-        ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession,
-        ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
+        InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits, ModelLimitsError,
+        ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession, ParkedSession,
+        PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
         PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder, SessionCommand,
         SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest,
         SessionDeleteReport, SessionSpec, SessionStartPoint, SessionTriggerAdmin, ToolAdmin,
         TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
-        TurnBuilder, TurnCause, TurnEvent, TurnFinish, TurnInput, TurnInputAcceptanceReceipt,
-        TurnOutcome, TurnOutput, TurnResult, TurnStop, TurnStream, message_role, message_text,
+        TurnBuilder, TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStop, TurnStream,
+        message_role, message_text,
     };
 }
 
@@ -109,7 +110,7 @@ pub mod observe {
         SessionObservationStream, SessionObservationStreamItem,
     };
     pub use lash_core::{
-        LiveReplayGapReason, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult,
+        LiveReplayGapReason, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
         SessionCursor, SessionObservationEvent, SessionObservationEventPayload,
         SessionProcessEventKind, SessionQueueEventKind, SessionRevision,
         facade_support::InMemoryLiveReplayStore, facade_support::InMemoryLiveReplayStoreConfig,
@@ -137,15 +138,15 @@ pub mod triggers {
     pub use lash_core::facade_support::InMemoryTriggerStore;
     pub use lash_core::{
         LashSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
-        TriggerDeliveryReservationStatus, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
-        TriggerIngressResult, TriggerInputBinding, TriggerMutationDisposition,
-        TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceRecord,
-        TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope,
-        TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
-        facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReport,
+        TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
+        TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
+        TriggerOccurrenceFilter, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
+        TriggerOperationError, TriggerOwnerScope, TriggerSubscriptionDraft,
+        TriggerSubscriptionFilter, TriggerSubscriptionRecord,
+        facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReceipt,
         facade_support::TriggerEmitReport, facade_support::TriggerEvent,
         facade_support::TriggerEventType, facade_support::TriggerRegistration,
-        facade_support::TriggerTargetSummary, facade_support::empty_trigger_source_key,
+        facade_support::TriggerTarget, facade_support::empty_trigger_source_key,
     };
     /// The fenced, receipted verb vocabulary for subscription mutation,
     /// including [`TriggerCommand::Enable`] for re-enable, executed by
@@ -161,7 +162,7 @@ pub mod tools {
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
     /// Turn flow control constructed by tool implementors; attach it with
-    /// [`ToolCallOutput::with_control`] or [`ToolResult::with_control`].
+    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
     pub use lash_core::ToolControl;
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
@@ -169,11 +170,11 @@ pub mod tools {
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement, PendingCompletion,
         PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent, StartProcessIntent,
-        TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy, ToolAttemptResult, ToolCall,
-        ToolCallOutput, ToolCallRecord, ToolContext, ToolContract, ToolDefinition,
+        TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy, ToolAttemptOutcome,
+        ToolCall, ToolCallOutput, ToolCallRecord, ToolContext, ToolContract, ToolDefinition,
         ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntent,
-        ToolIntentExecutionOutcome, ToolIntents, ToolManifest, ToolOutputContract, ToolPrepareCall,
-        ToolPrepareContext, ToolProvider, ToolResult, ToolResultDone, ToolRetryDisposition,
+        ToolIntentExecutionOutcome, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
+        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRetryStatus,
         ToolValue, facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
     };
     pub use lash_core::{
@@ -205,7 +206,7 @@ pub mod tools {
 
 pub mod direct {
     pub use lash_core::llm::types::{
-        AttachmentSource, GenerationDisposition, GenerationOptionDisposition, GenerationOptions,
+        AttachmentSource, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
         LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
         NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope, ProviderReplayDrop,
         ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
@@ -213,7 +214,7 @@ pub mod direct {
     pub use lash_core::{
         facade_support::DirectCompletion, facade_support::DirectJsonSchema,
         facade_support::DirectLlmClient, facade_support::DirectLlmCompletion,
-        facade_support::DirectLlmError, facade_support::DirectLlmResult,
+        facade_support::DirectLlmError, facade_support::DirectLlmOutcome,
         facade_support::DirectMessage, facade_support::DirectOutputSpec,
         facade_support::DirectPart, facade_support::DirectRequest, facade_support::DirectRole,
     };
@@ -230,7 +231,7 @@ pub mod persistence {
     pub use lash_core::CheckpointKind;
     pub use lash_core::facade_support::FileAttachmentStore;
     pub use lash_core::runtime::{
-        DeliveryPolicy, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemorySessionStore,
+        DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest, InMemorySessionStore,
         InMemorySessionStoreFactory, PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics,
         PendingTurnInputDraft, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
         QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy,
@@ -252,7 +253,7 @@ pub mod persistence {
     pub use lash_core::store::{
         CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent,
         HydratedSessionCheckpoint, OperationId, OrphanedTurnInputScope, PersistedSessionRead,
-        RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
+        RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp, RuntimeUsageDelta,
         RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHead, SessionHeadMeta,
         SessionHeadPayload, commit_runtime_state_verified, load_persisted_session_state,
     };
@@ -308,7 +309,7 @@ pub mod plugins {
     /// ([`SessionGraphService`]), plus the append request/result vocabulary.
     /// Both are runtime-implemented — a plugin receives one, never writes one.
     pub use lash_core::{
-        AppendSessionNodesRequest, AppendSessionNodesResult, SessionAppendNode,
+        AppendSessionNodesOutcome, AppendSessionNodesRequest, SessionAppendNode,
         SessionGraphService, SessionStateService,
     };
     pub use lash_core::{
@@ -378,8 +379,8 @@ pub mod remote {
         pub use lash_remote_protocol::llm::{
             RemoteAttachmentRef, RemoteAttachmentSource, RemoteAttachmentTypeMetadata,
             RemoteAttemptOutcome, RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
-            RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationDisposition,
-            RemoteGenerationOptionDisposition, RemoteGenerationOptions, RemoteLlmCallRecord,
+            RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
+            RemoteGenerationOptions, RemoteGenerationReceipt, RemoteLlmCallRecord,
             RemoteLlmContentBlock, RemoteLlmMessage, RemoteLlmOutputPart, RemoteLlmOutputSpec,
             RemoteLlmRequest, RemoteLlmRequestScope, RemoteLlmResponse, RemoteLlmRole,
             RemoteLlmTerminalReason, RemoteLlmToolChoice, RemoteLlmToolSpec, RemoteModelCapability,
@@ -410,22 +411,22 @@ pub mod remote {
     pub mod processes {
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
-            RemoteObservedProcess, RemoteObservedProcessEvent, RemotePersistProcessEnvRequest,
-            RemotePersistProcessEnvResult, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
-            RemoteProcessAwaitResult, RemoteProcessCancelRequest, RemoteProcessCancelResult,
+            RemoteObservedProcess, RemoteObservedProcessEvent, RemotePersistProcessEnvReceipt,
+            RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
+            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
             RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
             RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
             RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,
-            RemoteProcessInput, RemoteProcessListFilter, RemoteProcessListResponse,
-            RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessOriginator,
-            RemoteProcessPluginOptions, RemoteProcessProvenance, RemoteProcessSignalRequest,
-            RemoteProcessSignalResult, RemoteProcessStartRequest, RemoteProcessStartResult,
-            RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
-            RemoteProcessSummary, RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
+            RemoteProcessHandleView, RemoteProcessInput, RemoteProcessListFilter,
+            RemoteProcessListResponse, RemoteProcessModelLimits, RemoteProcessModelSpec,
+            RemoteProcessOriginator, RemoteProcessPluginOptions, RemoteProcessProvenance,
+            RemoteProcessSignalReceipt, RemoteProcessSignalRequest, RemoteProcessStartReceipt,
+            RemoteProcessStartRequest, RemoteProcessStarted, RemoteProcessStatus,
+            RemoteProcessStatusFilter, RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
             RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-            RemoteProcessWorkSnapshot, RemoteRecoveryDisposition, RemoteRuntimeEffectKind,
+            RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeEffectKind,
             RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
             RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
         };
@@ -455,13 +456,13 @@ pub mod remote {
     /// registrations.
     pub mod triggers {
         pub use lash_remote_protocol::triggers::{
-            RemoteTriggerDeliveryEmitOutcome, RemoteTriggerDeliveryEmitReport,
+            RemoteTriggerDeliveryEmitOutcome, RemoteTriggerDeliveryEmitReceipt,
             RemoteTriggerEmitReport, RemoteTriggerInputBinding, RemoteTriggerInputTemplate,
             RemoteTriggerListSubscriptionsResponse, RemoteTriggerOccurrenceRecord,
-            RemoteTriggerOccurrenceRequest, RemoteTriggerRegisterSubscriptionRequest,
-            RemoteTriggerRegisterSubscriptionResult, RemoteTriggerRegistration,
+            RemoteTriggerOccurrenceRequest, RemoteTriggerRegisterSubscriptionReceipt,
+            RemoteTriggerRegisterSubscriptionRequest, RemoteTriggerRegistration,
             RemoteTriggerSubscriptionDraft, RemoteTriggerSubscriptionFilter,
-            RemoteTriggerSubscriptionRecord, RemoteTriggerTargetSummary,
+            RemoteTriggerSubscriptionRecord, RemoteTriggerTarget,
         };
     }
 
@@ -486,9 +487,9 @@ pub mod remote {
     pub mod turn_result {
         pub use lash_remote_protocol::turn_result::{
             RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef,
-            RemoteExecutionSummary, RemoteToolCallOutcome, RemoteToolCallSummary, RemoteTurnFinish,
-            RemoteTurnIssue, RemoteTurnOutcome, RemoteTurnResult, RemoteTurnStatus, RemoteTurnStop,
-            RemoteTurnUsageSummary,
+            RemoteToolCallOutcome, RemoteToolCallRecord, RemoteTurnExecutionMetrics,
+            RemoteTurnFinish, RemoteTurnIssue, RemoteTurnOutcome, RemoteTurnReport,
+            RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
         };
     }
 
@@ -505,17 +506,17 @@ pub mod process {
     pub use crate::process_admin::Processes;
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, ProcessAwaitOutput,
-        ProcessCancelSummary, ProcessChangeCursor, ProcessCompletionAuthority,
-        ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest,
-        ProcessEventAppendResult, ProcessEventType, ProcessExecutionContext,
-        ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleSummary,
+        ProcessCancelReceipt, ProcessChangeCursor, ProcessCompletionAuthority,
+        ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEventAppendRequest, ProcessEventType, ProcessExecutionContext,
+        ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView,
         ProcessIdentity, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
-        ProcessLeaseCompletion, ProcessListFilter, ProcessListMode, ProcessLiveReferenceSummary,
+        ProcessLeaseCompletion, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
         ProcessObserverBy, ProcessOpScope, ProcessOriginator, ProcessProvenance,
         ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessService,
         ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
         ProcessStatus, ProcessStatusFilter, ProcessWakeDelivery, ProcessWakeSpec,
-        ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryDisposition,
+        ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryContract,
         SessionScope, facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
         facade_support::ObservedWorkItem, facade_support::ProcessAdmissionDeferred,
         facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
@@ -556,7 +557,7 @@ pub mod durability {
     /// fail the request instead of the turn.
     pub use lash_core::facade_support::ensure_durable_effect_input;
     pub use lash_core::facade_support::{
-        ProcessDrainDeferred, ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
+        ProcessDrainDeferred, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
     };
     pub use lash_core::{
         EffectHost, facade_support::DurableProcessWorker,
@@ -580,14 +581,14 @@ pub mod runtime {
         DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient, EffectGroupHandle,
         EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
         GroupSettlement, GroupWakePolicy, InlineRuntimeEffectController, LashRuntime,
-        LlmAttachmentSpec, LlmRequestSpec, LoserDisposition, NoopEventSink, NoopTurnActivitySink,
+        LlmAttachmentSpec, LlmRequestSpec, LoserPolicy, NoopEventSink, NoopTurnActivitySink,
         ProcessCommand, ProcessEffectOutcome, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,
         QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
         QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
-        QueuedWorkWakeContended, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
+        QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
         RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
         RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-        RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary, RuntimeEnvironmentBuilder,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
         RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeObservation,
         RuntimeScope, RuntimeTurnPhase, RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
     };

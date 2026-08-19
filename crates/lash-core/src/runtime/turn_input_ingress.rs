@@ -377,7 +377,7 @@ impl PendingTurnInputCancelOutcome {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PendingTurnInputCancelResult {
+pub struct PendingTurnInputCancelReceipt {
     pub target: PendingTurnInputCancelTarget,
     pub outcome: PendingTurnInputCancelOutcome,
 }

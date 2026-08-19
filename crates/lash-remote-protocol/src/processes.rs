@@ -395,7 +395,7 @@ impl RemoteProcessWaitState {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessSummary {
+pub struct RemoteProcessHandleView {
     #[serde(rename = "__handle__")]
     pub handle_type: String,
     pub id: String,
@@ -408,7 +408,7 @@ pub struct RemoteProcessSummary {
     pub status: RemoteProcessStatus,
 }
 
-impl RemoteProcessSummary {
+impl RemoteProcessHandleView {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "handle_type", &self.handle_type)?;
         require_non_empty(type_name, "id", &self.id)?;
@@ -425,7 +425,7 @@ impl RemoteProcessSummary {
 pub struct RemoteProcessRecord {
     pub process_id: String,
     pub input: RemoteProcessInput,
-    pub disposition: RemoteRecoveryDisposition,
+    pub disposition: RemoteRecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     pub identity: RemoteProcessIdentity,
@@ -560,7 +560,7 @@ pub struct RemoteObservedProcess {
     pub lifecycle: RemoteProcessStatus,
     pub status_label: String,
     pub terminal: bool,
-    pub disposition: RemoteRecoveryDisposition,
+    pub disposition: RemoteRecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub created_at_ms: u64,
@@ -761,7 +761,7 @@ impl RemoteProcessEventSemantics {
 /// Wire mirror of the producer-declared recovery contract (ADR 0019).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RemoteRecoveryDisposition {
+pub enum RemoteRecoveryContract {
     Rerunnable,
     OwnerBound,
     ExternallyOwned,
@@ -1142,15 +1142,15 @@ impl RemotePersistProcessEnvRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemotePersistProcessEnvResult {
+pub struct RemotePersistProcessEnvReceipt {
     pub protocol_version: u32,
     pub env_ref: RemoteProcessExecutionEnvRef,
 }
 
-impl RemotePersistProcessEnvResult {
+impl RemotePersistProcessEnvReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
-        self.env_ref.validate("RemotePersistProcessEnvResult")
+        self.env_ref.validate("RemotePersistProcessEnvReceipt")
     }
 }
 
@@ -1196,7 +1196,7 @@ pub struct RemoteProcessStartRequest {
     pub protocol_version: u32,
     pub id: String,
     pub input: RemoteProcessInput,
-    pub disposition: RemoteRecoveryDisposition,
+    pub disposition: RemoteRecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1258,19 +1258,19 @@ impl RemoteProcessStartRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessStartResult {
+pub struct RemoteProcessStartReceipt {
     pub protocol_version: u32,
     pub record: RemoteProcessRecord,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<RemoteProcessSummary>,
+    pub summary: Option<RemoteProcessHandleView>,
 }
 
-impl RemoteProcessStartResult {
+impl RemoteProcessStartReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
-        self.record.validate("RemoteProcessStartResult")?;
+        self.record.validate("RemoteProcessStartReceipt")?;
         if let Some(summary) = &self.summary {
-            summary.validate("RemoteProcessStartResult")?;
+            summary.validate("RemoteProcessStartReceipt")?;
         }
         Ok(())
     }
@@ -1380,7 +1380,7 @@ impl RemoteProcessCancelRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessCancelResult {
+pub struct RemoteProcessCancelReceipt {
     pub protocol_version: u32,
     pub process_id: String,
     pub status: RemoteProcessStatus,
@@ -1388,12 +1388,12 @@ pub struct RemoteProcessCancelResult {
     pub record: Option<RemoteProcessRecord>,
 }
 
-impl RemoteProcessCancelResult {
+impl RemoteProcessCancelReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
-        require_non_empty("RemoteProcessCancelResult", "process_id", &self.process_id)?;
+        require_non_empty("RemoteProcessCancelReceipt", "process_id", &self.process_id)?;
         if let Some(record) = &self.record {
-            record.validate("RemoteProcessCancelResult")?;
+            record.validate("RemoteProcessCancelReceipt")?;
         }
         Ok(())
     }
@@ -1429,15 +1429,15 @@ impl RemoteProcessSignalRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessSignalResult {
+pub struct RemoteProcessSignalReceipt {
     pub protocol_version: u32,
     pub event: RemoteProcessEvent,
 }
 
-impl RemoteProcessSignalResult {
+impl RemoteProcessSignalReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
-        self.event.validate("RemoteProcessSignalResult")
+        self.event.validate("RemoteProcessSignalReceipt")
     }
 }
 
@@ -1455,17 +1455,17 @@ impl RemoteProcessAwaitRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessAwaitResult {
+pub struct RemoteProcessAwaitOutcome {
     pub protocol_version: u32,
     pub process_id: String,
     pub output: RemoteProcessAwaitOutput,
 }
 
-impl RemoteProcessAwaitResult {
+impl RemoteProcessAwaitOutcome {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
-        require_non_empty("RemoteProcessAwaitResult", "process_id", &self.process_id)?;
-        self.output.validate("RemoteProcessAwaitResult")
+        require_non_empty("RemoteProcessAwaitOutcome", "process_id", &self.process_id)?;
+        self.output.validate("RemoteProcessAwaitOutcome")
     }
 }
 

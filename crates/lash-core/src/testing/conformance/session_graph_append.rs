@@ -259,12 +259,12 @@ async fn abandoned_branch_scenario(
 
 async fn assert_appended_onto_current_leaf(
     store: &Arc<dyn crate::RuntimePersistence>,
-    result: crate::AppendSessionNodesResult,
+    result: crate::AppendSessionNodesOutcome,
     observed_base: &str,
     advanced_leaf: &str,
     entry_point: &str,
 ) -> String {
-    let crate::AppendSessionNodesResult::Appended {
+    let crate::AppendSessionNodesOutcome::Appended {
         node_ids,
         leaf_node_id,
     } = result
@@ -333,12 +333,12 @@ async fn assert_appended_onto_current_leaf(
 
 async fn assert_stale_branch_changed_nothing(
     store: &Arc<dyn crate::RuntimePersistence>,
-    result: crate::AppendSessionNodesResult,
+    result: crate::AppendSessionNodesOutcome,
     abandoned_base: &str,
     before: crate::store::PersistedSessionRead,
     entry_point: &str,
 ) {
-    let crate::AppendSessionNodesResult::StaleBranch { required_node_id } = result else {
+    let crate::AppendSessionNodesOutcome::StaleBranch { required_node_id } = result else {
         panic!("{entry_point}: an abandoned base must be refused: {result:?}");
     };
     assert_eq!(
@@ -480,11 +480,11 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
         .await
         .expect("old-format fixture receipt replay");
     let (
-        crate::AppendSessionNodesResult::Appended {
+        crate::AppendSessionNodesOutcome::Appended {
             node_ids: first_node_ids,
             leaf_node_id: first_leaf,
         },
-        crate::AppendSessionNodesResult::Appended {
+        crate::AppendSessionNodesOutcome::Appended {
             node_ids: replay_node_ids,
             leaf_node_id: replay_leaf,
         },
@@ -519,7 +519,7 @@ async fn append_conformance_plugin_node(
         .await
         .expect("seed the append conformance graph");
     match result {
-        crate::AppendSessionNodesResult::Appended { node_ids, .. } => {
+        crate::AppendSessionNodesOutcome::Appended { node_ids, .. } => {
             node_ids.into_iter().next().expect("seeded node id")
         }
         other => panic!("an unfenced append must succeed: {other:?}"),

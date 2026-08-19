@@ -914,7 +914,7 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    lash_core::RecoveryDisposition::ExternallyOwned,
+                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                 ))
                 .await?;

@@ -27,7 +27,7 @@ use crate::reasoning::ReasoningWireIntent;
 use crate::responses_shared as shared;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
-    GenerationDisposition, GenerationOptionDisposition, LlmOutputSpec, LlmRequest,
+    GenerationOptionOutcome, GenerationReceipt, LlmOutputSpec, LlmRequest,
 };
 use lash_core::provider::{
     CacheRetention, Provider, ProviderComponents, ProviderFactory, ProviderOptions,
@@ -200,16 +200,14 @@ impl CodexProvider {
     /// of them. The Responses dialect Codex speaks has no seed field, and this
     /// adapter sends neither a temperature nor a token cap, for the same
     /// reason it leaves the rest of the sampling surface to the endpoint.
-    fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationDisposition {
-        GenerationDisposition {
-            output_token_cap: GenerationOptionDisposition::unsupported(
+    fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationReceipt {
+        GenerationReceipt {
+            output_token_cap: GenerationOptionOutcome::unsupported(
                 req.generation.output_token_cap.is_some(),
             ),
-            temperature: GenerationOptionDisposition::unsupported(
-                req.generation.temperature.is_some(),
-            ),
-            seed: GenerationOptionDisposition::unsupported(req.generation.seed.is_some()),
-            stop_sequences: GenerationOptionDisposition::unsupported(
+            temperature: GenerationOptionOutcome::unsupported(req.generation.temperature.is_some()),
+            seed: GenerationOptionOutcome::unsupported(req.generation.seed.is_some()),
+            stop_sequences: GenerationOptionOutcome::unsupported(
                 !req.generation.stop_sequences.is_empty(),
             ),
             cache: lash_llm_transport::cache_intent_disposition(req, Some(body)),

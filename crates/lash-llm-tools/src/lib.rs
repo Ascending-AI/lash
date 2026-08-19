@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::plugin::{PluginError, PluginFactory, PluginSessionContext};
 use lash_core::{
-    AttemptContext, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    AttemptContext, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
     facade_support::DirectJsonSchema, facade_support::DirectMessage,
     facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
     facade_support::DirectRole, facade_support::PluginSpec, facade_support::PluginSpecFactory,
@@ -161,7 +161,7 @@ impl LlmToolsProvider {
 
 #[async_trait]
 impl StaticToolExecute for LlmToolsProvider {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let result = match call.name {
             "llm_query" => self.llm_query(call.args, call.context).await,
             _ => Err(format!("Unknown tool: {}", call.name)),
@@ -311,10 +311,10 @@ fn required_string(args: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("missing required parameter: {key}"))
 }
 
-fn finalise_tool_result(result: Result<Value, String>) -> ToolResult {
+fn finalise_tool_result(result: Result<Value, String>) -> ToolOutcome {
     match result {
-        Ok(value) => ToolResult::ok(value),
-        Err(err) => ToolResult::err(json!(err)),
+        Ok(value) => ToolOutcome::ok(value),
+        Err(err) => ToolOutcome::err(json!(err)),
     }
 }
 

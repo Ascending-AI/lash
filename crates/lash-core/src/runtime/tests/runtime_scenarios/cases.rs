@@ -508,15 +508,15 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
             .then(|| Arc::new(runtime_scenario_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         panic!("the runtime scenario provider must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let session_id = call.context.session_id().to_string();
-        crate::ToolAttemptResult::done(
-            crate::ToolResultDone::ok(serde_json::json!({"provider": "done"})),
+        crate::ToolAttemptOutcome::done(
+            crate::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
             crate::ToolIntents::v1(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     session_id: session_id.clone(),
@@ -605,7 +605,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             )
             .with_extra_event_types([

@@ -9,7 +9,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
 };
 use lash_core::{
-    AttemptContext, ToolCall, ToolContract, ToolId, ToolManifest, ToolProvider, ToolResult,
+    AttemptContext, ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolProvider,
 };
 
 use crate::config::McpServerConfig;
@@ -208,7 +208,7 @@ impl McpDeferredToolProvider {
     fn validate_execution_binding(
         tool_id: &ToolId,
         binding: &serde_json::Value,
-    ) -> Result<(), ToolResult> {
+    ) -> Result<(), ToolOutcome> {
         let valid = binding
             .get("kind")
             .and_then(serde_json::Value::as_str)
@@ -220,7 +220,7 @@ impl McpDeferredToolProvider {
         if valid {
             return Ok(());
         }
-        Err(ToolResult::err_fmt(format_args!(
+        Err(ToolOutcome::err_fmt(format_args!(
             "MCP deferred execution for tool id `{tool_id}` requires an execution binding with kind `mcp` and matching `tool_id`"
         )))
     }
@@ -244,7 +244,7 @@ impl ToolProvider for McpToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         self.pool
             .call_tool(call.name, call.args, call.context)
             .await
@@ -274,8 +274,8 @@ impl ToolProvider for McpDeferredToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        ToolResult::err_fmt(format_args!(
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::err_fmt(format_args!(
             "MCP tool `{}` is not a resident catalog member; execute it through a deferred grant",
             call.name
         ))
@@ -286,14 +286,14 @@ impl ToolProvider for McpDeferredToolProvider {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         if let Err(result) =
             Self::validate_execution_binding(tool_id, context.tool_execution_binding())
         {
             return result;
         }
         let Some(definition) = self.definition_by_id(tool_id) else {
-            return ToolResult::err_fmt(format_args!("Unknown MCP tool id: {tool_id}"));
+            return ToolOutcome::err_fmt(format_args!("Unknown MCP tool id: {tool_id}"));
         };
         self.pool
             .call_tool(&definition.manifest.name, args, context)

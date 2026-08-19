@@ -382,7 +382,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryDisposition::ExternallyOwned,
+            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
         ))
         .await
@@ -488,7 +488,7 @@ async fn commit_with_lease(
     store: &Arc<dyn crate::RuntimePersistence>,
     commit: crate::RuntimeCommit,
     owner_id: &str,
-) -> crate::store::RuntimeCommitResult {
+) -> crate::store::RuntimeCommitReceipt {
     let owner = crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"));
     let lease = store
         .try_claim_session_execution_lease(

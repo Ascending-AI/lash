@@ -999,11 +999,11 @@ mod tests {
         let pinned_disposition = AnthropicProvider::generation_disposition(&req, &body);
         assert_eq!(
             pinned_disposition.temperature,
-            lash_core::llm::types::GenerationOptionDisposition::OmittedSamplingPinned
+            lash_core::llm::types::GenerationOptionOutcome::OmittedSamplingPinned
         );
         assert_eq!(
             pinned_disposition.seed,
-            lash_core::llm::types::GenerationOptionDisposition::OmittedUnsupported,
+            lash_core::llm::types::GenerationOptionOutcome::OmittedUnsupported,
             "Anthropic Messages has no seed field"
         );
         assert!(!pinned_disposition.nothing_omitted());
@@ -1014,7 +1014,7 @@ mod tests {
         assert_eq!(configurable["temperature"], json!(0.25));
         assert_eq!(
             AnthropicProvider::generation_disposition(&req, &configurable).temperature,
-            lash_core::llm::types::GenerationOptionDisposition::Applied
+            lash_core::llm::types::GenerationOptionOutcome::Applied
         );
     }
 
@@ -1226,7 +1226,7 @@ mod tests {
         );
         assert_eq!(
             AnthropicProvider::generation_disposition(&req, &body).cache,
-            lash_core::GenerationOptionDisposition::Applied,
+            lash_core::GenerationOptionOutcome::Applied,
         );
     }
 
@@ -1303,7 +1303,7 @@ mod tests {
         assert_eq!(body["stop_sequences"], json!(["</lashlang>"]));
         assert_eq!(
             AnthropicProvider::generation_disposition(&req, &body).stop_sequences,
-            lash_core::GenerationOptionDisposition::Applied
+            lash_core::GenerationOptionOutcome::Applied
         );
     }
 

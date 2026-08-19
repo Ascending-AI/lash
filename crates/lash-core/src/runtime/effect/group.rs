@@ -76,7 +76,7 @@ pub struct EffectGroupMembership {
     /// per-group durable fact, and on engine tiers that keep no group row the
     /// child hash is the only fence that can refuse a replay whose disposition
     /// drifted.
-    pub loser_disposition: LoserDisposition,
+    pub loser_disposition: LoserPolicy,
 }
 
 /// A group of independently journaled child effects opened at the effect-host
@@ -99,7 +99,7 @@ pub struct RuntimeEffectGroup {
     group_key: String,
     children: Vec<RuntimeEffectEnvelope>,
     wake: GroupWakePolicy,
-    loser_disposition: LoserDisposition,
+    loser_disposition: LoserPolicy,
 }
 
 impl RuntimeEffectGroup {
@@ -141,7 +141,7 @@ impl RuntimeEffectGroup {
     ///
     /// `loser_disposition` is declared **here, at open**, rather than chosen at
     /// close. It is statically known when the group is built — `all` and
-    /// `allSettled` mean [`LoserDisposition::RunToCompletion`], and `race`/`any`
+    /// `allSettled` mean [`LoserPolicy::RunToCompletion`], and `race`/`any`
     /// take whichever the ratified race semantics specify — and it is the same
     /// class of per-group durable fact as [`wake`](Self::wake). Leaving it as a
     /// close-time argument meant a caller that crashed after opening and before
@@ -153,7 +153,7 @@ impl RuntimeEffectGroup {
         group_key: impl Into<String>,
         children: Vec<RuntimeEffectEnvelope>,
         wake: GroupWakePolicy,
-        loser_disposition: LoserDisposition,
+        loser_disposition: LoserPolicy,
     ) -> Result<Self, RuntimeEffectControllerError> {
         let group_key = group_key.into();
         if group_key.trim().is_empty() {
@@ -264,7 +264,7 @@ impl RuntimeEffectGroup {
     /// group row so an abandoned group is drained under the caller's declared
     /// intent rather than a policy the drain path invented.
     #[must_use]
-    pub fn loser_disposition(&self) -> LoserDisposition {
+    pub fn loser_disposition(&self) -> LoserPolicy {
         self.loser_disposition
     }
 }
@@ -506,7 +506,7 @@ impl std::fmt::Debug for GroupSettlement {
 /// What becomes of a group's remaining children once the caller stops consuming.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LoserDisposition {
+pub enum LoserPolicy {
     /// Losers run to completion under host ownership and journal their own
     /// settlements. Node-exact for `race`/`any`: a losing promise keeps running
     /// and its side effects still happen.
@@ -516,7 +516,7 @@ pub enum LoserDisposition {
     Cancel,
 }
 
-impl LoserDisposition {
+impl LoserPolicy {
     /// Resolves the disposition a close should apply, from the one the group
     /// `declared` at open and the one the closing caller `requested`.
     ///
@@ -805,7 +805,7 @@ mod effect_group_contract_tests {
                 "scope:group:batch:0",
                 0,
                 GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             )
             .stable_hash()
             .expect("hashes");
@@ -815,7 +815,7 @@ mod effect_group_contract_tests {
                 "scope:group:batch:0",
                 0,
                 GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             )
             .stable_hash()
             .expect("hashes");
@@ -825,7 +825,7 @@ mod effect_group_contract_tests {
                 "scope:group:batch:0",
                 1,
                 GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             )
             .stable_hash()
             .expect("hashes");
@@ -834,7 +834,7 @@ mod effect_group_contract_tests {
                 "scope:group:batch:1",
                 0,
                 GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             )
             .stable_hash()
             .expect("hashes");
@@ -884,7 +884,7 @@ mod effect_group_contract_tests {
             "scope:group:batch:2",
             3,
             GroupWakePolicy::FirstSuccess,
-            LoserDisposition::Cancel,
+            LoserPolicy::Cancel,
         );
         let encoded = serde_json::to_string(&envelope).expect("envelope encodes");
         let decoded =
@@ -978,7 +978,7 @@ mod effect_group_contract_tests {
             "scope:group:batch:0",
             Vec::new(),
             GroupWakePolicy::First,
-            LoserDisposition::RunToCompletion,
+            LoserPolicy::RunToCompletion,
         )
         .expect_err("an empty group is the only source of a zero-child handle");
         let single = EffectGroupHandle::new(&group_of(1));
@@ -1023,7 +1023,7 @@ mod effect_group_contract_tests {
                 duration_ms: position as u64 + 1,
             },
         )
-        .in_effect_group(group_key, position, wake, LoserDisposition::RunToCompletion)
+        .in_effect_group(group_key, position, wake, LoserPolicy::RunToCompletion)
     }
 
     fn group_of(children: usize) -> RuntimeEffectGroup {
@@ -1032,7 +1032,7 @@ mod effect_group_contract_tests {
             "scope:group:batch:0",
             (0..children).map(unstamped_child).collect(),
             GroupWakePolicy::First,
-            LoserDisposition::RunToCompletion,
+            LoserPolicy::RunToCompletion,
         )
         .expect("a non-empty group assembles")
     }
@@ -1057,7 +1057,7 @@ mod effect_group_contract_tests {
             "scope:group:batch:0",
             vec![unstamped_child(0), unstamped_child(1)],
             GroupWakePolicy::First,
-            LoserDisposition::RunToCompletion,
+            LoserPolicy::RunToCompletion,
         )
         .expect("a group of unstamped children assembles");
         assert_eq!(group.group_key(), "scope:group:batch:0");
@@ -1103,7 +1103,7 @@ mod effect_group_contract_tests {
                 key,
                 children,
                 GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             )
             .expect_err(&format!("a group with a {name} child must not assemble"));
             assert_eq!(
@@ -1121,7 +1121,7 @@ mod effect_group_contract_tests {
             "   ",
             vec![unstamped_child(0)],
             GroupWakePolicy::First,
-            LoserDisposition::RunToCompletion,
+            LoserPolicy::RunToCompletion,
         )
         .expect_err("a group without an identity must not assemble");
         assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeEffectGroupShape);
@@ -1133,21 +1133,21 @@ mod effect_group_contract_tests {
     /// divergence that declaring at open exists to remove.
     #[test]
     fn a_close_may_narrow_the_declared_loser_disposition_but_not_widen_it() {
-        use LoserDisposition::{Cancel, RunToCompletion};
+        use LoserPolicy::{Cancel, RunToCompletion};
         assert_eq!(
-            LoserDisposition::resolve_close(RunToCompletion, RunToCompletion).expect("same"),
+            LoserPolicy::resolve_close(RunToCompletion, RunToCompletion).expect("same"),
             RunToCompletion
         );
         assert_eq!(
-            LoserDisposition::resolve_close(Cancel, Cancel).expect("same"),
+            LoserPolicy::resolve_close(Cancel, Cancel).expect("same"),
             Cancel
         );
         assert_eq!(
-            LoserDisposition::resolve_close(RunToCompletion, Cancel)
+            LoserPolicy::resolve_close(RunToCompletion, Cancel)
                 .expect("narrowing a declared RunToCompletion to Cancel is allowed"),
             Cancel
         );
-        let error = LoserDisposition::resolve_close(Cancel, RunToCompletion)
+        let error = LoserPolicy::resolve_close(Cancel, RunToCompletion)
             .expect_err("widening a declared Cancel must be refused");
         assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeEffectGroupShape);
     }
@@ -1162,17 +1162,12 @@ mod effect_group_contract_tests {
             invocation(RuntimeEffectKind::Sleep),
             RuntimeEffectCommand::Sleep { duration_ms: 1 },
         )
-        .in_effect_group(
-            key,
-            0,
-            GroupWakePolicy::First,
-            LoserDisposition::RunToCompletion,
-        );
+        .in_effect_group(key, 0, GroupWakePolicy::First, LoserPolicy::RunToCompletion);
         let cancel = RuntimeEffectEnvelope::new(
             invocation(RuntimeEffectKind::Sleep),
             RuntimeEffectCommand::Sleep { duration_ms: 1 },
         )
-        .in_effect_group(key, 0, GroupWakePolicy::First, LoserDisposition::Cancel);
+        .in_effect_group(key, 0, GroupWakePolicy::First, LoserPolicy::Cancel);
         assert_ne!(
             run.stable_hash().expect("hashes"),
             cancel.stable_hash().expect("hashes"),
@@ -1185,7 +1180,7 @@ mod effect_group_contract_tests {
             key,
             vec![cancel],
             GroupWakePolicy::First,
-            LoserDisposition::RunToCompletion,
+            LoserPolicy::RunToCompletion,
         )
         .expect_err("a child whose disposition disagrees must not assemble");
         assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeEffectGroupShape);
@@ -1205,7 +1200,7 @@ mod effect_group_contract_tests {
             group_key: "scope:group:batch:0".to_string(),
             position: 1,
             wake: GroupWakePolicy::First,
-            loser_disposition: LoserDisposition::RunToCompletion,
+            loser_disposition: LoserPolicy::RunToCompletion,
         };
         let error = super::refuse_unhonored_group_membership(Some(&membership), "trigger")
             .expect_err("a grouped child on a membership-less path must be refused");

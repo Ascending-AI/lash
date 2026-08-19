@@ -59,11 +59,11 @@ use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, PersistedSessionRead,
-    RuntimeCommit, RuntimeCommitResult, SessionCommitStore,
+    RuntimeCommit, RuntimeCommitReceipt, SessionCommitStore,
 };
 use crate::{
     AttachmentId, CheckpointKind, GcReport, LeaseOwnerIdentity, PendingTurnInput,
-    PendingTurnInputCancelResult, PendingTurnInputCancelTarget, PendingTurnInputDraft,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionAdmission,
@@ -590,7 +590,7 @@ impl SessionCommitStore for SeamStore {
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitResult, StoreError> {
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
             settles_queue: !commit.completed_queue_claims.is_empty(),
             settles_turn_input: !commit.completed_turn_input_claims.is_empty(),
@@ -644,7 +644,7 @@ impl TurnInputStore for SeamStore {
         &self,
         session_id: &str,
         targets: &[PendingTurnInputCancelTarget],
-    ) -> Result<Vec<PendingTurnInputCancelResult>, StoreError> {
+    ) -> Result<Vec<PendingTurnInputCancelReceipt>, StoreError> {
         self.inner
             .cancel_pending_turn_inputs(session_id, targets)
             .await
@@ -1364,7 +1364,7 @@ impl crate::ToolProvider for TraceTool {
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
         (name == "trace_effect").then(|| Arc::new(trace_tool_definition().contract()))
     }
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         if let Some(marker) = &self.marker {
             use std::io::Write as _;
             let mut file = std::fs::OpenOptions::new()
@@ -1384,7 +1384,7 @@ impl crate::ToolProvider for TraceTool {
         {
             self.control.stop_here().await;
         }
-        crate::ToolResult::ok(serde_json::json!({"effect":"executed"}))
+        crate::ToolOutcome::ok(serde_json::json!({"effect":"executed"}))
     }
 }
 

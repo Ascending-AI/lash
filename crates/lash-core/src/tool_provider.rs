@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::plugin::{
     PluginError, SessionGraphService, SessionLifecycleService, SessionSnapshot, SessionStateService,
 };
-use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolResult};
+use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome};
 
 mod attachments;
 mod completion_support;
@@ -90,14 +90,14 @@ impl AttemptProcessReads {
     pub async fn list_handles_filtered(
         &self,
         filter: &crate::ProcessListFilter,
-    ) -> Result<Vec<crate::ProcessHandleSummary>, PluginError> {
+    ) -> Result<Vec<crate::ProcessHandleView>, PluginError> {
         Ok(self
             .processes
             .list_visible_for_attempt(&self.session_id, filter.list_mode())
             .await?
             .into_iter()
             .filter(|record| filter.matches_record(record))
-            .map(crate::ProcessHandleSummary::from_record)
+            .map(crate::ProcessHandleView::from_record)
             .collect())
     }
 }
@@ -870,12 +870,12 @@ impl<'run> ToolContext<'run> {
     }
 
     /// Obtain the durable completion key for this call, required before returning
-    /// [`ToolResult::Pending`](crate::ToolResult::Pending).
+    /// [`ToolOutcome::Pending`](crate::ToolOutcome::Pending).
     ///
     /// A tool that defers its outcome (waiting on a webhook, human approval, or another
     /// service) calls this, hands the returned [`AwaitEventKey`](crate::AwaitEventKey)
     /// to whatever will complete the work out-of-band, and then returns
-    /// `ToolResult::Pending(..)`. The key names the durable wait the runtime parks the
+    /// `ToolOutcome::Pending(..)`. The key names the durable wait the runtime parks the
     /// call on; the external resolver delivers the result against it later.
     ///
     /// The key is stored on the context and consumed by the dispatcher when the tool
@@ -1325,21 +1325,21 @@ pub trait ToolProvider: Send + Sync + 'static {
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
     async fn prepare_granted_tool_call(
         &self,
         grant: &ToolExecutionGrant,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         let _ = call;
-        Err(ToolResult::err_fmt(format_args!(
+        Err(ToolOutcome::err_fmt(format_args!(
             "Granted execution is unsupported for tool id `{}`",
             grant.manifest.id
         )))
     }
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult;
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome;
     /// Execute an owner-bound internal process body.
     ///
     /// This is ADR 0051's protocol and process-engine implementor class. The
@@ -1347,7 +1347,7 @@ pub trait ToolProvider: Send + Sync + 'static {
     /// down to the attempt-shaped leaf signature; durable process capabilities
     /// are exposed only to providers that explicitly override this
     /// internal-only route.
-    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolResult {
+    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolOutcome {
         let attempt_context = call.context.__attempt_context();
         self.execute(ToolCall {
             name: call.name,
@@ -1366,17 +1366,17 @@ pub trait ToolProvider: Send + Sync + 'static {
     /// Defaults to the pure [`execute`](Self::execute) body: both signatures
     /// receive the same sealed [`AttemptContext`], and this route adds only the
     /// ability to return declared intents alongside the result.
-    async fn execute_attempt(&self, call: ToolCall<'_>) -> crate::ToolAttemptResult {
-        crate::ToolAttemptResult::from_tool_result(self.execute(call).await)
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolAttemptOutcome::from_tool_result(self.execute(call).await)
     }
     async fn execute_attempt_by_id(
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &AttemptContext<'_>,
-    ) -> crate::ToolAttemptResult {
+    ) -> crate::ToolAttemptOutcome {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format!(
+            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(format!(
                 "Unknown tool id: {tool_id}"
             )));
         };
@@ -1392,9 +1392,9 @@ pub trait ToolProvider: Send + Sync + 'static {
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
         context: &AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let _ = (args, context);
-        ToolResult::err_fmt(format_args!(
+        ToolOutcome::err_fmt(format_args!(
             "Granted execution is unsupported for tool id `{}`",
             grant.manifest.id
         ))
@@ -1408,17 +1408,19 @@ pub trait ToolProvider: Send + Sync + 'static {
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
         context: &AttemptContext<'_>,
-    ) -> crate::ToolAttemptResult {
-        crate::ToolAttemptResult::from_tool_result(self.execute_granted(grant, args, context).await)
+    ) -> crate::ToolAttemptOutcome {
+        crate::ToolAttemptOutcome::from_tool_result(
+            self.execute_granted(grant, args, context).await,
+        )
     }
     async fn execute_by_id(
         &self,
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
+            return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
         };
         self.execute(ToolCall {
             name: &manifest.name,
@@ -1436,9 +1438,9 @@ pub trait ToolProvider: Send + Sync + 'static {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &InternalProcessContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return ToolResult::err_fmt(format!("Unknown tool id: {tool_id}"));
+            return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
         };
         self.execute_internal(InternalProcessToolCall {
             name: &manifest.name,

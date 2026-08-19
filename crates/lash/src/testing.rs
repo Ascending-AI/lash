@@ -268,13 +268,13 @@ finish "registered"
             (name == "rebuild_echo").then(|| Arc::new(echo_tool_definition().contract()))
         }
 
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
             let value = call
                 .args
                 .get("value")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
-            lash_core::ToolResult::ok(serde_json::json!({ "echoed": value }))
+            lash_core::ToolOutcome::ok(serde_json::json!({ "echoed": value }))
         }
     }
 
@@ -349,7 +349,7 @@ finish "registered"
             id,
             input,
             // Worker-rebuild recovery tests need the row to be re-executable.
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION_ID)),
         )
     }

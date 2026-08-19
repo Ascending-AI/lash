@@ -375,13 +375,13 @@ impl PluginSession {
         mut ctx: ToolResultHookContext,
     ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
         let mut out = Vec::new();
-        let mut effective_replacement: Option<ToolResult> = None;
+        let mut effective_replacement: Option<ToolOutcome> = None;
         for (index, registered) in self.contributions.after_tool_call_hooks.iter().enumerate() {
             let directives = (registered.hook)(ctx.clone()).await?;
             for directive in directives {
                 let replacement = match &directive {
                     PluginDirective::ShortCircuitTool { output } if output.is_success() => {
-                        Some(ToolResult::from_output(output.clone()))
+                        Some(ToolOutcome::from_output(output.clone()))
                     }
                     _ => None,
                 };

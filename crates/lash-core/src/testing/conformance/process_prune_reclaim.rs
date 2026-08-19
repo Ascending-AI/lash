@@ -217,7 +217,7 @@ async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &st
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryDisposition::ExternallyOwned,
+            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
         ))
         .await

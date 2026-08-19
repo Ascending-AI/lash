@@ -201,7 +201,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         &self,
         session_id: &str,
         targets: &[crate::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<crate::PendingTurnInputCancelResult>, crate::store::StoreError> {
+    ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
@@ -216,7 +216,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 }
                 None => crate::PendingTurnInputCancelOutcome::NotFound,
             };
-            results.push(crate::PendingTurnInputCancelResult {
+            results.push(crate::PendingTurnInputCancelReceipt {
                 target: target.clone(),
                 outcome,
             });

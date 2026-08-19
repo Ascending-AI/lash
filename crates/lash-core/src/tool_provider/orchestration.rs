@@ -1,4 +1,4 @@
-use super::{ToolContext, ToolPrepareCall, ToolResult};
+use super::{ToolContext, ToolOutcome, ToolPrepareCall};
 use crate::plugin::PluginError;
 use crate::{PreparedToolCall, ToolContract, ToolManifest};
 use std::sync::Arc;
@@ -70,7 +70,7 @@ impl<'run> OrchestrationContext<'run> {
     pub async fn start_process(
         &self,
         request: crate::ProcessStartRequest,
-    ) -> Result<crate::ProcessHandleSummary, PluginError> {
+    ) -> Result<crate::ProcessHandleView, PluginError> {
         self.context.process_admin().start(request).await
     }
 
@@ -84,7 +84,7 @@ impl<'run> OrchestrationContext<'run> {
     pub async fn cancel_process(
         &self,
         process_id: &str,
-    ) -> Result<crate::ProcessCancelSummary, PluginError> {
+    ) -> Result<crate::ProcessCancelReceipt, PluginError> {
         self.context.process_admin().cancel(process_id).await
     }
 
@@ -153,7 +153,7 @@ pub trait OrchestratingToolImplementation: Send + Sync + 'static {
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
@@ -161,7 +161,7 @@ pub trait OrchestratingToolImplementation: Send + Sync + 'static {
         &self,
         args: &serde_json::Value,
         context: &OrchestrationContext<'_>,
-    ) -> ToolResult;
+    ) -> ToolOutcome;
 }
 
 /// Opaque definition for a first-party orchestrating registration.
@@ -208,7 +208,7 @@ impl OrchestratingToolDef {
     pub(crate) async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         self.implementation.prepare_tool_call(call).await
     }
 
@@ -216,7 +216,7 @@ impl OrchestratingToolDef {
         &self,
         args: &serde_json::Value,
         context: &OrchestrationContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         self.implementation.execute(args, context).await
     }
 }

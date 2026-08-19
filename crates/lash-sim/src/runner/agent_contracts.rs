@@ -1036,7 +1036,7 @@ async fn wait_for_contract_durable_input_key(
 async fn agent_process_execution_result(
     core: &lash::LashCore,
     graph_store: &lash::tracing::TraceLashlangGraphStore,
-    result: lash::TurnResult,
+    result: lash::TurnReport,
     events: Arc<RuntimeProofRecordingEvents>,
     provider_kind: &'static str,
     expected_final_value: &Value,
@@ -1372,7 +1372,7 @@ fn agent_contract_graph_facts(
 }
 
 fn agent_failed_child_activity_facts(
-    result: &lash::TurnResult,
+    result: &lash::TurnReport,
     events: &[lash::TurnActivity],
 ) -> Value {
     let mut failed_code_block_errors = Vec::new();

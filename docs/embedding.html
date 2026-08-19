@@ -42,7 +42,7 @@
             <dt>Subagent capability boundaries</dt>
             <dd><code>Capability::build_session_request(ctx)</code> resolves a constrained <code>SessionCreateRequest</code> for the child against the parent policy. Hosts hide interactive-only tools from child surfaces through the factory's hidden-tool set (<code>with_hidden_tools</code>); at the maximum spawn depth the runtime hides <code>spawn_agent</code> itself.</dd>
             <dt>Semantic event stream</dt>
-            <dd>Identity-bearing <code>TurnActivity</code> items: assistant prose deltas, reasoning deltas, tool start/complete pairs with correlation ids, code-block start/complete, terminal <code>FinalValue</code>/<code>ToolValue</code>, per-call and rolling usage. Assistant prose deltas are live previews; the settled transcript comes from <code>TurnResult</code> / <code>SessionReadView</code> after the runtime commit.</dd>
+            <dd>Identity-bearing <code>TurnActivity</code> items: assistant prose deltas, reasoning deltas, tool start/complete pairs with correlation ids, code-block start/complete, terminal <code>FinalValue</code>/<code>ToolValue</code>, per-call and rolling usage. Assistant prose deltas are live previews; the settled transcript comes from <code>TurnReport</code> / <code>SessionReadView</code> after the runtime commit.</dd>
             <dt>Session observation</dt>
             <dd><code>ObservableSession::current_observation()</code> returns the current <code>SessionReadView</code> plus an opaque <code>SessionCursor</code>. Persistent browser or worker transports should use <code>subscribe_and_recover</code>, which is a <code>futures_util::Stream</code> that replays buffered <code>SessionObservationEvent</code>s, yields recoverable gap items, and resubscribes from <code>gap.latest_cursor</code> internally. <code>resume_from_cursor</code> is the one-shot poll alternative; <code>subscribe_from_cursor</code> is the lower-level primitive for hosts that want to handle resubscribe loops themselves. See <a href="./streaming.html#session-reconnect">Streaming and reconnect</a> for browser folding and gap recovery.</dd>
             <dt>Tracing as a first-class sink</dt>
@@ -77,8 +77,8 @@
                 <dd>The user or host payload plus per-turn prompt/plugin context. It is data, not a running turn.</dd>
                 <dt><code>TurnBuilder</code></dt>
                 <dd>An ephemeral run request created by <code>session.turn(input)</code>. It layers exact-turn cooperative control through a stable turn id and <code>TurnWorkDriver</code> (with process-local cancellation tokens retained for shutdown/provider plumbing; see <a href="./embedding-turns.html#cancellation">turns · cancellation</a>), an optional provider override, protocol turn options, prompt edits, typed plugin input, and optional durable handler effects, then drives the turn through <code>run()</code>, <code>stream_to(...)</code>, or pull-style <code>stream()</code>. The session model is selected at construction.</dd>
-                <dt><code>TurnResult</code> / <code>TurnOutput</code></dt>
-                <dd>The committed result. <code>TurnResult</code> is the terminal outcome and usage; <code>TurnOutput</code> adds the collected semantic <code>TurnActivity</code> stream for app UIs and logs.</dd>
+                <dt><code>TurnReport</code> / <code>TurnOutput</code></dt>
+                <dd>The committed result. <code>TurnReport</code> is the terminal outcome and usage; <code>TurnOutput</code> adds the collected semantic <code>TurnActivity</code> stream for app UIs and logs.</dd>
                 <dt><code>SessionObservation</code></dt>
                 <dd>The reconnect surface for hosts that observe a whole session. It is session-level and cursor-based; turn activity APIs remain local conveniences for the currently running turn. Persistent hosts should stream <code>subscribe_and_recover</code> and keep app product state separate from Lash observation rows. The host recipe lives in <a href="./streaming.html">Streaming and reconnect</a>.</dd>
               </dl>
@@ -275,7 +275,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         <div class="section" id="run-a-turn">
           <div class="section-header">
             <h2>Run A Turn</h2>
-            <p><code>TurnBuilder::run()</code> returns a <code>TurnOutput</code>: terminal <code>TurnResult</code> plus ordered <code>Vec&lt;TurnActivity&gt;</code>.</p>
+            <p><code>TurnBuilder::run()</code> returns a <code>TurnOutput</code>: terminal <code>TurnReport</code> plus ordered <code>Vec&lt;TurnActivity&gt;</code>.</p>
           </div>
           <div class="two-col">
             <article class="panel">
@@ -313,7 +313,7 @@ persist(
 )?;</code></pre>
             </article>
           </div>
-          <p>Fold <code>TurnActivity</code> directly for live UI state. At turn completion, replace the current-turn display from <code>TurnResult.state.read_view()</code>; do not append a separate final assistant event. Use <code>TurnActivity.correlation_id</code> as the stable identity for multi-phase rows: start events insert, completion events update.</p>
+          <p>Fold <code>TurnActivity</code> directly for live UI state. At turn completion, replace the current-turn display from <code>TurnReport.state.read_view()</code>; do not append a separate final assistant event. Use <code>TurnActivity.correlation_id</code> as the stable identity for multi-phase rows: start events insert, completion events update.</p>
         </div>
 
         <div class="section" id="pending-input-reconciliation">

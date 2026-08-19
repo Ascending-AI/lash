@@ -3,7 +3,7 @@ use serde_json::json;
 use super::model::{
     ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter, ProcessListMode,
     ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStatus,
-    RecoveryDisposition, SessionScope,
+    RecoveryContract, SessionScope,
 };
 
 fn record(process_id: &str, label: &str, created_at_ms: u64) -> ProcessRecord {
@@ -14,7 +14,7 @@ fn record(process_id: &str, label: &str, created_at_ms: u64) -> ProcessRecord {
                 kind: "test-engine".to_string(),
                 payload: json!({}),
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
         )
         .with_identity(ProcessIdentity::new("test-engine").with_label(Some(label)))

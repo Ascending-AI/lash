@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     PreparedToolCall, ToolCall, ToolContract, ToolExecutionGrant, ToolId, ToolManifest,
-    ToolPrepareCall, ToolProvider, ToolResult,
+    ToolOutcome, ToolPrepareCall, ToolProvider,
 };
 
 #[cfg(test)]

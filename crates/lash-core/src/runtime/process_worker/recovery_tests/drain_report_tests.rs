@@ -11,7 +11,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
     registry
         .register_process(registration_with_disposition(
             process_id,
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register owner-bound row");
@@ -41,7 +41,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+            disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ClaimLease,
                 error: "plugin session error: injected claim failure".to_string(),
             },
@@ -71,7 +71,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
     registry
         .register_process(registration_with_disposition(
             process_id,
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register owner-bound row");
@@ -101,7 +101,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+            disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::RenewLease,
                 error: "plugin session error: injected lease-renewal failure".to_string(),
             },
@@ -131,7 +131,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
     registry
         .register_process(registration_with_disposition(
             process_id,
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register owner-bound row");
@@ -161,7 +161,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+            disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ReadProcess,
                 error: "plugin session error: injected registry read failure".to_string(),
             },
@@ -191,7 +191,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
         registry
             .register_process(registration_with_disposition(
                 process_id,
-                RecoveryDisposition::OwnerBound,
+                RecoveryContract::OwnerBound,
             ))
             .await
             .expect("register owner-bound row");
@@ -225,7 +225,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
         busy.deferred,
         vec![ProcessDrainDeferred {
             process_id: "owner-bound-busy".to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::Busy,
+            disposition: ProcessRecoveryAttemptOutcome::Busy,
         }]
     );
     assert_eq!(busy.abandoned, vec!["owner-bound-absent".to_string()]);
@@ -234,7 +234,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
     registry
         .register_process(registration_with_disposition(
             absent_id,
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register read-as-absent row");
@@ -257,11 +257,11 @@ async fn drain_distinguishes_busy_and_absent_rows() {
         vec![
             ProcessDrainDeferred {
                 process_id: "owner-bound-busy".to_string(),
-                disposition: ProcessRecoveryAttemptDisposition::Busy,
+                disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
             ProcessDrainDeferred {
                 process_id: absent_id.to_string(),
-                disposition: ProcessRecoveryAttemptDisposition::Absent,
+                disposition: ProcessRecoveryAttemptOutcome::Absent,
             },
         ]
     );

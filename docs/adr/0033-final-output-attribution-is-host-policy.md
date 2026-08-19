@@ -7,7 +7,7 @@ and forcing a turn-level producing-model onto it manufactures an answer that is 
 exactly the interesting cases. We decided lash exposes execution facts at **call
 granularity** — per-call `ExecutionEvidence` (served model, response id, request id,
 reasoning tokens, finish reason) plus the per-attempt ledger, delivered as the per-call
-`LlmCallRecord` list on `TurnResult` (ADR 0032). **Lash computes no turn-level or
+`LlmCallRecord` list on `TurnReport` (ADR 0032). **Lash computes no turn-level or
 session-level model attribution** — no "the served model," no "primary model," no
 final-output provenance tag. Any higher-level view is composed by the host from the ledger
 it already holds.
@@ -35,7 +35,7 @@ honest answer may be the resolved intent or the set of contributing models, not 
 fabricated model. That decision lives with the host.
 
 Consequences: the "tagged final-output provenance" clause of ADR 0031 is withdrawn, and the
-runtime-side arc of ADR 0032 ends at ledger aggregation onto `TurnResult` plus its remote
-mirror — there is no provenance-selector step. `TurnOutput`/`TurnResult` carry no producing-
+runtime-side arc of ADR 0032 ends at ledger aggregation onto `TurnReport` plus its remote
+mirror — there is no provenance-selector step. `TurnOutput`/`TurnReport` carry no producing-
 model identity of their own (they never did); this ADR makes that a deliberate, permanent
 boundary rather than a gap to be filled.

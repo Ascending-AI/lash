@@ -6,7 +6,7 @@ use crate::support::*;
 use futures_util::Stream;
 use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
 use lash_core::runtime::{
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
     QueuedWorkClaim, TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
 };
@@ -752,7 +752,7 @@ impl LashSession {
     pub async fn cancel_pending_turn_inputs(
         &self,
         targets: impl IntoIterator<Item = PendingTurnInputCancelTarget>,
-    ) -> Result<Vec<PendingTurnInputCancelResult>> {
+    ) -> Result<Vec<PendingTurnInputCancelReceipt>> {
         let session_id = self.session_id();
         let targets = targets.into_iter().collect::<Vec<_>>();
         self.runtime
@@ -1016,11 +1016,11 @@ impl ObservableSession {
             .unwrap_or_default()
     }
 
-    pub async fn list_process_handles(&self) -> Vec<ProcessHandleSummary> {
+    pub async fn list_process_handles(&self) -> Vec<ProcessHandleView> {
         self.snapshot().list_process_handles().await
     }
 
-    pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleSummary> {
+    pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleView> {
         self.snapshot().list_all_process_handles().await
     }
 
@@ -1360,7 +1360,7 @@ mod reconcile_tests {
             .expect("append 2");
 
         let subscription = store.subscribe_after_cursor(&cursor).expect("subscribe");
-        let lash_core::LiveReplaySubscribeResult::Subscribed(sub) = subscription else {
+        let lash_core::LiveReplaySubscribeOutcome::Subscribed(sub) = subscription else {
             panic!("expected subscribed");
         };
 

@@ -644,7 +644,7 @@ pub async fn effect_controller_replay_mismatch_diagnostics(
     );
     assert_eq!(
         error.summary,
-        Some(crate::RuntimeEffectReplayMismatchSummary {
+        Some(crate::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.duration_ms".to_string()],
         }),

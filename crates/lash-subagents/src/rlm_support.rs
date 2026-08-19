@@ -2,7 +2,7 @@
 
 use lash_core::{
     CausalRef, InputItem, SessionCreateRequest, SessionSnapshot, SessionToolAccess,
-    SubagentSessionContext, ToolDefinition, ToolResult, TurnInput, facade_support::AssembledTurn,
+    SubagentSessionContext, ToolDefinition, ToolOutcome, TurnInput, facade_support::AssembledTurn,
     facade_support::SessionSpec, facade_support::TurnFinish, facade_support::TurnOutcome,
     facade_support::TurnStop,
 };
@@ -245,8 +245,8 @@ fn submit_error_output_schema() -> Value {
     })
 }
 
-pub(crate) fn submit_error_tool_result(args: &Value) -> ToolResult {
-    ToolResult::ok(args.clone()).with_control(lash_core::ToolControl::Fail {
+pub(crate) fn submit_error_tool_result(args: &Value) -> ToolOutcome {
+    ToolOutcome::ok(args.clone()).with_control(lash_core::ToolControl::Fail {
         failure: lash_core::ToolFailure::tool(
             lash_core::ToolFailureClass::Execution,
             "subagent_submit_error",
@@ -289,11 +289,11 @@ pub(crate) fn task_result_value(turn: &AssembledTurn) -> Value {
     json!(turn.assistant_output.raw_text.trim().to_string())
 }
 
-/// Wrap an `Ok`/`Err` result as a `ToolResult`. Used by both providers'
+/// Wrap an `Ok`/`Err` result as a `ToolOutcome`. Used by both providers'
 /// `execute` so error encoding stays identical.
-pub(crate) fn finalise_tool_result(result: Result<Value, String>) -> ToolResult {
+pub(crate) fn finalise_tool_result(result: Result<Value, String>) -> ToolOutcome {
     match result {
-        Ok(value) => ToolResult::ok(value),
-        Err(err) => ToolResult::err(json!(err)),
+        Ok(value) => ToolOutcome::ok(value),
+        Err(err) => ToolOutcome::err(json!(err)),
     }
 }

@@ -210,10 +210,7 @@ async fn same_owner_key_definition_is_idempotent(store: Arc<dyn crate::TriggerSt
     assert_eq!(first.incarnation, second.incarnation);
     assert_eq!(first.revision, 1);
     assert_eq!(second.revision, 1);
-    assert_eq!(
-        second.disposition,
-        crate::TriggerMutationDisposition::Unchanged
-    );
+    assert_eq!(second.disposition, crate::TriggerMutationOutcome::Unchanged);
     let rows = store
         .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
         .await
@@ -385,10 +382,7 @@ async fn mutation_receipts_follow_retention_cutoff(store: Arc<dyn crate::Trigger
     let key = "receipt-retention-key";
     let command = register_command("session-a", sample_draft("session-a", key, "v1", "worker"));
     let created = mutate(&store, "receipt-retention-register", command.clone()).await;
-    assert_eq!(
-        created.disposition,
-        crate::TriggerMutationDisposition::Created
-    );
+    assert_eq!(created.disposition, crate::TriggerMutationOutcome::Created);
     assert_eq!(
         store.prune_mutation_receipts(u64::MAX).await.unwrap(),
         1,
@@ -397,7 +391,7 @@ async fn mutation_receipts_follow_retention_cutoff(store: Arc<dyn crate::Trigger
     let reevaluated = mutate(&store, "receipt-retention-register", command).await;
     assert_eq!(
         reevaluated.disposition,
-        crate::TriggerMutationDisposition::Unchanged,
+        crate::TriggerMutationOutcome::Unchanged,
         "after retention, the operation is evaluated against current state"
     );
 }
@@ -429,7 +423,7 @@ async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::Trig
     assert_eq!(receipts[0].owner_scope, owner("prune-owner"));
     assert_eq!(
         receipts[0].disposition,
-        crate::TriggerMutationDisposition::Deleted
+        crate::TriggerMutationOutcome::Deleted
     );
 
     let replay = execute(&store, "explicit-prune", command)
@@ -609,7 +603,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     assert_eq!(disabled.revision, 2);
     assert_eq!(
         disabled.disposition,
-        crate::TriggerMutationDisposition::Disabled
+        crate::TriggerMutationOutcome::Disabled
     );
     assert!(
         store
@@ -668,7 +662,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     .await;
     assert_eq!(
         reenabled.disposition,
-        crate::TriggerMutationDisposition::Enabled
+        crate::TriggerMutationOutcome::Enabled
     );
     assert_eq!(reenabled.revision, 3);
     assert!(reenabled.enabled);
@@ -942,7 +936,7 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
     );
     assert_eq!(
         replay.reservations[0].reservation_status,
-        crate::TriggerDeliveryReservationStatus::AlreadyReserved
+        crate::TriggerDeliveryReservationOutcome::AlreadyReserved
     );
 }
 
@@ -995,7 +989,7 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
         alpha_id > gamma_id,
         "fixture must oppose hash order so canonical-order coverage cannot pass accidentally"
     );
-    let keys = |ingress: &crate::TriggerIngressResult| {
+    let keys = |ingress: &crate::TriggerIngressReceipt| {
         ingress
             .reservations
             .iter()

@@ -49,7 +49,7 @@ impl DurableProcessWorker {
                 .await?;
             let next = page.continuation;
             for record in page.records {
-                if record.disposition != RecoveryDisposition::OwnerBound {
+                if record.disposition != RecoveryContract::OwnerBound {
                     continue;
                 }
                 let Some(first_started) = record.first_started.as_ref() else {
@@ -63,16 +63,16 @@ impl DurableProcessWorker {
                     RecoveryCompletionDisposition::Committed => abandoned.push(record.id),
                     RecoveryCompletionDisposition::Busy => deferred.push(ProcessDrainDeferred {
                         process_id: record.id,
-                        disposition: ProcessRecoveryAttemptDisposition::Busy,
+                        disposition: ProcessRecoveryAttemptOutcome::Busy,
                     }),
                     RecoveryCompletionDisposition::Absent => deferred.push(ProcessDrainDeferred {
                         process_id: record.id,
-                        disposition: ProcessRecoveryAttemptDisposition::Absent,
+                        disposition: ProcessRecoveryAttemptOutcome::Absent,
                     }),
                     RecoveryCompletionDisposition::AlreadyApplied(terminal_status) => {
                         deferred.push(ProcessDrainDeferred {
                             process_id: record.id,
-                            disposition: ProcessRecoveryAttemptDisposition::AlreadyApplied {
+                            disposition: ProcessRecoveryAttemptOutcome::AlreadyApplied {
                                 terminal_status,
                             },
                         });
@@ -80,7 +80,7 @@ impl DurableProcessWorker {
                     RecoveryCompletionDisposition::SettledByPeer(terminal_status) => {
                         deferred.push(ProcessDrainDeferred {
                             process_id: record.id,
-                            disposition: ProcessRecoveryAttemptDisposition::SettledByPeer {
+                            disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
                                 terminal_status,
                             },
                         });
@@ -88,7 +88,7 @@ impl DurableProcessWorker {
                     RecoveryCompletionDisposition::LeaseLost(operation) => {
                         deferred.push(ProcessDrainDeferred {
                             process_id: record.id,
-                            disposition: ProcessRecoveryAttemptDisposition::LeaseLost { operation },
+                            disposition: ProcessRecoveryAttemptOutcome::LeaseLost { operation },
                         });
                     }
                     RecoveryCompletionDisposition::BackendError(error) => {

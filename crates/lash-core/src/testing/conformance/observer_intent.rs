@@ -16,7 +16,7 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryDisposition::ExternallyOwned,
+            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
         ))
         .await

@@ -377,7 +377,7 @@ impl SqliteProcessRegistry {
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core::WakeDeliveryConfig,
-    ) -> Result<(ProcessEventAppendResult, bool), lash_core::PluginError> {
+    ) -> Result<(ProcessEventAppendReceipt, bool), lash_core::PluginError> {
         let process_id = record.id.clone();
         let replay_lookup =
             if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
@@ -417,7 +417,7 @@ impl SqliteProcessRegistry {
                     false
                 };
                 Ok((
-                    ProcessEventAppendResult {
+                    ProcessEventAppendReceipt {
                         event,
                         wake_delivery,
                     },
@@ -460,7 +460,7 @@ impl SqliteProcessRegistry {
                     sequence,
                 )?;
                 Ok((
-                    ProcessEventAppendResult {
+                    ProcessEventAppendReceipt {
                         event,
                         wake_delivery,
                     },

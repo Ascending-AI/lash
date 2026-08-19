@@ -579,22 +579,22 @@ impl TryFrom<RemoteProcessEventSemantics> for lash_core::runtime::ProcessEventSe
     }
 }
 
-impl From<lash_core::RecoveryDisposition> for RemoteRecoveryDisposition {
-    fn from(value: lash_core::RecoveryDisposition) -> Self {
+impl From<lash_core::RecoveryContract> for RemoteRecoveryContract {
+    fn from(value: lash_core::RecoveryContract) -> Self {
         match value {
-            lash_core::RecoveryDisposition::Rerunnable => Self::Rerunnable,
-            lash_core::RecoveryDisposition::OwnerBound => Self::OwnerBound,
-            lash_core::RecoveryDisposition::ExternallyOwned => Self::ExternallyOwned,
+            lash_core::RecoveryContract::Rerunnable => Self::Rerunnable,
+            lash_core::RecoveryContract::OwnerBound => Self::OwnerBound,
+            lash_core::RecoveryContract::ExternallyOwned => Self::ExternallyOwned,
         }
     }
 }
 
-impl From<RemoteRecoveryDisposition> for lash_core::RecoveryDisposition {
-    fn from(value: RemoteRecoveryDisposition) -> Self {
+impl From<RemoteRecoveryContract> for lash_core::RecoveryContract {
+    fn from(value: RemoteRecoveryContract) -> Self {
         match value {
-            RemoteRecoveryDisposition::Rerunnable => Self::Rerunnable,
-            RemoteRecoveryDisposition::OwnerBound => Self::OwnerBound,
-            RemoteRecoveryDisposition::ExternallyOwned => Self::ExternallyOwned,
+            RemoteRecoveryContract::Rerunnable => Self::Rerunnable,
+            RemoteRecoveryContract::OwnerBound => Self::OwnerBound,
+            RemoteRecoveryContract::ExternallyOwned => Self::ExternallyOwned,
         }
     }
 }
@@ -1270,9 +1270,9 @@ impl From<RemoteObservedProcessEvent> for lash_core::facade_support::ObservedPro
     }
 }
 
-impl From<lash_core::ProcessHandleSummary> for RemoteProcessSummary {
-    fn from(value: lash_core::ProcessHandleSummary) -> Self {
-        let lash_core::ProcessHandleSummary {
+impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
+    fn from(value: lash_core::ProcessHandleView) -> Self {
+        let lash_core::ProcessHandleView {
             handle_type,
             id,
             process_id,
@@ -1293,12 +1293,12 @@ impl From<lash_core::ProcessHandleSummary> for RemoteProcessSummary {
     }
 }
 
-impl TryFrom<RemoteProcessSummary> for lash_core::ProcessHandleSummary {
+impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteProcessSummary) -> Result<Self, Self::Error> {
-        value.validate("RemoteProcessSummary")?;
-        let RemoteProcessSummary {
+    fn try_from(value: RemoteProcessHandleView) -> Result<Self, Self::Error> {
+        value.validate("RemoteProcessHandleView")?;
+        let RemoteProcessHandleView {
             handle_type,
             id,
             process_id,
@@ -1728,7 +1728,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
     }
 }
 
-impl TryFrom<lash_core::ProcessRecord> for RemoteProcessStartResult {
+impl TryFrom<lash_core::ProcessRecord> for RemoteProcessStartReceipt {
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::ProcessRecord) -> Result<Self, Self::Error> {
@@ -1740,12 +1740,12 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessStartResult {
     }
 }
 
-impl TryFrom<RemoteProcessStartResult> for lash_core::ProcessRecord {
+impl TryFrom<RemoteProcessStartReceipt> for lash_core::ProcessRecord {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteProcessStartResult) -> Result<Self, Self::Error> {
+    fn try_from(value: RemoteProcessStartReceipt) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteProcessStartResult {
+        let RemoteProcessStartReceipt {
             protocol_version: _,
             record,
             summary: _,
@@ -1889,9 +1889,9 @@ impl From<RemoteProcessCancelRequest> for lash_core::ProcessCommand {
     }
 }
 
-impl From<lash_core::ProcessCancelSummary> for RemoteProcessCancelResult {
-    fn from(value: lash_core::ProcessCancelSummary) -> Self {
-        let lash_core::ProcessCancelSummary { process_id, status } = value;
+impl From<lash_core::ProcessCancelReceipt> for RemoteProcessCancelReceipt {
+    fn from(value: lash_core::ProcessCancelReceipt) -> Self {
+        let lash_core::ProcessCancelReceipt { process_id, status } = value;
         Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             process_id,
@@ -1901,12 +1901,12 @@ impl From<lash_core::ProcessCancelSummary> for RemoteProcessCancelResult {
     }
 }
 
-impl TryFrom<RemoteProcessCancelResult> for lash_core::ProcessCancelSummary {
+impl TryFrom<RemoteProcessCancelReceipt> for lash_core::ProcessCancelReceipt {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteProcessCancelResult) -> Result<Self, Self::Error> {
+    fn try_from(value: RemoteProcessCancelReceipt) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteProcessCancelResult {
+        let RemoteProcessCancelReceipt {
             protocol_version: _,
             process_id,
             status,
@@ -1968,7 +1968,7 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessCommand {
     }
 }
 
-impl TryFrom<lash_core::ProcessEvent> for RemoteProcessSignalResult {
+impl TryFrom<lash_core::ProcessEvent> for RemoteProcessSignalReceipt {
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::ProcessEvent) -> Result<Self, Self::Error> {
@@ -1979,12 +1979,12 @@ impl TryFrom<lash_core::ProcessEvent> for RemoteProcessSignalResult {
     }
 }
 
-impl TryFrom<RemoteProcessSignalResult> for lash_core::ProcessEvent {
+impl TryFrom<RemoteProcessSignalReceipt> for lash_core::ProcessEvent {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteProcessSignalResult) -> Result<Self, Self::Error> {
+    fn try_from(value: RemoteProcessSignalReceipt) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteProcessSignalResult {
+        let RemoteProcessSignalReceipt {
             protocol_version: _,
             event,
         } = value;
@@ -2002,7 +2002,7 @@ impl From<RemoteProcessAwaitRequest> for lash_core::ProcessCommand {
     }
 }
 
-impl TryFrom<(String, lash_core::ProcessAwaitOutput)> for RemoteProcessAwaitResult {
+impl TryFrom<(String, lash_core::ProcessAwaitOutput)> for RemoteProcessAwaitOutcome {
     type Error = RemoteProtocolError;
 
     fn try_from(
@@ -2016,12 +2016,12 @@ impl TryFrom<(String, lash_core::ProcessAwaitOutput)> for RemoteProcessAwaitResu
     }
 }
 
-impl TryFrom<RemoteProcessAwaitResult> for (String, lash_core::ProcessAwaitOutput) {
+impl TryFrom<RemoteProcessAwaitOutcome> for (String, lash_core::ProcessAwaitOutput) {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteProcessAwaitResult) -> Result<Self, Self::Error> {
+    fn try_from(value: RemoteProcessAwaitOutcome) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteProcessAwaitResult {
+        let RemoteProcessAwaitOutcome {
             protocol_version: _,
             process_id,
             output,

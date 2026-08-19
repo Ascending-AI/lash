@@ -835,7 +835,7 @@ pub struct RuntimeError {
     pub message: String,
     /// Structured, content-free evidence for a replay mismatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<crate::RuntimeEffectReplayMismatchSummary>,
+    pub summary: Option<crate::RuntimeEffectReplayMismatchReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<RuntimeErrorCause>,
 }

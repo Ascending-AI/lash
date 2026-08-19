@@ -26,7 +26,7 @@ use crate::process::{
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use lash_core::TestProcessRegistryWriteExt;
-use lash_core::facade_support::{ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation};
+use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
     ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome,
@@ -2262,7 +2262,7 @@ async fn fig811_independent_client_retry_reports_duplicate_without_a_second_proc
         .expect("decode first client report");
     assert!(matches!(
         first.deliveries.as_slice(),
-        [lash_core::facade_support::TriggerDeliveryEmitReport {
+        [lash_core::facade_support::TriggerDeliveryEmitReceipt {
             outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
             ..
         }]
@@ -2283,7 +2283,7 @@ async fn fig811_independent_client_retry_reports_duplicate_without_a_second_proc
         .expect("decode second client report");
     assert!(matches!(
         second.deliveries.as_slice(),
-        [lash_core::facade_support::TriggerDeliveryEmitReport {
+        [lash_core::facade_support::TriggerDeliveryEmitReceipt {
             outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
             ..
         }]
@@ -4249,7 +4249,7 @@ fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
     );
     assert_eq!(
         err.summary.expect("mismatch summary"),
-        lash_core::RuntimeEffectReplayMismatchSummary {
+        lash_core::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.duration_ms".to_string()],
         }
@@ -4342,7 +4342,7 @@ fn external_registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryDisposition::ExternallyOwned,
+        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
     )
 }
@@ -4353,7 +4353,7 @@ fn rerunnable_registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
     )
 }
@@ -4364,7 +4364,7 @@ fn owner_bound_registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryDisposition::OwnerBound,
+        lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
     )
 }
@@ -4542,7 +4542,7 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
     async fn commit_runtime_state(
         &self,
         commit: lash_core::store::RuntimeCommit,
-    ) -> Result<lash_core::store::RuntimeCommitResult, lash_core::StoreError> {
+    ) -> Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
         self.inner.commit_runtime_state(commit).await
     }
 
@@ -4749,7 +4749,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         &self,
         session_id: &str,
         targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core::PendingTurnInputCancelResult>, lash_core::StoreError> {
+    ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, lash_core::StoreError> {
         self.inner
             .cancel_pending_turn_inputs(session_id, targets)
             .await
@@ -4954,7 +4954,7 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
                     "scope:group:batch:0",
                     0,
                     lash_core::GroupWakePolicy::First,
-                    lash_core::LoserDisposition::RunToCompletion,
+                    lash_core::LoserPolicy::RunToCompletion,
                 );
         let grouped_result = restate_effect_execution(grouped);
         let carries_membership = matches!(
@@ -5506,7 +5506,7 @@ async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>) {
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "endpoint-corpus"}),
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -6995,8 +6995,8 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
         (name == "fig1293_echo").then(|| Arc::new(fig1293_echo_tool().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-        lash_core::ToolResult::ok(serde_json::json!({
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!({
             "echo": call.args.get("value").cloned().unwrap_or_default(),
         }))
     }
@@ -7031,7 +7031,7 @@ async fn fig1293_seed_control_target(registry: &Arc<dyn ProcessRegistry>, sessio
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "fig1293"}),
                 },
-                lash_core::RecoveryDisposition::Rerunnable,
+                lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -7070,14 +7070,17 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
             .then(|| Arc::new(restate_parent_end_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         panic!("the Restate parent-end law must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({"started": true})),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
             lash_core::ToolIntents::v1(
                 ["first", "second"]
                     .into_iter()
@@ -7094,7 +7097,7 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
                                             "child": child,
                                         }),
                                     },
-                                    lash_core::RecoveryDisposition::Rerunnable,
+                                    lash_core::RecoveryContract::Rerunnable,
                                     lash_core::ProcessOriginator::host_scoped(
                                         "restate-parent-end-law",
                                     ),
@@ -8514,23 +8517,23 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
         }
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         match call.name {
             "replay_scalar_counter" => {
                 self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
-                lash_core::ToolResult::ok(serde_json::json!({ "value": "counted" }))
+                lash_core::ToolOutcome::ok(serde_json::json!({ "value": "counted" }))
             }
             "replay_pending_input" => {
                 let key = match call.context.completion_key() {
                     Ok(key) => key,
-                    Err(err) => return lash_core::ToolResult::err_fmt(err),
+                    Err(err) => return lash_core::ToolOutcome::err_fmt(err),
                 };
                 if let Some(tx) = self.completion_key_tx.lock_recover().take() {
                     let _ = tx.send(Ok(key));
                 }
-                lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
+                lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
             }
-            other => lash_core::ToolResult::err_fmt(format!("unknown replay tool `{other}`")),
+            other => lash_core::ToolOutcome::err_fmt(format!("unknown replay tool `{other}`")),
         }
     }
 
@@ -8538,13 +8541,16 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
         tool_id == Self::pending_definition().id()
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         if call.name != "replay_scalar_counter" {
             let key = match call.context.completion_key() {
                 Ok(key) => key,
                 Err(err) => {
-                    return lash_core::ToolAttemptResult::done_without_intents(
-                        lash_core::ToolResultDone::failure(lash_core::ToolFailure::runtime(
+                    return lash_core::ToolAttemptOutcome::done_without_intents(
+                        lash_core::ToolOutcomeDone::failure(lash_core::ToolFailure::runtime(
                             lash_core::ToolFailureClass::Internal,
                             "replay_pending_input_completion_key",
                             err.to_string(),
@@ -8555,11 +8561,11 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
             if let Some(tx) = self.completion_key_tx.lock_recover().take() {
                 let _ = tx.send(Ok(key));
             }
-            return lash_core::ToolAttemptResult::pending(lash_core::PendingCompletion::new());
+            return lash_core::ToolAttemptOutcome::pending(lash_core::PendingCompletion::new());
         }
         self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({ "value": "counted" })),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": "counted" })),
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::SignalProcess(
                 lash_core::SignalProcessIntent {
                     session_id: call.context.session_id().to_string(),
@@ -8674,7 +8680,7 @@ finish (await handle)?
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -9279,7 +9285,7 @@ async fn restate_controller_schedules_lashlang_process_with_serializable_input()
             process_name: "scan".to_string(),
             args: args.clone(),
         }),
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
@@ -10960,14 +10966,17 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         (name == "recovery_echo").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         let _ = call;
-        lash_core::ToolResult::err_fmt(
+        lash_core::ToolOutcome::err_fmt(
             "recovery_echo owes a process.wake emission and runs only on the leaf attempt route",
         )
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         let line = call
             .args
             .get("line")
@@ -10975,8 +10984,8 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
             .unwrap_or_default()
             .to_string();
         let Some(process_id) = call.context.runtime_process_id() else {
-            return lash_core::ToolAttemptResult::done_without_intents(
-                lash_core::ToolResultDone::from_output(lash_core::ToolCallOutput::failure(
+            return lash_core::ToolAttemptOutcome::done_without_intents(
+                lash_core::ToolOutcomeDone::from_output(lash_core::ToolCallOutput::failure(
                     lash_core::ToolFailure::runtime(
                         lash_core::ToolFailureClass::Internal,
                         "recovery_echo_outside_process",
@@ -10993,8 +11002,8 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
             event_type: "process.wake".to_string(),
             payload: serde_json::json!({ "message": line, "wake_input": line }),
         });
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({ "echo": line })),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({ "echo": line })),
             lash_core::ToolIntents::v1(vec![intent]),
         )
     }
@@ -11030,13 +11039,13 @@ impl lash_core::ToolProvider for SnapshotRecoveryTool {
         (name == "snapshot_echo").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         let line = call
             .args
             .get("line")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        lash_core::ToolResult::ok(serde_json::json!({ "echo": format!("snapshot:{line}") }))
+        lash_core::ToolOutcome::ok(serde_json::json!({ "echo": format!("snapshot:{line}") }))
     }
 }
 
@@ -11159,11 +11168,14 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         (name == "process_parent_intent").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         panic!("the process-parent law must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args
@@ -11190,8 +11202,8 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         } else {
             lash_core::ToolIntents::default()
         };
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({"child": child})),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({"child": child})),
             intents,
         )
     }
@@ -11313,7 +11325,7 @@ async fn process_parent_lashlang_registration(
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
@@ -11545,7 +11557,7 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
                 serde_json::Value::Null,
             ),
         },
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
     )
     .with_execution_env_ref(Some(env_ref));
@@ -11705,7 +11717,7 @@ async fn snapshot_lashlang_registration(
             process_name: "main".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
@@ -11762,7 +11774,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                 serde_json::Value::Null,
             ),
         },
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(creator_scope.clone()),
     )
     .with_extra_event_types([process_wake_event_type()])
@@ -12025,7 +12037,7 @@ async fn trigger_lashlang_registration(process_id: &str, resource: &str) -> Proc
             process_name: "notify".to_string(),
             args,
         }),
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("root")).with_caused_by(
             Some(lash_core::CausalRef::SessionNode {
                 session_id: "root".to_string(),
@@ -12082,7 +12094,7 @@ async fn typescript_process_registration(process_id: &str) -> ProcessRegistratio
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
         }),
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
@@ -12303,14 +12315,14 @@ impl lash_core::ToolProvider for CountingProcessTool {
         (name == "recovery_count").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         let executed = self.executions.fetch_add(1, Ordering::SeqCst) + 1;
         let line = call
             .args
             .get("line")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        lash_core::ToolResult::ok(serde_json::json!({ "executed": executed, "line": line }))
+        lash_core::ToolOutcome::ok(serde_json::json!({ "executed": executed, "line": line }))
     }
 }
 
@@ -12326,7 +12338,7 @@ fn counting_tool_plugin(
 
 fn counting_tool_registration(
     id: &str,
-    disposition: lash_core::RecoveryDisposition,
+    disposition: lash_core::RecoveryContract,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
     ProcessRegistration::new(
@@ -13347,7 +13359,7 @@ async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_request() {
     let externally_owned = report
         .deferred
         .iter()
-        .filter(|entry| entry.disposition == ProcessRecoveryAttemptDisposition::ExternallyOwned)
+        .filter(|entry| entry.disposition == ProcessRecoveryAttemptOutcome::ExternallyOwned)
         .map(|entry| entry.process_id.clone())
         .collect::<Vec<_>>();
     assert_eq!(
@@ -14503,7 +14515,7 @@ async fn a_failed_ingress_submit_defers_its_row_without_discarding_the_pass() {
     assert!(report.admitted.is_empty());
     assert_eq!(report.deferred.len(), 1, "{report:?}");
     assert_eq!(report.deferred[0].process_id, "submit-fails");
-    let ProcessRecoveryAttemptDisposition::BackendError { operation, .. } =
+    let ProcessRecoveryAttemptOutcome::BackendError { operation, .. } =
         &report.deferred[0].disposition
     else {
         panic!(

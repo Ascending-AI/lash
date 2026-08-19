@@ -216,7 +216,7 @@ pub trait ProcessRunHandle: Send + Sync {
     /// the executor. Those rows are running; the error says this pass stopped
     /// short, never that nothing was admitted. Per-row failures are reported as
     /// deferred rows with a typed
-    /// [`BackendError`](crate::runtime::ProcessRecoveryAttemptDisposition::BackendError)
+    /// [`BackendError`](crate::runtime::ProcessRecoveryAttemptOutcome::BackendError)
     /// disposition rather than failing the call, so a partial report survives.
     async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError>;
 }

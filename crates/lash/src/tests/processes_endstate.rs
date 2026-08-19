@@ -82,7 +82,7 @@ impl LinkedTestProcess {
         lash_core::ProcessStartRequest::new(
             process_id,
             self.process_input(),
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
         )
         .with_env_spec(process_env_spec())
@@ -322,7 +322,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_identity(lash_core::ProcessIdentity::new("test")),
@@ -404,7 +404,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_identity(lash_core::ProcessIdentity::new("test")),
@@ -1279,7 +1279,7 @@ fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({}),
         },
-        lash_core::RecoveryDisposition::OwnerBound,
+        lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
     )
 }
@@ -1478,7 +1478,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     // The read exposes the lease facts a host classifies staleness from.
     assert_eq!(
         observed.disposition,
-        lash_core::RecoveryDisposition::OwnerBound
+        lash_core::RecoveryContract::OwnerBound
     );
     assert_eq!(
         observed.lease_holder.as_ref(),
@@ -1579,7 +1579,7 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
                     lash_core::ProcessInput::External {
                         metadata: serde_json::json!({}),
                     },
-                    lash_core::RecoveryDisposition::ExternallyOwned,
+                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                 )
                 .with_identity(lash_core::ProcessIdentity::new("test")),

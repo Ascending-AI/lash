@@ -3,7 +3,7 @@
 //! provider already depends on `lash-llm-transport`.
 
 use lash_sansio::llm::types::{
-    GenerationOptionDisposition, LlmContentBlock, LlmProviderTraceEvent, LlmProviderTraceSender,
+    GenerationOptionOutcome, LlmContentBlock, LlmProviderTraceEvent, LlmProviderTraceSender,
     LlmRequest,
 };
 use serde_json::Value;
@@ -89,7 +89,7 @@ pub fn extract_error_detail(raw: &str) -> Option<String> {
 pub fn cache_intent_disposition(
     request: &LlmRequest,
     provider_body: Option<&Value>,
-) -> GenerationOptionDisposition {
+) -> GenerationOptionOutcome {
     let requested = request.messages.iter().any(|message| {
         message.blocks.iter().any(|block| {
             matches!(
@@ -107,9 +107,9 @@ pub fn cache_intent_disposition(
             || contains_object_key(body, "cachedContent")
     });
     if emitted {
-        GenerationOptionDisposition::applied(requested)
+        GenerationOptionOutcome::applied(requested)
     } else {
-        GenerationOptionDisposition::unsupported(requested)
+        GenerationOptionOutcome::unsupported(requested)
     }
 }
 

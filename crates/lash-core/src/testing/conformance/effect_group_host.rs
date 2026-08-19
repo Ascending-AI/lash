@@ -37,7 +37,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::{
-    EffectGroupHandle, GroupExecutors, GroupSettlement, GroupWakePolicy, LoserDisposition,
+    EffectGroupHandle, GroupExecutors, GroupSettlement, GroupWakePolicy, LoserPolicy,
     RuntimeEffectGroup,
 };
 
@@ -107,11 +107,11 @@ where
         &key,
         1,
         GroupWakePolicy::First,
-        LoserDisposition::Cancel,
+        LoserPolicy::Cancel,
         vec![never()],
     )
     .await;
-    close(&scoped, handle, LoserDisposition::Cancel)
+    close(&scoped, handle, LoserPolicy::Cancel)
         .await
         .expect("the caller closes under the declared disposition");
 
@@ -124,7 +124,7 @@ where
     let mut reopened = resumed
         .controller()
         .open_effect_group(staged(
-            group(&key, 1, GroupWakePolicy::First, LoserDisposition::Cancel),
+            group(&key, 1, GroupWakePolicy::First, LoserPolicy::Cancel),
             vec![never()],
         ))
         .await
@@ -147,7 +147,7 @@ where
         "the journaled terminal must name the cancellation, not some later \
          reader's guess at why the child stopped"
     );
-    close(&resumed, reopened, LoserDisposition::Cancel)
+    close(&resumed, reopened, LoserPolicy::Cancel)
         .await
         .expect("the reading host closes the group");
 }
@@ -792,7 +792,7 @@ async fn cancel_stops_the_losers_and_closes_the_caller_out<F: Fn() -> Host>(
         &key,
         3,
         GroupWakePolicy::First,
-        LoserDisposition::Cancel,
+        LoserPolicy::Cancel,
         vec![settles(0), slow, never()],
     )
     .await;
@@ -800,7 +800,7 @@ async fn cancel_stops_the_losers_and_closes_the_caller_out<F: Fn() -> Host>(
         .await
         .expect("the winner settles");
     let replayed = EffectGroupHandle::restored(key.as_str(), 3, 1).expect("the cursor restores");
-    close(&scoped, handle, LoserDisposition::Cancel)
+    close(&scoped, handle, LoserPolicy::Cancel)
         .await
         .expect("the caller closes under the declared disposition");
 
@@ -834,7 +834,7 @@ async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &
         &widened_key,
         1,
         GroupWakePolicy::First,
-        LoserDisposition::Cancel,
+        LoserPolicy::Cancel,
         vec![never()],
     )
     .await;
@@ -866,7 +866,7 @@ async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &
         .expect("closing as declared releases the caller's interest");
     let replayed =
         EffectGroupHandle::restored(narrowed_key.as_str(), 1, 0).expect("a handle restores");
-    close(&scoped, replayed, LoserDisposition::Cancel)
+    close(&scoped, replayed, LoserPolicy::Cancel)
         .await
         .expect("a caller that has learned it no longer wants the losers may narrow");
     loser.release();
@@ -891,15 +891,15 @@ async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make: &F,
         &key,
         2,
         GroupWakePolicy::First,
-        LoserDisposition::Cancel,
+        LoserPolicy::Cancel,
         vec![never(), never()],
     )
     .await;
-    close(&scoped, handle, LoserDisposition::Cancel)
+    close(&scoped, handle, LoserPolicy::Cancel)
         .await
         .expect("the first close applies the disposition");
     let replayed = EffectGroupHandle::restored(key.as_str(), 2, 0).expect("a handle restores");
-    close(&scoped, replayed, LoserDisposition::Cancel)
+    close(&scoped, replayed, LoserPolicy::Cancel)
         .await
         .expect("a replayed close under the same disposition must succeed");
 }
@@ -1069,7 +1069,7 @@ async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -> Ho
 // Fixtures
 // =============================================================================
 
-const RUN: LoserDisposition = LoserDisposition::RunToCompletion;
+const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
 
 /// Every await is bounded: a host that never serves a rank must fail this suite
 /// as a timeout at the law that waited, not as a hung test binary.
@@ -1105,7 +1105,7 @@ fn group(
     key: &str,
     children: usize,
     wake: GroupWakePolicy,
-    disposition: LoserDisposition,
+    disposition: LoserPolicy,
 ) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
         RuntimeInvocation::effect(
@@ -1326,7 +1326,7 @@ async fn open(
     key: &str,
     children: usize,
     wake: GroupWakePolicy,
-    disposition: LoserDisposition,
+    disposition: LoserPolicy,
     executors: Vec<RuntimeEffectLocalExecutor<'static>>,
 ) -> EffectGroupHandle {
     scoped
@@ -1359,7 +1359,7 @@ async fn next(
 async fn close(
     scoped: &ScopedEffectController<'_>,
     handle: EffectGroupHandle,
-    disposition: LoserDisposition,
+    disposition: LoserPolicy,
 ) -> Result<(), RuntimeEffectControllerError> {
     scoped
         .controller()

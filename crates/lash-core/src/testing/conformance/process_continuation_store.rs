@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     BoundaryReason, PersistedSegmentHandover, ProcessAwaitOutput, ProcessCompletionAuthority,
     ProcessContinuationStore, ProcessInput, ProcessProvenance, ProcessRegistration,
-    ProcessRegistry, ProjectionWatermark, RecoveryDisposition, SegmentHandover,
+    ProcessRegistry, ProjectionWatermark, RecoveryContract, SegmentHandover,
 };
 
 pub async fn process_continuation_store(
@@ -19,7 +19,7 @@ pub async fn process_continuation_store(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
         ))
         .await
@@ -86,7 +86,7 @@ pub async fn process_continuation_store(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
         ))
         .await

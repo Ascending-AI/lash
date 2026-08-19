@@ -8,7 +8,7 @@ use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
     ProcessInput, ProcessLease, ProcessListFilter, ProcessOriginator, ProcessRecord,
-    ProcessStarted, ProcessStatus, RecoveryDisposition, SessionScope, WaitState,
+    ProcessStarted, ProcessStatus, RecoveryContract, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 use super::time::epoch_ms_from_system_time;
@@ -43,7 +43,7 @@ pub struct ObservedProcess {
     pub status_label: String,
     pub terminal: bool,
     /// Declared recovery contract (ADR 0019). Raw fact; hosts classify.
-    pub disposition: RecoveryDisposition,
+    pub disposition: RecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub created_at_ms: u64,
@@ -367,7 +367,7 @@ mod tests {
             ProcessInput::External {
                 metadata: json!({ "label": label }),
             },
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
         )
     }
@@ -677,8 +677,8 @@ mod tests {
                 ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. }
             );
             let disposition = match input {
-                ProcessInput::External { .. } => RecoveryDisposition::ExternallyOwned,
-                _ => RecoveryDisposition::Rerunnable,
+                ProcessInput::External { .. } => RecoveryContract::ExternallyOwned,
+                _ => RecoveryContract::Rerunnable,
             };
             let mut registration =
                 ProcessRegistration::new(process_id, input, disposition, ProcessProvenance::host())

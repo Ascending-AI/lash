@@ -73,7 +73,7 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
     async fn ingest_occurrence(
         &self,
         _request: lash::triggers::TriggerOccurrenceRequest,
-    ) -> Result<lash::triggers::TriggerIngressResult, lash::plugins::PluginError> {
+    ) -> Result<lash::triggers::TriggerIngressReceipt, lash::plugins::PluginError> {
         Err(self.failure.clone())
     }
 

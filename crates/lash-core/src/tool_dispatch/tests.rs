@@ -2,8 +2,8 @@ use super::*;
 use crate::plugin::{PluginHost, PluginSession, StaticPluginFactory};
 use crate::runtime::RuntimeEffectControllerHandle;
 use crate::{
-    ProcessRegistry as _, ToolCall, ToolCallOutcome, ToolContext, ToolProvider, ToolResult,
-    ToolRetryDisposition, ToolRetryPolicy,
+    ProcessRegistry as _, ToolCall, ToolCallOutcome, ToolContext, ToolOutcome, ToolProvider,
+    ToolRetryPolicy, ToolRetryStatus,
 };
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
@@ -106,9 +106,9 @@ impl ToolProvider for InternalProbeTools {
         })
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolResult::ok(json!("internal body ran"))
+        ToolOutcome::ok(json!("internal body ran"))
     }
 }
 
@@ -147,11 +147,11 @@ impl ToolProvider for OrderedBatchIntentTools {
         contract_from(self.definitions.clone(), name)
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         panic!("ordered batch intent law uses AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         if call.name == "intent_batch_first" {
             self.second_attempt_finished.notified().await;
         } else {
@@ -162,8 +162,8 @@ impl ToolProvider for OrderedBatchIntentTools {
             .context
             .tool_call_id()
             .expect("ordered batch calls carry ids");
-        crate::ToolAttemptResult::done(
-            crate::ToolResultDone::ok(json!({"completed": call.name})),
+        crate::ToolAttemptOutcome::done(
+            crate::ToolOutcomeDone::ok(json!({"completed": call.name})),
             crate::ToolIntents::v1(
                 [0, 1]
                     .into_iter()
@@ -198,11 +198,11 @@ impl ToolProvider for BlockingAttemptIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         panic!("pre-result cancellation law uses AttemptContext")
     }
 
-    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.entered.notify_one();
         std::future::pending().await
     }
@@ -218,14 +218,14 @@ impl ToolProvider for FixedAttemptIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         panic!("fixed intent law uses AttemptContext")
     }
 
-    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        crate::ToolAttemptResult::done(
-            crate::ToolResultDone::ok(json!({"provider": "recorded"})),
+        crate::ToolAttemptOutcome::done(
+            crate::ToolOutcomeDone::ok(json!({"provider": "recorded"})),
             self.intents.clone(),
         )
     }
@@ -456,11 +456,11 @@ impl ToolProvider for RetryingIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         panic!("retry intent law uses AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
@@ -471,8 +471,8 @@ impl ToolProvider for RetryingIntentTools {
             },
         )]);
         if attempt == 1 {
-            crate::ToolAttemptResult::done(
-                crate::ToolResultDone::failure(crate::ToolFailure::safe_retry(
+            crate::ToolAttemptOutcome::done(
+                crate::ToolOutcomeDone::failure(crate::ToolFailure::safe_retry(
                     crate::ToolFailureClass::External,
                     "retry_once",
                     "literal first attempt failure",
@@ -481,7 +481,7 @@ impl ToolProvider for RetryingIntentTools {
                 intents,
             )
         } else {
-            crate::ToolAttemptResult::done(crate::ToolResultDone::ok(json!("done")), intents)
+            crate::ToolAttemptOutcome::done(crate::ToolOutcomeDone::ok(json!("done")), intents)
         }
     }
 }
@@ -496,11 +496,11 @@ impl ToolProvider for AttemptIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         panic!("the legacy ToolContext entrypoint must not run for an AttemptContext provider")
     }
 
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.context.session_id(), "session");
         assert_eq!(call.context.tool_call_id(), Some("attempt-intents-call"));
@@ -575,8 +575,8 @@ impl ToolProvider for AttemptIntentTools {
             // says so rather than blaming the host's effect controller.
             crate::RuntimeErrorCode::ToolDeferralNotDeclared
         );
-        crate::ToolAttemptResult::done(
-            crate::ToolResultDone::ok(json!({"provider": "done"})),
+        crate::ToolAttemptOutcome::done(
+            crate::ToolOutcomeDone::ok(json!({"provider": "done"})),
             crate::ToolIntents::v1(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     session_id: "session".to_string(),
@@ -628,19 +628,19 @@ impl ToolProvider for MockTools {
         contract_from(vec![test_tool("alpha"), beta_tool()], name)
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match call.name {
-            "alpha" => ToolResult::ok(json!("alpha")),
+            "alpha" => ToolOutcome::ok(json!("alpha")),
             "beta" => {
                 if call.args.get("value").and_then(|value| value.as_str()) == Some("fail") {
-                    ToolResult::err_fmt("beta failed")
+                    ToolOutcome::err_fmt("beta failed")
                 } else {
-                    ToolResult::ok(json!(
+                    ToolOutcome::ok(json!(
                         call.args.get("value").cloned().unwrap_or(json!(null))
                     ))
                 }
             }
-            other => ToolResult::err_fmt(format!("Unknown tool: {other}")),
+            other => ToolOutcome::err_fmt(format!("Unknown tool: {other}")),
         }
     }
 }
@@ -688,15 +688,15 @@ impl ToolProvider for PendingProbeTools {
             )
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         match self.mode {
-            PendingProbeMode::MissingKey => ToolResult::pending(crate::PendingCompletion::new()),
+            PendingProbeMode::MissingKey => ToolOutcome::pending(crate::PendingCompletion::new()),
             PendingProbeMode::PendingWithKey => {
                 call.context.completion_key().expect("completion key");
-                ToolResult::pending(crate::PendingCompletion::new())
+                ToolOutcome::pending(crate::PendingCompletion::new())
             }
-            PendingProbeMode::FailureThenPending if attempt == 1 => ToolResult::retryable_failure(
+            PendingProbeMode::FailureThenPending if attempt == 1 => ToolOutcome::retryable_failure(
                 crate::ToolFailureClass::External,
                 "transient",
                 "transient before pending",
@@ -704,11 +704,11 @@ impl ToolProvider for PendingProbeTools {
             ),
             PendingProbeMode::FailureThenPending => {
                 call.context.completion_key().expect("completion key");
-                ToolResult::pending(crate::PendingCompletion::new())
+                ToolOutcome::pending(crate::PendingCompletion::new())
             }
             PendingProbeMode::AnnouncingWithoutProcess => {
                 call.context.completion_key().expect("completion key");
-                ToolResult::pending(crate::PendingCompletion::new().announcing(
+                ToolOutcome::pending(crate::PendingCompletion::new().announcing(
                     crate::PendingAnnouncement::new(
                         "process.yield",
                         json!({ "type": "work.input_request.opened" }),
@@ -716,7 +716,7 @@ impl ToolProvider for PendingProbeTools {
                     ),
                 ))
             }
-            PendingProbeMode::Done => ToolResult::ok(json!({ "done": true })),
+            PendingProbeMode::Done => ToolOutcome::ok(json!({ "done": true })),
         }
     }
 }
@@ -731,12 +731,12 @@ impl ToolProvider for ParallelProbeTools {
         contract_from(vec![test_tool("probe_a"), test_tool("probe_b")], name)
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         self.started.fetch_add(1, Ordering::SeqCst);
         let waited = timeout(Duration::from_millis(100), self.barrier.wait()).await;
         match waited {
-            Ok(_) => ToolResult::ok(json!(call.name)),
-            Err(_) => ToolResult::err_fmt(format!("{} did not overlap with peer", call.name)),
+            Ok(_) => ToolOutcome::ok(json!(call.name)),
+            Err(_) => ToolOutcome::err_fmt(format!("{} did not overlap with peer", call.name)),
         }
     }
 }
@@ -756,9 +756,9 @@ impl ToolProvider for StrictMcpTools {
             .then(|| Arc::new(strict_mcp_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolResult::ok(json!({ "executed": true }))
+        ToolOutcome::ok(json!({ "executed": true }))
     }
 }
 
@@ -792,8 +792,8 @@ impl ToolProvider for ProjectionPolicyTools {
         (name == "seedy").then(|| Arc::new(projection_policy_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-        ToolResult::ok(json!("ok"))
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::ok(json!("ok"))
     }
 }
 
@@ -1034,9 +1034,9 @@ impl ToolProvider for CountingContractTools {
         (name == "beta").then(|| Arc::new(beta_tool().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolResult::ok(json!("ok"))
+        ToolOutcome::ok(json!("ok"))
     }
 }
 
@@ -1061,21 +1061,21 @@ impl ToolProvider for ExactDispatchTools {
             .then(|| Arc::new(named_beta_tool("host_only").contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
         if let Some(bindings) = &self.observed_execution_bindings {
             bindings
                 .lock_recover()
                 .push(call.context.tool_execution_binding().clone());
         }
-        ToolResult::ok(json!("host"))
+        ToolOutcome::ok(json!("host"))
     }
 
     async fn prepare_granted_tool_call(
         &self,
         _grant: &crate::ToolExecutionGrant,
         call: crate::ToolPrepareCall<'_>,
-    ) -> Result<crate::PreparedToolCall, ToolResult> {
+    ) -> Result<crate::PreparedToolCall, ToolOutcome> {
         Ok(crate::PreparedToolCall::identity(
             call.tool_id,
             call.pending,
@@ -1087,7 +1087,7 @@ impl ToolProvider for ExactDispatchTools {
         grant: &crate::ToolExecutionGrant,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         self.execute_by_id(&grant.manifest.id, args, context).await
     }
 }
@@ -1103,9 +1103,9 @@ impl ToolProvider for HiddenDispatchTools {
         (name == "hidden").then(|| Arc::new(named_beta_tool("hidden").contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolResult::ok(json!("hidden"))
+        ToolOutcome::ok(json!("hidden"))
     }
 }
 
@@ -1119,7 +1119,7 @@ impl ToolProvider for RetryProbeTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         self.observed_attempts.lock_recover().push((
             call.context.attempt_number(),
             call.context.max_attempts(),
@@ -1127,12 +1127,12 @@ impl ToolProvider for RetryProbeTools {
         ));
         let attempt_index = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if self.cancel_on_first {
-            return ToolResult::cancelled("cancelled");
+            return ToolOutcome::cancelled("cancelled");
         }
         if attempt_index >= self.successes_after {
-            return ToolResult::ok(json!({ "attempt": attempt_index }));
+            return ToolOutcome::ok(json!({ "attempt": attempt_index }));
         }
-        ToolResult::retryable_failure(
+        ToolOutcome::retryable_failure(
             crate::ToolFailureClass::External,
             "transient",
             "transient failure",
@@ -1321,7 +1321,7 @@ fn retry_dispatch_context(
 fn retry_dispatch_context_with_after_observations(
     attempts: Arc<AtomicUsize>,
     observed_attempts: SharedAttemptObservations,
-    observed_retries: Arc<std::sync::Mutex<Vec<ToolRetryDisposition>>>,
+    observed_retries: Arc<std::sync::Mutex<Vec<ToolRetryStatus>>>,
 ) -> ToolDispatchContext<'static> {
     let provider: Arc<dyn ToolProvider> = Arc::new(RetryProbeTools {
         definition: retry_tool("retry_probe", ToolRetryPolicy::safe(2, 0, 0)),
@@ -1956,18 +1956,15 @@ async fn scalar_after_tool_hook_runs_once_per_retry_attempt_before_exhaustion() 
     assert_eq!(
         *observed_retries.lock_recover(),
         vec![
-            ToolRetryDisposition::Safe { after_ms: Some(0) },
-            ToolRetryDisposition::Safe { after_ms: Some(0) },
+            ToolRetryStatus::Safe { after_ms: Some(0) },
+            ToolRetryStatus::Safe { after_ms: Some(0) },
         ],
         "the after hook runs for each finalized attempt, before exhaustion is marked"
     );
     let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
         panic!("expected exhausted failure");
     };
-    assert_eq!(
-        failure.retry,
-        ToolRetryDisposition::Exhausted { attempts: 2 }
-    );
+    assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
 }
 
 #[derive(Default)]
@@ -2109,10 +2106,7 @@ async fn safe_retry_policy_marks_exhausted_after_final_attempt() {
     let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
         panic!("expected failure");
     };
-    assert_eq!(
-        failure.retry,
-        ToolRetryDisposition::Exhausted { attempts: 2 }
-    );
+    assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
 }
 
 #[tokio::test]
@@ -2372,7 +2366,7 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::Rerunnable,
+                crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
             )
             .with_extra_event_types(event_types),

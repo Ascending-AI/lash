@@ -75,21 +75,21 @@ pub(crate) fn empty_response_error(raw: String) -> lash_core::llm::transport::Ll
 pub(crate) fn generation_disposition(
     request: &LlmRequest,
     body: &Value,
-) -> lash_core::llm::types::GenerationDisposition {
-    use lash_core::llm::types::{GenerationDisposition, GenerationOptionDisposition};
+) -> lash_core::llm::types::GenerationReceipt {
+    use lash_core::llm::types::{GenerationOptionOutcome, GenerationReceipt};
 
-    fn record(requested: bool, emitted: bool) -> GenerationOptionDisposition {
+    fn record(requested: bool, emitted: bool) -> GenerationOptionOutcome {
         if emitted {
-            GenerationOptionDisposition::applied(requested)
+            GenerationOptionOutcome::applied(requested)
         } else {
-            GenerationOptionDisposition::unsupported(requested)
+            GenerationOptionOutcome::unsupported(requested)
         }
     }
 
     let cap_emitted = ["max_tokens", "max_completion_tokens", "max_output_tokens"]
         .iter()
         .any(|field| body.get(field).is_some());
-    GenerationDisposition {
+    GenerationReceipt {
         output_token_cap: record(request.generation.output_token_cap.is_some(), cap_emitted),
         temperature: record(
             request.generation.temperature.is_some(),

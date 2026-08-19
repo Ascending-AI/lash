@@ -399,7 +399,7 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
     /// the remaining question is where a child's runner comes from: the resolver
     /// is what supplies the `'static` executors the flag's other half requires,
     /// since a child must be able to outlive its caller to honor
-    /// [`LoserDisposition::RunToCompletion`](lash_core::LoserDisposition::RunToCompletion).
+    /// [`LoserPolicy::RunToCompletion`](lash_core::LoserPolicy::RunToCompletion).
     /// A host with no resolver would admit a group and then have nothing to run
     /// it with, which is the drift this answer forecloses.
     fn supports_effect_groups(&self) -> bool {
@@ -429,7 +429,7 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
     async fn close_effect_group(
         &self,
         handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserDisposition,
+        disposition: lash_core::LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         Box::pin(self.inner.close_effect_group(&handle, disposition)).await
     }

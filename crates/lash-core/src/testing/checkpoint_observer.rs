@@ -10,12 +10,12 @@ use crate::runtime::{
 };
 use crate::store::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, PersistedSessionRead,
-    RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionCommitStore, StoreError,
+    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, SessionCommitStore, StoreError,
 };
 use crate::{
-    AttachmentId, BlobRef, CheckpointKind, ForkPoint, ForkSessionRequest, ForkSessionResult,
+    AttachmentId, BlobRef, CheckpointKind, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
     GcReport, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelResult, PendingTurnInputCancelTarget, PendingTurnInputDraft,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     SessionAdmission, SessionBinding, SessionExecutionLease, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, StoreMaintenance, TurnInputApplication,
@@ -344,7 +344,10 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
         self.inner.fork_points().await
     }
 
-    async fn fork_at(&self, request: &ForkSessionRequest) -> Result<ForkSessionResult, StoreError> {
+    async fn fork_at(
+        &self,
+        request: &ForkSessionRequest,
+    ) -> Result<ForkSessionReceipt, StoreError> {
         self.inner.fork_at(request).await
     }
 }
@@ -453,7 +456,7 @@ impl SessionCommitStore for ObservedSessionStore {
     async fn commit_runtime_state(
         &self,
         mut commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitResult, StoreError> {
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
         self.collector.apply_mutation(&mut commit);
         let mut event = checkpoint_write_event(&commit);
         let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
@@ -661,7 +664,7 @@ impl TurnInputStore for ObservedSessionStore {
         &self,
         session_id: &str,
         targets: &[PendingTurnInputCancelTarget],
-    ) -> Result<Vec<PendingTurnInputCancelResult>, StoreError> {
+    ) -> Result<Vec<PendingTurnInputCancelReceipt>, StoreError> {
         self.inner
             .cancel_pending_turn_inputs(session_id, targets)
             .await

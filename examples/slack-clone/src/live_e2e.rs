@@ -24,7 +24,7 @@ use lash::provider::{
 };
 use lash::tools::{
     LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition,
-    ToolDefinitionLashlangExt as _, ToolProvider, ToolResult,
+    ToolDefinitionLashlangExt as _, ToolOutcome, ToolProvider,
 };
 use lash::tracing::{JsonlTraceSink, TraceLevel};
 use lash::{LashCore, ModelSpec, TurnInput};
@@ -640,13 +640,13 @@ struct EchoTool;
 
 #[async_trait]
 impl StaticToolExecute for EchoTool {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match serde_json::from_value::<EchoArgs>(call.args.clone()) {
             Ok(args) if call.name == "structural_echo" => {
-                ToolResult::ok(json!(EchoOutput { value: args.value }))
+                ToolOutcome::ok(json!(EchoOutput { value: args.value }))
             }
-            Ok(_) => ToolResult::err(json!("unknown tool")),
-            Err(error) => ToolResult::err_fmt(format_args!("invalid arguments: {error}")),
+            Ok(_) => ToolOutcome::err(json!("unknown tool")),
+            Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
         }
     }
 }
@@ -929,27 +929,27 @@ struct SwapTools {
 
 #[async_trait]
 impl StaticToolExecute for SwapTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match call.name {
             "read_channel" => self.read_channel().await,
             "post_channel_message" => match serde_json::from_value(call.args.clone()) {
                 Ok(args) => self.post_message(args).await,
-                Err(error) => ToolResult::err_fmt(format_args!("invalid arguments: {error}")),
+                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
             },
             "submit_peer_nonce" => match serde_json::from_value(call.args.clone()) {
                 Ok(args) => self.submit(args),
-                Err(error) => ToolResult::err_fmt(format_args!("invalid arguments: {error}")),
+                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
             },
-            other => ToolResult::err_fmt(format_args!("unknown tool: {other}")),
+            other => ToolOutcome::err_fmt(format_args!("unknown tool: {other}")),
         }
     }
 }
 
 impl SwapTools {
-    async fn read_channel(&self) -> ToolResult {
+    async fn read_channel(&self) -> ToolOutcome {
         let output = match read_transcript(&self.api, &self.channel).await {
             Ok(messages) => ReadChannelOutput { messages },
-            Err(error) => return ToolResult::err_fmt(format_args!("{error:#}")),
+            Err(error) => return ToolOutcome::err_fmt(format_args!("{error:#}")),
         };
         self.record(
             "read_channel",
@@ -958,7 +958,7 @@ impl SwapTools {
         into_tool_result(&output)
     }
 
-    async fn post_message(&self, args: PostMessageArgs) -> ToolResult {
+    async fn post_message(&self, args: PostMessageArgs) -> ToolOutcome {
         let text = format!("{}: {}", self.agent, args.message.trim());
         let request = ChatPostMessageRequest {
             channel: self.channel.clone(),
@@ -969,13 +969,13 @@ impl SwapTools {
             metadata: None,
         };
         if let Err(error) = self.api.chat_post_message(&request).await {
-            return ToolResult::err_fmt(format_args!("{error:#}"));
+            return ToolOutcome::err_fmt(format_args!("{error:#}"));
         }
         self.record("post_channel_message", text);
         into_tool_result(&PostMessageOutput { posted: true })
     }
 
-    fn submit(&self, args: SubmitNonceArgs) -> ToolResult {
+    fn submit(&self, args: SubmitNonceArgs) -> ToolOutcome {
         let nonce = args.nonce.trim().to_string();
         let mut state = self
             .state
@@ -1043,10 +1043,10 @@ fn swap_tools(
     ))
 }
 
-fn into_tool_result(value: &impl Serialize) -> ToolResult {
+fn into_tool_result(value: &impl Serialize) -> ToolOutcome {
     match serde_json::to_value(value) {
-        Ok(value) => ToolResult::ok(value),
-        Err(error) => ToolResult::err_fmt(format_args!("serialize tool output: {error}")),
+        Ok(value) => ToolOutcome::ok(value),
+        Err(error) => ToolOutcome::err_fmt(format_args!("serialize tool output: {error}")),
     }
 }
 

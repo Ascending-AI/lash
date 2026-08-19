@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use super::{
-    BlobRef, RuntimeCommit, RuntimeCommitReceiptDecision, RuntimeCommitResult,
+    BlobRef, RuntimeCommit, RuntimeCommitReceipt, RuntimeCommitReceiptDecision,
     RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, StoreError,
     decide_runtime_commit_receipt,
 };
@@ -22,7 +22,7 @@ pub struct RuntimeCommitReceiptRecord {
     /// Canonical hash stored by the first commit attempt.
     pub turn_commit_hash: String,
     /// Canonical result stored by the first commit attempt.
-    pub result: RuntimeCommitResult,
+    pub result: RuntimeCommitReceipt,
     /// Versioned append-request identity, when this is an append receipt.
     pub request_identity_hash: Option<String>,
     /// Canonical append identity encoding version.
@@ -97,7 +97,7 @@ pub struct PlannedNodeFacts {
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
 #[derive(Clone, Debug)]
 pub struct RuntimeCommitReplay {
-    result: RuntimeCommitResult,
+    result: RuntimeCommitReceipt,
     release_session_execution_lease: Option<crate::store::SessionExecutionLeaseAuthority>,
 }
 
@@ -110,7 +110,7 @@ impl RuntimeCommitReplay {
     }
 
     /// Consume the replay prescription and return its canonical stored result.
-    pub fn into_result(self) -> RuntimeCommitResult {
+    pub fn into_result(self) -> RuntimeCommitReceipt {
         self.result
     }
 }
@@ -127,7 +127,7 @@ pub struct RuntimeCommitReceiptWrite<'a> {
     /// Canonical hash of the committed semantic content.
     pub turn_commit_hash: &'a str,
     /// Canonical result encoded into the durable receipt.
-    pub result: &'a RuntimeCommitResult,
+    pub result: &'a RuntimeCommitReceipt,
     /// Versioned append-request identity, when applicable.
     pub request_identity_hash: Option<&'a str>,
     /// Semantic append node count, when applicable.
@@ -535,8 +535,8 @@ impl<'a> RuntimeCommitPlan<'a> {
         checkpoint_ref: BlobRef,
         manifest: SessionCheckpoint,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
-    ) -> RuntimeCommitResult {
-        RuntimeCommitResult {
+    ) -> RuntimeCommitReceipt {
+        RuntimeCommitReceipt {
             head_revision: self.next_head_revision,
             checkpoint_ref,
             manifest,
@@ -552,7 +552,7 @@ impl<'a> RuntimeCommitPlan<'a> {
     /// Project the durable receipt row for the supplied canonical result.
     pub fn receipt_write<'b>(
         &'b self,
-        result: &'b RuntimeCommitResult,
+        result: &'b RuntimeCommitReceipt,
     ) -> RuntimeCommitReceiptWrite<'b> {
         RuntimeCommitReceiptWrite {
             session_id: &self.commit.session_id,

@@ -361,25 +361,25 @@ fn expect_live_replay_gap(
 }
 
 fn expect_live_replay_subscribed(
-    result: Result<LiveReplaySubscribeResult, LiveReplayStoreError>,
+    result: Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>,
     context: &str,
 ) -> crate::LiveReplaySubscription {
     match result.expect(context) {
-        LiveReplaySubscribeResult::Subscribed(subscription) => subscription,
-        LiveReplaySubscribeResult::Gap(reason) => {
+        LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,
+        LiveReplaySubscribeOutcome::Gap(reason) => {
             panic!("{context}: expected subscription, got gap {reason:?}")
         }
     }
 }
 
 fn expect_live_replay_subscribe_gap(
-    result: Result<LiveReplaySubscribeResult, LiveReplayStoreError>,
+    result: Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>,
     expected: LiveReplayGapReason,
     context: &str,
 ) {
     match result.expect(context) {
-        LiveReplaySubscribeResult::Gap(reason) => assert_eq!(reason, expected, "{context}"),
-        LiveReplaySubscribeResult::Subscribed(_) => {
+        LiveReplaySubscribeOutcome::Gap(reason) => assert_eq!(reason, expected, "{context}"),
+        LiveReplaySubscribeOutcome::Subscribed(_) => {
             panic!("{context}: expected subscribe gap {expected:?}, got subscription")
         }
     }

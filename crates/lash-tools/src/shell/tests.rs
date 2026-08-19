@@ -16,7 +16,7 @@ mod tests {
         shell: &StaticToolProvider<StandardShell>,
         name: &str,
         args: &serde_json::Value,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         lash_core::testing::run_tool(shell, name, args).await
     }
 
@@ -25,7 +25,7 @@ mod tests {
         name: &str,
         args: &serde_json::Value,
         context: &lash_core::ToolContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         if name == "start_command" && context.async_process_id().is_some() {
             let internal = lash_core::InternalProcessContext::__for_testing(context);
             return shell
@@ -45,7 +45,7 @@ mod tests {
                     context: &attempt,
                 })
                 .await;
-            let lash_core::ToolAttemptResult::Done { result, intents } = outcome else {
+            let lash_core::ToolAttemptOutcome::Done { result, intents } = outcome else {
                 panic!("shell leaf test unexpectedly returned Pending");
             };
             let internal = lash_core::InternalProcessContext::__for_testing(context);
@@ -67,7 +67,7 @@ mod tests {
                     other => panic!("unexpected shell intent: {:?}", other.kind()),
                 }
             }
-            return ToolResult::from_output(result.into_output());
+            return ToolOutcome::from_output(result.into_output());
         }
         shell
             .execute(ToolCall {
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
         assert_eq!(failure.code, "invalid_tool_args");
         assert!(failure.message.contains("cmd"));
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 
     #[tokio::test]
@@ -107,7 +107,7 @@ mod tests {
         };
         assert_eq!(failure.class, lash_core::ToolFailureClass::Io);
         assert_eq!(failure.code, "spawn_shell_command_failed");
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 
     fn async_process_context(
@@ -146,7 +146,7 @@ mod tests {
             session_id: &str,
             request: lash_core::ProcessStartRequest,
             scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessHandleSummary, PluginError> {
+        ) -> Result<lash_core::ProcessHandleView, PluginError> {
             self.start_from_request(session_id, request, scope).await
         }
 
@@ -169,7 +169,7 @@ mod tests {
             session_id: &str,
             request: lash_core::ProcessStartRequest,
             scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessHandleSummary, PluginError> {
+        ) -> Result<lash_core::ProcessHandleView, PluginError> {
             let env_ref = request
                 .env_spec
                 .as_ref()
@@ -189,7 +189,7 @@ mod tests {
                 )
                 .await?;
             let definition = record.identity.definition.clone();
-            Ok(lash_core::ProcessHandleSummary::new(
+            Ok(lash_core::ProcessHandleView::new(
                 record.id,
                 record.identity,
                 record.status,
@@ -227,7 +227,7 @@ mod tests {
             }
             match self.registry.get_process(process_id).await? {
                 Some(record)
-                    if record.disposition != lash_core::RecoveryDisposition::ExternallyOwned =>
+                    if record.disposition != lash_core::RecoveryContract::ExternallyOwned =>
                 {
                     return Err(PluginError::Session(format!(
                         "process `{process_id}` is not externally-owned"
@@ -472,7 +472,7 @@ mod tests {
         register_signal_target_with_disposition(
             registry,
             process_id,
-            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::RecoveryContract::ExternallyOwned,
         )
         .await;
     }
@@ -484,7 +484,7 @@ mod tests {
         register_signal_target_with_disposition(
             registry,
             process_id,
-            lash_core::RecoveryDisposition::OwnerBound,
+            lash_core::RecoveryContract::OwnerBound,
         )
         .await;
     }
@@ -492,7 +492,7 @@ mod tests {
     async fn register_signal_target_with_disposition(
         registry: &lash_core::TestLocalProcessRegistry,
         process_id: &str,
-        disposition: lash_core::RecoveryDisposition,
+        disposition: lash_core::RecoveryContract,
     ) {
         registry
             .register_process(
@@ -782,7 +782,7 @@ mod tests {
                 context: &attempt,
             })
             .await;
-        let lash_core::ToolAttemptResult::Done { result, intents } = start else {
+        let lash_core::ToolAttemptOutcome::Done { result, intents } = start else {
             panic!("shell.start must complete with an intent")
         };
         let value = result.into_output().value_for_projection();
@@ -821,7 +821,7 @@ mod tests {
                 context: &attempt,
             })
             .await;
-        let lash_core::ToolAttemptResult::Done { intents, .. } = tracked else {
+        let lash_core::ToolAttemptOutcome::Done { intents, .. } = tracked else {
             panic!("tracked shell.start must complete with an intent")
         };
         let lash_core::ToolIntent::StartProcess(tracked) = &intents.intents[0] else {
@@ -848,7 +848,7 @@ mod tests {
                 context: &attempt,
             })
             .await;
-        let lash_core::ToolAttemptResult::Done { intents, .. } = write else {
+        let lash_core::ToolAttemptOutcome::Done { intents, .. } = write else {
             panic!("shell.write must complete with an intent")
         };
         let lash_core::ToolIntent::SignalProcess(intent) = &intents.intents[0] else {
@@ -1034,7 +1034,7 @@ mod tests {
             .expect("detached audit row exists");
         assert_eq!(
             record.disposition,
-            lash_core::RecoveryDisposition::ExternallyOwned
+            lash_core::RecoveryContract::ExternallyOwned
         );
         assert!(record.is_terminal(), "detached audit row is terminal from birth");
 
@@ -1359,7 +1359,7 @@ mod tests {
         .expect("audit row must commit before the blocking spawn is released");
         assert_eq!(
             audit.disposition,
-            lash_core::RecoveryDisposition::ExternallyOwned
+            lash_core::RecoveryContract::ExternallyOwned
         );
         assert!(!audit.is_terminal(), "the launch is still gated");
 

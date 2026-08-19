@@ -427,7 +427,7 @@ mod tests {
         PluginSessionSnapshot, ProcessAwaitOutput, ProcessCompletionAuthority,
         ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
         ProcessRegistry as _, ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark,
-        RecoveryDisposition, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
+        RecoveryContract, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
         SessionStoreFactory as _, ToolState, facade_support::InMemorySessionStoreFactory,
         facade_support::ProcessChangeHub,
     };
@@ -482,7 +482,7 @@ mod tests {
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    RecoveryDisposition::ExternallyOwned,
+                    RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                 )
                 .with_extra_event_types([ProcessEventType {

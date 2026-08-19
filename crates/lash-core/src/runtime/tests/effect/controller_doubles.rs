@@ -114,13 +114,13 @@ impl RuntimeEffectController for SerialOnlyEffectController {
 pub(in crate::runtime::tests) struct RejectingEffectController {
     inline: InlineRuntimeEffectController,
     controller_owned_replay: bool,
-    mismatch_summary: Option<RuntimeEffectReplayMismatchSummary>,
+    mismatch_summary: Option<RuntimeEffectReplayMismatchReport>,
 }
 
 impl RejectingEffectController {
     pub(in crate::runtime::tests) fn with_replay_mismatch(mut self) -> Self {
         self.controller_owned_replay = true;
-        self.mismatch_summary = Some(RuntimeEffectReplayMismatchSummary {
+        self.mismatch_summary = Some(RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.request.model".to_string()],
         });

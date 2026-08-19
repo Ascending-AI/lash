@@ -28,7 +28,7 @@ impl From<RemoteTokenLedgerEntry> for lash_core::TokenLedgerEntry {
     }
 }
 
-impl RemoteTurnResult {
+impl RemoteTurnReport {
     pub fn from_core(
         session_id: impl Into<String>,
         turn_id: impl Into<String>,
@@ -68,13 +68,13 @@ impl RemoteTurnResult {
             outcome,
             cancellation: cancellation.map(Into::into),
             assistant_output: assistant_output.into(),
-            usage: RemoteTurnUsageSummary {
+            usage: RemoteTurnUsageReport {
                 parent,
                 children,
                 total,
             },
             execution: execution.into(),
-            tool_calls: tool_calls.into_iter().map(RemoteToolCallSummary::from).collect(),
+            tool_calls: tool_calls.into_iter().map(RemoteToolCallRecord::from).collect(),
             llm_calls: llm_calls.into_iter().map(Into::into).collect(),
             issues: errors.into_iter().map(Into::into).collect(),
             activities,
@@ -174,9 +174,9 @@ impl From<lash_core::facade_support::OutputState> for RemoteAssistantOutputState
     }
 }
 
-impl From<lash_core::facade_support::ExecutionSummary> for RemoteExecutionSummary {
-    fn from(value: lash_core::facade_support::ExecutionSummary) -> Self {
-        let lash_core::facade_support::ExecutionSummary {
+impl From<lash_core::facade_support::TurnExecutionMetrics> for RemoteTurnExecutionMetrics {
+    fn from(value: lash_core::facade_support::TurnExecutionMetrics) -> Self {
+        let lash_core::facade_support::TurnExecutionMetrics {
             had_tool_calls,
             had_code_execution,
             started_at_ms,
@@ -299,7 +299,7 @@ impl From<lash_core::ToolIntentParentEnd> for RemoteToolIntentParentEnd {
     }
 }
 
-impl From<lash_core::ToolCallRecord> for RemoteToolCallSummary {
+impl From<lash_core::ToolCallRecord> for RemoteToolCallRecord {
     fn from(value: lash_core::ToolCallRecord) -> Self {
         let lash_core::ToolCallRecord {
             call_id,

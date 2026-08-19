@@ -57,8 +57,8 @@ impl crate::ToolProvider for DynamicSnapshotTools {
             })
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-        crate::ToolResult::ok(serde_json::json!("ok"))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        crate::ToolOutcome::ok(serde_json::json!("ok"))
     }
 }
 
@@ -74,9 +74,9 @@ fn resident_leaf_body_bytes(state: &RuntimeSessionState) -> usize {
         .sum()
 }
 
-fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommitResult {
+fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommitReceipt {
     let commit = crate::RuntimeCommit::persisted_state_for_test(state, &[]);
-    crate::store::RuntimeCommitResult {
+    crate::store::RuntimeCommitReceipt {
         head_revision: state.head_revision + 1,
         checkpoint_ref: "checkpoint-ref".to_string().into(),
         manifest: commit
@@ -155,18 +155,18 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     let cases = [
         (
             "leaf ref absent from store",
-            Box::new(|result: &mut crate::store::RuntimeCommitResult| {
+            Box::new(|result: &mut crate::store::RuntimeCommitReceipt| {
                 result
                     .manifest
                     .components
                     .get_mut(LEAF_A)
                     .expect("leaf-a descriptor")
                     .blob_ref = "execution-state-missing-leaf".to_string().into();
-            }) as Box<dyn Fn(&mut crate::store::RuntimeCommitResult)>,
+            }) as Box<dyn Fn(&mut crate::store::RuntimeCommitReceipt)>,
         ),
         (
             "leaf ref hashes different bytes",
-            Box::new(move |result: &mut crate::store::RuntimeCommitResult| {
+            Box::new(move |result: &mut crate::store::RuntimeCommitReceipt| {
                 result
                     .manifest
                     .components
@@ -175,7 +175,7 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
         ),
         (
             "generation-B root with generation-A leaves",
-            Box::new(move |result: &mut crate::store::RuntimeCommitResult| {
+            Box::new(move |result: &mut crate::store::RuntimeCommitReceipt| {
                 result.manifest.components.insert(
                     crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
                     generation_b_root.clone(),
@@ -184,7 +184,7 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
         ),
         (
             "manifest omits leaf-b still listed by root",
-            Box::new(|result: &mut crate::store::RuntimeCommitResult| {
+            Box::new(|result: &mut crate::store::RuntimeCommitReceipt| {
                 result.manifest.components.remove(LEAF_B);
             }),
         ),

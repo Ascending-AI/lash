@@ -27,7 +27,7 @@ The engine vocabulary carries three invariants:
 `SessionEvent::ToolCall` is an accounting and host-observation event. It is not a
 conversation or protocol graph node, and RLM trajectory entries remain free of
 tool-call records. RLM emission consequently fills `AssembledTurn.tool_calls`,
-host and remote turn summaries, and `ExecutionSummary.had_tool_calls` without
+host and remote turn summaries, and `TurnExecutionMetrics.had_tool_calls` without
 changing the bytes projected back to the model. Exec calls continue to consume
 no model tokens and add nothing to the ADR 0032 LLM-attempt ledger.
 

@@ -137,7 +137,7 @@ finish { handle: handle, registrations: await triggers.list({ target: daily_dige
     <div class="section" id="durable-approval">
       <div class="section-header">
         <h2>Durable Approval Is Host Policy</h2>
-        <p>The workbench's <code>ops.apply_change</code> demo takes a <code>ToolContext::completion_key()</code>, persists it in the host-owned <code>approvals.db</code>, and returns <code>ToolResult::Pending</code>. The operator rail lists the key, tool, arguments, requesting session, and age. Approve and deny actions resolve that same durable key through <code>LashCore::completions()</code>, so an approval wait survives loss of the workbench process.</p>
+        <p>The workbench's <code>ops.apply_change</code> demo takes a <code>ToolContext::completion_key()</code>, persists it in the host-owned <code>approvals.db</code>, and returns <code>ToolOutcome::Pending</code>. The operator rail lists the key, tool, arguments, requesting session, and age. Approve and deny actions resolve that same durable key through <code>LashCore::completions()</code>, so an approval wait survives loss of the workbench process.</p>
       </div>
       <p>Approval is deliberately not a Lash manifest capability. It is host policy: the host chooses gated tools, authenticates operators, stores pending decisions, and defines their outcomes. Lash core will never grow an approval flag or approval/revert surface; its only responsibility is the general completion-key park/resume primitive.</p>
     </div>

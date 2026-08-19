@@ -71,7 +71,7 @@ impl crate::ToolProvider for LatencyProbeTools {
         probe_tools().iter().any(|tool| tool.id() == tool_id)
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         let key = call
             .context
             .completion_key()
@@ -92,7 +92,7 @@ impl crate::ToolProvider for LatencyProbeTools {
             )
             .await;
         });
-        crate::ToolResult::pending(crate::PendingCompletion::new())
+        crate::ToolOutcome::pending(crate::PendingCompletion::new())
     }
 }
 

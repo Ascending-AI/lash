@@ -762,7 +762,7 @@ pub async fn prepare_lashlang_process_start(
         process_input,
         // Lashlang engine rows are journaled and idempotent by process id, so
         // recovery may re-execute them (ADR 0019).
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
     )
     .with_identity(identity)

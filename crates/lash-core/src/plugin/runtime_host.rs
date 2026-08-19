@@ -125,7 +125,7 @@ pub trait SessionGraphService: Send + Sync {
         &self,
         _session_id: &str,
         _request: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesResult, PluginError> {
+    ) -> Result<AppendSessionNodesOutcome, PluginError> {
         Err(PluginError::Session(
             "session graph mutation is unavailable in this session".to_string(),
         ))
@@ -305,7 +305,7 @@ pub struct AppendSessionNodesRequest {
     ///
     /// # Refused
     ///
-    /// [`AppendSessionNodesResult::StaleBranch`], with nothing written, when the
+    /// [`AppendSessionNodesOutcome::StaleBranch`], with nothing written, when the
     /// named node has left the active path: the session forked or was rewound
     /// onto another line of history, or the id was never durable here at all.
     /// This applies only to a fresh operation id. A retry whose durable receipt
@@ -332,7 +332,7 @@ pub struct AppendSessionNodesRequest {
 /// Outcome of [`SessionGraphService::append_session_nodes`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum AppendSessionNodesResult {
+pub enum AppendSessionNodesOutcome {
     /// The nodes are durable. `node_ids` are their store-assigned ids in
     /// request order. On a fresh append, `leaf_node_id` is the selected leaf
     /// after that commit. On receipt replay both fields are the stored

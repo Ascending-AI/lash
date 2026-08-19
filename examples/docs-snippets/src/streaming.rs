@@ -58,14 +58,14 @@ async fn send_remote_session_line(_line: String) -> anyhow::Result<()> {
 async fn stream_one_turn(
     session: &LashSession,
     sink: &dyn TurnActivitySink,
-) -> lash::Result<lash::TurnResult> {
+) -> lash::Result<lash::TurnReport> {
     session
         .turn(TurnInput::text("Summarize the incident."))
         .stream_to(sink)
         .await
 }
 
-async fn pull_one_turn(session: &LashSession) -> anyhow::Result<lash::TurnResult> {
+async fn pull_one_turn(session: &LashSession) -> anyhow::Result<lash::TurnReport> {
     use futures_util::StreamExt as _;
 
     let mut stream = session

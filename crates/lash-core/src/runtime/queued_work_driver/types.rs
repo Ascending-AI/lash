@@ -76,7 +76,7 @@ impl From<PluginError> for QueuedWorkRunError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QueuedWorkWakeDisposition {
+pub enum QueuedWorkWakeOutcome {
     Retrying,
     Terminal,
     Exhausted,
@@ -93,7 +93,7 @@ pub struct QueuedWorkWakeFailure {
     pub reason: String,
     pub attempt: u32,
     pub retry_after_ms: u64,
-    pub disposition: QueuedWorkWakeDisposition,
+    pub disposition: QueuedWorkWakeOutcome,
     pub error: String,
 }
 

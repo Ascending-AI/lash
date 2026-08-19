@@ -222,7 +222,7 @@ async fn a_row_this_worker_is_already_running_is_deferred_busy_not_admitted_twic
         second.deferred,
         vec![ProcessAdmissionDeferred {
             process_id: "held-row".to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::Busy,
+            disposition: ProcessRecoveryAttemptOutcome::Busy,
         }],
         "busy stays distinct from absent in the admission report"
     );

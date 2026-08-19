@@ -63,16 +63,16 @@ use lash_core::store::queued_work::{
     select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
-    HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit, RuntimeCommitResult,
+    HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt,
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
-    ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceSummary, ProcessObserverBy,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
     ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
@@ -812,7 +812,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn fork_at(
         &self,
         request: &lash_core::ForkSessionRequest,
-    ) -> Result<lash_core::ForkSessionResult, lash_core::StoreError> {
+    ) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
         fork_at_in_catalog(&self.root, request).await
     }
 }

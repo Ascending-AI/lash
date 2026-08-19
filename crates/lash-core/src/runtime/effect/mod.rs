@@ -28,7 +28,7 @@ pub use executor::{
     ScopedEffectController, SegmentProgress,
 };
 pub use group::{
-    EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserDisposition,
+    EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,
     RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
 pub use group_drain::{
@@ -37,7 +37,7 @@ pub use group_drain::{
 pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;
 pub use validation::{
-    CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace,
+    CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     validate_replayed_effect_envelope,
 };
 
@@ -275,7 +275,7 @@ mod tests {
                     prepared_payload: serde_json::json!({"context": "prepared"}),
                 },
             },
-            crate::RecoveryDisposition::Rerunnable,
+            crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
         );
         let invocation = RuntimeInvocation::effect(

@@ -953,7 +953,7 @@ fn resolve_trigger_owner_scope(
 mod tests {
     use super::*;
     use crate::tool_dispatch::ToolDispatchContext;
-    use crate::{ToolCall, ToolProvider, ToolResult};
+    use crate::{ToolCall, ToolOutcome, ToolProvider};
 
     struct NoopTools;
 
@@ -1000,8 +1000,8 @@ mod tests {
             None
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-            ToolResult::err_fmt("not used")
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::err_fmt("not used")
         }
     }
 

@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use lash_core::{ToolCall, ToolDefinition, ToolFailure, ToolFailureClass, ToolResult, ToolValue};
+use lash_core::{ToolCall, ToolDefinition, ToolFailure, ToolFailureClass, ToolOutcome, ToolValue};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
@@ -38,7 +38,7 @@ pub fn fetch_url_provider(api_key: impl Into<String>) -> StaticToolProvider<Fetc
 
 #[async_trait::async_trait]
 impl StaticToolExecute for FetchUrl {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let args = call.args;
         let url = match require_str(args, "url") {
             Ok(s) => s,
@@ -91,7 +91,7 @@ impl StaticToolExecute for FetchUrl {
                 format!("Tavily API error ({status}): {value}"),
             );
             failure.raw = Some(body);
-            return ToolResult::failure(failure);
+            return ToolOutcome::failure(failure);
         }
         let content = value
             .get("results")
@@ -100,7 +100,7 @@ impl StaticToolExecute for FetchUrl {
             .and_then(|item| item.get("raw_content").or_else(|| item.get("content")))
             .and_then(|value| value.as_str())
             .unwrap_or_default();
-        ToolResult::ok(json!({
+        ToolOutcome::ok(json!({
             "url": url,
             "content": content,
         }))
@@ -184,6 +184,6 @@ mod tests {
         };
         assert_eq!(failure.class, lash_core::ToolFailureClass::Execution);
         assert_eq!(failure.code, "tavily_api_key_missing");
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 }

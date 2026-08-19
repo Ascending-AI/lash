@@ -76,9 +76,9 @@ pub(super) fn mutate_enabled(
         existing.updated_at_ms = now;
     }
     let disposition = if enabled {
-        TriggerMutationDisposition::Enabled
+        TriggerMutationOutcome::Enabled
     } else {
-        TriggerMutationDisposition::Disabled
+        TriggerMutationOutcome::Disabled
     };
     Ok(TriggerCommandOutcome::Mutation {
         receipt: Box::new(TriggerMutationReceipt::from_record(

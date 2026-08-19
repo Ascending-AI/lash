@@ -149,7 +149,7 @@ async fn connect_tolerates_unreachable_server() {
     };
     assert_eq!(failure.class, ToolFailureClass::Unavailable);
     assert_eq!(failure.code, "mcp_pool_shut_down");
-    assert_eq!(failure.retry, ToolRetryDisposition::Never);
+    assert_eq!(failure.retry, ToolRetryStatus::Never);
 }
 
 #[tokio::test]
@@ -198,9 +198,9 @@ impl lash_core::ToolProvider for NativeAndMcpProvider {
         self.mcp.resolve_contract(name)
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
         if call.name == self.native.name() {
-            return ToolResult::ok(json!("native-ok"));
+            return ToolOutcome::ok(json!("native-ok"));
         }
         self.mcp.execute(call).await
     }
@@ -583,7 +583,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
         .await
         .expect("connect collision server");
 
-    async fn dispatch(pool: &McpConnectionPool, operation: &str) -> Option<lash_core::ToolResult> {
+    async fn dispatch(pool: &McpConnectionPool, operation: &str) -> Option<lash_core::ToolOutcome> {
         let definition = pool.advertised_tools().into_iter().find(|definition| {
             lash_lashlang_runtime::tool_lashlang_binding(&definition.manifest)
                 .ok()
@@ -850,7 +850,7 @@ async fn pool_reconnects_after_transport_death() {
         );
         assert_eq!(
             failure.retry,
-            ToolRetryDisposition::Safe {
+            ToolRetryStatus::Safe {
                 after_ms: Some(500)
             }
         );
@@ -929,7 +929,7 @@ async fn call_timeout_is_a_typed_retryable_failure() {
     };
     assert_eq!(failure.class, ToolFailureClass::Timeout);
     assert_eq!(failure.code, "mcp_call_timeout");
-    assert_eq!(failure.retry, ToolRetryDisposition::Safe { after_ms: None });
+    assert_eq!(failure.retry, ToolRetryStatus::Safe { after_ms: None });
 
     pool.shutdown_all().await;
 }

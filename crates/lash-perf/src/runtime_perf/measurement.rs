@@ -18,7 +18,7 @@ use lash_core::sansio::{
 use lash_core::store::GraphAppend;
 use lash_core::{
     AttachmentIntent, AttachmentOwnerKind, DriverAction, DriverContextView, Effect, ExecResponse,
-    InputItem, LiveReplayResult, LiveReplayStore, LiveReplaySubscribeResult, Message, MessageRole,
+    InputItem, LiveReplayResult, LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole,
     Part, ProtocolTurnOptions, QueuedWorkStore, RuntimeCommit, RuntimeSessionState,
     SessionCommitStore, SessionExecutionLeaseStore, SessionObservationEventPayload,
     SessionRevision, SessionStoreFactory, TokenUsage, ToolCallOutput, ToolCancellation,

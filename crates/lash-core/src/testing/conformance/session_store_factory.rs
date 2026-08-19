@@ -555,7 +555,7 @@ pub async fn process_prune_deletes_owned_session_stores(
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryDisposition::ExternallyOwned,
+            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
         ))
         .await

@@ -2,7 +2,7 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
-    ProcessCancelSummary, ProcessCompletionOutcome, ProcessHandleSummary, ProcessListMode,
+    ProcessCancelReceipt, ProcessCompletionOutcome, ProcessHandleView, ProcessListMode,
     ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
@@ -48,7 +48,7 @@ pub trait ProcessService: Send + Sync {
         session_id: &str,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessHandleSummary, PluginError> {
+    ) -> Result<ProcessHandleView, PluginError> {
         let _ = (session_id, request, scope);
         Err(PluginError::Session(
             "process start request composition is unavailable in this service".to_string(),
@@ -63,7 +63,7 @@ pub trait ProcessService: Send + Sync {
         session_id: &str,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessHandleSummary, PluginError>;
+    ) -> Result<ProcessHandleView, PluginError>;
 
     async fn start(
         &self,
@@ -190,7 +190,7 @@ pub trait ProcessService: Send + Sync {
         &self,
         session_id: &str,
         scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<ProcessCancelSummary>, PluginError> {
+    ) -> Result<Vec<ProcessCancelReceipt>, PluginError> {
         let entries = self
             .list_visible(session_id, ProcessListMode::Live, scope.clone())
             .await?;
@@ -202,7 +202,7 @@ pub trait ProcessService: Send + Sync {
             cancelled.push(
                 self.cancel(session_id, &record.id, scope.clone())
                     .await
-                    .map(ProcessCancelSummary::from_record)?,
+                    .map(ProcessCancelReceipt::from_record)?,
             );
         }
         Ok(cancelled)
@@ -297,7 +297,7 @@ impl ProcessService for UnavailableProcessService {
         _session_id: &str,
         _request: ProcessStartRequest,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessHandleSummary, PluginError> {
+    ) -> Result<ProcessHandleView, PluginError> {
         Err(PluginError::Session(
             "processes are unavailable in this runtime".to_string(),
         ))
@@ -484,7 +484,7 @@ mod tests {
                         ProcessInput::External {
                             metadata: json!(null),
                         },
-                        crate::RecoveryDisposition::ExternallyOwned,
+                        crate::RecoveryContract::ExternallyOwned,
                         ProcessProvenance::host(),
                     ))
                 })
@@ -508,7 +508,7 @@ mod tests {
             _session_id: &str,
             _request: ProcessStartRequest,
             _scope: ProcessOpScope<'_>,
-        ) -> Result<ProcessHandleSummary, PluginError> {
+        ) -> Result<ProcessHandleView, PluginError> {
             Err(PluginError::Session("start not implemented".to_string()))
         }
 
@@ -660,7 +660,7 @@ mod tests {
             ProcessInput::External {
                 metadata: json!(null),
             },
-            crate::RecoveryDisposition::ExternallyOwned,
+            crate::RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
         ));
         record.status = ProcessStatus::Cancelled;

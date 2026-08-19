@@ -1165,7 +1165,7 @@ pub(crate) async fn record_turn_output(
     state: &AppState,
     session: &lash::LashSession,
     turn_id: &str,
-    output: lash::TurnResult,
+    output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
 ) -> Result<(), AppError> {
@@ -1186,7 +1186,7 @@ async fn record_turn_output_for_model(
     state: &AppState,
     session: &lash::LashSession,
     turn_id: &str,
-    output: lash::TurnResult,
+    output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
     model: Option<&str>,

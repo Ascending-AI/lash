@@ -5,12 +5,12 @@
     fn closure_companions_are_usable_through_their_facade_domains() {
         use lash::provider::ProviderFailureClassifier as _;
 
-        let replay_gap = lash::observe::LiveReplaySubscribeResult::Gap(
+        let replay_gap = lash::observe::LiveReplaySubscribeOutcome::Gap(
             lash::observe::LiveReplayGapReason::Trimmed,
         );
         assert!(matches!(
             replay_gap,
-            lash::observe::LiveReplaySubscribeResult::Gap(
+            lash::observe::LiveReplaySubscribeOutcome::Gap(
                 lash::observe::LiveReplayGapReason::Trimmed
             )
         ));
@@ -28,7 +28,7 @@
         assert_eq!(failure.source, lash::tools::ToolFailureSource::Tool);
         assert_eq!(
             failure.retry,
-            lash::tools::ToolRetryDisposition::Safe { after_ms: Some(25) }
+            lash::tools::ToolRetryStatus::Safe { after_ms: Some(25) }
         );
         assert_eq!(
             lash::tools::ToolValue::String("ready".to_string()).to_json_value(),
@@ -60,7 +60,7 @@
             "type": "fixed",
             "value": 42
         }));
-        assert!(std::mem::size_of::<lash::triggers::TriggerIngressResult>() > 0);
+        assert!(std::mem::size_of::<lash::triggers::TriggerIngressReceipt>() > 0);
         assert!(
             std::mem::size_of::<lash::triggers::TriggerDeliveryRetentionCandidate>() > 0
         );

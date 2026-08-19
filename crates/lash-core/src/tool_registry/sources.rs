@@ -39,7 +39,7 @@ impl ToolSourceExecutor for OrchestratingToolSource {
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         self.definition.prepare_tool_call(call).await
     }
 
@@ -48,8 +48,8 @@ impl ToolSourceExecutor for OrchestratingToolSource {
         _tool: &str,
         _args: &serde_json::Value,
         _context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
-        ToolResult::err_fmt(
+    ) -> ToolOutcome {
+        ToolOutcome::err_fmt(
             "orchestrating tools require direct OrchestrationContext dispatch",
         )
     }
@@ -59,9 +59,9 @@ impl ToolSourceExecutor for OrchestratingToolSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         if self.definition.manifest().id != *tool_id {
-            return ToolResult::err_fmt(format_args!("Unknown orchestrating tool id: {tool_id}"));
+            return ToolOutcome::err_fmt(format_args!("Unknown orchestrating tool id: {tool_id}"));
         }
         self.definition.execute(args, context).await
     }
@@ -243,10 +243,10 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         let name = call.pending.tool_name.clone();
         let Some(provider_idx) = self.provider_index_for_id(&call.tool_id) else {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Unknown tool id: {}",
                 call.tool_id
             )));
@@ -260,9 +260,9 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         tool: &str,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(provider_idx) = self.provider_index_for(tool) else {
-            return ToolResult::err_fmt(format_args!("Unknown tool: {tool}"));
+            return ToolOutcome::err_fmt(format_args!("Unknown tool: {tool}"));
         };
         self.providers[provider_idx]
             .execute(ToolCall {
@@ -284,9 +284,9 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptResult {
+    ) -> crate::ToolAttemptOutcome {
         let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return crate::ToolAttemptResult::from_tool_result(ToolResult::err_fmt(format_args!(
+            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(format_args!(
                 "Unknown tool id: {tool_id}"
             )));
         };
@@ -300,9 +300,9 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
+            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
         self.providers[provider_idx]
             .execute_by_id(tool_id, args, context)
@@ -314,9 +314,9 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::InternalProcessContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
+            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
         self.providers[provider_idx]
             .execute_internal_by_id(tool_id, args, context)
@@ -366,7 +366,7 @@ impl ToolSourceExecutor for ToolProviderSource {
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         self.provider.prepare_tool_call(call).await
     }
 
@@ -375,7 +375,7 @@ impl ToolSourceExecutor for ToolProviderSource {
         tool: &str,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         self.provider
             .execute(ToolCall {
                 name: tool,
@@ -395,7 +395,7 @@ impl ToolSourceExecutor for ToolProviderSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptResult {
+    ) -> crate::ToolAttemptOutcome {
         self.provider
             .execute_attempt_by_id(tool_id, args, context)
             .await
@@ -406,7 +406,7 @@ impl ToolSourceExecutor for ToolProviderSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         self.provider
             .execute_by_id(tool_id, args, context)
             .await
@@ -417,7 +417,7 @@ impl ToolSourceExecutor for ToolProviderSource {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::InternalProcessContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         self.provider
             .execute_internal_by_id(tool_id, args, context)
             .await

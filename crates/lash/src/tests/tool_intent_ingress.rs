@@ -31,7 +31,7 @@ async fn ingress_core_with_effect_host_and_env_store(
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types(vec![lash_core::ProcessEventType {
@@ -509,7 +509,7 @@ fn start_intent_with_env(session_id: &str) -> lash_core::ToolIntent {
                     serde_json::Value::Null,
                 ),
             },
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
@@ -1482,7 +1482,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
                 kind: kind.to_string(),
                 payload,
             },
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(

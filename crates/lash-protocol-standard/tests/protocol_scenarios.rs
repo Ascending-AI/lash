@@ -743,14 +743,17 @@ impl lash_core::ToolProvider for StandardIntentProvider {
         (name == "intent_leaf").then(|| Arc::new(standard_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         panic!("Standard intent scenario must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         let session_id = call.context.session_id().to_string();
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({"provider": "done"})),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
             lash_core::ToolIntents::v1(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                     session_id: session_id.clone(),
@@ -793,7 +796,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([

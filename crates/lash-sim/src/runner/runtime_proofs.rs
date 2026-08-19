@@ -423,7 +423,7 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
         duplicate_completion_outcome: duplicate,
         turn_suspension_invariant: pending_tool_completion(
             suspended_before_completion,
-            "pending ToolResult parked the live turn before external resolution",
+            "pending ToolOutcome parked the live turn before external resolution",
         ),
         scheduler_resolution_invariant: pending_tool_completion(
             delivered.kind == BoundaryKind::Tool
@@ -658,18 +658,18 @@ impl lash_core::ToolProvider for PendingToolProvider {
         tool_id == pending_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         if call.name != "app_lookup" {
-            return lash_core::ToolResult::err_fmt(format_args!("unknown tool {}", call.name));
+            return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name));
         }
         let key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(err) => return lash_core::ToolResult::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
         };
         if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(key);
         }
-        lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
     }
 }
 
@@ -707,7 +707,7 @@ pub(super) fn pending_tool_roundtrip_provider() -> ProviderHandle {
 }
 
 /// A sim tool that registers its await key in a shared slot the generated world
-/// can read, then returns `ToolResult::pending` so the calling turn parks until
+/// can read, then returns `ToolOutcome::pending` so the calling turn parks until
 /// the scheduler resolves the key. Generalizes `PendingToolProvider` for the
 /// generated suspend sessions (Tool / DurableEffect / ExecCode).
 pub(super) struct SuspendToolProvider {
@@ -755,15 +755,15 @@ impl lash_core::ToolProvider for SuspendToolProvider {
         tool_id == self.definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         if call.name != self.tool_name {
-            return lash_core::ToolResult::err_fmt(format_args!("unknown tool {}", call.name));
+            return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name));
         }
         let key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(err) => return lash_core::ToolResult::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
         };
         *self.key_slot.lock().await = Some(key);
-        lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
     }
 }

@@ -52,7 +52,7 @@ pub use queued_work::{
 };
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
-    RuntimeCommit, RuntimeCommitResult, RuntimeTurnCommitStamp, RuntimeUsageDelta,
+    RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity,
 };
 #[doc(hidden)]
@@ -880,7 +880,7 @@ impl Default for SessionHeadPayload {
 /// Checkpoint components have one backend-independent durable shape. When a
 /// commit supplies a tool-state, plugin-snapshot, or execution-state body, the
 /// backend must store it under a content ref and return that ref in
-/// [`RuntimeCommitResult::manifest`]. A later commit may carry the ref without
+/// [`RuntimeCommitReceipt::manifest`]. A later commit may carry the ref without
 /// the body to mean "unchanged"; the backend must resolve the existing body
 /// when hydrating the checkpoint. A ref-only commit whose component is absent
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
@@ -917,8 +917,8 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// receipt inside the write transaction before the fresh append ancestor
     /// fence and head-revision compare-and-swap. Existing receipts must be
     /// adjudicated with [`decide_runtime_commit_receipt`]: replay returns the
-    /// stored first-attempt [`RuntimeCommitResult`] with only
-    /// [`RuntimeCommitResult::receipt_replayed`] set transiently, applies none
+    /// stored first-attempt [`RuntimeCommitReceipt`] with only
+    /// [`RuntimeCommitReceipt::receipt_replayed`] set transiently, applies none
     /// of the attempted commit envelope, and may release the attempt's explicit
     /// execution-lease completion. Conflicts and corrupt count cross-checks
     /// mutate nothing.
@@ -929,7 +929,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// documented on [`RuntimeUsageDeltaIdentity`]. A duplicate full identity
     /// is a no-op inside this same transaction. Fresh results list every
     /// identity made durable by the commit in
-    /// [`RuntimeCommitResult::committed_usage_delta_identities`]; stored
+    /// [`RuntimeCommitReceipt::committed_usage_delta_identities`]; stored
     /// receipt results retain the original attempt's list so callers do not
     /// clear staged rows that the original transaction never carried.
     ///
@@ -947,7 +947,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitResult, StoreError>;
+    ) -> Result<RuntimeCommitReceipt, StoreError>;
 
     /// Admit `binding.session_id` to this store and bind this handle to it.
     ///
@@ -1039,7 +1039,7 @@ pub trait TurnInputStore: Send + Sync {
         &self,
         session_id: &str,
         targets: &[crate::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<crate::PendingTurnInputCancelResult>, StoreError>;
+    ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError>;
 
     /// Atomically cancel the same-session runtime-admission suffix from an anchor.
     async fn cancel_pending_turn_input_suffix(

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use lash_core::{ToolCall, ToolDefinition, ToolResult, ToolRetryPolicy};
+use lash_core::{ToolCall, ToolDefinition, ToolOutcome, ToolRetryPolicy};
 
 use lash_tool_support::{
     FS_DEFAULTS_PREAMBLE, OptionalUsizeArg, StaticToolExecute, StaticToolProvider,
@@ -43,7 +43,7 @@ struct GlobOutput {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for Glob {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         execute_typed_tool::<GlobArgs, GlobOutput, _, _>(call.args, |args| async move {
             match run_blocking_value(move || execute_glob_sync(args)).await {
                 Ok(result) => result,
@@ -54,7 +54,7 @@ impl StaticToolExecute for Glob {
     }
 }
 
-fn execute_glob_sync(args: GlobArgs) -> Result<GlobOutput, ToolResult> {
+fn execute_glob_sync(args: GlobArgs) -> Result<GlobOutput, ToolOutcome> {
     non_empty_string(&args.pattern, "pattern")?;
     let limit = args.limit.into_option("limit", 1)?;
     let cwd = std::env::current_dir().map_err(|err| {
@@ -170,7 +170,7 @@ mod tests {
     use serde_json::json;
     use tempfile::TempDir;
 
-    fn paths(result: &ToolResult) -> Vec<String> {
+    fn paths(result: &ToolOutcome) -> Vec<String> {
         let value = result.value_for_projection();
         value
             .get("paths")
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
         assert_eq!(failure.code, "invalid_glob_pattern");
         assert!(failure.message.contains("Invalid glob pattern"));
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 
     #[tokio::test]

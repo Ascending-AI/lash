@@ -86,7 +86,7 @@ impl SqliteTriggerStore {
         subscription_json: String,
         process_id: String,
         created_at_ms: i64,
-        reservation_status: lash_core::TriggerDeliveryReservationStatus,
+        reservation_status: lash_core::TriggerDeliveryReservationOutcome,
     ) -> Result<lash_core::TriggerDeliveryReservation, lash_core::PluginError> {
         Ok(lash_core::TriggerDeliveryReservation {
             occurrence: Self::decode_occurrence(occurrence_json)?,
@@ -133,7 +133,7 @@ impl SqliteTriggerStore {
                             subscription_json,
                             process_id,
                             created_at_ms,
-                            lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
+                            lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?);
                     }
                     Ok(deliveries)
@@ -483,7 +483,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn ingest_occurrence(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
-    ) -> Result<lash_core::TriggerIngressResult, lash_core::PluginError> {
+    ) -> Result<lash_core::TriggerIngressReceipt, lash_core::PluginError> {
         lash_core::facade_support::validate_trigger_occurrence_request(&request)?;
         let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request);
         let occurred_at_ms = self.clock.timestamp_ms();
@@ -546,10 +546,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         sqlite_delivery_snapshots(
                             tx,
                             &record,
-                            lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
+                            lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?
                     };
-                    Ok(lash_core::TriggerIngressResult {
+                    Ok(lash_core::TriggerIngressReceipt {
                         occurrence: record,
                         reservations,
                     })
@@ -818,7 +818,7 @@ fn reserve_sqlite_deliveries(
             subscription,
             process_id,
             created_at_ms,
-            reservation_status: lash_core::TriggerDeliveryReservationStatus::Reserved,
+            reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,
         });
     }
     lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
@@ -828,7 +828,7 @@ fn reserve_sqlite_deliveries(
 fn sqlite_delivery_snapshots(
     tx: &rusqlite::Transaction<'_>,
     occurrence: &lash_core::TriggerOccurrenceRecord,
-    reservation_status: lash_core::TriggerDeliveryReservationStatus,
+    reservation_status: lash_core::TriggerDeliveryReservationOutcome,
 ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
     let mut stmt = tx
         .prepare(

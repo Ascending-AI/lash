@@ -187,7 +187,7 @@ turn or emit another durable command.
 Handler work must stop when its request cancellation token fires. These seams
 are in-attempt host I/O and must not emit journaled Lash effects. Host-owned
 sampling is billed by the host: its usage is visible in provider/host traces,
-not in the session usage ledger or `TurnResult` usage.
+not in the session usage ledger or `TurnReport` usage.
 
 [Run the judged MCP client-depth walkthrough](../../runbooks/slack-clone-bot/runbook.md)
 (`slack-clone-bot` Phase 3M) for real-provider semantic judgement, or the

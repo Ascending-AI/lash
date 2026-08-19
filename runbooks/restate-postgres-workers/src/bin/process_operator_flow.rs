@@ -24,7 +24,7 @@ use lash::runtime::{
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, LeaseOwnerIdentity, ProcessAwaitOutput,
     ProcessInput, ProcessListFilter, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessRegistry, ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryDisposition,
+    ProcessRegistry, ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryContract,
     Resolution, ResolveOutcome, SessionScope, TestProcessRegistryWriteExt,
 };
 use lash_postgres_store::PostgresStorage;
@@ -72,7 +72,7 @@ fn owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:runbook-incarnation"))
 }
 
-fn registration(id: &str, disposition: RecoveryDisposition) -> ProcessRegistration {
+fn registration(id: &str, disposition: RecoveryContract) -> ProcessRegistration {
     ProcessRegistration::new(
         id,
         ProcessInput::External {
@@ -86,7 +86,7 @@ fn registration(id: &str, disposition: RecoveryDisposition) -> ProcessRegistrati
 async fn register_started(
     registry: &Arc<dyn ProcessRegistry>,
     id: &str,
-    disposition: RecoveryDisposition,
+    disposition: RecoveryContract,
     started_owner: &LeaseOwnerIdentity,
 ) -> Result<()> {
     registry
@@ -628,32 +628,26 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     // registry writes model work already held by deployment workers; allowing
     // the core's unrelated default worker to claim the never-started row would
     // change the fixture before the drain owner is invoked.
-    register_started(
-        &registry,
-        MINE,
-        RecoveryDisposition::OwnerBound,
-        &drain_owner,
-    )
-    .await?;
+    register_started(&registry, MINE, RecoveryContract::OwnerBound, &drain_owner).await?;
     register_started(
         &registry,
         RERUNNABLE,
-        RecoveryDisposition::Rerunnable,
+        RecoveryContract::Rerunnable,
         &drain_owner,
     )
     .await?;
     register_started(
         &registry,
         FOREIGN,
-        RecoveryDisposition::OwnerBound,
+        RecoveryContract::OwnerBound,
         &foreign_owner,
     )
     .await?;
     registry
-        .register_process(registration(UNSTARTED, RecoveryDisposition::OwnerBound))
+        .register_process(registration(UNSTARTED, RecoveryContract::OwnerBound))
         .await?;
     registry
-        .register_process(registration(EXTERNAL, RecoveryDisposition::ExternallyOwned))
+        .register_process(registration(EXTERNAL, RecoveryContract::ExternallyOwned))
         .await?;
 
     emit(json!({
@@ -816,7 +810,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     let sweep_owner = owner("request-abandon-sweeper");
     registry
         .register_process_with_observers(
-            registration(REQUEST_PROCESS_ID, RecoveryDisposition::OwnerBound),
+            registration(REQUEST_PROCESS_ID, RecoveryContract::OwnerBound),
             &[OBSERVER_SESSION_ID.to_string()],
         )
         .await?;

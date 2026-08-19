@@ -7,7 +7,7 @@ use crate::tool_dispatch::{
 };
 use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
-    ToolFailure, ToolFailureClass, ToolResult, TurnActivityId, TurnEvent,
+    ToolFailure, ToolFailureClass, ToolOutcome, TurnActivityId, TurnEvent,
 };
 use lash_sansio::core_support::*;
 use std::collections::HashMap;
@@ -576,7 +576,7 @@ impl RuntimeExecutionContext<'_> {
             self.dispatch.as_ref(),
             &tool_name,
             &args,
-            ToolResult::from_output(output),
+            ToolOutcome::from_output(output),
             duration_ms,
         )
         .await;

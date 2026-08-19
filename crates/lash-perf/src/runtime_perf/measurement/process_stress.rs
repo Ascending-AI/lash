@@ -63,7 +63,7 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({ "label": "signal stress" }),
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_event_types(vec![lash_core::ProcessEventType {
@@ -394,7 +394,7 @@ fn process_list_stress_registration(
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "index": index }),
         },
-        lash_core::RecoveryDisposition::ExternallyOwned,
+        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::session(session_scope),
     )
 }
@@ -404,7 +404,7 @@ fn process_list_tool_payload(entries: &[lash_core::ProcessRecord]) -> serde_json
         entries
             .iter()
             .map(|record| {
-                lash_core::ProcessHandleSummary::new(
+                lash_core::ProcessHandleView::new(
                     record.id.clone(),
                     record.identity.clone(),
                     record.status,

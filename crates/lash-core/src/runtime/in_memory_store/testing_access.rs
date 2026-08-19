@@ -211,7 +211,7 @@ impl InMemorySessionStore {
     /// Return turn-commit receipt identity, intent hash, and replay payload.
     pub fn raw_runtime_turn_commits_for_testing(
         &self,
-    ) -> Vec<(String, String, crate::RuntimeCommitResult)> {
+    ) -> Vec<(String, String, crate::RuntimeCommitReceipt)> {
         let mut rows = self
             .runtime_turn_commits
             .lock_recover()

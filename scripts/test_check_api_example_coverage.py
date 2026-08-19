@@ -397,7 +397,7 @@ class TautologicalAssertionTests(unittest.TestCase):
     #: The two anchors the review found holding up a reversed removal verdict.
     ANCHORS = (
         "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:63"
-        "#assert!(std::mem::size_of::<lash::triggers::TriggerIngressResult>() > 0);",
+        "#assert!(std::mem::size_of::<lash::triggers::TriggerIngressReceipt>() > 0);",
         "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:64"
         "#std::mem::align_of::<lash::triggers::TriggerDeliveryRetentionCandidate>()",
     )

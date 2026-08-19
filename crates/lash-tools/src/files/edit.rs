@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use unicode_normalization::UnicodeNormalization;
 
-use lash_core::{ToolCall, ToolDefinition, ToolResult};
+use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, compact_diff,
@@ -60,7 +60,7 @@ struct EditOutput {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for Edit {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         execute_typed_tool_result::<EditArgs, _, _>(call.args, |args| async move {
             if let Err(err) = validate_edit_args(&args) {
                 return err;
@@ -84,7 +84,7 @@ fn edit_tool_definition() -> ToolDefinition {
         ))
 }
 
-fn validate_edit_args(args: &EditArgs) -> Result<(), ToolResult> {
+fn validate_edit_args(args: &EditArgs) -> Result<(), ToolOutcome> {
     non_empty_string(&args.path, "path")?;
     if args.edits.is_empty() {
         return Err(invalid_tool_args(
@@ -94,7 +94,7 @@ fn validate_edit_args(args: &EditArgs) -> Result<(), ToolResult> {
     Ok(())
 }
 
-fn edit_file(args: EditArgs) -> ToolResult {
+fn edit_file(args: EditArgs) -> ToolOutcome {
     if let Err(err) = validate_edit_args(&args) {
         return err;
     }
@@ -172,7 +172,7 @@ fn edit_file(args: EditArgs) -> ToolResult {
     })
 }
 
-fn ensure_editable_file(path: &Path, input_path: &str) -> Result<(), ToolResult> {
+fn ensure_editable_file(path: &Path, input_path: &str) -> Result<(), ToolOutcome> {
     match std::fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => Ok(()),
         Ok(_) => Err(invalid_request_failure(
@@ -557,7 +557,7 @@ mod tests {
         }
     }
 
-    fn run_edit(dir: &TempDir, path: &str, edits: Vec<EditReplacement>) -> ToolResult {
+    fn run_edit(dir: &TempDir, path: &str, edits: Vec<EditReplacement>) -> ToolOutcome {
         let path = dir.path().join(path).to_string_lossy().to_string();
         edit_file(EditArgs { path, edits })
     }
@@ -696,7 +696,7 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::Io);
         assert_eq!(failure.code, "file_metadata_failed");
         assert!(failure.message.contains("missing.txt"));
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 
     #[test]

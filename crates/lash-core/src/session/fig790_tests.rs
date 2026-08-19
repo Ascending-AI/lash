@@ -130,7 +130,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                         crate::ProcessInput::External {
                             metadata: serde_json::Value::Null,
                         },
-                        crate::RecoveryDisposition::ExternallyOwned,
+                        crate::RecoveryContract::ExternallyOwned,
                         crate::ProcessProvenance::host(),
                     ));
                 Ok(crate::RuntimeEffectOutcome::Process {
@@ -188,7 +188,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         _session_id: &str,
         _request: crate::ProcessStartRequest,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         Err(crate::PluginError::Session(
             "recorded intent start is not used by the FIG-790 fixture".to_string(),
         ))
@@ -372,8 +372,8 @@ impl crate::ToolProvider for NoopTools {
         None
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-        crate::ToolResult::err_fmt("not used by the FIG-790 fixture")
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        crate::ToolOutcome::err_fmt("not used by the FIG-790 fixture")
     }
 }
 

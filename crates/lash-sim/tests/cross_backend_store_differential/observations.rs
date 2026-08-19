@@ -197,8 +197,8 @@ pub(super) struct ComparableRuntimeCommitResult {
     pub(super) turn_input_applications: Vec<TurnInputApplication>,
 }
 
-impl From<RuntimeCommitResult> for ComparableRuntimeCommitResult {
-    fn from(result: RuntimeCommitResult) -> Self {
+impl From<RuntimeCommitReceipt> for ComparableRuntimeCommitResult {
+    fn from(result: RuntimeCommitReceipt) -> Self {
         Self {
             head_revision: result.head_revision,
             turn_input_applications: result.turn_input_applications,

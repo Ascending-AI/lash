@@ -1086,7 +1086,7 @@ mod tests {
         );
         assert_eq!(
             GoogleOAuthProvider::generation_disposition(&req).stop_sequences,
-            lash_core::GenerationOptionDisposition::Applied
+            lash_core::GenerationOptionOutcome::Applied
         );
     }
 
@@ -1127,7 +1127,7 @@ mod tests {
         let disposition = GoogleOAuthProvider::generation_disposition(&req);
         assert_eq!(
             disposition.cache,
-            lash_core::GenerationOptionDisposition::OmittedUnsupported
+            lash_core::GenerationOptionOutcome::OmittedUnsupported
         );
         assert!(!disposition.nothing_omitted());
     }

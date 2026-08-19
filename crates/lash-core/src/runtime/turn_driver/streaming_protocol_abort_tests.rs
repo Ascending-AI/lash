@@ -1,12 +1,12 @@
 use super::*;
 
-fn request_disposition() -> crate::GenerationDisposition {
-    crate::GenerationDisposition {
-        output_token_cap: crate::GenerationOptionDisposition::Applied,
-        temperature: crate::GenerationOptionDisposition::NotRequested,
-        seed: crate::GenerationOptionDisposition::NotRequested,
-        stop_sequences: crate::GenerationOptionDisposition::NotRequested,
-        cache: crate::GenerationOptionDisposition::NotRequested,
+fn request_disposition() -> crate::GenerationReceipt {
+    crate::GenerationReceipt {
+        output_token_cap: crate::GenerationOptionOutcome::Applied,
+        temperature: crate::GenerationOptionOutcome::NotRequested,
+        seed: crate::GenerationOptionOutcome::NotRequested,
+        stop_sequences: crate::GenerationOptionOutcome::NotRequested,
+        cache: crate::GenerationOptionOutcome::NotRequested,
     }
 }
 
@@ -34,7 +34,7 @@ fn abort_persists_request_disposition_and_typed_interruption() {
             .generation_disposition
             .expect("request disposition")
             .stop_sequences,
-        crate::GenerationOptionDisposition::NotRequested
+        crate::GenerationOptionOutcome::NotRequested
     );
     assert_eq!(response.request_body, evidence.request_body);
     assert_eq!(record.attempts[0].outcome, crate::AttemptOutcome::Aborted);
@@ -106,13 +106,13 @@ fn abort_suppression_updates_response_and_attempt_together() {
             .generation_disposition
             .expect("response disposition")
             .stop_sequences,
-        crate::GenerationOptionDisposition::SuppressedProtocolOwned
+        crate::GenerationOptionOutcome::SuppressedProtocolOwned
     );
     assert_eq!(
         record.attempts[0]
             .generation_disposition
             .expect("attempt disposition")
             .stop_sequences,
-        crate::GenerationOptionDisposition::SuppressedProtocolOwned
+        crate::GenerationOptionOutcome::SuppressedProtocolOwned
     );
 }

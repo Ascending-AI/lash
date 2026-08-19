@@ -26,7 +26,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "fig1293-rerunnable-control"}),
                 },
-                lash_core::RecoveryDisposition::Rerunnable,
+                lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -103,10 +103,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
         .await
         .expect("read Rerunnable target")
         .expect("Rerunnable target exists");
-    assert_eq!(
-        record.disposition,
-        lash_core::RecoveryDisposition::Rerunnable
-    );
+    assert_eq!(record.disposition, lash_core::RecoveryContract::Rerunnable);
     assert!(
         record.first_started.is_none(),
         "the focused law installs no worker, so scheduler timing cannot alter the event sequence"

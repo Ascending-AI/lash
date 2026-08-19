@@ -35,7 +35,7 @@ use lash_core::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvStore as _, ProcessIdentity,
     ProcessInput, ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessStatus,
-    ProcessValueSelector, ProcessWakeSpec, RecoveryDisposition, SessionRelation, SessionScope,
+    ProcessValueSelector, ProcessWakeSpec, RecoveryContract, SessionRelation, SessionScope,
     SessionStoreCreateRequest, SessionStoreFactory as _, TriggerCommand, TriggerOccurrenceRequest,
     TriggerOwnerScope, TriggerSubscriptionDraft,
 };
@@ -305,7 +305,7 @@ fn wake_registration(process_id: &str, wake_session_id: &str) -> ProcessRegistra
         ProcessInput::External {
             metadata: json!({"runbook": "version-bump-recreation"}),
         },
-        RecoveryDisposition::ExternallyOwned,
+        RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
     )
     .with_identity(

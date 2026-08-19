@@ -283,7 +283,7 @@ fn queued_work_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<String> {
 /// Opened before the runtime claims the turn (session-execution lease and
 /// queued-work/turn-input claims) and stamped onto the assembled turn after
 /// the final commit and post-persist hooks complete, so
-/// [`ExecutionSummary`](crate::ExecutionSummary) timing covers
+/// [`TurnExecutionMetrics`](crate::TurnExecutionMetrics) timing covers
 /// claim → final commit. Reads only the injected [`Clock`](crate::Clock):
 /// `started_at_ms` comes from the wall-clock source and the duration from the
 /// monotonic source, so deterministic clocks produce deterministic timing.

@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectGroupHandle,
     EffectHost, EffectJournalRetirement, ExecutionScope, GroupSettlement,
-    InlineRuntimeEffectController, LoserDisposition, Resolution, ResolveOutcome,
+    InlineRuntimeEffectController, LoserPolicy, Resolution, ResolveOutcome,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
     SegmentProgress,
@@ -275,7 +275,7 @@ impl RuntimeEffectController for InlineHostScopedController {
     async fn close_effect_group(
         &self,
         handle: EffectGroupHandle,
-        disposition: LoserDisposition,
+        disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.controller
             .close_effect_group(handle, disposition)

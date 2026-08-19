@@ -277,18 +277,18 @@ impl AnthropicProvider {
     /// host-declared capability says so. The other two are read off the dialect
     /// instead, because for them the body cannot be wrong: Messages always
     /// carries a `max_tokens`, and it has no seed field at all.
-    pub(crate) fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationDisposition {
-        GenerationDisposition {
-            output_token_cap: GenerationOptionDisposition::applied(
+    pub(crate) fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationReceipt {
+        GenerationReceipt {
+            output_token_cap: GenerationOptionOutcome::applied(
                 req.generation.output_token_cap.is_some(),
             ),
             temperature: if body.get("temperature").is_some() {
-                GenerationOptionDisposition::Applied
+                GenerationOptionOutcome::Applied
             } else {
-                GenerationOptionDisposition::sampling_pinned(req.generation.temperature.is_some())
+                GenerationOptionOutcome::sampling_pinned(req.generation.temperature.is_some())
             },
-            seed: GenerationOptionDisposition::unsupported(req.generation.seed.is_some()),
-            stop_sequences: GenerationOptionDisposition::applied(
+            seed: GenerationOptionOutcome::unsupported(req.generation.seed.is_some()),
+            stop_sequences: GenerationOptionOutcome::applied(
                 !req.generation.stop_sequences.is_empty(),
             ),
             cache: lash_llm_transport::cache_intent_disposition(req, Some(body)),
@@ -299,7 +299,7 @@ impl AnthropicProvider {
         mut state: StreamState,
         request_body: Option<String>,
         url: &str,
-        generation_disposition: Option<GenerationDisposition>,
+        generation_disposition: Option<GenerationReceipt>,
         origin_model: &str,
     ) -> LlmResponse {
         let provider_usage = state.provider_usage.take();

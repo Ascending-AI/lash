@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use lash_core::{ToolCall, ToolDefinition, ToolResult};
+use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
@@ -32,7 +32,7 @@ pub fn web_search_provider(api_key: impl Into<String>) -> StaticToolProvider<Web
 
 #[async_trait::async_trait]
 impl StaticToolExecute for WebSearch {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let args = call.args;
         let query = match require_str(args, "query") {
             Ok(query) => query,
@@ -65,7 +65,7 @@ impl StaticToolExecute for WebSearch {
             .await;
         match resp {
             Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
-                Ok(data) => ToolResult::ok(json!({
+                Ok(data) => ToolOutcome::ok(json!({
                     "results": sanitize_results(data.get("results")),
                 })),
                 Err(err) => execution_failure(
@@ -241,6 +241,6 @@ mod tests {
         };
         assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
         assert_eq!(failure.code, "invalid_tool_args");
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 }

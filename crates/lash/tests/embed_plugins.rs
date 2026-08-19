@@ -8,7 +8,9 @@ use lash::plugins::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
 };
 use lash::provider::LlmResponse;
-use lash::tools::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolProvider, ToolResult};
+use lash::tools::{
+    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+};
 use lash::{EmbedError, LashCore, PluginBinding};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -114,7 +116,7 @@ impl ToolProvider for TestTools {
     async fn prepare_tool_call(
         &self,
         call: lash::tools::ToolPrepareCall<'_>,
-    ) -> Result<lash::tools::PreparedToolCall, ToolResult> {
+    ) -> Result<lash::tools::PreparedToolCall, ToolOutcome> {
         if call.pending.tool_name != "typed_probe" {
             return Ok(lash::tools::PreparedToolCall::identity(
                 call.tool_id,
@@ -122,10 +124,10 @@ impl ToolProvider for TestTools {
             ));
         }
         let Some(input) = call.context.plugin_input::<TestTurnInput>(TestPlugin::ID) else {
-            return Err(ToolResult::err_fmt("missing typed input"));
+            return Err(ToolOutcome::err_fmt("missing typed input"));
         };
         let prepared_payload = serde_json::to_value(input)
-            .map_err(|err| ToolResult::err_fmt(format!("failed to prepare typed input: {err}")))?;
+            .map_err(|err| ToolOutcome::err_fmt(format!("failed to prepare typed input: {err}")))?;
         Ok(lash::tools::PreparedToolCall::from_parts(
             call.pending.call_id,
             call.tool_id,
@@ -136,14 +138,16 @@ impl ToolProvider for TestTools {
         ))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         assert_eq!(call.name, "typed_probe");
         let input = match call.context.decode_prepared_payload::<TestTurnInput>() {
             Ok(input) => input,
-            Err(err) => return ToolResult::err_fmt(format!("missing prepared typed input: {err}")),
+            Err(err) => {
+                return ToolOutcome::err_fmt(format!("missing prepared typed input: {err}"));
+            }
         };
         self.seen.lock_recover().push(input.label.clone());
-        ToolResult::ok(json!({ "label": input.label }))
+        ToolOutcome::ok(json!({ "label": input.label }))
     }
 }
 

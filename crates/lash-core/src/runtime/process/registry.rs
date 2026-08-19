@@ -4,8 +4,8 @@ use std::num::NonZeroUsize;
 use super::ProcessCompletionOutcome;
 use super::engine::PersistedSegmentHandover;
 use super::events::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult, ProcessWakeDelivery,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessWakeDelivery,
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
@@ -13,7 +13,7 @@ use super::model::{
     ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
     ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
 };
-use super::references::ProcessLiveReferenceSummary;
+use super::references::ProcessLiveReferenceView;
 
 /// Outcome of process retention: how many terminal processes, events, and
 /// coordinated trigger deliveries were physically deleted.
@@ -606,7 +606,7 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         process_id: &str,
         request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendResult, PluginError>;
+    ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
     /// Append an event emitted by the currently executing process attempt.
     ///
@@ -616,7 +616,7 @@ pub trait ProcessRegistry: Send + Sync {
         process_id: &str,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendResult, PluginError>;
+    ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
     async fn events_after(
         &self,
@@ -671,7 +671,7 @@ pub trait ProcessRegistry: Send + Sync {
     /// [`ProcessCompletionAuthority`] names which of these applies; the
     /// implementation MUST call
     /// [`authority.validate`](ProcessCompletionAuthority::validate) against the
-    /// row's declared [`RecoveryDisposition`](super::model::RecoveryDisposition)
+    /// row's declared [`RecoveryContract`](super::model::RecoveryContract)
     /// inside this operation, so a mismatched authority is rejected with a typed
     /// error before any terminal event is appended, and MUST record the
     /// authority on the terminal event as audit evidence (via
@@ -992,8 +992,7 @@ pub trait ProcessRegistry: Send + Sync {
     ///
     /// This is intentionally a full-scan aggregate. Implementations must read
     /// one consistent snapshot; worklist pagination is not part of this API.
-    async fn live_reference_summary(&self)
-    -> Result<Vec<ProcessLiveReferenceSummary>, PluginError>;
+    async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError>;
 
     /// Count every retained process row that is still non-terminal.
     ///

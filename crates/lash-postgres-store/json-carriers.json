@@ -13,7 +13,7 @@
   },
   "lash_runtime_turn_commits.result_json": {
     "verdict": "deliberately-excluded",
-    "reason": "RuntimeCommitResult is a receipt coupled to turn_commit_hash and identity_encoding_version; enrolling the full receipt DTO is a separate cutover."
+    "reason": "RuntimeCommitReceipt is a receipt coupled to turn_commit_hash and identity_encoding_version; enrolling the full receipt DTO is a separate cutover."
   },
   "lash_session_execution_leases.lease_owner_liveness_json": {
     "verdict": "not-serialized-struct",

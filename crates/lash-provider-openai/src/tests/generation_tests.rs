@@ -54,7 +54,7 @@ fn stop_sequences_reach_chat_but_are_omitted_by_responses_and_codex() {
     assert_eq!(chat["stop"], json!(["</lashlang>"]));
     assert_eq!(
         crate::common::generation_disposition(&req, &chat).stop_sequences,
-        lash_core::GenerationOptionDisposition::Applied
+        lash_core::GenerationOptionOutcome::Applied
     );
 
     let responses = OpenAiProvider::new("key")
@@ -63,7 +63,7 @@ fn stop_sequences_reach_chat_but_are_omitted_by_responses_and_codex() {
     assert!(responses.get("stop").is_none());
     assert_eq!(
         crate::common::generation_disposition(&req, &responses).stop_sequences,
-        lash_core::GenerationOptionDisposition::OmittedUnsupported
+        lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 
     let codex =

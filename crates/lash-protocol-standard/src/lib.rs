@@ -35,7 +35,7 @@ pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, LlmOutputPart, LlmResponse,
-    ProtocolBuildInput, SessionError, ToolResult, TurnDriverConfig, TurnDriverPreamble,
+    ProtocolBuildInput, SessionError, ToolOutcome, TurnDriverConfig, TurnDriverPreamble,
     facade_support::ToolInvocation, facade_support::TurnFinish, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::append_assistant_text_part,
     facade_support::normalized_response_parts, facade_support::reasoning_part,
@@ -178,7 +178,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for StandardBatc
         &self,
         args: &Value,
         context: &lash_core::facade_support::OrchestrationContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         execute_orchestration(args, context).await
     }
 }
@@ -193,7 +193,7 @@ struct BatchCallSpec {
 async fn execute_orchestration(
     args: &Value,
     context: &lash_core::facade_support::OrchestrationContext<'_>,
-) -> ToolResult {
+) -> ToolOutcome {
     let specs = match parse_batch_specs(args) {
         Ok(specs) => specs,
         Err(err) => return err,
@@ -310,19 +310,19 @@ async fn execute_orchestration(
             .and_then(|value| value.as_u64())
             .unwrap_or(u64::MAX)
     });
-    ToolResult::ok(serde_json::json!({
+    ToolOutcome::ok(serde_json::json!({
         "results": immediate_outcomes,
     }))
 }
 
-fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolResult> {
+fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolOutcome> {
     let Some(raw_calls) = args.get("tool_calls").and_then(|value| value.as_array()) else {
-        return Err(ToolResult::err_fmt(
+        return Err(ToolOutcome::err_fmt(
             "Missing required parameter: tool_calls",
         ));
     };
     if raw_calls.is_empty() {
-        return Err(ToolResult::err_fmt(
+        return Err(ToolOutcome::err_fmt(
             "Invalid tool_calls: expected at least one call",
         ));
     }
@@ -330,7 +330,7 @@ fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolResult> {
     let mut specs = Vec::with_capacity(raw_calls.len());
     for (index, item) in raw_calls.iter().enumerate() {
         let Some(object) = item.as_object() else {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Invalid tool_calls[{index}]: expected object with tool and parameters"
             )));
         };
@@ -340,7 +340,7 @@ fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolResult> {
             .map(str::trim)
             .filter(|tool| !tool.is_empty())
         else {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Invalid tool_calls[{index}].tool: expected non-empty string"
             )));
         };
@@ -858,24 +858,24 @@ mod tests {
             }
         }
 
-        async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+        async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
             if call.name == "internal_probe" {
                 self.internal_executed.fetch_add(1, Ordering::SeqCst);
-                return ToolResult::ok(serde_json::json!("internal body ran"));
+                return ToolOutcome::ok(serde_json::json!("internal body ran"));
             }
             self.started.fetch_add(1, Ordering::SeqCst);
             if timeout(Duration::from_millis(100), self.barrier.wait())
                 .await
                 .is_err()
             {
-                return ToolResult::err_fmt("batch child tools did not run concurrently");
+                return ToolOutcome::err_fmt("batch child tools did not run concurrently");
             }
             if call.name == "beta"
                 && call.args.get("value").and_then(|value| value.as_str()) == Some("fail")
             {
-                return ToolResult::err_fmt("beta failed");
+                return ToolOutcome::err_fmt("beta failed");
             }
-            ToolResult::ok(serde_json::json!(call.name))
+            ToolOutcome::ok(serde_json::json!(call.name))
         }
     }
 

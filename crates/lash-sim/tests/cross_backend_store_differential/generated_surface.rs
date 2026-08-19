@@ -201,18 +201,21 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
         (name == "surface_intent_provider").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         panic!("the cross-backend intent provider must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         assert_eq!(call.context.session_id(), SURFACE_SESSION);
         assert_eq!(call.context.execution_scope_id(), SURFACE_TURN);
         assert_eq!(call.context.tool_call_id(), Some("surface-intent-call"));
         assert_eq!(call.context.attempt_number(), 1);
         assert_eq!(call.context.max_attempts(), 1);
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({"ok": true})),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({"ok": true})),
             lash_core::ToolIntents::v1(
                 (0..2)
                     .map(|index| {
@@ -573,7 +576,7 @@ impl SurfaceRunner {
                         ProcessInput::External {
                             metadata: serde_json::json!({"role": "durable-parent"}),
                         },
-                        lash_core::RecoveryDisposition::ExternallyOwned,
+                        lash_core::RecoveryContract::ExternallyOwned,
                         lash_core::ProcessProvenance::new(ProcessOriginator::host_scoped(
                             "surface-differential",
                         )),

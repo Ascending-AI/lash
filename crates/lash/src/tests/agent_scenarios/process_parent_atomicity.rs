@@ -308,11 +308,14 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         (name == "pg_process_parent_intent").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         panic!("the PostgreSQL process-parent law must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args
@@ -339,8 +342,8 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         } else {
             lash_core::ToolIntents::default()
         };
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({"child": child})),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({"child": child})),
             intents,
         )
     }
@@ -411,7 +414,7 @@ async fn segmented_registration(
         input
             .into_process_input()
             .expect("encode PostgreSQL Lashlang process input"),
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION)),
     )
     .with_identity(identity)
@@ -863,7 +866,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                         serde_json::Value::Null,
                     ),
                 },
-                lash_core::RecoveryDisposition::Rerunnable,
+                lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION)),
             )
             .with_execution_env_ref(Some(env_ref)),

@@ -3,14 +3,14 @@ struct WorkbenchControlTools;
 
 #[async_trait]
 impl lash::tools::StaticToolExecute for WorkbenchControlTools {
-    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolResult {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolOutcome {
         match call.name {
-            "workbench_cancel" => lash::tools::ToolResult::from_output(
+            "workbench_cancel" => lash::tools::ToolOutcome::from_output(
                 lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime(
                     "the operator cancelled the workbench action",
                 )),
             ),
-            "workbench_finish" => lash::tools::ToolResult::from_output(
+            "workbench_finish" => lash::tools::ToolOutcome::from_output(
                 lash::tools::ToolCallOutput::success(json!({ "accepted": true })).with_control(
                     lash::tools::ToolControl::Finish {
                         value: lash::tools::ToolValue::from(json!({
@@ -19,7 +19,7 @@ impl lash::tools::StaticToolExecute for WorkbenchControlTools {
                     },
                 ),
             ),
-            "workbench_fail" => lash::tools::ToolResult::ok(json!({ "accepted": false }))
+            "workbench_fail" => lash::tools::ToolOutcome::ok(json!({ "accepted": false }))
                 .with_control(lash::tools::ToolControl::Fail {
                     failure: lash::tools::ToolFailure::tool(
                         lash::tools::ToolFailureClass::Execution,
@@ -27,7 +27,7 @@ impl lash::tools::StaticToolExecute for WorkbenchControlTools {
                         "the workbench action was rejected",
                     ),
                 }),
-            other => lash::tools::ToolResult::err_fmt(format_args!(
+            other => lash::tools::ToolOutcome::err_fmt(format_args!(
                 "unknown workbench control tool `{other}`"
             )),
         }

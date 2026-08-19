@@ -50,7 +50,7 @@ async fn seed_started_owner_bound(
     registry
         .register_process(registration_with_disposition(
             process_id,
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register owner-bound row");
@@ -98,7 +98,7 @@ async fn drain_reports_superseded_terminal_as_peer_settled() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::SettledByPeer {
+            disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
                 terminal_status: ProcessStatus::Completed,
             },
         }]
@@ -138,7 +138,7 @@ async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::AlreadyApplied {
+            disposition: ProcessRecoveryAttemptOutcome::AlreadyApplied {
                 terminal_status: ProcessStatus::Abandoned,
             },
         }]
@@ -171,7 +171,7 @@ async fn drain_reports_already_terminal_completed_as_peer_settled() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::SettledByPeer {
+            disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
                 terminal_status: ProcessStatus::Completed,
             },
         }]
@@ -199,7 +199,7 @@ async fn drain_reports_renewal_supersession_as_lease_lost() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::LeaseLost {
+            disposition: ProcessRecoveryAttemptOutcome::LeaseLost {
                 operation: ProcessRecoveryOperation::RenewLease,
             },
         }]
@@ -234,7 +234,7 @@ async fn drain_reports_terminal_write_supersession_as_lease_lost() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::LeaseLost {
+            disposition: ProcessRecoveryAttemptOutcome::LeaseLost {
                 operation: ProcessRecoveryOperation::WriteTerminal,
             },
         }]
@@ -269,7 +269,7 @@ async fn drain_release_failure_overrides_absent_disposition() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+            disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ReleaseLease,
                 error: "plugin session error: injected lease-release failure".to_string(),
             },

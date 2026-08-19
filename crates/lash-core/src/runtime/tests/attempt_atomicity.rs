@@ -153,15 +153,9 @@ async fn fixtures() -> Fixtures {
     })
     .collect::<Vec<_>>();
     for (id, disposition) in [
-        (LIVE_PROCESS, crate::RecoveryDisposition::Rerunnable),
-        (
-            TERMINAL_PROCESS,
-            crate::RecoveryDisposition::ExternallyOwned,
-        ),
-        (
-            EXTERNAL_PROCESS,
-            crate::RecoveryDisposition::ExternallyOwned,
-        ),
+        (LIVE_PROCESS, crate::RecoveryContract::Rerunnable),
+        (TERMINAL_PROCESS, crate::RecoveryContract::ExternallyOwned),
+        (EXTERNAL_PROCESS, crate::RecoveryContract::ExternallyOwned),
     ] {
         registry
             .register_process_with_observers(
@@ -365,7 +359,7 @@ impl crate::ToolProvider for PureLeafProbeProvider {
         (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         self.execute_calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.name, "attempt_atomicity");
         // The sealed attempt projection, not the journal-capable `ToolContext`.
@@ -392,7 +386,7 @@ impl crate::ToolProvider for PureLeafProbeProvider {
             "the refusal must name the missing declaration: {}",
             refusal.message
         );
-        crate::ToolResult::ok(serde_json::json!("pure execute ran"))
+        crate::ToolOutcome::ok(serde_json::json!("pure execute ran"))
     }
 }
 
@@ -520,7 +514,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
             // becomes a `Done` failure output: without pinning the exact
             // success payload here, every in-provider law above would be
             // unenforced.
-            let crate::ToolAttemptResult::Done { result, .. } = result else {
+            let crate::ToolAttemptOutcome::Done { result, .. } = result else {
                 panic!("pure-execute provider must complete, not park");
             };
             assert_eq!(
@@ -822,7 +816,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             )
             .with_extra_event_types([crate::ProcessEventType {
@@ -1348,7 +1342,7 @@ impl crate::ToolProvider for RawClientDirectProvider {
         (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         self.execute_calls.fetch_add(1, Ordering::SeqCst);
         let context = call.context;
         let completion = context
@@ -1360,7 +1354,7 @@ impl crate::ToolProvider for RawClientDirectProvider {
             .await
             .expect("raw-client direct completion");
         assert_eq!(completion.text, DIRECT_TEXT);
-        crate::ToolResult::ok(serde_json::json!("raw client ran"))
+        crate::ToolOutcome::ok(serde_json::json!("raw client ran"))
     }
 }
 

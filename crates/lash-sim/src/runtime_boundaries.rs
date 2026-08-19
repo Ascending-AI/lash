@@ -9,7 +9,7 @@ use lash_core::runtime::{
 };
 use lash_core::{
     ExecResponse, ExecutionScope, LeaseOwnerIdentity, PreparedToolCall, ProcessAwaitOutput,
-    ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryDisposition,
+    ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryContract,
     RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome, SessionRelation,
@@ -923,7 +923,7 @@ impl RuntimeBoundaryHarness {
         register_lifecycle_row(
             registry.as_ref(),
             "ob-crashed",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         )
         .await?;
         record_lifecycle_started(registry.as_ref(), "ob-crashed", &dead_holder).await?;
@@ -948,7 +948,7 @@ impl RuntimeBoundaryHarness {
         register_lifecycle_row(
             registry.as_ref(),
             "ob-abandon-req",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         )
         .await?;
         record_lifecycle_started(registry.as_ref(), "ob-abandon-req", &silent_owner).await?;
@@ -984,7 +984,7 @@ impl RuntimeBoundaryHarness {
             &registry,
             &awaiter,
             "ob-crashed",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
             Some(&dead_holder),
             &sweep_owner,
         )
@@ -993,7 +993,7 @@ impl RuntimeBoundaryHarness {
             &registry,
             &awaiter,
             "rerun-crashed",
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             Some(&dead_holder),
             &sweep_owner,
         )
@@ -1002,7 +1002,7 @@ impl RuntimeBoundaryHarness {
             &registry,
             &awaiter,
             "ob-abandon-req",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
             None,
             &sweep_owner,
         )
@@ -1200,7 +1200,7 @@ impl RuntimeBoundaryHarness {
                 ProcessInput::External {
                     metadata: json!({"simulation": "worker_stale_completion"}),
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
             ))
             .await

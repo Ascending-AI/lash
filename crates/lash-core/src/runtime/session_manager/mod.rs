@@ -447,11 +447,11 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         .await
         .expect("lost-response retry replays");
     let (
-        crate::AppendSessionNodesResult::Appended {
+        crate::AppendSessionNodesOutcome::Appended {
             node_ids: first_node_ids,
             leaf_node_id: first_leaf,
         },
-        crate::AppendSessionNodesResult::Appended {
+        crate::AppendSessionNodesOutcome::Appended {
             node_ids: replay_node_ids,
             leaf_node_id: replay_leaf,
         },

@@ -344,7 +344,7 @@ pub fn runtime_agent_frame_invariant_facts(
 }
 
 pub fn runtime_usage_invariant_facts(
-    result: &lash::TurnResult,
+    result: &lash::TurnReport,
     activities: &[lash::TurnActivity],
 ) -> RuntimeUsageInvariantFacts {
     let turn_usage = RuntimeUsageTotals::from_usage(&result.usage);
@@ -413,7 +413,7 @@ pub fn runtime_usage_invariant_facts(
 }
 
 pub fn runtime_final_value_invariant_facts(
-    result: &lash::TurnResult,
+    result: &lash::TurnReport,
     activities: &[lash::TurnActivity],
 ) -> RuntimeFinalValueInvariantFacts {
     let (outcome_kind, semantic_value) = match &result.outcome {
@@ -626,8 +626,8 @@ mod tests {
 
     #[test]
     fn final_value_builder_derives_pass_and_fail_from_real_outcomes_and_events() {
-        fn result(outcome: lash_core::facade_support::TurnOutcome) -> lash::TurnResult {
-            lash::TurnResult {
+        fn result(outcome: lash_core::facade_support::TurnOutcome) -> lash::TurnReport {
+            lash::TurnReport {
                 state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                 )),

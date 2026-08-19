@@ -82,7 +82,7 @@ impl CanonicalRuntimeEffectEnvelope {
 
 /// Compact, content-free mismatch evidence retained on the controller error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeEffectReplayMismatchSummary {
+pub struct RuntimeEffectReplayMismatchReport {
     pub divergent_path_count: usize,
     pub first_divergent_paths: Vec<String>,
 }
@@ -188,7 +188,7 @@ pub fn validate_replayed_effect_envelope(
         .iter()
         .map(|difference| difference.path.clone())
         .collect::<Vec<_>>();
-    let summary = RuntimeEffectReplayMismatchSummary {
+    let summary = RuntimeEffectReplayMismatchReport {
         divergent_path_count: paths.len(),
         first_divergent_paths: paths
             .iter()
@@ -217,7 +217,7 @@ pub fn validate_replayed_effect_envelope(
     .with_summary(summary))
 }
 
-fn render_divergent_paths(summary: &RuntimeEffectReplayMismatchSummary) -> String {
+fn render_divergent_paths(summary: &RuntimeEffectReplayMismatchReport) -> String {
     let mut paths = summary.first_divergent_paths.clone();
     let elided = summary.divergent_path_count.saturating_sub(paths.len());
     if elided > 0 {
@@ -406,7 +406,7 @@ mod tests {
         .expect_err("mismatch");
         assert_eq!(
             error.summary.as_ref(),
-            Some(&RuntimeEffectReplayMismatchSummary {
+            Some(&RuntimeEffectReplayMismatchReport {
                 divergent_path_count: 10,
                 first_divergent_paths: vec![
                     "command.call.args.f0".to_string(),

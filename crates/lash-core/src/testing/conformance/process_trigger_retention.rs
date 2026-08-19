@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProjectionWatermark, RecoveryDisposition, SessionScope, TriggerCommand, TriggerOwnerScope,
+    ProjectionWatermark, RecoveryContract, SessionScope, TriggerCommand, TriggerOwnerScope,
     TriggerStore, TriggerSubscriptionDraft,
 };
 
@@ -152,7 +152,7 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryDisposition::ExternallyOwned,
+                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
             )
             .with_identity(ProcessIdentity::new("test")),
@@ -421,7 +421,7 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
                     ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    RecoveryDisposition::ExternallyOwned,
+                    RecoveryContract::ExternallyOwned,
                     ProcessProvenance::host(),
                 )
                 .with_identity(ProcessIdentity::new("test")),
@@ -497,7 +497,7 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryDisposition::ExternallyOwned,
+                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
             )
             .with_identity(ProcessIdentity::new("test")),
@@ -569,7 +569,7 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
         )
         .with_identity(ProcessIdentity::new("test"))
@@ -630,7 +630,7 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
                             ProcessInput::External {
                                 metadata: serde_json::Value::Null,
                             },
-                            RecoveryDisposition::ExternallyOwned,
+                            RecoveryContract::ExternallyOwned,
                             ProcessProvenance::host(),
                         )
                         .with_identity(ProcessIdentity::new("test")),

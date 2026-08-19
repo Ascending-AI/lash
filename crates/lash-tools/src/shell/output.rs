@@ -22,7 +22,7 @@ use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::Notify;
 
-use lash_core::{ToolFailure, ToolFailureClass, ToolResult, ToolValue};
+use lash_core::{ToolFailure, ToolFailureClass, ToolOutcome, ToolValue};
 
 pub(crate) const MAX_OUTPUT: usize = 512_000;
 pub(crate) const SPILL_OUTPUT_THRESHOLD: usize = 50 * 1024;
@@ -528,7 +528,7 @@ pub(crate) fn shell_io_result(
     original_token_count: Option<usize>,
     full_output_path: Option<&Path>,
     wall_time_seconds: f64,
-) -> ToolResult {
+) -> ToolOutcome {
     let record = standard_shell_io_record(
         id,
         output,
@@ -537,7 +537,7 @@ pub(crate) fn shell_io_result(
         full_output_path,
         wall_time_seconds,
     );
-    ToolResult::ok(record)
+    ToolOutcome::ok(record)
 }
 
 pub(crate) fn timed_out_shell_io_result(
@@ -547,7 +547,7 @@ pub(crate) fn timed_out_shell_io_result(
     full_output_path: Option<&Path>,
     wall_time_seconds: f64,
     timeout_ms: u64,
-) -> ToolResult {
+) -> ToolOutcome {
     let mut record = standard_shell_io_record(
         id,
         output,
@@ -574,15 +574,15 @@ pub(crate) fn timed_out_shell_io_result(
     )
 }
 
-fn shell_failure(code: &str, message: impl Into<String>, raw: serde_json::Value) -> ToolResult {
+fn shell_failure(code: &str, message: impl Into<String>, raw: serde_json::Value) -> ToolOutcome {
     let mut failure = ToolFailure::tool(ToolFailureClass::Execution, code, message);
     failure.raw = Some(ToolValue::from(raw));
-    ToolResult::failure(failure)
+    ToolOutcome::failure(failure)
 }
 
 #[cfg(test)]
-fn shell_reader_died_result() -> ToolResult {
-    ToolResult::failure(*shell_reader_died_failure())
+fn shell_reader_died_result() -> ToolOutcome {
+    ToolOutcome::failure(*shell_reader_died_failure())
 }
 
 pub(crate) fn shell_reader_died_failure() -> Box<ToolFailure> {
@@ -623,7 +623,7 @@ mod reader_death_tests {
         assert!(reader_died.load(Ordering::SeqCst));
 
         let result = shell_reader_died_result();
-        let lash_core::ToolResult::Done(output) = result else {
+        let lash_core::ToolOutcome::Done(output) = result else {
             panic!("reader death cannot defer completion");
         };
         let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {

@@ -420,7 +420,7 @@ fn trigger_dtos_round_trip_core_values() {
 
     let report = lash_core::facade_support::TriggerEmitReport {
         occurrence_id: "occurrence:1".to_string(),
-        deliveries: vec![lash_core::facade_support::TriggerDeliveryEmitReport {
+        deliveries: vec![lash_core::facade_support::TriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
             process_id: "process:1".to_string(),
@@ -453,7 +453,7 @@ fn trigger_dtos_round_trip_core_values() {
         name: Some("button watcher".to_string()),
         source_type: lash_core::facade_support::TriggerEventType::new("ui.button.pressed"),
         source: serde_json::json!({}),
-        target: lash_core::facade_support::TriggerTargetSummary {
+        target: lash_core::facade_support::TriggerTarget {
             label: Some("on_button".to_string()),
             identity: engine_process_identity("on_button"),
             input: engine_process_input("on_button", serde_json::json!({})),
@@ -528,7 +528,7 @@ fn trigger_subscription_dtos_round_trip_core_values() {
     assert_eq!(core.source_key, "source-key");
 
     let result =
-        RemoteTriggerRegisterSubscriptionResult::try_from(record.clone()).expect("remote result");
+        RemoteTriggerRegisterSubscriptionReceipt::try_from(record.clone()).expect("remote result");
     let core = lash_core::TriggerSubscriptionRecord::try_from(result).expect("register result");
     assert_eq!(core.subscription_id, record.subscription_id);
 
@@ -558,7 +558,7 @@ fn process_start_requests_round_trip_core_values() {
     let lashlang = lash_core::ProcessStartRequest::new(
         "process:lashlang",
         engine_process_input("main", serde_json::json!({ "event": true })),
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a")),
     )
     .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
@@ -607,7 +607,7 @@ fn process_start_requests_round_trip_core_values() {
                 Some(serde_json::json!({ "type": "object" })),
             ),
         },
-        lash_core::RecoveryDisposition::Rerunnable,
+        lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
     );
     assert_process_start_roundtrip(session_turn);
@@ -633,17 +633,17 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
         serde_json::to_value(record.input.as_ref()).expect("record input json")
     );
 
-    let summary = lash_core::ProcessHandleSummary::new(
+    let summary = lash_core::ProcessHandleView::new(
         "process:record",
         lash_core::ProcessIdentity::new("external").with_label(Some("External".to_string())),
         lash_core::ProcessStatus::Completed,
     )
     .with_definition(Some(process_definition_identity("main")));
-    let remote = RemoteProcessSummary::from(summary.clone());
+    let remote = RemoteProcessHandleView::from(summary.clone());
     remote
-        .validate("RemoteProcessSummary")
+        .validate("RemoteProcessHandleView")
         .expect("valid summary");
-    let core = lash_core::ProcessHandleSummary::try_from(remote).expect("core summary");
+    let core = lash_core::ProcessHandleView::try_from(remote).expect("core summary");
     assert_eq!(core.process_id, summary.process_id);
     assert_eq!(core.status, summary.status);
 
@@ -690,19 +690,19 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.session_id, snapshot.session_id);
     assert_eq!(core.items[0].process.process_id, "process:observed");
 
-    let start_result = RemoteProcessStartResult::try_from(process_record("process:start-result"))
+    let start_result = RemoteProcessStartReceipt::try_from(process_record("process:start-result"))
         .expect("start result");
     let core = lash_core::ProcessRecord::try_from(start_result).expect("core start result");
     assert_eq!(core.id, "process:start-result");
 
-    let cancel = RemoteProcessCancelResult::from(lash_core::ProcessCancelSummary {
+    let cancel = RemoteProcessCancelReceipt::from(lash_core::ProcessCancelReceipt {
         process_id: "process:cancel".to_string(),
         status: lash_core::ProcessStatus::Cancelled,
     });
-    let core = lash_core::ProcessCancelSummary::try_from(cancel).expect("core cancel summary");
+    let core = lash_core::ProcessCancelReceipt::try_from(cancel).expect("core cancel summary");
     assert_eq!(core.status, lash_core::ProcessStatus::Cancelled);
 
-    let await_result = RemoteProcessAwaitResult::try_from((
+    let await_result = RemoteProcessAwaitOutcome::try_from((
         "process:await".to_string(),
         lash_core::ProcessAwaitOutput::Cancelled {
             message: "stopped".to_string(),
@@ -870,7 +870,7 @@ fn remote_turn_result_maps_core_semantics() {
             raw_text: "done".to_string(),
             state: lash_core::facade_support::OutputState::Usable,
         },
-        execution: lash_core::facade_support::ExecutionSummary {
+        execution: lash_core::facade_support::TurnExecutionMetrics {
             had_tool_calls: true,
             had_code_execution: false,
             started_at_ms: 1_700_000_000_000,
@@ -924,7 +924,7 @@ fn remote_turn_result_maps_core_semantics() {
         result: serde_json::json!({"sequence": 3}),
         parent_end: None,
     };
-    let remote = RemoteTurnResult::from_core(
+    let remote = RemoteTurnReport::from_core(
         "session",
         "turn",
         turn,
@@ -1056,14 +1056,14 @@ fn assert_terminal_call_record_converts_and_validates(
             raw_text: String::new(),
             state: lash_core::facade_support::OutputState::EmptyOutput,
         },
-        execution: lash_core::facade_support::ExecutionSummary::default(),
+        execution: lash_core::facade_support::TurnExecutionMetrics::default(),
         token_usage: lash_core::TokenUsage::default(),
         children_usage: Vec::new(),
         llm_calls: vec![record],
         tool_calls: Vec::new(),
         errors: Vec::new(),
     };
-    let result = RemoteTurnResult::from_core("session", "turn", turn, [activity]);
+    let result = RemoteTurnReport::from_core("session", "turn", turn, [activity]);
     result
         .validate()
         .expect("turn-result conversion validates the terminal call record");
@@ -1895,7 +1895,7 @@ fn process_record(process_id: &str) -> lash_core::ProcessRecord {
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "label": "External" }),
         },
-        lash_core::RecoveryDisposition::ExternallyOwned,
+        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host().with_caused_by(Some(
             lash_core::CausalRef::TriggerOccurrence {
                 occurrence_id: "trigger:1".to_string(),
@@ -1966,7 +1966,7 @@ fn observed_process() -> lash_core::facade_support::ObservedProcess {
         lifecycle: lash_core::ProcessStatus::Running,
         status_label: "running".to_string(),
         terminal: false,
-        disposition: lash_core::RecoveryDisposition::ExternallyOwned,
+        disposition: lash_core::RecoveryContract::ExternallyOwned,
         error: None,
         created_at_ms: 1,
         updated_at_ms: 2,
@@ -2090,19 +2090,19 @@ fn remote_generation_options_are_omitted_from_the_wire_when_unset() {
 #[test]
 fn every_generation_option_disposition_crosses_the_boundary_in_both_directions() {
     for core in [
-        core_llm::GenerationOptionDisposition::NotRequested,
-        core_llm::GenerationOptionDisposition::Applied,
-        core_llm::GenerationOptionDisposition::SuppressedProtocolOwned,
-        core_llm::GenerationOptionDisposition::OmittedUnsupported,
-        core_llm::GenerationOptionDisposition::OmittedSamplingPinned,
-        core_llm::GenerationOptionDisposition::ClampedToCapacity,
+        core_llm::GenerationOptionOutcome::NotRequested,
+        core_llm::GenerationOptionOutcome::Applied,
+        core_llm::GenerationOptionOutcome::SuppressedProtocolOwned,
+        core_llm::GenerationOptionOutcome::OmittedUnsupported,
+        core_llm::GenerationOptionOutcome::OmittedSamplingPinned,
+        core_llm::GenerationOptionOutcome::ClampedToCapacity,
     ] {
-        let remote = RemoteGenerationOptionDisposition::from(core);
-        assert_eq!(core_llm::GenerationOptionDisposition::from(remote), core);
+        let remote = RemoteGenerationOptionOutcome::from(core);
+        assert_eq!(core_llm::GenerationOptionOutcome::from(remote), core);
     }
 
     assert_eq!(
-        serde_json::to_value(RemoteGenerationOptionDisposition::SuppressedProtocolOwned)
+        serde_json::to_value(RemoteGenerationOptionOutcome::SuppressedProtocolOwned)
             .expect("serialize"),
         serde_json::json!("suppressed_protocol_owned")
     );

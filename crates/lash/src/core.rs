@@ -656,7 +656,7 @@ impl LashCore {
         &self,
         node_id: impl Into<String>,
         session_id: impl Into<String>,
-    ) -> Result<lash_core::ForkSessionResult> {
+    ) -> Result<lash_core::ForkSessionReceipt> {
         self.fork_at_with_observer_inheritance(
             node_id,
             session_id,
@@ -670,7 +670,7 @@ impl LashCore {
         node_id: impl Into<String>,
         session_id: impl Into<String>,
         observer_inheritance: lash_core::ObserverInheritance,
-    ) -> Result<lash_core::ForkSessionResult> {
+    ) -> Result<lash_core::ForkSessionReceipt> {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };

@@ -57,7 +57,7 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
         ))
         .await
@@ -336,7 +336,7 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryDisposition::ExternallyOwned,
+        RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
     )
     .with_identity(
@@ -410,7 +410,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
         ))
         .await
@@ -819,7 +819,7 @@ async fn refolded_process_record_matches_stored_projection(
                     kind: "refold-conformance".to_string(),
                     payload: serde_json::json!({"case": process_id}),
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
             )
             .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
@@ -959,7 +959,7 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
             )
             .with_max_attempts(Some(1)),
@@ -1150,7 +1150,7 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
                     kind: "waiting-recovery-worklist".to_string(),
                     payload: serde_json::Value::Null,
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
             )
             .with_identity(
@@ -1685,7 +1685,7 @@ async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessR
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryDisposition::ExternallyOwned,
+                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::session(SessionScope::new("filter-origin")).with_caused_by(
                     Some(crate::CausalRef::TriggerOccurrence {
                         occurrence_id: "indexed-occurrence-target".to_string(),
@@ -2133,7 +2133,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
 
     // Illegal: departures belong to rows lash never executes.
     let mut owner_bound = registration("caller-departure-owner-bound");
-    owner_bound.disposition = RecoveryDisposition::OwnerBound;
+    owner_bound.disposition = RecoveryContract::OwnerBound;
     registry
         .register_process(owner_bound)
         .await

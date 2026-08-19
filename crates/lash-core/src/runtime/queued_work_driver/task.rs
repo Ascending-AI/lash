@@ -7,7 +7,7 @@ use super::scheduler::{
 };
 use super::types::{
     QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunProgress, QueuedWorkSlowWake,
-    QueuedWorkWakeContended, QueuedWorkWakeDisposition, QueuedWorkWakeFailure, WAKE_MAX_ATTEMPTS,
+    QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome, WAKE_MAX_ATTEMPTS,
     WAKE_RETRY_INITIAL, WAKE_RETRY_MAX,
 };
 
@@ -211,22 +211,19 @@ impl QueuedWorkTaskDriver {
                     contended_since = None;
                     next_contention_heartbeat = None;
                     let disposition = match err.class {
-                        QueuedWorkRunErrorClass::Terminal => QueuedWorkWakeDisposition::Terminal,
+                        QueuedWorkRunErrorClass::Terminal => QueuedWorkWakeOutcome::Terminal,
                         QueuedWorkRunErrorClass::Transient
                             if transient_attempt >= WAKE_MAX_ATTEMPTS =>
                         {
-                            QueuedWorkWakeDisposition::Exhausted
+                            QueuedWorkWakeOutcome::Exhausted
                         }
-                        QueuedWorkRunErrorClass::Transient => QueuedWorkWakeDisposition::Retrying,
+                        QueuedWorkRunErrorClass::Transient => QueuedWorkWakeOutcome::Retrying,
                     };
                     let failure = QueuedWorkWakeFailure {
                         session_id: demand.session_id.clone(),
                         reason: reason.clone(),
                         attempt: transient_attempt,
-                        retry_after_ms: if matches!(
-                            disposition,
-                            QueuedWorkWakeDisposition::Retrying
-                        ) {
+                        retry_after_ms: if matches!(disposition, QueuedWorkWakeOutcome::Retrying) {
                             transient_retry_after.as_millis() as u64
                         } else {
                             0
@@ -235,7 +232,7 @@ impl QueuedWorkTaskDriver {
                         error: err.to_string(),
                     };
                     match failure.disposition {
-                        QueuedWorkWakeDisposition::Retrying => tracing::warn!(
+                        QueuedWorkWakeOutcome::Retrying => tracing::warn!(
                             target: "lash_core::queued_work",
                             session_id = failure.session_id.as_deref(),
                             reason = %failure.reason,
@@ -245,7 +242,7 @@ impl QueuedWorkTaskDriver {
                             event = "queued_work.wake_retry",
                             "queued-work wake failed; retrying the pending-work claim"
                         ),
-                        QueuedWorkWakeDisposition::Terminal => {
+                        QueuedWorkWakeOutcome::Terminal => {
                             tracing::warn!(
                                 target: "lash_core::queued_work",
                                 session_id = failure.session_id.as_deref(),
@@ -257,7 +254,7 @@ impl QueuedWorkTaskDriver {
                             );
                             return;
                         }
-                        QueuedWorkWakeDisposition::Exhausted => {
+                        QueuedWorkWakeOutcome::Exhausted => {
                             tracing::warn!(
                                 target: "lash_core::queued_work",
                                 session_id = failure.session_id.as_deref(),

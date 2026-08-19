@@ -42,7 +42,7 @@ struct GroupSupportingEffectController {
     inline: InlineRuntimeEffectController,
     /// The disposition the open declared, so the close can resolve against it
     /// rather than accept whatever it is handed.
-    declared: std::sync::Mutex<Option<crate::LoserDisposition>>,
+    declared: std::sync::Mutex<Option<crate::LoserPolicy>>,
 }
 
 #[async_trait::async_trait]
@@ -91,14 +91,14 @@ impl RuntimeEffectController for GroupSupportingEffectController {
     async fn close_effect_group(
         &self,
         _handle: crate::EffectGroupHandle,
-        disposition: crate::LoserDisposition,
+        disposition: crate::LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         let declared = self
             .declared
             .lock()
             .expect("declared disposition")
             .unwrap_or(disposition);
-        crate::LoserDisposition::resolve_close(declared, disposition)?;
+        crate::LoserPolicy::resolve_close(declared, disposition)?;
         Ok(())
     }
 }
@@ -141,7 +141,7 @@ fn one_child_group() -> crate::RuntimeEffectGroup {
         "session:group:batch:0",
         vec![child],
         crate::GroupWakePolicy::First,
-        crate::LoserDisposition::Cancel,
+        crate::LoserPolicy::Cancel,
     )
     .expect("a one-child group assembles")
 }
@@ -182,7 +182,7 @@ async fn a_controller_without_group_support_fails_closed_on_every_group_method()
     );
 
     let close_error = controller
-        .close_effect_group(handle, crate::LoserDisposition::Cancel)
+        .close_effect_group(handle, crate::LoserPolicy::Cancel)
         .await
         .expect_err("closing a group must fail closed");
     assert_eq!(

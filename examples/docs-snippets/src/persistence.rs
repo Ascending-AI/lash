@@ -177,7 +177,7 @@ fn replay_mismatch_classification_is_host_usable() {
         lash::runtime::RuntimeErrorCode::from_wire_code("sqlite_effect_replay_hash_conflict"),
         "recorded effect diverged",
     );
-    error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchSummary {
+    error.summary = Some(lash::runtime::RuntimeEffectReplayMismatchReport {
         divergent_path_count: 1,
         first_divergent_paths: vec!["command.duration_ms".to_string()],
     });

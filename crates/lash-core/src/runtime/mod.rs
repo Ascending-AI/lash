@@ -300,12 +300,12 @@ pub use effect::{
     EffectHost, EffectJournalIdentity, EffectJournalRetirement, ExecutionScope,
     ExternalCompletionError, GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy,
     InlineEffectHost, InlineRuntimeEffectController, LlmAttachmentSpec, LlmRequestSpec,
-    LoserDisposition, ProcessCommand, ProcessEffectOutcome, ProcessOutcomeObserver,
+    LoserPolicy, ProcessCommand, ProcessEffectOutcome, ProcessOutcomeObserver,
     ProcessTurnCancellation, Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome,
     RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchSummary, RuntimeEffectReplayTrace, RuntimeInvocation,
+    RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
     RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
     ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
@@ -322,7 +322,7 @@ pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
-    LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult,
+    LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
     LiveReplaySubscription, RuntimeHandle, RuntimeObservation, SessionCursor, SessionCursorError,
     SessionObservation, SessionObservationEvent, SessionObservationEventPayload,
     SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
@@ -336,25 +336,25 @@ pub use process::{
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
     ObserverInheritance, PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
     PersistedSegmentHandover, ProcessAttach, ProcessAwaitOutput, ProcessAwaiter,
-    ProcessCancelSummary, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine,
     ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
-    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType,
     ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInfraError, ProcessInput,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
-    ProcessListMode, ProcessLiveReferenceSummary, ProcessObserverBy, ProcessOpScope,
-    ProcessOriginator, ProcessOutcome, ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
+    ProcessHandleView, ProcessId, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessListMode,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessOpScope, ProcessOriginator, ProcessOutcome,
+    ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
     ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, ProcessToolVisibilityFilter,
     ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeDeliveryRequest,
     ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorklistCursor,
-    ProcessWorklistPage, ProjectionWatermark, RecoveryDisposition, SegmentHandover, SessionId,
+    ProcessWorklistPage, ProjectionWatermark, RecoveryContract, SegmentHandover, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, UnavailableProcessService,
     WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
@@ -376,7 +376,7 @@ pub use process_work_driver::{InlineProcessRunHandle, ProcessRunHandle, ProcessW
 pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
-    ProcessDrainReport, ProcessExecutionConcurrencyError, ProcessRecoveryAttemptDisposition,
+    ProcessDrainReport, ProcessExecutionConcurrencyError, ProcessRecoveryAttemptOutcome,
     ProcessRecoveryOperation, ProcessWorkerFault,
 };
 pub use queued_drain_policy::{
@@ -392,7 +392,7 @@ pub use queued_work_driver::{
     DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,
     QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
     QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
-    QueuedWorkWakeContended, QueuedWorkWakeDisposition, QueuedWorkWakeFailure,
+    QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
@@ -407,7 +407,7 @@ pub use turn_control::{
 };
 pub(crate) use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
     PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt,
     TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
@@ -941,7 +941,7 @@ pub struct CodeOutputRecord {
 
 /// High-level execution summary for a completed turn.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct ExecutionSummary {
+pub struct TurnExecutionMetrics {
     #[serde(default)]
     pub had_tool_calls: bool,
     #[serde(default)]
@@ -992,13 +992,13 @@ pub struct AssembledTurn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancellation: Option<TurnCancellationEvidence>,
     pub assistant_output: AssistantOutput,
-    pub execution: ExecutionSummary,
+    pub execution: TurnExecutionMetrics,
     #[serde(default)]
     pub token_usage: TokenUsage,
     /// Per-(session, source, model) ledger entries for child sessions whose
     /// LLM calls completed during this turn. `token_usage` above is the
     /// parent's own LLM tokens; `total_usage` (on the embed-facing
-    /// `TurnResult`) sums both.
+    /// `TurnReport`) sums both.
     #[serde(default)]
     pub children_usage: Vec<TokenLedgerEntry>,
     /// Provider calls made by this session during the turn, in protocol order.
@@ -1405,7 +1405,7 @@ pub struct ForkSessionRequest {
 
 /// Durable identity returned after a zero-node fork.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ForkSessionResult {
+pub struct ForkSessionReceipt {
     pub session_id: String,
     pub node_id: String,
     /// Session that originally wrote `node_id`. This is process-observer
@@ -1508,7 +1508,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     async fn fork_at(
         &self,
         request: &ForkSessionRequest,
-    ) -> Result<ForkSessionResult, crate::StoreError> {
+    ) -> Result<ForkSessionReceipt, crate::StoreError> {
         let _ = request;
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "fork_at",

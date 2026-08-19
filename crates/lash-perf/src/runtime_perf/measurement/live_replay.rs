@@ -99,8 +99,8 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
         let ((buffered_count, live_count), subscribe_phase) =
             measure_runtime_perf_async_phase("live_replay.subscribe_buffered", async {
                 let mut subscription = match store.subscribe_after_cursor(&first_cursor)? {
-                    LiveReplaySubscribeResult::Subscribed(subscription) => subscription,
-                    LiveReplaySubscribeResult::Gap(reason) => {
+                    LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,
+                    LiveReplaySubscribeOutcome::Gap(reason) => {
                         anyhow::bail!("subscribe after first cursor returned gap {reason:?}")
                     }
                 };
@@ -187,13 +187,13 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     ),
                 }
                 match store.subscribe_after_cursor(&ahead_cursor)? {
-                    LiveReplaySubscribeResult::Gap(lash_core::LiveReplayGapReason::Unavailable) => {
+                    LiveReplaySubscribeOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => {
                         gaps += 1
                     }
-                    LiveReplaySubscribeResult::Gap(reason) => {
+                    LiveReplaySubscribeOutcome::Gap(reason) => {
                         anyhow::bail!("ahead subscribe returned wrong gap {reason:?}")
                     }
-                    LiveReplaySubscribeResult::Subscribed(_) => {
+                    LiveReplaySubscribeOutcome::Subscribed(_) => {
                         anyhow::bail!("ahead subscribe expected gap")
                     }
                 }

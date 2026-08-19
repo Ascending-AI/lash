@@ -404,7 +404,7 @@ pub enum SessionRelation {
         /// host understands it. Stores persist it as durable fork lineage
         /// and never validate it against the fork point's anchor provenance —
         /// repeated rewinds legitimately name superseded intermediate
-        /// sessions, while [`crate::ForkSessionResult::source_session_id`]
+        /// sessions, while [`crate::ForkSessionReceipt::source_session_id`]
         /// always reports the original writer.
         source_session_id: String,
         /// Host-declared source node, persisted alongside

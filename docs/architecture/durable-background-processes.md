@@ -372,7 +372,7 @@ A generalization of code that already existed for turns — not a new subsystem:
   (`ProcessWorkDriver::await_terminal`); the worker exposes no completion
   handle. It fetches a bounded page only as dispatch capacity
   frees, claims each lease (skipping any held live by another owner), re-checks terminality after
-  claiming, then handles each row by its declared `RecoveryDisposition` (ADR
+  claiming, then handles each row by its declared `RecoveryContract` (ADR
   0019). A `Rerunnable` row —
   or a not-yet-started `OwnerBound` one, since a first execution is not a
   re-execution — is run on the worker's wired controller while renewing the lease
@@ -708,9 +708,9 @@ terminal are carried as request config / tool-access, not lost.
   reconciled request, a revenant's lease-fenced writes are rejected, and owner
   drain terminalizes inline.
 - `docs/adr/0019-process-recovery-obeys-declared-disposition.md` — the ratified
-  contract: required `RecoveryDisposition`, the `Abandoned` terminal, single
+  contract: required `RecoveryContract`, the `Abandoned` terminal, single
   writer per path, and elapsed-time-never-terminalizes.
-- `crates/lash-core/src/runtime/process/model.rs` — `RecoveryDisposition`, the
+- `crates/lash-core/src/runtime/process/model.rs` — `RecoveryContract`, the
   durable `first_started` fact, and `AbandonRequest`.
 - `crates/lash-core/src/runtime/process/events.rs` —
   `ProcessStatus::Abandoned`, `AbandonWriter`

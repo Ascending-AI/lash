@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use lash_core::{ToolCall, ToolDefinition, ToolResult};
+use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, display_relative,
@@ -36,7 +36,7 @@ struct WriteOutput {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for Write {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         execute_typed_tool_result::<WriteArgs, _, _>(call.args, |args| async move {
             if let Err(err) = non_empty_string(&args.path, "path") {
                 return err;
@@ -60,7 +60,7 @@ fn write_tool_definition() -> ToolDefinition {
         ))
 }
 
-fn write_file(args: WriteArgs) -> ToolResult {
+fn write_file(args: WriteArgs) -> ToolOutcome {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(err) => {
@@ -101,7 +101,7 @@ mod tests {
     use serde_json::json;
     use tempfile::TempDir;
 
-    fn run_write(dir: &TempDir, path: &str, content: &str) -> ToolResult {
+    fn run_write(dir: &TempDir, path: &str, content: &str) -> ToolOutcome {
         let path = dir.path().join(path).to_string_lossy().to_string();
         write_file(WriteArgs {
             path,
@@ -168,6 +168,6 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::Io);
         assert_eq!(failure.code, "write_file_failed");
         assert!(failure.message.contains(target.to_string_lossy().as_ref()));
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 }

@@ -936,7 +936,7 @@ async fn apply_model_selection_to_session(
 /// `finish`, and the runtime deliberately keeps that value out of the
 /// conversation. The reply the workbench renders is then the workbench's own to
 /// commit, so resume and `/api/state` still read it from durable truth.
-fn workbench_owns_committed_agent_reply(output: &TurnResult) -> bool {
+fn workbench_owns_committed_agent_reply(output: &TurnReport) -> bool {
     output.assistant_message().is_none()
 }
 
@@ -1005,7 +1005,7 @@ fn replay_route_committed_reply<'a>(
     Some((turn, model))
 }
 
-fn assistant_text_for_display(output: &TurnResult, streamed_prose: &str) -> String {
+fn assistant_text_for_display(output: &TurnReport, streamed_prose: &str) -> String {
     let terminal = output.final_value().map(terminal_value_text).or_else(|| {
         output
             .tool_value()

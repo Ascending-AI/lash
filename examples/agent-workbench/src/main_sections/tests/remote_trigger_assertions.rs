@@ -47,7 +47,7 @@
             assert_eq!(&round_trip_record, record);
 
             let remote_result =
-                lash_remote_protocol::RemoteTriggerRegisterSubscriptionResult::try_from(
+                lash_remote_protocol::RemoteTriggerRegisterSubscriptionReceipt::try_from(
                     record.clone(),
                 )
                 .expect("remote trigger register result");

@@ -111,7 +111,7 @@ only if the park happened, a failed append fails the call instead of parking
 silently, and the required replay key makes the append idempotent across
 redrives of the attempt. This is a single runtime-executed carve-out on the
 pending return, not a body-side door: `AttemptContext` still has no
-`process_events()`, and `ToolAttemptResult::Pending` still cannot carry general
+`process_events()`, and `ToolAttemptOutcome::Pending` still cannot carry general
 intents.
 
 Because no attempt body can hold a `ToolContext`, the three runtime refusals
@@ -129,9 +129,9 @@ therefore have one behavior on every tier without a compatibility guard.
 
 FIG-1291 ships the capability-separated authoring model, and FIG-1487 makes it
 unconditional: every recorded attempt body receives the sealed, controller-free
-`AttemptContext`. A completed attempt returns `ToolAttemptResult::Done` with a
-`ToolResultDone` and versioned `ToolIntents`; a deferred attempt returns
-`ToolAttemptResult::Pending`, whose type cannot carry intents. Lash records the
+`AttemptContext`. A completed attempt returns `ToolAttemptOutcome::Done` with a
+`ToolOutcomeDone` and versioned `ToolIntents`; a deferred attempt returns
+`ToolAttemptOutcome::Pending`, whose type cannot carry intents. Lash records the
 final attempt first, then admits and drains its declarations in source order.
 Retries discard non-final declarations. Each v1 declaration derives one stable
 identity from `(session_id, execution_scope_id, tool_call_id, intent_index)`;

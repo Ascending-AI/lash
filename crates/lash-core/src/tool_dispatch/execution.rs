@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::plugin::ToolResultHookContext;
-use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolResult};
+use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolOutcome};
 use futures_util::FutureExt as _;
 
 use super::context::ToolDispatchOutcome;
@@ -28,7 +28,7 @@ use super::retry::{execute_granted_leaf_tool_attempt, execute_leaf_tool_attempt}
 async fn announce_pending_park(
     context: &ToolContext<'_>,
     mut pending: crate::PendingCompletion,
-) -> Result<crate::PendingCompletion, ToolResult> {
+) -> Result<crate::PendingCompletion, ToolOutcome> {
     let Some(announcement) = pending.announcement.take() else {
         return Ok(pending);
     };
@@ -62,7 +62,7 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
         crate::tool_provider::orchestration::OrchestrationContext::new(tool_context);
     let result = std::panic::AssertUnwindSafe(async {
         let Some(registry) = context.tool_registry.as_deref() else {
-            return ToolResult::err_fmt("orchestrating registration is missing its tool registry");
+            return ToolOutcome::err_fmt("orchestrating registration is missing its tool registry");
         };
         registry
             .execute_orchestrating_by_id(&prepared.tool_id, &prepared.args, &orchestration_context)
@@ -73,7 +73,7 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     .unwrap_or_else(|payload| {
         let message = crate::panic_containment::payload_message(payload.as_ref());
         crate::panic_containment::enforce_loudness(payload);
-        ToolResult::failure(crate::ToolFailure::runtime(
+        ToolOutcome::failure(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "tool_panicked",
             message,
@@ -89,8 +89,8 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     )
     .await;
     let output = match result {
-        ToolResult::Done(output) => *output,
-        ToolResult::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+        ToolOutcome::Done(output) => *output,
+        ToolOutcome::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "orchestrating_tool_returned_pending",
             "orchestrating tools must immediately await journaled actions and return a completed result",
@@ -135,7 +135,7 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     .unwrap_or_else(|payload| {
         let message = crate::panic_containment::payload_message(payload.as_ref());
         crate::panic_containment::enforce_loudness(payload);
-        ToolResult::failure(crate::ToolFailure::runtime(
+        ToolOutcome::failure(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "tool_panicked",
             message,
@@ -151,8 +151,8 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     )
     .await;
     let output = match result {
-        ToolResult::Done(output) => *output,
-        ToolResult::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+        ToolOutcome::Done(output) => *output,
+        ToolOutcome::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "internal_process_tool_returned_pending",
             "internal process-body tools must return a completed result",
@@ -267,10 +267,10 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     .await;
     let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
     let (result, intents) = match attempt_result {
-        crate::ToolAttemptResult::Done { result, intents } => {
-            (ToolResult::from_output(result.into_output()), intents)
+        crate::ToolAttemptOutcome::Done { result, intents } => {
+            (ToolOutcome::from_output(result.into_output()), intents)
         }
-        crate::ToolAttemptResult::Pending(pending) => {
+        crate::ToolAttemptOutcome::Pending(pending) => {
             let key = match completion_context.take_completion_key() {
                 Some(key) => key,
                 None => {
@@ -359,10 +359,10 @@ pub(super) async fn dispatch_granted_prepared_tool_attempt_launch_with_execution
     .await;
     let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
     let (result, intents) = match attempt_result {
-        crate::ToolAttemptResult::Done { result, intents } => {
-            (ToolResult::from_output(result.into_output()), intents)
+        crate::ToolAttemptOutcome::Done { result, intents } => {
+            (ToolOutcome::from_output(result.into_output()), intents)
         }
-        crate::ToolAttemptResult::Pending(pending) => {
+        crate::ToolAttemptOutcome::Pending(pending) => {
             let key = match completion_context.take_completion_key() {
                 Some(key) => key,
                 None => {
@@ -465,9 +465,9 @@ pub(crate) async fn finalize_tool_result_with_execution_context(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,
     args: &serde_json::Value,
-    result: ToolResult,
+    result: ToolOutcome,
     duration_ms: u64,
-) -> ToolResult {
+) -> ToolOutcome {
     match context
         .plugins
         .after_tool_call(ToolResultHookContext::new(

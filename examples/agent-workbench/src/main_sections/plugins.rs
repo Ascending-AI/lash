@@ -391,7 +391,7 @@ impl WorkbenchDerivedNotes {
             .append_session_nodes(&ctx.session_id, request)
             .await
         {
-            Ok(lash::plugins::AppendSessionNodesResult::Appended {
+            Ok(lash::plugins::AppendSessionNodesOutcome::Appended {
                 node_ids,
                 leaf_node_id,
             }) => WorkbenchSettledNote::Written {
@@ -402,7 +402,7 @@ impl WorkbenchDerivedNotes {
                     .unwrap_or_else(|| leaf_node_id.clone()),
                 leaf_node_id,
             },
-            Ok(lash::plugins::AppendSessionNodesResult::StaleBranch { required_node_id }) => {
+            Ok(lash::plugins::AppendSessionNodesOutcome::StaleBranch { required_node_id }) => {
                 WorkbenchSettledNote::AbandonedBranch {
                     base_node_id: required_node_id,
                 }

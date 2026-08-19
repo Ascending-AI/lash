@@ -228,11 +228,11 @@ pub(super) async fn fork_points_in_catalog(
 pub(super) async fn fork_at_in_catalog(
     root: &Path,
     request: &lash_core::ForkSessionRequest,
-) -> Result<lash_core::ForkSessionResult, lash_core::StoreError> {
+) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
     let conn = open_factory_catalog(root).await?;
     let request = request.clone();
     conn.write_flow(move |tx| {
-        let outcome: Result<lash_core::ForkSessionResult, lash_core::StoreError> = (|| {
+        let outcome: Result<lash_core::ForkSessionReceipt, lash_core::StoreError> = (|| {
             // Keep the fork fences in the shared order: exists -> deleted ->
             // retained -> live -> frame.
             let exists = tx
@@ -451,7 +451,7 @@ pub(super) async fn fork_at_in_catalog(
                 &session_meta,
                 crate::session_meta::SessionMetaWrite::Insert,
             )?;
-            Ok(lash_core::ForkSessionResult {
+            Ok(lash_core::ForkSessionReceipt {
                 session_id: request.session_id,
                 node_id: request.node_id,
                 source_session_id,

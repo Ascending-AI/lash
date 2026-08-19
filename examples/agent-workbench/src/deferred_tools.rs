@@ -16,7 +16,7 @@ use lash::tools::{
     CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
     LashlangToolBinding, SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider,
     ToolCall, ToolContract, ToolDefinition, ToolDefinitionLashlangExt, ToolExecutionGrant, ToolId,
-    ToolManifest, ToolManifestLashlangExt, ToolPrepareCall, ToolProvider, ToolResult,
+    ToolManifest, ToolManifestLashlangExt, ToolOutcome, ToolPrepareCall, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -290,14 +290,14 @@ struct SearchDeferredTools {
 
 #[async_trait]
 impl StaticToolExecute for SearchDeferredTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let query = call
             .args
             .get("query")
             .and_then(Value::as_str)
             .unwrap_or_default();
         if query.trim().is_empty() {
-            return ToolResult::err(json!({
+            return ToolOutcome::err(json!({
                 "kind": "invalid_query",
                 "message": "tools.search requires a non-empty query"
             }));
@@ -323,13 +323,13 @@ impl StaticToolExecute for SearchDeferredTools {
                     "call_path": result.call_path,
                 }));
             if let Err(error) = self.store.grant(&result.call_path, &grant) {
-                return ToolResult::err(json!({
+                return ToolOutcome::err(json!({
                     "kind": "grant_persistence_failed",
                     "message": error.to_string()
                 }));
             }
         }
-        ToolResult::ok(json!({ "results": results }))
+        ToolOutcome::ok(json!({ "results": results }))
     }
 }
 
@@ -349,10 +349,10 @@ impl DeferredExecutionProvider {
         definition: &ToolDefinition,
         args: &Value,
         context: &lash::tools::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let call_path = deferred_call_path(definition);
         if context.tool_execution_binding()["call_path"] != json!(call_path) {
-            return ToolResult::err(json!({
+            return ToolOutcome::err(json!({
                 "kind": "invalid_deferred_grant",
                 "message": "execution binding does not match the deferred tool"
             }));
@@ -384,20 +384,20 @@ impl ToolProvider for DeferredExecutionProvider {
         &self,
         _grant: &ToolExecutionGrant,
         call: ToolPrepareCall<'_>,
-    ) -> Result<lash::tools::PreparedToolCall, ToolResult> {
+    ) -> Result<lash::tools::PreparedToolCall, ToolOutcome> {
         Ok(lash::tools::PreparedToolCall::identity(
             call.tool_id,
             call.pending,
         ))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let Some(definition) = self
             .definitions
             .values()
             .find(|definition| definition.name() == call.name)
         else {
-            return ToolResult::err_fmt(format_args!("unknown deferred tool `{}`", call.name));
+            return ToolOutcome::err_fmt(format_args!("unknown deferred tool `{}`", call.name));
         };
         self.execute_definition(definition, call.args, call.context)
             .await
@@ -408,9 +408,9 @@ impl ToolProvider for DeferredExecutionProvider {
         grant: &ToolExecutionGrant,
         args: &Value,
         context: &lash::tools::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(definition) = self.definition_by_id(&grant.manifest.id) else {
-            return ToolResult::err_fmt(format_args!(
+            return ToolOutcome::err_fmt(format_args!(
                 "unknown deferred tool id `{}`",
                 grant.manifest.id
             ));
@@ -601,13 +601,13 @@ fn string_list_field_schema(field: &str) -> Value {
     })
 }
 
-fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolResult {
+fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolOutcome {
     match call_path {
         "text.stats" => {
             let Some(text) = args.get("text").and_then(Value::as_str) else {
                 return invalid_arguments("text.stats requires string `text`");
             };
-            ToolResult::ok(json!({
+            ToolOutcome::ok(json!({
                 "bytes": text.len(),
                 "characters": text.chars().count(),
                 "words": text.split_whitespace().count(),
@@ -618,20 +618,20 @@ fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolResult {
             let Some(text) = args.get("text").and_then(Value::as_str) else {
                 return invalid_arguments("text.sha256 requires string `text`");
             };
-            ToolResult::ok(json!({ "digest": format!("{:x}", Sha256::digest(text.as_bytes())) }))
+            ToolOutcome::ok(json!({ "digest": format!("{:x}", Sha256::digest(text.as_bytes())) }))
         }
         "json.keys" => {
             let Some(object) = args.get("value").and_then(Value::as_object) else {
                 return invalid_arguments("json.keys requires object `value`");
             };
-            ToolResult::ok(json!({ "keys": object.keys().collect::<Vec<_>>() }))
+            ToolOutcome::ok(json!({ "keys": object.keys().collect::<Vec<_>>() }))
         }
         "json.pointer" => {
             let Some(pointer) = args.get("pointer").and_then(Value::as_str) else {
                 return invalid_arguments("json.pointer requires string `pointer`");
             };
             let found = args.get("value").and_then(|value| value.pointer(pointer));
-            ToolResult::ok(json!({
+            ToolOutcome::ok(json!({
                 "found": found.is_some(),
                 "value": found.cloned().unwrap_or(Value::Null),
             }))
@@ -645,7 +645,7 @@ fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolResult {
             if args.get("descending").and_then(Value::as_bool) == Some(true) {
                 values.reverse();
             }
-            ToolResult::ok(json!({ "values": values }))
+            ToolOutcome::ok(json!({ "values": values }))
         }
         "list.unique" => {
             let Some(values) = string_values(args) else {
@@ -656,9 +656,9 @@ fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolResult {
                 .into_iter()
                 .filter(|value| seen.insert(value.clone()))
                 .collect::<Vec<_>>();
-            ToolResult::ok(json!({ "values": values }))
+            ToolOutcome::ok(json!({ "values": values }))
         }
-        _ => ToolResult::err(json!({
+        _ => ToolOutcome::err(json!({
             "kind": "unknown_deferred_tool",
             "message": format!("unknown deferred call path `{call_path}`")
         })),
@@ -673,8 +673,8 @@ fn string_values(args: &Value) -> Option<Vec<String>> {
         .collect()
 }
 
-fn invalid_arguments(message: &str) -> ToolResult {
-    ToolResult::err(json!({ "kind": "invalid_arguments", "message": message }))
+fn invalid_arguments(message: &str) -> ToolOutcome {
+    ToolOutcome::err(json!({ "kind": "invalid_arguments", "message": message }))
 }
 
 #[cfg(test)]

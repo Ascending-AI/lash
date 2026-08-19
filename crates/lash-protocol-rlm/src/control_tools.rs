@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use lash_core::{
     ToolArgumentProjectionPolicy, ToolCall, ToolContract, ToolControl, ToolDefinition,
-    ToolManifest, ToolProvider, ToolResult,
+    ToolManifest, ToolOutcome, ToolProvider,
 };
 use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
 use serde_json::{Value, json};
@@ -26,10 +26,10 @@ impl ToolProvider for RlmControlToolsProvider {
             .then(|| Arc::new(continue_as_tool_definition_for(self.vocabulary).contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let result = match call.name {
             "continue_as" => continue_as_switch_frame(call.args, call.context),
-            _ => return ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name)),
+            _ => return ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name)),
         };
         finalise_tool_result(result)
     }
@@ -154,10 +154,10 @@ struct ContinueAsResult {
     control: ToolControl,
 }
 
-fn finalise_tool_result(result: Result<ContinueAsResult, String>) -> ToolResult {
+fn finalise_tool_result(result: Result<ContinueAsResult, String>) -> ToolOutcome {
     match result {
-        Ok(result) => ToolResult::ok(result.value).with_control(result.control),
-        Err(err) => ToolResult::err(json!(err)),
+        Ok(result) => ToolOutcome::ok(result.value).with_control(result.control),
+        Err(err) => ToolOutcome::err(json!(err)),
     }
 }
 
@@ -282,7 +282,7 @@ mod tests {
             _session_id: &str,
             _request: lash_core::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessHandleSummary, PluginError> {
+        ) -> Result<lash_core::ProcessHandleView, PluginError> {
             Err(PluginError::Session(
                 "recorded process starts are unavailable in this test".to_string(),
             ))
@@ -427,7 +427,7 @@ mod tests {
         manager: Arc<BatonManager>,
         args: &Value,
         tool_call_id: &str,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let sessions: Arc<dyn SessionStateService> = manager.clone();
         let session_lifecycle: Arc<dyn SessionLifecycleService> = manager.clone();
         let session_graph: Arc<dyn SessionGraphService> = manager.clone();
@@ -461,7 +461,7 @@ mod tests {
         provider: &RlmControlToolsProvider,
         manager: Arc<BatonManager>,
         args: &Value,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         run_continue_as_at_call(provider, manager, args, "continue-as-test").await
     }
 
@@ -558,7 +558,7 @@ mod tests {
         assert!(manager.created.lock_recover().is_empty());
     }
 
-    fn frame_key(result: &ToolResult) -> &lash_core::FrameKey {
+    fn frame_key(result: &ToolOutcome) -> &lash_core::FrameKey {
         let Some(ToolControl::SwitchAgentFrame { frame_key, .. }) =
             result.as_output().control.as_ref()
         else {

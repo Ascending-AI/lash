@@ -181,8 +181,8 @@ fn tone_tool_definitions() -> Vec<lash::tools::ToolDefinition> {
     Vec::new()
 }
 
-fn run_tone_tool(_name: &str, _args: &serde_json::Value, _tone: &str) -> lash::tools::ToolResult {
-    lash::tools::ToolResult::ok(serde_json::Value::Null)
+fn run_tone_tool(_name: &str, _args: &serde_json::Value, _tone: &str) -> lash::tools::ToolOutcome {
+    lash::tools::ToolOutcome::ok(serde_json::Value::Null)
 }
 
 // docs:start:tone-plugin
@@ -259,12 +259,12 @@ impl lash::tools::ToolProvider for ToneTools {
     async fn prepare_tool_call(
         &self,
         call: lash::tools::ToolPrepareCall<'_>,
-    ) -> Result<lash::tools::PreparedToolCall, lash::tools::ToolResult> {
+    ) -> Result<lash::tools::PreparedToolCall, lash::tools::ToolOutcome> {
         let Some(input) = call.context.plugin_input::<ToneTurnInput>(TonePlugin::ID) else {
-            return Err(lash::tools::ToolResult::err_fmt("missing tone input"));
+            return Err(lash::tools::ToolOutcome::err_fmt("missing tone input"));
         };
         let prepared_payload = serde_json::to_value(input).map_err(|err| {
-            lash::tools::ToolResult::err_fmt(format!("invalid tone input: {err}"))
+            lash::tools::ToolOutcome::err_fmt(format!("invalid tone input: {err}"))
         })?;
         Ok(lash::tools::PreparedToolCall::from_parts(
             call.pending.call_id,
@@ -276,11 +276,11 @@ impl lash::tools::ToolProvider for ToneTools {
         ))
     }
 
-    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolResult {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolOutcome {
         let input = match call.context.decode_prepared_payload::<ToneTurnInput>() {
             Ok(input) => input,
             Err(err) => {
-                return lash::tools::ToolResult::err_fmt(format!("missing tone input: {err}"));
+                return lash::tools::ToolOutcome::err_fmt(format!("missing tone input: {err}"));
             }
         };
         run_tone_tool(call.name, call.args, &input.tone)

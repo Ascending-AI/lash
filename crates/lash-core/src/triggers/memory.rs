@@ -103,7 +103,7 @@ impl InMemoryTriggerStore {
                 in_memory_delivery_reservation(
                     &state,
                     delivery,
-                    TriggerDeliveryReservationStatus::AlreadyReserved,
+                    TriggerDeliveryReservationOutcome::AlreadyReserved,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -152,7 +152,7 @@ pub(super) struct InMemoryTriggerDeliveryRecord {
 fn in_memory_delivery_reservation(
     state: &InMemoryTriggerEventState,
     delivery: &InMemoryTriggerDeliveryRecord,
-    reservation_status: TriggerDeliveryReservationStatus,
+    reservation_status: TriggerDeliveryReservationOutcome,
 ) -> Result<TriggerDeliveryReservation, PluginError> {
     let occurrence = state
         .occurrences
@@ -235,7 +235,7 @@ impl TriggerStore for InMemoryTriggerStore {
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
-    ) -> Result<TriggerIngressResult, PluginError> {
+    ) -> Result<TriggerIngressReceipt, PluginError> {
         validate_trigger_occurrence_request(&request)?;
         let mut state = self.state.lock_recover();
         if let Some(existing_id) = state
@@ -263,12 +263,12 @@ impl TriggerStore for InMemoryTriggerStore {
                     in_memory_delivery_reservation(
                         &state,
                         delivery,
-                        TriggerDeliveryReservationStatus::AlreadyReserved,
+                        TriggerDeliveryReservationOutcome::AlreadyReserved,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             sort_trigger_delivery_reservations(&mut reservations);
-            return Ok(TriggerIngressResult {
+            return Ok(TriggerIngressReceipt {
                 occurrence,
                 reservations,
             });
@@ -290,7 +290,7 @@ impl TriggerStore for InMemoryTriggerStore {
         state.occurrences.insert(occurrence_id, record.clone());
         let reservations =
             reserve_in_memory_for_occurrence(&mut state, &record, self.clock.as_ref())?;
-        Ok(TriggerIngressResult {
+        Ok(TriggerIngressReceipt {
             occurrence: record,
             reservations,
         })
@@ -503,7 +503,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
                     return Ok(TriggerCommandOutcome::Mutation {
                         receipt: Box::new(TriggerMutationReceipt::from_record(
                             existing,
-                            TriggerMutationDisposition::Unchanged,
+                            TriggerMutationOutcome::Unchanged,
                         )),
                     });
                 }
@@ -534,7 +534,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
             Ok(TriggerCommandOutcome::Mutation {
                 receipt: Box::new(TriggerMutationReceipt::from_record(
                     record,
-                    TriggerMutationDisposition::Created,
+                    TriggerMutationOutcome::Created,
                 )),
             })
         }
@@ -575,7 +575,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
             Ok(TriggerCommandOutcome::Mutation {
                 receipt: Box::new(TriggerMutationReceipt::from_record(
                     record,
-                    TriggerMutationDisposition::Updated,
+                    TriggerMutationOutcome::Updated,
                 )),
             })
         }
@@ -633,7 +633,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
             Ok(TriggerCommandOutcome::Mutation {
                 receipt: Box::new(TriggerMutationReceipt::from_record(
                     existing.clone(),
-                    TriggerMutationDisposition::Deleted,
+                    TriggerMutationOutcome::Deleted,
                 )),
             })
         }
@@ -681,7 +681,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
             Ok(TriggerCommandOutcome::Mutation {
                 receipt: Box::new(TriggerMutationReceipt::from_record(
                     record,
-                    TriggerMutationDisposition::Revived,
+                    TriggerMutationOutcome::Revived,
                 )),
             })
         }

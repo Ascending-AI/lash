@@ -62,7 +62,7 @@ sequenceDiagram
       loop each PendingToolCall
         Runtime->>EffectController: tool_call(invocation, call)
         EffectController->>Tools: native/mode/provider tool
-        Tools-->>EffectController: ToolResult converted to ToolCallOutput + ModelToolReturn
+        Tools-->>EffectController: ToolOutcome converted to ToolCallOutput + ModelToolReturn
         EffectController-->>Runtime: CompletedToolCall
       end
       Runtime->>Plugins: project_tool_result -> ModelToolReturn

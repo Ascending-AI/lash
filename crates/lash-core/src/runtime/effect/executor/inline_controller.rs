@@ -8,8 +8,8 @@
 //! the SQL stores own that half. What it *is* is the conformance definition of
 //! the contract's **observable semantics**: wake behaviour, settlement order by
 //! rank, loser completion under
-//! [`LoserDisposition::RunToCompletion`](crate::LoserDisposition::RunToCompletion),
-//! cancelled terminals under [`Cancel`](crate::LoserDisposition::Cancel), and
+//! [`LoserPolicy::RunToCompletion`](crate::LoserPolicy::RunToCompletion),
+//! cancelled terminals under [`Cancel`](crate::LoserPolicy::Cancel), and
 //! the close-side narrowing rule. A durable host that disagrees with this module
 //! is wrong about the contract; a durable host that agrees with it and also
 //! survives a crash is conformant.
@@ -45,7 +45,7 @@ use super::super::envelope::{
     ProcessCommand, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome,
 };
 use super::super::group::{
-    EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserDisposition, RuntimeEffectGroup,
+    EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup,
 };
 use super::super::group_drain::GroupExecutors;
 use super::control::{
@@ -242,7 +242,7 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
     async fn close_effect_group(
         &self,
         handle: EffectGroupHandle,
-        disposition: LoserDisposition,
+        disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.groups.registered_executors()?;
         InlineEffectGroups::close(&self.groups, &handle, disposition)
@@ -372,8 +372,8 @@ struct InlineEffectGroup {
     wake: GroupWakePolicy,
     /// The disposition declared at open, which a crash-drain would apply. Close
     /// resolves against the *effective* disposition below, which starts here.
-    declared: LoserDisposition,
-    /// Fired by a close that resolves to [`LoserDisposition::Cancel`]. Children
+    declared: LoserPolicy,
+    /// Fired by a close that resolves to [`LoserPolicy::Cancel`]. Children
     /// select on their own child token, so cancelling the group cancels exactly
     /// the children that have not settled.
     cancel: CancellationToken,
@@ -392,7 +392,7 @@ struct InlineEffectGroupState {
     /// rank read is an index rather than a sort.
     order: Vec<InlineSettlement>,
     /// The disposition in force, which a close may narrow but never widen.
-    effective: LoserDisposition,
+    effective: LoserPolicy,
     closed: bool,
 }
 
@@ -723,7 +723,7 @@ impl InlineEffectGroups {
     fn close(
         groups: &Arc<Self>,
         handle: &EffectGroupHandle,
-        requested: LoserDisposition,
+        requested: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         // An already-reaped group is a closed group whose children have all
         // settled: it has no losers left for a disposition to decide, so a
@@ -737,10 +737,10 @@ impl InlineEffectGroups {
             // Resolved against the disposition in force rather than the declared
             // one, so narrowing is cumulative: a group closed as `Cancel` cannot
             // be reopened to `RunToCompletion` by a second close either.
-            let effective = LoserDisposition::resolve_close(inner.effective, requested)?;
+            let effective = LoserPolicy::resolve_close(inner.effective, requested)?;
             inner.effective = effective;
             inner.closed = true;
-            let cancelled = matches!(effective, LoserDisposition::Cancel);
+            let cancelled = matches!(effective, LoserPolicy::Cancel);
             if cancelled {
                 // Each cancellation is journaled as that child's terminal, here
                 // and now rather than whenever the task notices, so a caller that

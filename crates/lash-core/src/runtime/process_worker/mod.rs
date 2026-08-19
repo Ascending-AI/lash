@@ -30,7 +30,7 @@ use self::recovery::ProcessRecoveryOutcome;
 
 pub use self::recovery::{
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
-    ProcessDrainReport, ProcessRecoveryAttemptDisposition, ProcessRecoveryOperation,
+    ProcessDrainReport, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
     ProcessWorkerFault,
 };
 
@@ -45,7 +45,7 @@ use crate::InMemorySessionStore;
 use crate::{
     AbandonEvidence, AbandonWriter, LashRuntime, PluginError, PluginFactory, PluginHost,
     PluginStack, ProcessAwaitOutput, ProcessExecutionContext, ProcessInput, ProcessLease,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, RecoveryDisposition, SessionStoreFactory,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, RecoveryContract, SessionStoreFactory,
 };
 
 /// Default maximum number of processes one [`DurableProcessWorker`] executes
@@ -489,7 +489,7 @@ impl DurableProcessWorker {
         // Externally-owned rows are never executed by lash (ADR 0019). Reject the
         // disposition before touching a runtime — the old fabricated-success path
         // for External inputs is deleted.
-        if registration.disposition == RecoveryDisposition::ExternallyOwned {
+        if registration.disposition == RecoveryContract::ExternallyOwned {
             return Err(PluginError::Session(format!(
                 "process `{}` is externally-owned and must not be executed by lash",
                 registration.id
@@ -995,7 +995,7 @@ impl DurableProcessWorker {
         // ExternallyOwned: lash never executes the row. The only recovery action
         // is reconciling a pending Abandon Request; there is no owner lease to
         // wait out.
-        if record.disposition == RecoveryDisposition::ExternallyOwned {
+        if record.disposition == RecoveryContract::ExternallyOwned {
             if record.abandon_request.is_some() {
                 return self.reconcile_externally_owned_abandon(&process_id).await;
             }
@@ -1012,7 +1012,7 @@ impl DurableProcessWorker {
         {
             RecoveryClaimDisposition::Acquired(lease) => lease,
             RecoveryClaimDisposition::Busy => {
-                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Busy);
+                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Busy);
             }
             RecoveryClaimDisposition::BackendError(error) => {
                 return ProcessRecoveryOutcome::Deferred(error.into_public());
@@ -1026,7 +1026,7 @@ impl DurableProcessWorker {
                 return self
                     .release_or_outcome(
                         &lease,
-                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Absent),
+                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Absent),
                     )
                     .await;
             }
@@ -1041,12 +1041,12 @@ impl DurableProcessWorker {
                 .release_or_outcome(
                     &lease,
                     ProcessRecoveryOutcome::Deferred(
-                        ProcessRecoveryAttemptDisposition::SettledByPeer { terminal_status },
+                        ProcessRecoveryAttemptOutcome::SettledByPeer { terminal_status },
                     ),
                 )
                 .await;
         }
-        if record.disposition == RecoveryDisposition::Rerunnable
+        if record.disposition == RecoveryContract::Rerunnable
             && let (Some(max_attempts), Some(started)) =
                 (record.max_attempts, record.first_started.as_deref())
             && started.attempt >= max_attempts
@@ -1070,8 +1070,8 @@ impl DurableProcessWorker {
 
         match record.disposition {
             // Rerunnable: claim, (re-)run, complete — exactly today's behavior.
-            RecoveryDisposition::Rerunnable => Box::pin(self.run_and_complete(record, lease)).await,
-            RecoveryDisposition::OwnerBound if record.first_started.is_some() => {
+            RecoveryContract::Rerunnable => Box::pin(self.run_and_complete(record, lease)).await,
+            RecoveryContract::OwnerBound if record.first_started.is_some() => {
                 // Started OwnerBound work is NEVER re-run — abandonment is the
                 // only recovery. `first_started`'s owner is the lapsed owner the
                 // reconciled-request evidence names.
@@ -1113,9 +1113,9 @@ impl DurableProcessWorker {
             }
             // OwnerBound, never started: first execution is not re-execution, so
             // any worker may run it; the runner records first_started first.
-            RecoveryDisposition::OwnerBound => Box::pin(self.run_and_complete(record, lease)).await,
+            RecoveryContract::OwnerBound => Box::pin(self.run_and_complete(record, lease)).await,
             // Filtered above; releasing keeps the lease honest if reached.
-            RecoveryDisposition::ExternallyOwned => {
+            RecoveryContract::ExternallyOwned => {
                 self.release_or_outcome(&lease, ProcessRecoveryOutcome::LeftToOwner)
                     .await
             }
@@ -1140,7 +1140,7 @@ impl DurableProcessWorker {
         {
             RecoveryClaimDisposition::Acquired(lease) => lease,
             RecoveryClaimDisposition::Busy => {
-                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Busy);
+                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Busy);
             }
             RecoveryClaimDisposition::BackendError(error) => {
                 return ProcessRecoveryOutcome::Deferred(error.into_public());
@@ -1152,7 +1152,7 @@ impl DurableProcessWorker {
                 return self
                     .release_or_outcome(
                         &lease,
-                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Absent),
+                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Absent),
                     )
                     .await;
             }
@@ -1167,7 +1167,7 @@ impl DurableProcessWorker {
                 .release_or_outcome(
                     &lease,
                     ProcessRecoveryOutcome::Deferred(
-                        ProcessRecoveryAttemptDisposition::SettledByPeer { terminal_status },
+                        ProcessRecoveryAttemptOutcome::SettledByPeer { terminal_status },
                     ),
                 )
                 .await;
@@ -1237,7 +1237,7 @@ impl DurableProcessWorker {
                 // lease holder; it will finish (or another sweep retries it).
                 Err(RecoverFailure::LeaseLost(_error)) => {
                     return ProcessRecoveryOutcome::Deferred(
-                        ProcessRecoveryAttemptDisposition::LeaseLost {
+                        ProcessRecoveryAttemptOutcome::LeaseLost {
                             operation: ProcessRecoveryOperation::RenewLease,
                         },
                     );
@@ -1278,7 +1278,7 @@ impl DurableProcessWorker {
         let process_id = registration.id.clone();
         self.ensure_stable_process_id(&registration)
             .map_err(RecoverFailure::Run)?;
-        if registration.disposition == RecoveryDisposition::ExternallyOwned {
+        if registration.disposition == RecoveryContract::ExternallyOwned {
             return Err(RecoverFailure::Run(PluginError::Session(format!(
                 "process `{}` is externally-owned and must not be executed by lash",
                 registration.id

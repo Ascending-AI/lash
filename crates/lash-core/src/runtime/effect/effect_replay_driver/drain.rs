@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::groups::{LocalDrainConflict, drain_deferred_error, group_shape_error};
 use super::*;
-use crate::runtime::effect::group::LoserDisposition;
+use crate::runtime::effect::group::LoserPolicy;
 use crate::runtime::effect::group_drain::{
     ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainReport,
 };
@@ -176,7 +176,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
                 status: child.status.clone(),
             });
         }
-        if record.loser_disposition == LoserDisposition::Cancel {
+        if record.loser_disposition == LoserPolicy::Cancel {
             return Ok(ChildDrainOutcome::CancelDeclared);
         }
         if child.lease_expires_at_ms > now_ms {

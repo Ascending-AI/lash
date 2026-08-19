@@ -405,11 +405,11 @@ impl lash_core::ToolProvider for ContractAppTools {
         (name == "app_lookup").then(|| Arc::new(contract_app_lookup_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         if call.name == "app_lookup" {
-            lash_core::ToolResult::ok(json!({ "ok": true }))
+            lash_core::ToolOutcome::ok(json!({ "ok": true }))
         } else {
-            lash_core::ToolResult::err_fmt(format!("Unknown contract app tool: {}", call.name))
+            lash_core::ToolOutcome::err_fmt(format!("Unknown contract app tool: {}", call.name))
         }
     }
 }
@@ -483,9 +483,9 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
         tool_id == contract_durable_input_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         if call.name != "mock_input_request" {
-            return lash_core::ToolResult::err_fmt(format!(
+            return lash_core::ToolOutcome::err_fmt(format!(
                 "Unknown durable input tool: {}",
                 call.name
             ));
@@ -500,7 +500,7 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
             Ok(key) => key,
             Err(err) => {
                 self.send_key_result(Err(err.to_string()));
-                return lash_core::ToolResult::err_fmt(err);
+                return lash_core::ToolOutcome::err_fmt(err);
             }
         };
         self.increment_attempt_count();
@@ -517,7 +517,9 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
             "mock-input-request:request-1",
         );
         self.send_key_result(Ok(key));
-        lash_core::ToolResult::pending(lash_core::PendingCompletion::new().announcing(announcement))
+        lash_core::ToolOutcome::pending(
+            lash_core::PendingCompletion::new().announcing(announcement),
+        )
     }
 }
 

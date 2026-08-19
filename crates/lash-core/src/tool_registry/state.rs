@@ -220,7 +220,7 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
     async fn execute(
@@ -228,14 +228,14 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         tool: &str,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult;
+    ) -> ToolOutcome;
     async fn execute_orchestrating(
         &self,
         _tool_id: &ToolId,
         _args: &serde_json::Value,
         _context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> ToolResult {
-        ToolResult::err_fmt("leaf tools cannot execute in the orchestrating registration lane")
+    ) -> ToolOutcome {
+        ToolOutcome::err_fmt("leaf tools cannot execute in the orchestrating registration lane")
     }
     fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
         false
@@ -245,8 +245,8 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptResult {
-        crate::ToolAttemptResult::from_tool_result(
+    ) -> crate::ToolAttemptOutcome {
+        crate::ToolAttemptOutcome::from_tool_result(
             self.execute_by_id(tool_id, args, context).await,
         )
     }
@@ -255,9 +255,9 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"));
+            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
         self.execute(&manifest.name, args, context).await
     }
@@ -266,7 +266,7 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::InternalProcessContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         self.execute_by_id(tool_id, args, &context.__attempt_context())
             .await
     }

@@ -1565,19 +1565,19 @@ mod tests {
             &self,
             _grant: &lash_core::ToolExecutionGrant,
             call: lash_core::ToolPrepareCall<'_>,
-        ) -> Result<lash_core::PreparedToolCall, lash_core::ToolResult> {
+        ) -> Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
             Ok(lash_core::PreparedToolCall::identity(
                 call.tool_id,
                 call.pending,
             ))
         }
 
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
             self.executions.fetch_add(1, Ordering::SeqCst);
             self.observed_bindings
                 .lock_recover()
                 .push(call.context.tool_execution_binding().clone());
-            lash_core::ToolResult::ok(serde_json::json!("deferred ok"))
+            lash_core::ToolOutcome::ok(serde_json::json!("deferred ok"))
         }
 
         async fn execute_granted(
@@ -1585,7 +1585,7 @@ mod tests {
             grant: &lash_core::ToolExecutionGrant,
             args: &serde_json::Value,
             context: &lash_core::AttemptContext<'_>,
-        ) -> lash_core::ToolResult {
+        ) -> lash_core::ToolOutcome {
             self.execute_by_id(&grant.manifest.id, args, context).await
         }
     }
@@ -2055,7 +2055,7 @@ mod tests {
                 .then(|| Arc::new(status_inspect_definition().contract()))
         }
 
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
             if call.name == "status_inspect" || call.name == "tool:status_inspect" {
                 let pid = call
                     .args
@@ -2063,9 +2063,9 @@ mod tests {
                     .and_then(|v| v.as_str())
                     .map(str::to_string);
                 *self.inspected_process_id.lock().unwrap() = pid;
-                lash_core::ToolResult::ok(serde_json::json!("inspected-ok"))
+                lash_core::ToolOutcome::ok(serde_json::json!("inspected-ok"))
             } else {
-                lash_core::ToolResult::err(serde_json::json!(format!(
+                lash_core::ToolOutcome::err(serde_json::json!(format!(
                     "unknown tool `{}`",
                     call.name
                 )))
@@ -2083,8 +2083,8 @@ mod tests {
             None
         }
 
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-            lash_core::ToolResult::err(serde_json::json!(format!(
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+            lash_core::ToolOutcome::err(serde_json::json!(format!(
                 "signal round-trip test has no tool `{}`",
                 call.name
             )))
@@ -2102,7 +2102,7 @@ mod tests {
             _session_id: &str,
             _request: lash_core::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessHandleSummary, lash_core::PluginError> {
+        ) -> Result<lash_core::ProcessHandleView, lash_core::PluginError> {
             Err(lash_core::PluginError::Session(
                 "recorded process starts are unavailable in this test".to_string(),
             ))

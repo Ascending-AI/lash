@@ -252,14 +252,14 @@ pub fn derive_tool_intent_identity(
     })
 }
 
-/// A completed leaf-provider value. Unlike [`crate::ToolResult`], this type has
+/// A completed leaf-provider value. Unlike [`crate::ToolOutcome`], this type has
 /// no deferred variant, so a completed result can be paired with intents
 /// without making `Pending + intents` representable.
 /// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug, PartialEq)]
-pub struct ToolResultDone(Box<crate::ToolCallOutput>);
+pub struct ToolOutcomeDone(Box<crate::ToolCallOutput>);
 
-impl ToolResultDone {
+impl ToolOutcomeDone {
     /// Wrap a completed tool output for protocol and process-engine implementors.
     pub fn from_output(output: crate::ToolCallOutput) -> Self {
         Self(Box::new(output))
@@ -285,11 +285,11 @@ impl ToolResultDone {
 /// The enum is the law: only the completed variant has an intents field.
 /// **Integrator class 3: protocol and process-engine implementors.**
 #[derive(Clone, Debug)]
-pub enum ToolAttemptResult {
+pub enum ToolAttemptOutcome {
     /// Terminal provider output with ordered durable declarations.
     Done {
         /// Completed provider result.
-        result: ToolResultDone,
+        result: ToolOutcomeDone,
         /// Follow-on declarations admitted only after the attempt is recorded.
         intents: ToolIntents,
     },
@@ -297,14 +297,14 @@ pub enum ToolAttemptResult {
     Pending(crate::PendingCompletion),
 }
 
-impl ToolAttemptResult {
+impl ToolAttemptOutcome {
     /// Pair a completed result with its declarations for protocol and process-engine implementors.
-    pub fn done(result: ToolResultDone, intents: ToolIntents) -> Self {
+    pub fn done(result: ToolOutcomeDone, intents: ToolIntents) -> Self {
         Self::Done { result, intents }
     }
 
     /// Construct a completed attempt with no declarations for protocol and process-engine implementors.
-    pub fn done_without_intents(result: ToolResultDone) -> Self {
+    pub fn done_without_intents(result: ToolOutcomeDone) -> Self {
         Self::done(result, ToolIntents::default())
     }
 
@@ -313,10 +313,10 @@ impl ToolAttemptResult {
         Self::Pending(pending)
     }
 
-    pub(crate) fn from_tool_result(result: crate::ToolResult) -> Self {
+    pub(crate) fn from_tool_result(result: crate::ToolOutcome) -> Self {
         match result {
-            crate::ToolResult::Done(output) => Self::done_without_intents(ToolResultDone(output)),
-            crate::ToolResult::Pending(pending) => Self::Pending(pending),
+            crate::ToolOutcome::Done(output) => Self::done_without_intents(ToolOutcomeDone(output)),
+            crate::ToolOutcome::Pending(pending) => Self::Pending(pending),
         }
     }
 }

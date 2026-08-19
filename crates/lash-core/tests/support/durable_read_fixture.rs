@@ -16,13 +16,13 @@ use lash_core::{
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessIdentity, ProcessInput, ProcessOriginator, ProcessProvenance, ProcessRegistration,
     ProcessRegistry, ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    ProjectionWatermark, ProtocolTurnOptions, RecoveryDisposition, Resolution, ResolveOutcome,
+    ProjectionWatermark, ProtocolTurnOptions, RecoveryContract, Resolution, ResolveOutcome,
     RuntimeCommit, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence,
     RuntimeScope, RuntimeSessionState, SegmentHandover, SessionAppendNode, SessionNodePayload,
     SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
     StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
-    TriggerDeliveryReservationStatus, TriggerInputBinding, TriggerMutationDisposition,
+    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
     TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
     WaitState,
@@ -263,7 +263,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "wake"}),
                 },
-                RecoveryDisposition::ExternallyOwned,
+                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
             )
             .with_extra_event_types([ProcessEventType {
@@ -303,7 +303,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             ProcessInput::External {
                 metadata: serde_json::json!({"fixture": "tombstone"}),
             },
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
         ))
         .await
@@ -339,7 +339,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         register_command,
     )
     .await;
-    assert_eq!(receipt.disposition, TriggerMutationDisposition::Created);
+    assert_eq!(receipt.disposition, TriggerMutationOutcome::Created);
     handles
         .triggers
         .ingest_occurrence(TriggerOccurrenceRequest::new(
@@ -936,7 +936,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert!(deliveries[0].subscription.enabled);
     assert_eq!(
         deliveries[0].reservation_status,
-        TriggerDeliveryReservationStatus::AlreadyReserved
+        TriggerDeliveryReservationOutcome::AlreadyReserved
     );
     assert_eq!(
         deliveries[0].occurrence.payload,
@@ -960,7 +960,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     .await;
     assert_eq!(
         unchanged.disposition,
-        TriggerMutationDisposition::Unchanged,
+        TriggerMutationOutcome::Unchanged,
         "durable fixture identity drift: identical trigger re-registration changed meaning"
     );
 
@@ -1365,7 +1365,7 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
             kind: "durable-read-engine".to_string(),
             payload: serde_json::json!({"fixture": "process"}),
         },
-        RecoveryDisposition::Rerunnable,
+        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
     )
     .with_execution_env_ref(Some(env_ref))

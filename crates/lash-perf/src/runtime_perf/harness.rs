@@ -212,7 +212,7 @@ impl BenchmarkRuntime {
         &self,
         input: lash::TurnInput,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> anyhow::Result<lash::TurnResult> {
+    ) -> anyhow::Result<lash::TurnReport> {
         let session = self.session.as_ref().expect("benchmark session");
         let effect_host = session.effect_host();
         let scoped_effect_controller = effect_host
@@ -241,7 +241,7 @@ impl BenchmarkRuntime {
         input: lash::TurnInput,
         turn_id: &str,
         cancel: tokio_util::sync::CancellationToken,
-    ) -> anyhow::Result<lash::TurnResult> {
+    ) -> anyhow::Result<lash::TurnReport> {
         let session = self.session.as_ref().expect("benchmark session");
         let effect_host = session.effect_host();
         let scoped_effect_controller = effect_host
@@ -286,7 +286,7 @@ impl BenchmarkRuntime {
         turn_id: &str,
         cancel: tokio_util::sync::CancellationToken,
         request_id: &str,
-    ) -> anyhow::Result<(lash::TurnResult, std::time::Duration)> {
+    ) -> anyhow::Result<(lash::TurnReport, std::time::Duration)> {
         let control = self
             .provider_control
             .as_ref()
@@ -336,7 +336,7 @@ impl BenchmarkRuntime {
         turn_id: &str,
         cancel: tokio_util::sync::CancellationToken,
         source_id: &str,
-    ) -> anyhow::Result<(lash::TurnResult, std::time::Duration)> {
+    ) -> anyhow::Result<(lash::TurnReport, std::time::Duration)> {
         let control = self
             .provider_control
             .as_ref()
@@ -367,7 +367,7 @@ impl BenchmarkRuntime {
         input: lash::TurnInput,
         cancel: tokio_util::sync::CancellationToken,
         scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
-    ) -> anyhow::Result<lash::TurnResult> {
+    ) -> anyhow::Result<lash::TurnReport> {
         self.session
             .as_ref()
             .expect("benchmark session")
@@ -402,7 +402,7 @@ impl BenchmarkRuntime {
 pub(crate) fn validate_runtime_perf_turn(
     scenario: RuntimePerfScenario,
     turn_index: usize,
-    turn: &lash::TurnResult,
+    turn: &lash::TurnReport,
 ) -> anyhow::Result<()> {
     let expected = "runtime perf benchmark ok";
     let diagnostics = runtime_perf_turn_diagnostics(turn);
@@ -492,7 +492,7 @@ pub(crate) fn validate_runtime_perf_turn(
     }
 }
 
-fn rlm_trajectory_errors(turn: &lash::TurnResult) -> Vec<RlmTrajectoryEntry> {
+fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
     rlm_trajectory_entries(turn)
         .into_iter()
         .filter(|entry| {
@@ -504,7 +504,7 @@ fn rlm_trajectory_errors(turn: &lash::TurnResult) -> Vec<RlmTrajectoryEntry> {
         .collect()
 }
 
-fn rlm_trajectory_entries(turn: &lash::TurnResult) -> Vec<RlmTrajectoryEntry> {
+fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
     turn.state
         .read_view()
         .active_events()
@@ -528,7 +528,7 @@ fn rlm_trajectory_entries(turn: &lash::TurnResult) -> Vec<RlmTrajectoryEntry> {
         .collect()
 }
 
-fn runtime_perf_turn_diagnostics(turn: &lash::TurnResult) -> String {
+fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
     let mut out = String::new();
     if !turn.errors.is_empty() {
         let _ = writeln!(out, "turn_errors:");

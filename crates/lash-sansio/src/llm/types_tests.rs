@@ -219,34 +219,31 @@ fn stamping_foreign_replay_reports_conflict_and_preserves_the_original_origin() 
 
 #[test]
 fn only_requested_options_can_be_omitted() {
-    let untouched = GenerationDisposition {
-        output_token_cap: GenerationOptionDisposition::applied(false),
-        temperature: GenerationOptionDisposition::sampling_pinned(false),
-        seed: GenerationOptionDisposition::unsupported(false),
-        stop_sequences: GenerationOptionDisposition::unsupported(false),
-        cache: GenerationOptionDisposition::unsupported(false),
+    let untouched = GenerationReceipt {
+        output_token_cap: GenerationOptionOutcome::applied(false),
+        temperature: GenerationOptionOutcome::sampling_pinned(false),
+        seed: GenerationOptionOutcome::unsupported(false),
+        stop_sequences: GenerationOptionOutcome::unsupported(false),
+        cache: GenerationOptionOutcome::unsupported(false),
     };
-    assert_eq!(untouched, GenerationDisposition::default());
+    assert_eq!(untouched, GenerationReceipt::default());
     assert!(untouched.nothing_omitted());
 
-    let suppressed = GenerationDisposition {
-        stop_sequences: GenerationOptionDisposition::SuppressedProtocolOwned,
+    let suppressed = GenerationReceipt {
+        stop_sequences: GenerationOptionOutcome::SuppressedProtocolOwned,
         ..Default::default()
     };
     assert!(!suppressed.nothing_omitted());
     assert!(!suppressed.fully_honored());
 
-    let dropped = GenerationDisposition {
-        output_token_cap: GenerationOptionDisposition::applied(true),
-        temperature: GenerationOptionDisposition::sampling_pinned(true),
-        seed: GenerationOptionDisposition::unsupported(true),
-        stop_sequences: GenerationOptionDisposition::unsupported(false),
-        cache: GenerationOptionDisposition::unsupported(true),
+    let dropped = GenerationReceipt {
+        output_token_cap: GenerationOptionOutcome::applied(true),
+        temperature: GenerationOptionOutcome::sampling_pinned(true),
+        seed: GenerationOptionOutcome::unsupported(true),
+        stop_sequences: GenerationOptionOutcome::unsupported(false),
+        cache: GenerationOptionOutcome::unsupported(true),
     };
-    assert_eq!(
-        dropped.output_token_cap,
-        GenerationOptionDisposition::Applied
-    );
+    assert_eq!(dropped.output_token_cap, GenerationOptionOutcome::Applied);
     assert!(!dropped.output_token_cap.is_omitted());
     assert!(dropped.temperature.is_omitted());
     assert!(dropped.seed.is_omitted());
@@ -291,12 +288,12 @@ fn attempt_contract_round_trips_closed_outcomes_and_preserves_optional_zero() {
                     reasoning_output_tokens: Some(0),
                     ..ExecutionEvidence::default()
                 }),
-                generation_disposition: Some(GenerationDisposition {
-                    output_token_cap: GenerationOptionDisposition::Applied,
-                    temperature: GenerationOptionDisposition::OmittedSamplingPinned,
-                    seed: GenerationOptionDisposition::OmittedUnsupported,
-                    stop_sequences: GenerationOptionDisposition::NotRequested,
-                    cache: GenerationOptionDisposition::Applied,
+                generation_disposition: Some(GenerationReceipt {
+                    output_token_cap: GenerationOptionOutcome::Applied,
+                    temperature: GenerationOptionOutcome::OmittedSamplingPinned,
+                    seed: GenerationOptionOutcome::OmittedUnsupported,
+                    stop_sequences: GenerationOptionOutcome::NotRequested,
+                    cache: GenerationOptionOutcome::Applied,
                 }),
                 usage: None,
             }],

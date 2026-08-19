@@ -9,9 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
-use super::super::group::{
-    EffectGroupHandle, GroupSettlement, LoserDisposition, RuntimeEffectGroup,
-};
+use super::super::group::{EffectGroupHandle, GroupSettlement, LoserPolicy, RuntimeEffectGroup};
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor};
 
 // =============================================================================
@@ -1061,7 +1059,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// [`GroupExecutors`](super::super::group_drain::GroupExecutors) resolver,
     /// because that resolver is where the children's `'static` executors come
     /// from: a child must be able to outlive its caller to honor
-    /// [`LoserDisposition::RunToCompletion`], and a host with nothing to resolve
+    /// [`LoserPolicy::RunToCompletion`], and a host with nothing to resolve
     /// a journaled child's envelope through cannot run one child, let alone
     /// outlive a caller with it. The capability and the resolver are one
     /// question and must not drift apart.
@@ -1095,7 +1093,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     ///
     /// The `'static` property is unchanged and still ratified — children must
     /// outlive the caller's future under
-    /// [`LoserDisposition::RunToCompletion`], and the borrow-scoped
+    /// [`LoserPolicy::RunToCompletion`], and the borrow-scoped
     /// `RuntimeEffectLocalExecutor<'_>` taken by
     /// [`execute_effect`](Self::execute_effect) carries the one lifetime this
     /// contract exists to break — it just lives at the resolver now rather than
@@ -1183,15 +1181,15 @@ pub trait RuntimeEffectController: AwaitEventResolver {
 
     /// Release the caller's interest in the group.
     ///
-    /// Under [`LoserDisposition::RunToCompletion`] the remaining children keep
+    /// Under [`LoserPolicy::RunToCompletion`] the remaining children keep
     /// running under host ownership and journal their own settlements; the host
-    /// owns their redrive. Under [`LoserDisposition::Cancel`] the host cancels
+    /// owns their redrive. Under [`LoserPolicy::Cancel`] the host cancels
     /// them and journals each cancellation as that child's terminal. Either way
     /// the caller may not observe further settlements.
     ///
     /// `disposition` may only **narrow** the one the group declared at open:
     /// resolve it through
-    /// [`LoserDisposition::resolve_close`] and refuse a widening request. The
+    /// [`LoserPolicy::resolve_close`] and refuse a widening request. The
     /// declared disposition is authoritative — it is journaled with the group
     /// row, so a group abandoned by a crash before its close is drained under it
     /// too, and no policy is invented at drain time.
@@ -1205,7 +1203,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     async fn close_effect_group(
         &self,
         _handle: EffectGroupHandle,
-        _disposition: LoserDisposition,
+        _disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         Err(RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::EffectGroupUnsupported,

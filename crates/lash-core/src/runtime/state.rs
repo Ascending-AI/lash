@@ -469,7 +469,7 @@ impl RuntimeCheckpointComponents {
         if self.execution_state_body_residency == ExecutionStateBodyResidency::CommitResultMismatch
         {
             return Err(crate::StoreError::StoredDataCorrupt {
-                record_kind: "RuntimeCommitResult",
+                record_kind: "RuntimeCommitReceipt",
                 message: "committed checkpoint components differ from resident commit intent"
                     .to_string(),
             });
@@ -835,7 +835,7 @@ impl RuntimeSessionState {
     /// Advances resident state to a store's committed head revision and realized timestamps, adopts
     /// durable artifact references, and clears transient snapshots so protocol and store
     /// implementors cannot reuse stale bytes.
-    pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitResult) {
+    pub fn apply_persisted_commit_result(&mut self, result: crate::store::RuntimeCommitReceipt) {
         self.head_revision = result.head_revision;
         self.checkpoint_ref = Some(result.checkpoint_ref);
         self.session_graph
@@ -1288,7 +1288,7 @@ pub(crate) fn apply_graph_commit_node_id_mapping(
 }
 
 pub(crate) fn receipt_append_node_ids(
-    result: &crate::store::RuntimeCommitResult,
+    result: &crate::store::RuntimeCommitReceipt,
     requested_node_count: usize,
 ) -> Result<Vec<String>, crate::StoreError> {
     if result.realized_node_timestamps.len() < requested_node_count {

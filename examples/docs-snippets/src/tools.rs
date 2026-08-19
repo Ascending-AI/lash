@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,21 +26,21 @@ struct WeatherTools;
 
 #[async_trait]
 impl StaticToolExecute for WeatherTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match call.name {
             "weather_lookup" => {
                 let args: WeatherArgs = match serde_json::from_value(call.args.clone()) {
                     Ok(args) => args,
-                    Err(err) => return ToolResult::err_fmt(format_args!("invalid args: {err}")),
+                    Err(err) => return ToolOutcome::err_fmt(format_args!("invalid args: {err}")),
                 };
 
                 let report = lookup_weather(args).await;
                 match serde_json::to_value(report) {
-                    Ok(value) => ToolResult::ok(value),
-                    Err(err) => ToolResult::err_fmt(format_args!("serialize output: {err}")),
+                    Ok(value) => ToolOutcome::ok(value),
+                    Err(err) => ToolOutcome::err_fmt(format_args!("serialize output: {err}")),
                 }
             }
-            other => ToolResult::err_fmt(format_args!("unknown tool: {other}")),
+            other => ToolOutcome::err_fmt(format_args!("unknown tool: {other}")),
         }
     }
 }

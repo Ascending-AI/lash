@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use lash::tools::{
     LashlangToolBinding, PendingCompletion, ToolCall, ToolContract, ToolDefinition,
-    ToolDefinitionLashlangExt, ToolManifest, ToolProvider, ToolResult,
+    ToolDefinitionLashlangExt, ToolManifest, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -236,21 +236,21 @@ impl ToolProvider for ApprovalToolProvider {
         tool_id == Self::definition().id()
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         if call.name != APPROVAL_TOOL_NAME {
-            return ToolResult::err_fmt(format_args!("unknown approval tool `{}`", call.name));
+            return ToolOutcome::err_fmt(format_args!("unknown approval tool `{}`", call.name));
         }
         let key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(error) => return ToolResult::err_fmt(error),
+            Err(error) => return ToolOutcome::err_fmt(error),
         };
         if let Err(error) = self
             .approvals
             .record(&key, call.args, call.context.session_id())
         {
-            return ToolResult::err_fmt(error);
+            return ToolOutcome::err_fmt(error);
         }
-        ToolResult::pending(PendingCompletion::new())
+        ToolOutcome::pending(PendingCompletion::new())
     }
 }
 

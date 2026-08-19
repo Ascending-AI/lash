@@ -165,7 +165,7 @@ pub enum TriggerDeliveryEmitOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TriggerDeliveryEmitReport {
+pub struct TriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
     pub process_id: String,
@@ -177,7 +177,7 @@ pub struct TriggerEmitReport {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub occurrence_id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub deliveries: Vec<TriggerDeliveryEmitReport>,
+    pub deliveries: Vec<TriggerDeliveryEmitReceipt>,
 }
 
 impl TriggerEmitReport {
@@ -185,7 +185,7 @@ impl TriggerEmitReport {
         Self::default()
     }
 
-    fn new(occurrence_id: String, deliveries: Vec<TriggerDeliveryEmitReport>) -> Self {
+    fn new(occurrence_id: String, deliveries: Vec<TriggerDeliveryEmitReceipt>) -> Self {
         Self {
             occurrence_id,
             deliveries,
@@ -347,7 +347,7 @@ pub struct TriggerRegistration {
     pub name: Option<String>,
     pub source_type: TriggerEventType,
     pub source: serde_json::Value,
-    pub target: TriggerTargetSummary,
+    pub target: TriggerTarget,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
@@ -362,7 +362,7 @@ pub enum TriggerManifestMembership {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TriggerTargetSummary {
+pub struct TriggerTarget {
     pub label: Option<String>,
     pub identity: crate::ProcessIdentity,
     pub input: crate::ProcessInput,
@@ -661,7 +661,7 @@ impl TriggerRegistration {
             name: route.name.clone(),
             source_type: TriggerEventType::new(route.source_type.clone()),
             source: route.source.clone(),
-            target: TriggerTargetSummary {
+            target: TriggerTarget {
                 label: route.target_label.clone(),
                 identity: route.target_identity.clone(),
                 input: route.target.clone(),
@@ -762,7 +762,7 @@ impl TriggerSubscriptionFilter {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TriggerMutationDisposition {
+pub enum TriggerMutationOutcome {
     Created,
     Unchanged,
     Updated,
@@ -781,15 +781,12 @@ pub struct TriggerMutationReceipt {
     pub revision: u64,
     pub definition_fingerprint: String,
     pub enabled: bool,
-    pub disposition: TriggerMutationDisposition,
+    pub disposition: TriggerMutationOutcome,
     pub record_snapshot: TriggerSubscriptionRecord,
 }
 
 impl TriggerMutationReceipt {
-    fn from_record(
-        record: TriggerSubscriptionRecord,
-        disposition: TriggerMutationDisposition,
-    ) -> Self {
+    fn from_record(record: TriggerSubscriptionRecord, disposition: TriggerMutationOutcome) -> Self {
         Self {
             owner_scope: record.owner_scope.clone(),
             subscription_key: record.subscription_key.clone(),
@@ -832,7 +829,7 @@ impl TriggerMutationReceipt {
 /// [`Enable`](Self::Enable) is a first-class verb, so re-enabling is fully
 /// supported: read the live revision, then `Enable` against it. Registering the
 /// same definition again is deliberately *not* a re-enable: it reports
-/// [`TriggerMutationDisposition::Unchanged`] and leaves the row disabled.
+/// [`TriggerMutationOutcome::Unchanged`] and leaves the row disabled.
 ///
 /// ```no_run
 /// use lash_core::{
@@ -1303,14 +1300,14 @@ fn trigger_operation_receipt_preimage(
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TriggerIngressResult {
+pub struct TriggerIngressReceipt {
     pub occurrence: TriggerOccurrenceRecord,
     pub reservations: Vec<TriggerDeliveryReservation>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TriggerDeliveryReservationStatus {
+pub enum TriggerDeliveryReservationOutcome {
     Reserved,
     AlreadyReserved,
 }
@@ -1321,7 +1318,7 @@ pub struct TriggerDeliveryReservation {
     pub subscription: TriggerSubscriptionRecord,
     pub process_id: String,
     pub created_at_ms: u64,
-    pub reservation_status: TriggerDeliveryReservationStatus,
+    pub reservation_status: TriggerDeliveryReservationOutcome,
 }
 
 /// Stable identity of one trigger-delivery row considered for retention.
@@ -1364,8 +1361,8 @@ pub fn sort_trigger_delivery_reservations(reservations: &mut [TriggerDeliveryRes
 }
 
 impl TriggerDeliveryReservation {
-    fn emit_report(&self, outcome: TriggerDeliveryEmitOutcome) -> TriggerDeliveryEmitReport {
-        TriggerDeliveryEmitReport {
+    fn emit_report(&self, outcome: TriggerDeliveryEmitOutcome) -> TriggerDeliveryEmitReceipt {
+        TriggerDeliveryEmitReceipt {
             occurrence_id: self.occurrence.occurrence_id.clone(),
             subscription_id: self.subscription.subscription_id.clone(),
             process_id: self.process_id.clone(),
@@ -1419,7 +1416,7 @@ pub trait TriggerStore: Send + Sync {
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
-    ) -> Result<TriggerIngressResult, PluginError>;
+    ) -> Result<TriggerIngressReceipt, PluginError>;
 
     async fn list_occurrences(
         &self,

@@ -494,11 +494,11 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
         deferred: vec![
             ProcessAdmissionDeferred {
                 process_id: "nested-row".to_string(),
-                disposition: ProcessRecoveryAttemptDisposition::Busy,
+                disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
             ProcessAdmissionDeferred {
                 process_id: "peer-row".to_string(),
-                disposition: ProcessRecoveryAttemptDisposition::Busy,
+                disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
         ],
     });
@@ -511,7 +511,7 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
         outer.deferred,
         vec![ProcessAdmissionDeferred {
             process_id: "peer-row".to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::Busy,
+            disposition: ProcessRecoveryAttemptOutcome::Busy,
         }],
         "another owner's contention survives; this call's own admission does not become it"
     );

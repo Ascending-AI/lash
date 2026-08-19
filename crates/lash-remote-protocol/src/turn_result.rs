@@ -15,7 +15,7 @@ use crate::turn_control::RemoteTurnCancellationEvidence;
 use crate::usage_activity::{RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteUsage};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteTurnResult {
+pub struct RemoteTurnReport {
     pub protocol_version: u32,
     pub session_id: String,
     pub turn_id: String,
@@ -26,11 +26,11 @@ pub struct RemoteTurnResult {
     pub cancellation: Option<RemoteTurnCancellationEvidence>,
     pub assistant_output: RemoteAssistantOutput,
     #[serde(default)]
-    pub usage: RemoteTurnUsageSummary,
+    pub usage: RemoteTurnUsageReport,
     #[serde(default)]
-    pub execution: RemoteExecutionSummary,
+    pub execution: RemoteTurnExecutionMetrics,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<RemoteToolCallSummary>,
+    pub tool_calls: Vec<RemoteToolCallRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub llm_calls: Vec<RemoteLlmCallRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -41,14 +41,14 @@ pub struct RemoteTurnResult {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-impl RemoteTurnResult {
+impl RemoteTurnReport {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
-        require_non_empty("RemoteTurnResult", "session_id", &self.session_id)?;
-        require_non_empty("RemoteTurnResult", "turn_id", &self.turn_id)?;
+        require_non_empty("RemoteTurnReport", "session_id", &self.session_id)?;
+        require_non_empty("RemoteTurnReport", "turn_id", &self.turn_id)?;
         if (self.status == RemoteTurnStatus::Cancelled) != self.cancellation.is_some() {
             return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteTurnResult",
+                type_name: "RemoteTurnReport",
                 message: "cancellation evidence must be present if and only if status is cancelled"
                     .to_string(),
             });
@@ -72,7 +72,7 @@ impl RemoteTurnResult {
         for activity in &self.activities {
             if activity.protocol_version != self.protocol_version {
                 return Err(RemoteProtocolError::MismatchedNestedProtocolVersion {
-                    parent: "RemoteTurnResult",
+                    parent: "RemoteTurnReport",
                     child: "activities",
                     parent_version: self.protocol_version,
                     child_version: activity.protocol_version,
@@ -234,7 +234,7 @@ pub enum RemoteAssistantOutputState {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteTurnUsageSummary {
+pub struct RemoteTurnUsageReport {
     #[serde(default)]
     pub parent: RemoteUsage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -244,7 +244,7 @@ pub struct RemoteTurnUsageSummary {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteExecutionSummary {
+pub struct RemoteTurnExecutionMetrics {
     #[serde(default)]
     pub had_tool_calls: bool,
     #[serde(default)]
@@ -260,7 +260,7 @@ pub struct RemoteExecutionSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteToolCallSummary {
+pub struct RemoteToolCallRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
     pub tool_name: String,

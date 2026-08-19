@@ -399,11 +399,14 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
         (name == "pg_public_signal_intent").then(|| Arc::new(public_signal_tool().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         panic!("the PostgreSQL public-caller law must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let intent = match self.kind {
             PublicIntentKind::Signal => {
@@ -426,8 +429,8 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
                 }))
             }
         };
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({"signal": "recorded"})),
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({"signal": "recorded"})),
             lash_core::ToolIntents::v1(vec![intent]),
         )
     }
@@ -606,9 +609,9 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
         (name == "fig1293_echo").then(|| Arc::new(fig1293_echo_tool().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         if call.args.get("value") == Some(&serde_json::json!("fail")) {
-            return lash_core::ToolResult::err_fmt("fig1293 injected batch failure");
+            return lash_core::ToolOutcome::err_fmt("fig1293 injected batch failure");
         }
         if call.args.get("value") == Some(&serde_json::json!("block"))
             && FIG1293_BLOCKING_CHILD_RUNS.fetch_add(1, Ordering::SeqCst) == 0
@@ -616,7 +619,7 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
             std::future::pending::<()>().await;
             unreachable!("FIG-1293 blocking child is dropped by cancellation")
         }
-        lash_core::ToolResult::ok(serde_json::json!({
+        lash_core::ToolOutcome::ok(serde_json::json!({
             "echo": call.args.get("value").cloned().unwrap_or_default(),
         }))
     }
@@ -818,7 +821,7 @@ async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegist
                 // must not enter the durable worker worklist, whose racing
                 // `first_started` events would make the signal sequence depend
                 // on scheduler timing instead of the law's literal journal.
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -2017,7 +2020,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({"source": "postgres-recorded-intent"}),
         },
-        lash_core::RecoveryDisposition::ExternallyOwned,
+        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
     );
     let envelope = RuntimeEffectEnvelope::new(
@@ -2115,7 +2118,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -2303,7 +2306,7 @@ async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_po
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {

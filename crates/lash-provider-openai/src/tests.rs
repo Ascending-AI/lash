@@ -2415,7 +2415,7 @@ mod openrouter_native_finish_reason_tests;
 #[test]
 fn generation_disposition_reports_what_each_dialect_carried() {
     use crate::common::generation_disposition;
-    use lash_core::llm::types::GenerationOptionDisposition::{Applied, OmittedUnsupported};
+    use lash_core::llm::types::GenerationOptionOutcome::{Applied, OmittedUnsupported};
 
     let provider = openrouter_provider();
     let mut req = request(vec![LlmMessage::new(
