@@ -310,6 +310,13 @@ struct SeamControl {
     /// lease TTL, and the scripted provider holds its initial response until
     /// the wall-clock fence has certainly lapsed. See [`RenewalPressure`].
     starve_renewal: Arc<std::sync::atomic::AtomicBool>,
+    /// When set, a background lease renewal is held until the scripted turn has
+    /// reached its provider mid-stream point. See
+    /// [`SeamControl::pin_renewal_after_provider`].
+    pin_renewal_after_provider: Arc<std::sync::atomic::AtomicBool>,
+    /// Notified on every [`SeamControl::record`], so a seam can wait for another
+    /// seam to appear in the trace rather than poll for it.
+    recorded: Arc<tokio::sync::Notify>,
 }
 
 /// Whether a matrix case runs its successor turn under a nominal lease-renewal
@@ -338,6 +345,53 @@ impl SeamControl {
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Pin every background lease renewal behind the provider's mid-stream seam.
+    ///
+    /// **This exists solely for [`turn_crash_trace_drift_check`]'s exact
+    /// golden-trace comparison, and no other test should reach for it.** That
+    /// check is the one place a strict seam *ordering* is asserted; every matrix
+    /// case asserts durable end states instead, and several of them arm crash
+    /// points that legitimately stop the turn before the provider is ever
+    /// called, where this park would have nothing to wait for.
+    ///
+    /// The race it removes: the renewal task fires on a fixed timer from the
+    /// lease claim ([`RECOVERY_RENEW`], against a [`RECOVERY_TTL`] lease), while
+    /// the turn has three store seams to clear before it reaches the provider.
+    /// On a loaded runner the timer wins that race and the renewal is recorded
+    /// ahead of `Provider(InitialRequest)` — a legal runtime ordering that a
+    /// single golden trace cannot express. Ordering the renewal behind a
+    /// positive signal removes the race without relaxing the comparison: the
+    /// renewal must still happen, and the scripted provider still refuses to
+    /// answer until it has.
+    fn pin_renewal_after_provider(&self) {
+        self.pin_renewal_after_provider
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Hold a renewal until the provider's mid-stream seam is in the trace.
+    ///
+    /// A no-op unless [`SeamControl::pin_renewal_after_provider`] armed it.
+    async fn park_renewal_behind_provider(&self) {
+        if !self
+            .pin_renewal_after_provider
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+        let target = TurnSeamOperation::Provider(ProviderOperation::InitialMidStream);
+        tokio::time::timeout(HIT_TIMEOUT, async {
+            loop {
+                let recorded = self.recorded.notified();
+                if self.state.lock_recover().trace.contains(&target) {
+                    break;
+                }
+                recorded.await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("pinned lease renewal never saw the provider reach {target:?}"));
+    }
+
     fn record(&self, operation: TurnSeamOperation) {
         let mut state = self.state.lock_recover();
         let duplicate_renewal = operation
@@ -346,6 +400,8 @@ impl SeamControl {
         if !duplicate_renewal {
             state.trace.push(operation);
         }
+        drop(state);
+        self.recorded.notify_one();
     }
 
     fn arm(&self, point: TurnCrashPoint) {
@@ -674,6 +730,7 @@ impl SessionExecutionLeaseStore for SeamStore {
         ttl: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::RenewSessionExecutionLease);
+        self.control.park_renewal_behind_provider().await;
         // A starved renewal task is modeled at its only observable seam: the
         // renewal call simply does not reach the store in time. The first
         // renewal is left intact because the scripted provider parks on it.
@@ -1671,6 +1728,9 @@ where
     ))
     .await;
     control.clear();
+    // The golden trace below is an exact ordering; pin the one seam whose timing
+    // is owned by a background timer rather than by the turn.
+    control.pin_renewal_after_provider();
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: Arc::new(crate::InlineRuntimeEffectController::default()),
         control: control.clone(),
