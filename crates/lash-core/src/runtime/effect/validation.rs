@@ -44,6 +44,21 @@ impl CanonicalRuntimeEffectEnvelope {
         &self.hash
     }
 
+    /// The exact serialized envelope bytes this value's hash was derived from.
+    ///
+    /// The bytes are the envelope's canonical form, so decoding them and
+    /// re-capturing the result reproduces this same hash. That fixpoint is what
+    /// lets a reader that holds only the journal — the group drain, which was
+    /// not the process that built the envelope — rebuild the effect and have it
+    /// pass its own replay fence rather than be refused as a mismatch.
+    ///
+    /// Deliberately not a typed decode: the recorded bytes may be older than
+    /// this build, and the one consumer that must decode them owns the error
+    /// vocabulary the failure is reported in.
+    pub fn json(&self) -> &str {
+        &self.json
+    }
+
     fn verify(&self, side: &str) -> Result<(), RuntimeEffectControllerError> {
         let actual = crate::stable_hash::sha256_hex(self.json.as_bytes());
         if actual == self.hash {

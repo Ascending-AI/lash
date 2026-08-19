@@ -125,6 +125,31 @@ const RUNTIME_EFFECT_REPLAY_GROUP_SEQ_INDEX_DDL: &str = r#"CREATE UNIQUE INDEX I
             ON lash_runtime_effect_replay(group_key, settlement_seq)
             WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL"#;
 
+/// The drain's queue read, indexed (FIG-1536).
+///
+/// `read_unsettled_group_children` asks for one group's children that hold no
+/// settlement rank. Without this the planner reaches that answer through the
+/// whole effect-replay table, which on a busy store is every effect any session
+/// ever journaled — a scan whose cost grows with history the drain has no
+/// interest in. The predicate keeps the index to exactly the rows a drain can
+/// act on: a settled child leaves it on finalize, so the index shrinks as a
+/// group drains and holds nothing at all for a fully settled one.
+///
+/// # Why this is a migration here and was not one on SQLite
+///
+/// The equivalent SQLite index shipped in the same generation as the columns it
+/// covers, with no version bump, because that tier's schema is
+/// reject-and-recreate: its guarded projection admits an idempotent index
+/// addition under the `sql_idempotent_index` carve-out precisely so that adding
+/// one does not force a bump that would delete every existing effect database.
+/// PostgreSQL has migrations, so it takes the routine path — a new generation
+/// with a creation-only migration into it — and the asymmetry is a property of
+/// what each tier can do about an old database, not a disagreement about what
+/// the index is for.
+const RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_group_unsettled
+            ON lash_runtime_effect_replay(group_key, replay_key)
+            WHERE group_key IS NOT NULL AND settlement_seq IS NULL"#;
+
 const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
     table: "lash_runtime_effect_replay",
     columns: &["group_key", "settlement_seq"],
@@ -148,11 +173,30 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
-    // The 54 generation adds the effect-group journal: one new table, its two
-    // indexes, and two nullable columns on `lash_runtime_effect_replay`.
+    // The 55 generation adds one index and nothing else: the drain's
+    // unsettled-children read, which layer 2.5 deferred (FIG-1564) and the
+    // drain (FIG-1536) makes a hot path. No table, no column, no guard — so the
+    // source shape a 54 store must present is the current one.
+    SchemaMigration {
+        from: 54,
+        to: 55,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &["idx_lash_runtime_effect_replay_group_unsettled"],
+        statements: &[
+            RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
+            r#"UPDATE lash_schema_versions
+               SET version = 55
+             WHERE component = 'lash-postgres-store' AND version = 54"#,
+        ],
+    },
+    // A 53 store takes both later generations at once: the 54 effect-group
+    // journal (one new table, its two indexes, two nullable columns on
+    // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 54,
+        to: 55,
         source_missing_tables: &["lash_runtime_effect_group"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
@@ -164,6 +208,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_session",
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
+            "idx_lash_runtime_effect_replay_group_unsettled",
         ],
         statements: &[
             RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL,
@@ -172,14 +217,15 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_DDL,
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
+            RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 54
+               SET version = 55
              WHERE component = 'lash-postgres-store' AND version = 53"#,
         ],
     },
     SchemaMigration {
         from: 52,
-        to: 54,
+        to: 55,
         source_missing_tables: &["lash_runtime_effect_group"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
@@ -193,6 +239,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_session",
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
+            "idx_lash_runtime_effect_replay_group_unsettled",
         ],
         statements: &[
             QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
@@ -203,14 +250,15 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_DDL,
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
+            RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 54
+               SET version = 55
              WHERE component = 'lash-postgres-store' AND version = 52"#,
         ],
     },
     SchemaMigration {
         from: 51,
-        to: 54,
+        to: 55,
         source_missing_tables: &["lash_attachment_condemnations", "lash_runtime_effect_group"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
@@ -225,6 +273,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_session",
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
+            "idx_lash_runtime_effect_replay_group_unsettled",
         ],
         statements: &[
             ATTACHMENT_CONDEMNATIONS_DDL,
@@ -236,8 +285,9 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_DDL,
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
+            RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 54
+               SET version = 55
              WHERE component = 'lash-postgres-store' AND version = 51"#,
         ],
     },
@@ -245,7 +295,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 54,
+        to: 55,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
@@ -268,6 +318,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_session",
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
+            "idx_lash_runtime_effect_replay_group_unsettled",
         ],
         statements: &[
             PROCESS_PARENT_END_PLANS_DDL,
@@ -282,8 +333,9 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_DDL,
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
+            RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 54
+               SET version = 55
              WHERE component = 'lash-postgres-store' AND version = 50"#,
         ],
     },
@@ -853,7 +905,8 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is normally a reject-and-recreate boundary. This build has \
          explicit Lash-managed migrations from the published component-50, component-51, \
-         component-52, and component-53 shapes to 54; they run only under SchemaCheck::Enforce \
+         component-52, component-53, and component-54 shapes to 55; they run only under \
+         SchemaCheck::Enforce \
          after an exact \
          source-shape preflight. This mismatch \
          has no applicable migration. Drain affected sessions and recreate the whole Lash trust \
@@ -869,7 +922,7 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
 mod tests {
     use super::*;
 
-    /// The declared 53 -> 54 migration, which every case below perturbs.
+    /// The declared 53 -> 55 migration, which every case below perturbs.
     fn migration() -> &'static SchemaMigration {
         SCHEMA_MIGRATIONS
             .iter()
@@ -908,7 +961,7 @@ mod tests {
     fn report(findings: Vec<SchemaFinding>) -> SchemaReport {
         SchemaReport {
             schema: Some("public".to_string()),
-            expected_version: 54,
+            expected_version: 55,
             found_version: Some(53),
             findings,
         }
@@ -919,7 +972,7 @@ mod tests {
     fn published_53_findings() -> Vec<SchemaFinding> {
         vec![
             SchemaFinding::VersionMismatch {
-                expected: 54,
+                expected: 55,
                 found: Some(53),
             },
             SchemaFinding::MissingTable {

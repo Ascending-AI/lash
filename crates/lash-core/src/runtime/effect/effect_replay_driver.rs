@@ -85,7 +85,27 @@ enum EffectReplayBackend {
     Postgres,
 }
 
+/// What a caller of the shared claim loop wants a live competing claim to mean.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BusyPolicy {
+    /// Wait the competing claim out. What an effect's own caller wants: it
+    /// needs this outcome, and the other executor is producing it.
+    Queue,
+    /// Report the busy claim and hand the decision back. What the drain wants:
+    /// it has a queue, and a child someone else owns right now is the one it
+    /// should move past rather than sleep against.
+    Yield,
+}
+
+/// How one trip through the claim loop ended.
+enum EffectRun {
+    /// The effect reached a terminal — replayed, or executed and finalized.
+    Terminal(RuntimeEffectOutcome),
+    /// Another executor holds a live claim, and the caller asked to be told
+    /// rather than made to wait. Nothing was written.
+    Busy,
+}
+
 enum EffectReplayFailure {
     CorruptRow,
     Decode,
@@ -649,6 +669,24 @@ pub trait EffectReplayPersistence: sealed::EffectReplayBackend + Send + Sync {
         record: &EffectGroupRecord,
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError>;
 
+    /// Read the group row under `group_key`, or `None` when no group is
+    /// recorded there.
+    ///
+    /// The read half of [`open_group`](Self::open_group), for the one reader
+    /// that must not write: the group drain takes its queue from the journal
+    /// rather than from a caller, and the disposition it applies is the one the
+    /// group declared. Asking `open_group` for it would *insert* a group row for
+    /// a key that has none — inventing the very fact the drain is forbidden to
+    /// invent.
+    ///
+    /// `None` is a real answer, not an error: a group whose row was retired
+    /// (N3) is gone whole, children included, and a drain that finds no row has
+    /// nothing to drain.
+    async fn read_group(
+        &self,
+        group_key: &str,
+    ) -> Result<Option<EffectGroupRecord>, RuntimeEffectControllerError>;
+
     /// Read the group's settled child at `rank`, counting from 1.
     ///
     /// Rank is the position of a child's `settlement_seq` in the ascending order
@@ -876,10 +914,47 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        // Boxed because the claim loop's future is large and this is the seam
-        // every caller funnels through; keeping it off the caller's frame is
-        // the same trade the store controllers already make.
-        Box::pin(self.execute_effect_cancellable(scope, envelope, local_executor, None)).await
+        // Not boxed here: `execute_effect_cancellable` boxes the claim loop
+        // itself, which is where the large future is, so a second box on the way
+        // in would only add an allocation and an indirection to the same call.
+        self.execute_effect_cancellable(scope, envelope, local_executor, None)
+            .await
+    }
+
+    /// Run `envelope` for `scope`, yielding rather than queueing behind a live
+    /// competing claim, and stopping if `cancel` fires.
+    ///
+    /// The drain's entry point, and the only caller that wants either bound.
+    /// [`execute_effect`](Self::execute_effect) queues on a busy claim because
+    /// its caller *needs this effect's outcome* and has nowhere else to be; a
+    /// drain pass is the opposite — it holds a queue of children and a child
+    /// another executor is running right now is the one child it should not be
+    /// waiting on. Queueing there turns a pass into an unbounded sleep against
+    /// a live renewer while the rest of the queue goes untouched.
+    ///
+    /// `Ok(None)` means the claim was busy and nothing was written. Dropping
+    /// the execution on cancellation is safe for exactly the reason the drain
+    /// exists: an abandoned claim leaves an `in_progress` row whose lease stops
+    /// being renewed, which is the same state a crashed executor leaves and
+    /// which the next pass reclaims.
+    pub(super) async fn execute_effect_yielding(
+        &self,
+        scope: &ExecutionScope,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<Option<RuntimeEffectOutcome>, RuntimeEffectControllerError> {
+        match Box::pin(self.execute_effect_with_policy(
+            scope,
+            envelope,
+            local_executor,
+            None,
+            BusyPolicy::Yield,
+        ))
+        .await?
+        {
+            EffectRun::Terminal(outcome) => Ok(Some(outcome)),
+            EffectRun::Busy => Ok(None),
+        }
     }
 
     /// [`execute_effect`](Self::execute_effect) with an optional cancellation
@@ -901,6 +976,41 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
         local_executor: RuntimeEffectLocalExecutor<'_>,
         cancel: Option<&CancellationToken>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        match Box::pin(self.execute_effect_with_policy(
+            scope,
+            envelope,
+            local_executor,
+            cancel,
+            BusyPolicy::Queue,
+        ))
+        .await?
+        {
+            EffectRun::Terminal(outcome) => Ok(outcome),
+            // Unreachable under `BusyPolicy::Queue`, which loops rather than
+            // reporting a busy claim. Answered as a refusal rather than a
+            // panic so that a future caller passing the wrong policy loses an
+            // effect's outcome instead of the process.
+            EffectRun::Busy => Err(self.vocabulary().error(
+                EffectReplayFailure::LeaseLost,
+                format!(
+                    "a queueing runtime effect execution for scope `{}` reported a busy claim, \
+                     which only a yielding execution may do",
+                    scope.id()
+                ),
+            )),
+        }
+    }
+
+    /// The claim loop both execution entry points share, parameterised by what
+    /// a busy claim means to the caller.
+    async fn execute_effect_with_policy(
+        &self,
+        scope: &ExecutionScope,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+        cancel: Option<&CancellationToken>,
+        busy: BusyPolicy,
+    ) -> Result<EffectRun, RuntimeEffectControllerError> {
         scope
             .validate()
             .map_err(RuntimeEffectControllerError::from)?;
@@ -938,7 +1048,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
                 }
                 PreparedEffect::ReplayOutcome { outcome, due_at_ms } => {
                     self.sleep_until_due(due_at_ms).await;
-                    return Ok(*outcome);
+                    return Ok(EffectRun::Terminal(*outcome));
                 }
                 PreparedEffect::ReplayError(err) => return Err(err),
                 PreparedEffect::Claimed(claim) => {
@@ -959,14 +1069,15 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
                     };
                     let finalize = self.finalize_effect(&claim.fence, &result).await;
                     return match (result, finalize) {
-                        (Ok(outcome), Ok(())) => Ok(outcome),
+                        (Ok(outcome), Ok(())) => Ok(EffectRun::Terminal(outcome)),
                         (Err(err), Ok(())) => Err(err),
                         (_, Err(err)) => Err(err),
                     };
                 }
-                PreparedEffect::Busy { retry_at_ms } => {
-                    self.sleep_until_retry(retry_at_ms).await;
-                }
+                PreparedEffect::Busy { retry_at_ms } => match busy {
+                    BusyPolicy::Queue => self.sleep_until_retry(retry_at_ms).await,
+                    BusyPolicy::Yield => return Ok(EffectRun::Busy),
+                },
             }
         }
     }
@@ -1207,6 +1318,7 @@ fn sleep_duration_ms(envelope: &RuntimeEffectEnvelope) -> Option<u64> {
     }
 }
 
+mod drain;
 mod groups;
 
 #[cfg(test)]

@@ -197,7 +197,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // catalog metadata and every already-journalled effect keeps its recorded
 // `envelope_hash` — and therefore its lease fence — across the upgrade. Stores at
 // 50 through 53 take a creation-only migration at open.
-const SCHEMA_VERSION: i32 = 54;
+// Version 55 indexes the loser drain's queue read: one group's children that
+// hold no settlement rank yet. An index and nothing else, so stores at 50
+// through 54 take a creation-only migration at open; SQLite carries the same
+// index unversioned, and `RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL` says why.
+const SCHEMA_VERSION: i32 = 55;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -960,8 +960,9 @@ pub use store::{TurnId, WorkClaim, WorkCompletion};
 // surface; the rest of the runtime block above stays crate-internal.
 
 pub use runtime::{
-    AssistantResponseHookEvents, CheckedEffectGroup, CheckpointClaimSet, EffectGroupHandle,
-    EffectGroupMembership, GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserDisposition,
+    AssistantResponseHookEvents, CheckedEffectGroup, CheckpointClaimSet, ChildDrainOutcome,
+    DrainedChild, EffectGroupDrain, EffectGroupHandle, EffectGroupMembership, GroupDrainExecutors,
+    GroupDrainReport, GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserDisposition,
     ProcessCommand, ProcessEffectOutcome, ProcessEventSemanticsSpec, ProcessOutcomeObserver,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind,

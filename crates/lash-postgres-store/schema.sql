@@ -409,6 +409,12 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_session
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
     ON lash_runtime_effect_replay(group_key, settlement_seq)
     WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
+-- The loser drain's queue read: one group's children that hold no rank yet. The
+-- predicate keeps the index to exactly the rows a drain can act on, so it
+-- shrinks as a group settles and holds nothing at all for a drained one.
+CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_group_unsettled
+    ON lash_runtime_effect_replay(group_key, replay_key)
+    WHERE group_key IS NOT NULL AND settlement_seq IS NULL;
 
 -- One row per open effect group. `next_seq` is the group's settlement counter:
 -- a finalizing child bumps it inside its own fenced transaction, which is the
@@ -520,7 +526,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 54)
+VALUES ('lash-postgres-store', 55)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

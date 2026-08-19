@@ -25,6 +25,8 @@ use lash_core::facade_support::effect_replay_driver::{
     decide_effect_claim,
 };
 
+use lash_core::{EffectGroupDrain, GroupDrainExecutors};
+
 use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
 use tokio_util::sync::CancellationToken;
 
@@ -80,6 +82,20 @@ impl PostgresEffectHost {
 
     pub fn start_replay(&self) {
         self.inner.start_replay();
+    }
+
+    /// The host-owned drain over this host's effect journal.
+    ///
+    /// `executors` is the wiring seam: it says how a child this host did not
+    /// open is run, and it is supplied here — by the host that owns those
+    /// runners — rather than discovered from whatever session is in scope when a
+    /// group turns out to need draining. The drain shares this host's driver, so
+    /// it claims under the same owner identity and the same journal.
+    pub fn group_drain(
+        &self,
+        executors: Arc<dyn GroupDrainExecutors>,
+    ) -> Arc<dyn EffectGroupDrain> {
+        Arc::clone(&self.inner).into_group_drain(executors)
     }
 }
 
@@ -539,21 +555,37 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
         stored_group_record(existing)
     }
 
+    /// Reads the group row without writing one, so a drain reads the declared
+    /// disposition instead of inserting a group it was only asking about.
+    async fn read_group(
+        &self,
+        group_key: &str,
+    ) -> Result<Option<EffectGroupRecord>, RuntimeEffectControllerError> {
+        let row = sqlx::query(
+            "SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    children, created_at_ms
+             FROM lash_runtime_effect_group
+             WHERE group_key = $1",
+        )
+        .bind(group_key)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(effect_store_error)?;
+        row.map(stored_group_record).transpose()
+    }
+
     /// Reads the group's children that hold no rank: the complement of
     /// [`read_group_settlement`](Self::read_group_settlement)'s
     /// `settlement_seq IS NOT NULL`.
     ///
-    /// **Unindexed on this tier, deliberately.** The only `group_key` index is
-    /// the rank read's unique backstop, whose predicate is the opposite half, so
-    /// this read is a sequential scan of `lash_runtime_effect_replay` — once per
-    /// child completion after a close, and once per drain pass. The sqlite tier
-    /// carries a complementary partial index because an additive index rides its
-    /// self-healing schema for free; here every relation is stamped into a
-    /// component generation, so adding one is a `SCHEMA_VERSION` bump with a
-    /// migration row per live generation. That bump belongs with the drain
-    /// (FIG-1536), which is the workload that makes the plan matter and the
-    /// change that has to carry the migration either way. Until then the cost is
-    /// bounded by the journal's size, not the group's.
+    /// Served by `idx_lash_runtime_effect_replay_group_unsettled`, whose
+    /// predicate is exactly this filter. That index is the 55 generation's whole
+    /// content, and it arrived with the drain (FIG-1536) — the workload that
+    /// makes the plan matter — rather than with the read, because on this tier
+    /// every relation is stamped into a component generation and an index is a
+    /// `SCHEMA_VERSION` bump with a migration row per live generation. The
+    /// asymmetry with sqlite, whose equivalent index shipped a generation
+    /// earlier without a bump, is documented where that migration is declared.
     async fn read_unsettled_group_children(
         &self,
         group_key: &str,

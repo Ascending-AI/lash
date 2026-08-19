@@ -154,6 +154,15 @@ pub enum RuntimeErrorCode {
     /// disposition resolved to `Cancel`. The cancellation is that child's
     /// terminal, not a transient failure to retry.
     RuntimeEffectGroupChildCancelled,
+    /// A drain pass was not attempted because the process asked to run it is
+    /// still working the group itself — a caller here has it open, or children
+    /// this host dispatched have not settled yet.
+    ///
+    /// Retryable, and the distinction matters: nothing about the group is wrong
+    /// and nothing needs changing, so the same call succeeds once this host is
+    /// done with it. A refusal that meant "never" would carry
+    /// `RuntimeEffectGroupShape` instead.
+    RuntimeEffectGroupDrainDeferred,
     /// A durable effect group was assembled with children that disagree with the
     /// group they claim to belong to, or an effect carrying group membership
     /// reached a command shape that cannot honor it.
@@ -349,6 +358,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
             Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
             Self::RuntimeEffectGroupChildCancelled => "runtime_effect_group_child_cancelled",
+            Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::RuntimeEffectInvocationKind => "runtime_effect_invocation_kind",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
@@ -440,6 +450,7 @@ impl RuntimeErrorCode {
         matches!(
             self,
             Self::ManagedTurnConcurrencyLimitExceeded
+                | Self::RuntimeEffectGroupDrainDeferred
                 | Self::SessionExecutionLaneBusy
                 | Self::StoreCommitContended
                 | Self::PostgresAwaitEventStore
@@ -698,6 +709,7 @@ impl RuntimeErrorCode {
             "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
             "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
             "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
+            "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "runtime_effect_invocation_kind" => Self::RuntimeEffectInvocationKind,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
@@ -957,6 +969,7 @@ mod tests {
             // durable completion, so redriving phase 2 is the correct recovery
             // (FIG-1276).
             RuntimeErrorCode::RuntimeEffectAssistantResponseHook
+            | RuntimeErrorCode::RuntimeEffectGroupDrainDeferred
             | RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
             | RuntimeErrorCode::SessionExecutionLaneBusy
             | RuntimeErrorCode::StoreCommitContended
@@ -1211,6 +1224,7 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectEnvelopeHash,
             RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
             RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
+            RuntimeErrorCode::RuntimeEffectGroupDrainDeferred,
             RuntimeErrorCode::RuntimeEffectGroupShape,
             RuntimeErrorCode::RuntimeEffectInvocationKind,
             RuntimeErrorCode::RuntimeEffectInvocationSubject,
