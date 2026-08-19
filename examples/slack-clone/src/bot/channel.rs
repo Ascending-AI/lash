@@ -165,7 +165,7 @@ pub struct ChannelBot {
     /// about. Filled from `users.list` and refreshed on a miss.
     directory: Arc<RwLock<HashMap<String, String>>>,
     #[cfg(test)]
-    missing_root_observed: Arc<tokio::sync::Notify>,
+    root_wait: Arc<threads::RootWaitObserver>,
     #[cfg(test)]
     thread_root_wait_budget: Arc<Mutex<Duration>>,
 }
@@ -188,7 +188,7 @@ impl ChannelBot {
             session_locks: Arc::new(Mutex::new(HashMap::new())),
             directory: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(test)]
-            missing_root_observed: Arc::new(tokio::sync::Notify::new()),
+            root_wait: Arc::new(threads::RootWaitObserver::default()),
             #[cfg(test)]
             thread_root_wait_budget: Arc::new(Mutex::new(threads::ROOT_ADMISSION_WAIT_BUDGET)),
         }
@@ -216,7 +216,16 @@ impl ChannelBot {
 
     #[cfg(test)]
     pub async fn wait_for_missing_thread_root(&self) {
-        self.missing_root_observed.notified().await;
+        self.root_wait.missing_root().await;
+    }
+
+    /// What the thread-root admission wait actually did: how much budget it
+    /// spent and how many turns saw a missing root. Tests assert the
+    /// fail-fast fact through these rather than through a wall-clock bound,
+    /// which a loaded runner breaks for reasons the test does not care about.
+    #[cfg(test)]
+    pub fn thread_root_wait(&self) -> &threads::RootWaitObserver {
+        &self.root_wait
     }
 
     #[cfg(test)]
@@ -560,7 +569,7 @@ impl ChannelBot {
                 &self.ledger,
                 record,
                 #[cfg(test)]
-                &self.missing_root_observed,
+                &self.root_wait,
                 thread_root_wait_budget,
             )
             .await?

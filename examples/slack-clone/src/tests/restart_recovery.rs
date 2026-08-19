@@ -1119,10 +1119,22 @@ async fn recovery_folds_a_late_root_before_re_driving_its_unavailable_reply() {
         .expect("stage root accepted as if the process stopped before admission");
     assert_eq!(claimed.record().stage, Stage::Accepted);
 
-    let report = tokio::time::timeout(std::time::Duration::from_secs(2), bot.recover())
+    // Restore a production-sized budget so recovery's own `Duration::ZERO` for
+    // thread records is what keeps the serial pass moving, rather than a test
+    // budget that would make the claim below vacuous.
+    bot.set_thread_root_wait_budget(std::time::Duration::from_secs(60));
+    // The wall-clock bound is only a hang guard: it is well past that budget, so
+    // a recovery pass that actually spent a root wait is caught by the assertion
+    // below rather than by the clock, and no amount of runner load trips it.
+    let report = tokio::time::timeout(std::time::Duration::from_secs(120), bot.recover())
         .await
-        .expect("boot recovery must not spend a fresh root wait")
+        .expect("boot recovery must settle without hanging")
         .expect("production recovery pass");
+    assert_eq!(
+        bot.thread_root_wait().budget_spent(),
+        std::time::Duration::ZERO,
+        "boot recovery must not spend a fresh root wait"
+    );
     assert!(report.deferred.is_empty(), "{report:?}");
     assert!(matches!(
         report.settled.first(),

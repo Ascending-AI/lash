@@ -619,10 +619,16 @@ async fn a_terminal_unroutable_root_fails_fast_without_spending_the_wait_budget(
         )
         .await;
     let reply = only_event(&platform.drain_envelopes().await, "app_mention");
-    let outcome = tokio::time::timeout(std::time::Duration::from_secs(1), bot.ingest(reply, None))
-        .await
-        .expect("terminal root evidence must bypass the 60s wait")
-        .expect("handle unroutable-root reply");
+    // The wall-clock bound is only a hang guard: it is well past the 60s budget,
+    // so a regression that actually spends the budget is caught by the
+    // assertions below rather than by the clock, and no amount of runner load
+    // trips it. Terminal root evidence is recognised on the first probe, so the
+    // wait loop never even reports a missing root.
+    let outcome =
+        tokio::time::timeout(std::time::Duration::from_secs(120), bot.ingest(reply, None))
+            .await
+            .expect("unroutable-root reply must settle without hanging")
+            .expect("handle unroutable-root reply");
     assert!(matches!(
         outcome,
         Disposition::RecoverableFailure {
@@ -630,6 +636,16 @@ async fn a_terminal_unroutable_root_fails_fast_without_spending_the_wait_budget(
             ..
         }
     ));
+    assert_eq!(
+        bot.thread_root_wait().budget_spent(),
+        std::time::Duration::ZERO,
+        "terminal root evidence must bypass the 60s wait budget entirely"
+    );
+    assert_eq!(
+        bot.thread_root_wait().probes(),
+        0,
+        "a permanently unroutable root must be recognised before the wait loop parks"
+    );
     assert_eq!(script.calls(), 0);
 }
 
