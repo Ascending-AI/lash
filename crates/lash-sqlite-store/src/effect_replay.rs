@@ -20,7 +20,7 @@ use lash_core::facade_support::effect_replay_driver::{
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectFinalizeOutcome,
     EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayDriver,
     EffectReplayPersistence, EffectReplayVocabulary, EffectRowStatus, EffectTerminal,
-    StoredEffectRow, StoredGroupSettlement, decide_effect_claim,
+    StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild, decide_effect_claim,
 };
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
@@ -360,6 +360,47 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
         )
         .await
     }
+
+    /// `true`: the group methods below are implemented against the durable
+    /// journal, and this store's [`EffectHost::scoped_static`] hands out the
+    /// `'static` scopes the flag's other half requires — a child must be able to
+    /// outlive its caller to honor
+    /// [`LoserDisposition::RunToCompletion`](lash_core::LoserDisposition::RunToCompletion).
+    ///
+    /// The two capabilities are one question and must not drift apart, which is
+    /// why the flag is answered here rather than defaulted: the surface it
+    /// admits is exactly the surface below.
+    fn supports_effect_groups(&self) -> bool {
+        true
+    }
+
+    /// Delegated to the shared driver exactly as `execute_effect` is: the group
+    /// host is one implementation over
+    /// [`EffectReplayPersistence`](lash_core::facade_support::effect_replay_driver::EffectReplayPersistence),
+    /// and this store contributes the substrate half of it rather than a second
+    /// copy of the state machine.
+    async fn open_effect_group(
+        &self,
+        group: lash_core::CheckedEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, RuntimeEffectControllerError> {
+        Box::pin(self.inner.open_effect_group(&self.scope, group)).await
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, RuntimeEffectControllerError> {
+        Box::pin(self.inner.await_next_group_settlement(handle, cancel)).await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserDisposition,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Box::pin(self.inner.close_effect_group(&handle, disposition)).await
+    }
 }
 
 fn validate_effect_host_path(path: &Path) -> tokio_rusqlite::Result<()> {
@@ -579,10 +620,17 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
             .map_err(effect_sqlite_error)
     }
 
+    /// Records the group and reports the row **as it stands durably**, so a
+    /// reopen is fenced against what the journal holds rather than against this
+    /// process's memory.
+    ///
+    /// The insert and the read-back share one `BEGIN IMMEDIATE` transaction,
+    /// which touches only the group table and commits before any child of the
+    /// group claims (N2).
     async fn open_group(
         &self,
         record: &EffectGroupRecord,
-    ) -> Result<(), RuntimeEffectControllerError> {
+    ) -> Result<EffectGroupRecord, RuntimeEffectControllerError> {
         let record = record.clone();
         self.conn
             .write(move |tx| {
@@ -606,7 +654,50 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
                         record.created_at_ms as i64,
                     ],
                 )?;
-                Ok(())
+                select_group_record(tx, &record.group_key)
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
+    /// Reads the group's children that hold no rank: the complement of
+    /// [`read_group_settlement`](Self::read_group_settlement)'s
+    /// `settlement_seq IS NOT NULL`.
+    ///
+    /// Served by `idx_runtime_effect_replay_group_unsettled`, whose predicate is
+    /// exactly this filter. The rank read's unique backstop indexes the opposite
+    /// half, so without a complementary index this read scans the whole effect
+    /// journal — once per child completion after a close, and once per drain
+    /// pass (FIG-1536).
+    async fn read_unsettled_group_children(
+        &self,
+        group_key: &str,
+    ) -> Result<Vec<UnsettledGroupChild>, RuntimeEffectControllerError> {
+        let group_key = group_key.to_string();
+        self.conn
+            .call(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT scope_id, replay_key, envelope_json, status, lease_expires_at_ms
+                     FROM runtime_effect_replay
+                     WHERE group_key = ?1 AND settlement_seq IS NULL
+                     ORDER BY replay_key",
+                )?;
+                let rows = statement
+                    .query_map(params![group_key.as_str()], |row| {
+                        Ok(UnsettledGroupChild {
+                            scope_id: row.get(0)?,
+                            replay_key: row.get(1)?,
+                            envelope_json: row.get(2)?,
+                            status: row.get(3)?,
+                            lease_expires_at_ms: u64_from_sql(
+                                "RuntimeEffectReplay",
+                                "lease_expires_at_ms",
+                                row.get(4)?,
+                            )?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
             })
             .await
             .map_err(effect_sqlite_error)
@@ -835,6 +926,66 @@ fn take_over_expired_lease(
         ],
     )?;
     Ok(())
+}
+
+/// Reads back the durably recorded group row.
+///
+/// A group is written before this reads it, in the same transaction, so a
+/// missing row is a substrate fault rather than a race — reported as corrupt
+/// rather than papered over with the record the caller passed in, which would
+/// make the reopen fence compare a row against itself.
+fn select_group_record(
+    tx: &rusqlite::Transaction<'_>,
+    group_key: &str,
+) -> rusqlite::Result<EffectGroupRecord> {
+    tx.query_row(
+        "SELECT group_key, scope_id, session_id, wake, loser_disposition, children,
+                created_at_ms
+         FROM runtime_effect_group
+         WHERE group_key = ?1",
+        params![group_key],
+        |row| {
+            Ok(EffectGroupRecord {
+                group_key: row.get(0)?,
+                scope_id: row.get(1)?,
+                session_id: row.get(2)?,
+                wake: group_column_from_sql("wake rule", &row.get::<_, String>(3)?)?,
+                loser_disposition: group_column_from_sql(
+                    "loser disposition",
+                    &row.get::<_, String>(4)?,
+                )?,
+                children: usize_from_sql("RuntimeEffectGroup", "children", row.get(5)?)?,
+                created_at_ms: u64_from_sql("RuntimeEffectGroup", "created_at_ms", row.get(6)?)?,
+            })
+        },
+    )
+}
+
+/// A persisted group column read back through the same mapping that wrote it,
+/// refusing a value no version of this runtime writes.
+fn group_column_from_sql<T: EffectGroupColumn>(
+    column: &'static str,
+    value: &str,
+) -> rusqlite::Result<T> {
+    EffectGroupColumn::from_column(value).ok_or_else(|| {
+        sqlite_conversion_error(stored_data_corrupt(
+            "RuntimeEffectGroup",
+            format!("unknown effect group {column} `{value}`"),
+        ))
+    })
+}
+
+fn usize_from_sql(
+    record_kind: &'static str,
+    column: &'static str,
+    value: i64,
+) -> rusqlite::Result<usize> {
+    usize::try_from(value).map_err(|_| {
+        sqlite_conversion_error(stored_data_corrupt(
+            record_kind,
+            format!("{column} must be non-negative, got {value}"),
+        ))
+    })
 }
 
 /// A grouped child whose group row is gone is a corrupt journal, not a

@@ -58,6 +58,7 @@ use super::executor::{
 /// backend imports the whole effect-journal vocabulary from one place.
 pub use super::group_journal::{
     EffectFinalizeOutcome, EffectGroupColumn, EffectGroupRecord, StoredGroupSettlement,
+    UnsettledGroupChild,
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
@@ -632,10 +633,21 @@ pub trait EffectReplayPersistence: sealed::EffectReplayBackend + Send + Sync {
     /// `next_seq` — resetting it would re-seat already-recorded children at
     /// ranks another caller has consumed. An existing row for the same key is
     /// left exactly as it is.
+    ///
+    /// Returns the record **as it stands durably** after the idempotent write:
+    /// the row that was already there when the key existed, and `record` itself
+    /// when it did not. That is what makes the reopen fence the group host owes
+    /// (`open_effect_group`'s "refuse rather than reopen a group whose child
+    /// count or wake rule differs") a *durable* check rather than an in-process
+    /// one. The per-child envelope-hash fence already refuses a drifted wake
+    /// rule or disposition, since both are folded into every child's hash — but
+    /// it cannot see a **shrunk child vec**, which silently renumbers every rank
+    /// above the truncation, and it cannot see anything at all from a process
+    /// that never opened the group before.
     async fn open_group(
         &self,
         record: &EffectGroupRecord,
-    ) -> Result<(), RuntimeEffectControllerError>;
+    ) -> Result<EffectGroupRecord, RuntimeEffectControllerError>;
 
     /// Read the group's settled child at `rank`, counting from 1.
     ///
@@ -648,6 +660,23 @@ pub trait EffectReplayPersistence: sealed::EffectReplayBackend + Send + Sync {
         group_key: &str,
         rank: usize,
     ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError>;
+
+    /// Read every child of `group_key` that holds no settlement rank.
+    ///
+    /// The exact complement of [`read_group_settlement`](Self::read_group_settlement):
+    /// that read filters `settlement_seq IS NOT NULL`, this one
+    /// `settlement_seq IS NULL`. Both predicates over one table, so a child is
+    /// in exactly one of the two answers and "the group is complete" is
+    /// decidable in a single query rather than by walking ranks until one comes
+    /// back `None`.
+    ///
+    /// Order is unspecified beyond being stable for one journal state: these
+    /// rows have no rank — that is what makes them unsettled — and imposing one
+    /// would invent an ordering fact the journal does not hold.
+    async fn read_unsettled_group_children(
+        &self,
+        group_key: &str,
+    ) -> Result<Vec<UnsettledGroupChild>, RuntimeEffectControllerError>;
 
     /// Extend the lease by `lease_ttl_ms`, guarded by `fence`.
     ///
@@ -713,6 +742,12 @@ pub struct EffectReplayDriver<P, A> {
     lease_counter: AtomicU64,
     replay_mode: AtomicBool,
     lease_timings: LeaseTimings,
+    /// The groups this driver has open, and the host-owned task set their
+    /// children run on. Process-local by design: every durable fact about a
+    /// group lives in the journal, and this map holds only what a process that
+    /// opened the group knows — which child is at which position, and the
+    /// cancellation token its own children select on.
+    groups: groups::DurableEffectGroups,
 }
 
 impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> {
@@ -746,6 +781,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             lease_counter: AtomicU64::new(1),
             replay_mode: AtomicBool::new(false),
             lease_timings,
+            groups: groups::DurableEffectGroups::default(),
         }
     }
 
@@ -840,11 +876,43 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        // Boxed because the claim loop's future is large and this is the seam
+        // every caller funnels through; keeping it off the caller's frame is
+        // the same trade the store controllers already make.
+        Box::pin(self.execute_effect_cancellable(scope, envelope, local_executor, None)).await
+    }
+
+    /// [`execute_effect`](Self::execute_effect) with an optional cancellation
+    /// token, which is how a group child's disposition reaches its execution.
+    ///
+    /// Cancellation is deliberately applied *inside* the claim rather than by
+    /// dropping this future: a dropped execution leaves an `in_progress` row
+    /// under a live lease and no terminal, so the child holds no rank and its
+    /// caller can never observe it settle. Racing the token against the
+    /// execution instead makes the cancellation the child's *terminal*, written
+    /// through the same fence and allocating the same rank any other outcome
+    /// would — which is what
+    /// [`LoserDisposition::Cancel`](super::group::LoserDisposition::Cancel)
+    /// promises.
+    async fn execute_effect_cancellable(
+        &self,
+        scope: &ExecutionScope,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         scope
             .validate()
             .map_err(RuntimeEffectControllerError::from)?;
         let reconstructed_envelope = envelope.canonical_form()?;
         let replay_trace = local_executor.replay_validation_trace().cloned();
+        // Kept before the claim loop, while the envelope still names the group
+        // this child belongs to — the terminal a cancellation writes has to say
+        // which group's disposition ended the child, and the claim consumes the
+        // envelope. Only a cancellable call clones it, so an ordinary effect
+        // pays nothing: every effect this driver runs passes through here, and
+        // the overwhelming majority can never be cancelled.
+        let cancel_membership = cancel.and_then(|_| envelope.group.clone());
         loop {
             match self
                 .prepare_effect(scope, &envelope, &reconstructed_envelope)
@@ -874,9 +942,21 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
                 }
                 PreparedEffect::ReplayError(err) => return Err(err),
                 PreparedEffect::Claimed(claim) => {
-                    let result = self
-                        .execute_claimed_effect_with_renewal(&claim, envelope, local_executor)
-                        .await;
+                    let execution =
+                        self.execute_claimed_effect_with_renewal(&claim, envelope, local_executor);
+                    let result = match cancel {
+                        None => execution.await,
+                        Some(cancel) => {
+                            tokio::pin!(execution);
+                            tokio::select! {
+                                biased;
+                                () = cancel.cancelled() => Err(groups::child_cancelled_error(
+                                    cancel_membership.as_deref(),
+                                )),
+                                result = &mut execution => result,
+                            }
+                        }
+                    };
                     let finalize = self.finalize_effect(&claim.fence, &result).await;
                     return match (result, finalize) {
                         (Ok(outcome), Ok(())) => Ok(outcome),
@@ -1126,6 +1206,8 @@ fn sleep_duration_ms(envelope: &RuntimeEffectEnvelope) -> Option<u64> {
         _ => None,
     }
 }
+
+mod groups;
 
 #[cfg(test)]
 mod tests;

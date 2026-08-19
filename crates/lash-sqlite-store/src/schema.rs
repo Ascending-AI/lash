@@ -677,6 +677,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_runtime_effect_replay_group_seq
     ON runtime_effect_replay(group_key, settlement_seq)
     WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS idx_runtime_effect_replay_group_unsettled
+    ON runtime_effect_replay(group_key, replay_key)
+    WHERE group_key IS NOT NULL AND settlement_seq IS NULL;
+
 CREATE TABLE IF NOT EXISTS runtime_effect_group (
     group_key          TEXT PRIMARY KEY,
     scope_id           TEXT NOT NULL,
@@ -741,6 +745,24 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // over the pair. Effect databases follow the crate's reject-and-recreate
 // convention, so an existing effect database is deleted on upgrade rather than
 // migrated — release-notes material, not a host's discovery.
+//
+// The index-only carve-out documented on `SCHEMA_VERSION` applies here for the
+// same reason and with the same limit: an additive non-unique
+// `CREATE INDEX IF NOT EXISTS` self-heals into an existing effect database on
+// open and leaves it readable by an older binary, so it does not bump — while
+// any table, column, unique index, or semantic change still does.
+// `idx_runtime_effect_replay_group_unsettled` (FIG-1564) is added under it,
+// because bumping would delete live effect databases to buy a query plan. That
+// index serves `read_unsettled_group_children`, whose predicate is the opposite
+// half of the unique backstop's: without it the read scans the whole effect
+// journal on every child completion after a close and on every drain pass
+// (FIG-1536). `replay_key` trails the group key so the read's `ORDER BY` is the
+// index order and the plan needs no sort.
+//
+// The rationale lives here rather than beside the statement on purpose: the
+// version guard's projection elides a *new* index statement but not the SQL
+// comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
+// bump the carve-out exists to avoid.
 pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 11;
 
 pub(crate) async fn apply_pragmas(

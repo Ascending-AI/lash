@@ -144,6 +144,17 @@ impl EffectGroupRecord {
 pub trait EffectGroupColumn: Sized {
     /// The persisted column value.
     fn column(self) -> &'static str;
+
+    /// The value a persisted column names, or `None` when no version of this
+    /// runtime wrote it.
+    ///
+    /// The inverse of [`column`](Self::column) and deliberately beside it: a
+    /// group row is read back to fence a reopen, so the mapping is now used in
+    /// both directions and a backend that hand-rolled the read half could drift
+    /// from the write half one string at a time. `None` rather than a default,
+    /// because a group whose wake rule cannot be read is refused, never replayed
+    /// under a guessed one.
+    fn from_column(value: &str) -> Option<Self>;
 }
 
 impl EffectGroupColumn for GroupWakePolicy {
@@ -154,6 +165,15 @@ impl EffectGroupColumn for GroupWakePolicy {
             Self::All => "all",
         }
     }
+
+    fn from_column(value: &str) -> Option<Self> {
+        match value {
+            "first" => Some(Self::First),
+            "first_success" => Some(Self::FirstSuccess),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
 }
 
 impl EffectGroupColumn for LoserDisposition {
@@ -161,6 +181,14 @@ impl EffectGroupColumn for LoserDisposition {
         match self {
             Self::RunToCompletion => "run_to_completion",
             Self::Cancel => "cancel",
+        }
+    }
+
+    fn from_column(value: &str) -> Option<Self> {
+        match value {
+            "run_to_completion" => Some(Self::RunToCompletion),
+            "cancel" => Some(Self::Cancel),
+            _ => None,
         }
     }
 }
@@ -220,6 +248,50 @@ pub struct StoredGroupSettlement {
     pub error_json: Option<String>,
 }
 
+/// A child of a group whose settlement rank has **not** been allocated, read
+/// back by [`read_unsettled_group_children`](super::effect_replay_driver::EffectReplayPersistence::read_unsettled_group_children).
+///
+/// "Unsettled" is `settlement_seq IS NULL`, which for a grouped child is the
+/// same set as "non-terminal": a rank is allocated in the same transaction that
+/// writes the terminal (N1), so a child cannot hold one without the other. The
+/// read is the exact complement of the rank read
+/// ([`StoredGroupSettlement`]), whose predicate is `settlement_seq IS NOT
+/// NULL` — which is why a group host could not previously ask the question at
+/// all, and had to infer "how much of this group is still outstanding" by
+/// walking ranks until one came back `None`.
+///
+/// Two consumers, both named because they decide the shape:
+///
+/// * A group host closing a group needs to know whether the group is
+///   *complete* — no unsettled children — because retention of its in-process
+///   state is bounded by close **and** completion, and completion is a durable
+///   fact rather than a count this process kept.
+/// * The group-drain driver (FIG-1536) uses the same rows as its queue: the
+///   journal's own non-terminal grouped children *are* the drain queue, so the
+///   row carries what re-executing or cancelling a child needs — the child's
+///   journal identity, its recorded canonical envelope, and the lease boundary
+///   that says whether the drain may take it over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnsettledGroupChild {
+    /// Durable journal identity of the scope the child was claimed under; one
+    /// half of its `(scope_id, replay_key)` key.
+    pub scope_id: String,
+    /// The child's replay key, unique within its scope. A host that opened the
+    /// group maps it back to a position through the children it holds.
+    pub replay_key: String,
+    /// The recorded canonical envelope JSON, so a drain can rebuild the child's
+    /// effect without reconstructing the caller's frame.
+    pub envelope_json: String,
+    /// Raw `status` column. Always `in_progress` on a healthy journal, since a
+    /// terminal and a rank are written together; any other value is a corrupt
+    /// row and is reported rather than filtered, so the corruption is visible
+    /// to the reader instead of silently shrinking the queue.
+    pub status: String,
+    /// Lease expiry of the child's current claim, against which a drain decides
+    /// whether the child is still owned by a live driver.
+    pub lease_expires_at_ms: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::envelope::{
@@ -233,21 +305,23 @@ mod tests {
         wake: GroupWakePolicy,
         loser: LoserDisposition,
     ) -> RuntimeEffectGroup {
-        let invocation = || {
+        // Siblings carry distinct replay keys, because one replay key is one
+        // journaled child and a group of duplicates is refused at construction.
+        let invocation = |replay_key: String| {
             RuntimeInvocation::effect(
                 RuntimeScope::new("session"),
                 "effect",
                 RuntimeEffectKind::Sleep,
-                "replay",
+                replay_key,
             )
         };
         RuntimeEffectGroup::try_new(
-            invocation(),
+            invocation("replay".to_string()),
             "scope:group:batch:0",
             (0..children)
                 .map(|position| {
                     RuntimeEffectEnvelope::new(
-                        invocation(),
+                        invocation(format!("replay-{position}")),
                         RuntimeEffectCommand::Sleep {
                             duration_ms: position as u64 + 1,
                         },
@@ -309,6 +383,32 @@ mod tests {
             first.session_id.is_none(),
             "a session-free scope writes NULL"
         );
+    }
+
+    /// Both directions, in one test, because the defect the round trip guards
+    /// is a read half that drifts from the write half one string at a time.
+    #[test]
+    fn group_columns_round_trip_through_their_persisted_bytes() {
+        for wake in [
+            GroupWakePolicy::First,
+            GroupWakePolicy::FirstSuccess,
+            GroupWakePolicy::All,
+        ] {
+            assert_eq!(GroupWakePolicy::from_column(wake.column()), Some(wake));
+        }
+        for disposition in [LoserDisposition::RunToCompletion, LoserDisposition::Cancel] {
+            assert_eq!(
+                LoserDisposition::from_column(disposition.column()),
+                Some(disposition)
+            );
+        }
+        assert_eq!(
+            GroupWakePolicy::from_column("first_settlement"),
+            None,
+            "a value no version of this runtime wrote must be refused, not \
+             defaulted"
+        );
+        assert_eq!(LoserDisposition::from_column(""), None);
     }
 
     #[test]
