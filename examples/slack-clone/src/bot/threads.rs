@@ -207,7 +207,7 @@ async fn root_route(
         let repair_view = open_channel_session(core, &record.channel_id)
             .await
             .context("open a current channel view for thread-root repair")?;
-        retain_applied_turn_boundary(core, ledger, &repair_view, &input_id)
+        try_retain_applied_turn_boundary(core, ledger, &repair_view, &input_id)
             .await
             .context("re-derive committed thread-root boundary")?;
         root = ledger
@@ -255,15 +255,51 @@ async fn root_route(
 /// application names the turn, and every input applied by that turn receives the
 /// same retained leaf boundary.
 ///
-/// A turn whose boundary is not observable through `session` yet is a no-op, the
-/// same answer as a turn that has not applied the input at all: there is nothing
-/// to pin, and the caller polls again.
+/// For a caller holding the handle the turn just committed on, a boundary that
+/// cannot be derived is a defect, not a wait: it fails loudly here rather than
+/// silently skipping the retention and the ledger write. The polling repair path
+/// wants the opposite answer and calls [`try_retain_applied_turn_boundary`].
 pub async fn retain_applied_turn_boundary(
     core: &LashCore,
     ledger: &EventLedger,
     session: &LashSession,
     input_id: &str,
 ) -> Result<()> {
+    retain_boundary(core, ledger, session, input_id, Derivation::Required)
+        .await
+        .map(|_| ())
+}
+
+/// [`retain_applied_turn_boundary`] for a caller that is still waiting.
+///
+/// `Ok(false)` means the turn's application is not on this handle's active path
+/// *yet*, so nothing was retained and the caller should poll again. Only the
+/// thread-root repair may treat that as a legal state: it reads applications
+/// from the store while the graph comes from a handle opened earlier, so it can
+/// legitimately see the application before the commit that carries it.
+pub async fn try_retain_applied_turn_boundary(
+    core: &LashCore,
+    ledger: &EventLedger,
+    session: &LashSession,
+    input_id: &str,
+) -> Result<bool> {
+    retain_boundary(core, ledger, session, input_id, Derivation::MayBePending).await
+}
+
+/// Whether an underivable boundary is a defect or a "not yet".
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Derivation {
+    Required,
+    MayBePending,
+}
+
+async fn retain_boundary(
+    core: &LashCore,
+    ledger: &EventLedger,
+    session: &LashSession,
+    input_id: &str,
+    derivation: Derivation,
+) -> Result<bool> {
     let applications = session
         .turn_input_applications()
         .await
@@ -273,10 +309,13 @@ pub async fn retain_applied_turn_boundary(
         .find(|application| application.input_id == input_id)
         .map(|application| application.turn_id.clone())
     else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(leaf) = committed_turn_boundary(session, &applications, &turn_id)? else {
-        return Ok(());
+        if derivation == Derivation::MayBePending {
+            return Ok(false);
+        }
+        bail!("committed turn application message is absent from the active channel graph");
     };
     core.pin(&leaf)
         .await
@@ -289,7 +328,8 @@ pub async fn retain_applied_turn_boundary(
     ledger
         .record_fork_node_for_inputs(input_ids, leaf)
         .await
-        .context("record fork boundary for committed Slack inputs")
+        .context("record fork boundary for committed Slack inputs")?;
+    Ok(true)
 }
 
 /// Resolve the graph boundary committed by `turn_id`, even when later turns
