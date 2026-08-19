@@ -608,6 +608,102 @@ kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/runtime/vm/continuation.rs"]
 must_cover = ["VmContinuation"]
 
+# The Lashlang runtime's two durable byte formats -- the canonical snapshot and
+# the VM continuation -- share one leaf family: the heap. Both encode a heap
+# error's brand as `error_kind`, and Serde writes that enum BY NAME, so a
+# variant added to `ErrorKind` reaches an N-1 reader as an unknown variant
+# during deserialization, before either format's `version` field is ever
+# compared. The reader then reports a corrupt payload instead of a version
+# boundary, which is why the heap files are guarded under both fences rather
+# than under whichever one happens to hold the enum.
+#
+# The heap guard is a whole-directory sweep, not a file list: `heap/*.rs` is
+# where the wire-visible leaves live (`ErrorKind`, `HeapId`), and a Serde
+# carrier added to a sibling heap module later is picked up without anyone
+# remembering to extend this entry.
+#
+# Stated boundary rather than claimed coverage: `ImageValue` is persisted
+# through a hand-written `impl Serialize`/`impl Deserialize` pair that no
+# declaration projection can see, so it is guarded by `rust_items` on its
+# declaration. That pair mirrors the struct field for field, so any field the
+# wire gains or loses is also a declaration edit; a rewrite of the key names
+# inside the impl alone is not visible here. The same holds for the
+# `serialize_with` helpers in continuation.rs: the wire structs they write
+# (`HeapWire`, `ValueWire`, and friends) are swept, the functions are not. The
+# canonical MessagePack writer in state/canonical_messagepack.rs is likewise an
+# encoder, deliberately not guarded whole -- under a forward-only fence a
+# spurious bump makes older binaries refuse payloads they could have read.
+[[surface]]
+constant = "LASHLANG_SNAPSHOT_VERSION"
+constant_path = "crates/lashlang/src/runtime/state.rs"
+description = "canonical MessagePack Lashlang snapshot: globals, heap, and value leaves"
+
+# Every Serde carrier in state.rs belongs to the canonical snapshot family, so
+# the file is swept whole and fails closed on a carrier added later.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/runtime/state.rs"]
+must_cover = [
+  "CanonicalSnapshot",
+  "CanonicalHeap",
+  "CanonicalHeapObject",
+  "CanonicalValue",
+]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/runtime/heap/*.rs"]
+must_cover = ["ErrorKind", "HeapId"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/value.rs"]
+symbols = ["ImageValue", "ResourceHandle"]
+
+[[surface]]
+constant = "VM_CONTINUATION_FORMAT_VERSION"
+constant_path = "crates/lashlang/src/runtime/vm/continuation.rs"
+description = "durable Lashlang VM continuation: frames, heap restore wire, and value leaves"
+
+# continuation.rs holds the continuation and its inline wire module; types.rs
+# holds the handler, finally, iterator, and profile sub-shapes it carries. Both
+# are continuation-only files, so both are swept whole.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = [
+  "crates/lashlang/src/runtime/vm/continuation.rs",
+  "crates/lashlang/src/runtime/vm/continuation/types.rs",
+]
+must_cover = [
+  "VmContinuation",
+  "HeapWire",
+  "HeapObjectWire",
+  "ValueWire",
+  "VmHandlerContinuation",
+]
+
+# Leaves the continuation reaches outside its own files: the execution mode it
+# resumes in and the span it blames a pending error on.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/host.rs"]
+symbols = ["ExecutionMode"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/lexer.rs"]
+symbols = ["Span"]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/runtime/heap/*.rs"]
+must_cover = ["ErrorKind", "HeapId"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/value.rs"]
+symbols = ["ImageValue", "ResourceHandle"]
+
 [[surface]]
 constant = "LASHLANG_SEGMENT_STATE_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/process.rs"
