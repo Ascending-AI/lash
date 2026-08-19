@@ -909,6 +909,9 @@ impl SessionExecutionLeaseStore for RuntimePerfStore {
         current.lease_term_ms = lease_ttl_ms;
         current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         let lease = current.materialize(session_id).expect("claimed lease set");
+        // FIG-1573: no orphan repair here - a takeover does not prove the
+        // previous turn is gone (cold recovery resumes it under the same turn
+        // id). The runtime owns the repair.
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
                 Some((previous, previous_executor_id, generation, expired_at_epoch_ms)) => {
@@ -1229,6 +1232,43 @@ impl TurnInputStore for RuntimePerfStore {
             }
         }
         Ok(())
+    }
+
+    /// Re-defer active-turn-scoped inputs whose pinned turn can no longer commit
+    /// (FIG-1573), sharing the row rule with every other backend.
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, StoreError> {
+        // Same order as the claim path: validate the fence, then hold the rows.
+        self.verify_session_execution_lease(session_id, session_execution_lease)?;
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        let mut repaired = 0usize;
+        for entry in pending.iter_mut() {
+            if entry.input.session_id != session_id {
+                continue;
+            }
+            if !lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+                scope,
+                session_execution_lease.fencing_token,
+                entry.input.state,
+                &entry.input.ingress,
+                entry.claim_token.is_some(),
+                entry.claim_session_lease_generation,
+            ) {
+                continue;
+            }
+            entry.input.state = lash_core::TurnInputState::DeferredNextTurn;
+            entry.input.ingress = lash_core::TurnInputIngress::NextTurn;
+            entry.claim_id = None;
+            entry.claim_token = None;
+            entry.claim_owner = None;
+            entry.claim_session_lease_generation = 0;
+            repaired += 1;
+        }
+        Ok(repaired)
     }
 }
 

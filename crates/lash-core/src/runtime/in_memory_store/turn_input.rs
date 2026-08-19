@@ -324,4 +324,38 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         }
         Ok(())
     }
+
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        scope: crate::OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, crate::store::StoreError> {
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        // Inside the write transaction, exactly like the claim path: a fence
+        // validated outside it could be displaced before the repair writes.
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        let mut repaired = 0usize;
+        for entry in pending.iter_mut() {
+            if entry.input.session_id != session_id
+                || !crate::store_backend_support::orphaned_active_turn_input_is_repairable(
+                    scope,
+                    session_execution_lease.fencing_token,
+                    entry.input.state,
+                    &entry.input.ingress,
+                    entry.claim_token.is_some(),
+                    entry.claim_session_lease_generation,
+                )
+            {
+                continue;
+            }
+            entry.input.state = crate::TurnInputState::DeferredNextTurn;
+            entry.input.ingress = crate::TurnInputIngress::NextTurn;
+            entry.clear_claim();
+            repaired += 1;
+        }
+        Ok(repaired)
+    }
 }

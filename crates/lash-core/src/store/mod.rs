@@ -1081,6 +1081,73 @@ pub trait TurnInputStore: Send + Sync {
         }
         Ok(())
     }
+
+    /// Re-defer every active-turn-scoped input whose pinned turn can no longer
+    /// commit, returning how many rows were repaired.
+    ///
+    /// An input routed into a running turn is persisted `pending_active` (or
+    /// `accepted` once that turn claims it) and addressed only by the turn id it
+    /// names. The turn's own final commit is what normally re-defers whatever it
+    /// did not deliver ([`RuntimeCommit::deferring_interrupted_turn_inputs`]),
+    /// so a turn that stops without committing strands its inputs in a state no
+    /// next-turn drain can claim and no later turn id can address. This is the
+    /// repair for that state, and [`OrphanedTurnInputScope`] carries the caller's
+    /// proof that the pinned turns are gone.
+    ///
+    /// Repaired rows become `deferred_next_turn` with `NextTurn` ingress and
+    /// cleared claim columns - byte-identical to the commit-time re-defer. A
+    /// repaired row is therefore a row that has not been delivered: exactly-once
+    /// delivery rests on the row's own state transition to a settled state,
+    /// which this repair never performs. Rows the scope does not cover are
+    /// untouched.
+    ///
+    /// Like every other sibling that rewrites claim columns, the repair
+    /// re-validates `session_execution_lease` **inside its own transaction**.
+    /// A separate upstream check would leave a window in which the lane is
+    /// displaced between the check and this write, after which a stale-generation
+    /// repair would clear a live holder's claim columns and turn its commit into
+    /// a silent no-match. A displaced or expired fence is refused with
+    /// [`StoreError::SessionExecutionLeaseExpired`]; callers treat that as "not
+    /// mine to repair", never as a failure of the work they were doing.
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        scope: OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, StoreError>;
+}
+
+/// The caller's proof that a pinned turn can no longer commit, and therefore
+/// which active-turn-scoped rows
+/// [`TurnInputStore::defer_orphaned_active_turn_inputs`] may repair.
+///
+/// Both variants deliberately exclude the one row class that must never be
+/// swept: an input pinned to a turn that is still able to deliver it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrphanedTurnInputScope<'a> {
+    /// Exactly the rows pinned to one named turn, which the caller has just
+    /// torn down without a commit. The turn id is the proof: that turn will
+    /// never reach a final commit, so nothing it holds can be delivered.
+    Turn(&'a str),
+    /// Every row not pinned to the caller's own live lane generation, which the
+    /// repair reads from the fence the caller passes.
+    ///
+    /// The caller holds the session-execution lane and is running no turn under
+    /// it and resuming none, so any row pinned to another generation - or to
+    /// none at all - names a turn that cannot commit under this lane. A row
+    /// pinned to the fence's own generation is in flight for the caller itself
+    /// and is never swept. A turn running lane-lessly elsewhere is unprotected
+    /// by design (ADR 0029 makes the commit CAS, not the lane, the authority),
+    /// and re-deferring its undelivered input changes delivery timing only.
+    ///
+    /// "Running no turn under it, and resuming none" is the load-bearing half.
+    /// Merely *acquiring* the lane at a new generation does not qualify: cold
+    /// recovery resumes the interrupted turn under the same turn id at the new
+    /// generation, so the rows pinned to the displaced generation may still be
+    /// delivered by it. `resumable_turn_id` is how a caller that *might* resume
+    /// one names it: rows pinned to that turn id, or to one of its agent-frame
+    /// follow-ons, are excluded however dead their claim generation looks.
+    LaneGeneration { resumable_turn_id: Option<&'a str> },
 }
 
 /// Durable single-writer execution-lane capability, fenced by monotonic

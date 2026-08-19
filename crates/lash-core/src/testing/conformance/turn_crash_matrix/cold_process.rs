@@ -201,7 +201,7 @@ pub async fn cold_process_real_turn_driver(
             | ColdProcessTurnAction::PeerReclaim
     );
     if !recovers_existing_turn {
-        seed_reference_ingress(&store, &identity).await;
+        seed_reference_ingress(&store, &identity, scenario).await;
     } else if action == ColdProcessTurnAction::PeerReclaim {
         let owner =
             LeaseOwnerIdentity::opaque("cold-process-peer", format!("{scenario}:peer-reclaim"));
@@ -296,6 +296,12 @@ pub async fn cold_process_real_turn_driver(
                             .await
                             .expect("list recovery queued work")
                             .len();
+                        // FIG-1573: the pinned-active-input scenario seeds no
+                        // next-turn row, so its one pending row is the
+                        // active-turn row pinned to the turn recovery is about
+                        // to resume - the same count, reached from the other
+                        // side, and the state in which the drain evaluates the
+                        // orphan backstop.
                         if scenario.starts_with("peer-reclaim-") {
                             assert_eq!(
                                 (terminal_count, pending_count, queued_count),

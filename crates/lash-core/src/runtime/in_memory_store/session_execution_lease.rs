@@ -72,6 +72,10 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             now,
             lease_ttl_ms,
         )?;
+        // FIG-1573: no orphan repair here. A takeover proves the previous runner
+        // is gone, not that its turn is - cold recovery resumes the interrupted
+        // turn under the same turn id at the new generation and must still
+        // receive the inputs pinned to it. The runtime owns the repair.
         Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
                 Some((previous, previous_executor_id, generation, expired_at_epoch_ms)) => {

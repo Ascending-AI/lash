@@ -143,6 +143,7 @@ enum StoreOperation {
     ReleaseSessionExecutionLease,
     ClaimLeadingSessionCommand,
     ClaimNextTurnInputs,
+    DeferOrphanedActiveTurnInputs,
     ClaimReadyQueuedWork {
         boundary: String,
     },
@@ -640,6 +641,25 @@ impl TurnInputStore for SeamStore {
 
     async fn abandon_turn_input_claims(&self, claims: &[TurnInputClaim]) -> Result<(), StoreError> {
         self.inner.abandon_turn_input_claims(claims).await
+    }
+
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        scope: crate::OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, StoreError> {
+        let operation = TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs);
+        self.control
+            .around(
+                operation,
+                self.inner.defer_orphaned_active_turn_inputs(
+                    session_id,
+                    session_execution_lease,
+                    scope,
+                ),
+            )
+            .await
     }
 }
 
@@ -1394,16 +1414,26 @@ async fn build_runtime(
     .expect("build reference runtime")
 }
 
-async fn seed_reference_ingress(store: &Arc<dyn RuntimePersistence>, identity: &ReferenceIdentity) {
+async fn seed_reference_ingress(
+    store: &Arc<dyn RuntimePersistence>,
+    identity: &ReferenceIdentity,
+    scenario: &str,
+) {
     super::bind_conformance_session(store, &identity.session_id).await;
-    store
-        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            &identity.session_id,
-            crate::TurnInputIngress::NextTurn,
-            crate::TurnInput::text("durable next-turn input"),
-        ))
-        .await
-        .expect("seed next-turn input");
+    // FIG-1573: one scenario deliberately seeds no next-turn row, so that after
+    // the crash a recovering drain claims no next-turn input and therefore
+    // evaluates the drain-time orphan backstop - with the active-turn row still
+    // pinned to the turn it is about to resume.
+    if !scenario.starts_with("peer-reclaim-pinned-active-input-") {
+        store
+            .enqueue_pending_turn_input(PendingTurnInputDraft::new(
+                &identity.session_id,
+                crate::TurnInputIngress::NextTurn,
+                crate::TurnInput::text("durable next-turn input"),
+            ))
+            .await
+            .expect("seed next-turn input");
+    }
     store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
             &identity.session_id,
@@ -1603,7 +1633,8 @@ fn validate_outcome_table(
 }
 
 fn validate_durable_recovery_rulings(rulings: &[DurableRecoveryRuling]) -> Result<(), String> {
-    const EXPECTED_SCENARIOS: [&str; 3] = [
+    const EXPECTED_SCENARIOS: [&str; 4] = [
+        "active_turn_input_pinned_to_recovered_turn",
         "checkpoint_execute_finalize",
         "checkpoint_replacement_double_crash",
         "peer_reclaim",
@@ -1660,7 +1691,7 @@ where
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let raw = make("trace-drift");
     let identity = ReferenceIdentity::for_scenario("trace-drift");
-    seed_reference_ingress(&raw, &identity).await;
+    seed_reference_ingress(&raw, &identity, "trace-drift").await;
     let decorated = SeamStore::wrap(raw, control.clone());
     let runtime = Box::pin(build_runtime(
         decorated,
@@ -1847,7 +1878,7 @@ async fn run_crash_matrix_case<F>(
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario);
-    seed_reference_ingress(&raw, &identity).await;
+    seed_reference_ingress(&raw, &identity, scenario).await;
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let decorated = SeamStore::wrap(raw, control.clone());

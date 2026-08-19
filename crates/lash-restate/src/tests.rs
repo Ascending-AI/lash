@@ -4804,6 +4804,17 @@ impl lash_core::TurnInputStore for CommitRetryStore {
     ) -> Result<(), lash_core::StoreError> {
         self.inner.abandon_turn_input_claim(claim).await
     }
+
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, lash_core::StoreError> {
+        self.inner
+            .defer_orphaned_active_turn_inputs(session_id, session_execution_lease, scope)
+            .await
+    }
 }
 
 #[async_trait::async_trait]

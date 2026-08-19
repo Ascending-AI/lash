@@ -7567,13 +7567,17 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
 /// `commit_runtime_turn`). A hard kill skips that commit, and nothing at
 /// session reopen re-defers the row: the next-turn drain matches only
 /// `state = 'deferred_next_turn'`, and an active-turn claim would have to name
-/// a turn id that can never exist again. The row stays visible to
-/// `pending_turn_inputs` forever while every drain claims nothing - the field
-/// signature in FIG-1573.
+/// a turn id that can never exist again. Before the fix the row stayed visible
+/// to `pending_turn_inputs` forever while every drain claimed nothing - the
+/// field signature in FIG-1573.
 ///
-/// Ignored because it reproduces an open defect; un-ignore with the fix.
+/// The regression law: the drain-time backstop repairs the row and the reopened
+/// process delivers it in that same drain. Remove
+/// `defer_orphaned_turn_inputs_before_drain` from `stream_queued_work` and this
+/// test goes red again - the dying boot released its lease on the way out, so
+/// the successor observes no displacement and nothing else in the reopened
+/// process ever reaches those rows.
 #[tokio::test]
-#[ignore = "FIG-1573: reproduces the wedge; un-ignore with the fix"]
 async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reopen() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "fig1573-orphaned-active-input";
@@ -7669,8 +7673,9 @@ async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reop
     }
 
     let output = claimed.expect(
-        "the reopened process must drain the orphaned input; on current main every drain claims \
-         nothing because the row is stuck in pending_active with a turn id that no longer exists",
+        "the reopened process must drain the orphaned input; without the drain-time backstop \
+         every drain claims nothing, because the row is stuck in pending_active with a turn id \
+         that no longer exists",
     );
     assert_eq!(output.assistant_message(), Some("the migration is green"));
     assert!(

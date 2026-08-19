@@ -621,6 +621,7 @@ where
         .await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make("root")).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make("root")).await;
+    a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(make("root")).await;
 }
 
 async fn session_prompt_layer_round_trips_through_the_committed_head(
@@ -8175,6 +8176,243 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
             .all(|input| input.ingress.active_turn_id() == Some("other-turn")),
         "inputs for other active turns must not be deferred by this interrupt"
     );
+}
+
+/// A turn that cannot commit leaves no input pinned to it (FIG-1573).
+///
+/// The commit-time re-defer
+/// ([`RuntimeCommit::deferring_interrupted_turn_inputs`]) is the repair a turn
+/// carries for the active-turn-scoped inputs it did not deliver. A turn that
+/// never reaches its commit - killed, aborted, or fenced - owes the same repair,
+/// and only the store can perform it once the turn is gone. Both scopes are
+/// laws: naming the dead turn repairs exactly its rows, and the lane-generation
+/// scope repairs every row no live claim protects, except those pinned to a turn
+/// the caller names as still resumable. Nothing else may move, so a row pinned
+/// to a turn that can still deliver stays put, and a caller whose lane has been
+/// superseded repairs nothing at all.
+pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let dead_turn_id = "fig1573-dead-turn";
+    let other_turn_id = "fig1573-other-turn";
+    let lease = claim_session_execution_lease_for_test(&store, "root", "fig1573-owner").await;
+    let orphaned = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            "root",
+            dead_turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "pinned to a turn that cannot commit",
+        ))
+        .await
+        .expect("enqueue the orphaned input");
+    let other = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            "root",
+            other_turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "pinned to a turn that can still deliver",
+        ))
+        .await
+        .expect("enqueue the untouched input");
+
+    let repaired = store
+        .defer_orphaned_active_turn_inputs(
+            "root",
+            &lease.fence(),
+            crate::OrphanedTurnInputScope::Turn(dead_turn_id),
+        )
+        .await
+        .expect("re-defer inputs pinned to the dead turn");
+    assert_eq!(
+        repaired, 1,
+        "naming a dead turn must repair exactly the rows pinned to it"
+    );
+    let pending = store
+        .list_pending_turn_inputs("root")
+        .await
+        .expect("list pending inputs after the turn-scoped repair");
+    let repaired_row = pending
+        .iter()
+        .find(|input| input.input_id == orphaned.input_id)
+        .expect("the repaired input is still queued");
+    assert_eq!(repaired_row.state, crate::TurnInputState::DeferredNextTurn);
+    assert_eq!(repaired_row.ingress, crate::TurnInputIngress::NextTurn);
+    let untouched_row = pending
+        .iter()
+        .find(|input| input.input_id == other.input_id)
+        .expect("the other turn's input is still queued");
+    assert_eq!(untouched_row.state, crate::TurnInputState::PendingActive);
+    assert_eq!(
+        untouched_row.ingress.active_turn_id(),
+        Some(other_turn_id),
+        "a row pinned to a turn that can still deliver must never be swept"
+    );
+    assert_eq!(
+        store
+            .defer_orphaned_active_turn_inputs(
+                "root",
+                &lease.fence(),
+                crate::OrphanedTurnInputScope::Turn(dead_turn_id)
+            )
+            .await
+            .expect("repeat the turn-scoped repair"),
+        0,
+        "the repair is idempotent: a repaired row is no longer pinned to any turn"
+    );
+
+    // The repaired row is next-turn work again, which is the whole point.
+    let claim = store
+        .claim_next_turn_inputs("root", &lease.fence(), &lease_owner("fig1573-owner"), 10)
+        .await
+        .expect("claim the repaired input as next-turn work")
+        .expect("the repaired input is claimable");
+    assert_eq!(
+        claim
+            .inputs
+            .iter()
+            .map(|input| input.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![orphaned.input_id.as_str()]
+    );
+    // A turn the sweeping caller can still resume owns its pinned rows even
+    // though no live claim protects them: cold recovery replays that turn under
+    // the same turn id at a new generation, and its agent-frame follow-ons are
+    // the same execution continuing.
+    let follow_on = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            "root",
+            &format!("{other_turn_id}:agent-frame:2"),
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "pinned to a follow-on frame of the resumable turn",
+        ))
+        .await
+        .expect("enqueue the follow-on frame's input");
+    assert_eq!(
+        store
+            .defer_orphaned_active_turn_inputs(
+                "root",
+                &lease.fence(),
+                crate::OrphanedTurnInputScope::LaneGeneration {
+                    resumable_turn_id: Some(other_turn_id),
+                },
+            )
+            .await
+            .expect("sweep while naming a turn the caller can still resume"),
+        0,
+        "a row pinned to a resumable turn, or to one of its agent frames, must survive the sweep"
+    );
+    let after_exclusion = store
+        .list_pending_turn_inputs("root")
+        .await
+        .expect("list pending inputs after the excluded sweep");
+    for input_id in [other.input_id.as_str(), follow_on.input_id.as_str()] {
+        let row = after_exclusion
+            .iter()
+            .find(|input| input.input_id == input_id)
+            .expect("the excluded row is still queued");
+        assert_eq!(row.state, crate::TurnInputState::PendingActive);
+        assert!(row.ingress.active_turn_id().is_some());
+    }
+    // A row this caller's own live generation holds is never an orphan, even
+    // while the lane-generation scope is sweeping around it.
+    assert_eq!(
+        store
+            .defer_orphaned_active_turn_inputs(
+                "root",
+                &lease.fence(),
+                crate::OrphanedTurnInputScope::LaneGeneration {
+                    resumable_turn_id: None,
+                },
+            )
+            .await
+            .expect("sweep around the caller's own live claim"),
+        2,
+        "the sweep repairs the unclaimed pinned rows and leaves the live claim alone"
+    );
+    // Abandoning a next-turn claim restores the next-turn state, not the
+    // active-turn one: a plural abandon that restored `pending_active` would
+    // re-strand the row behind a turn id that no longer exists.
+    store
+        .abandon_turn_input_claims(std::slice::from_ref(&claim))
+        .await
+        .expect("abandon the next-turn claim");
+    let after_abandon = store
+        .list_pending_turn_inputs("root")
+        .await
+        .expect("list pending inputs after abandoning the claim");
+    let restored_row = after_abandon
+        .iter()
+        .find(|input| input.input_id == orphaned.input_id)
+        .expect("the abandoned input is still queued");
+    assert_eq!(restored_row.state, crate::TurnInputState::DeferredNextTurn);
+    assert_eq!(restored_row.ingress, crate::TurnInputIngress::NextTurn);
+    assert!(
+        after_abandon
+            .iter()
+            .all(|input| input.ingress.active_turn_id().is_none()
+                && input.state == crate::TurnInputState::DeferredNextTurn),
+        "no input may stay pinned to a turn once no live claim protects it"
+    );
+
+    // A superseded caller repairs nothing: between its own check and its write
+    // the lane may have moved on, and the holder that displaced it owns those
+    // rows now.
+    let stale_fence = lease.fence();
+    let stranded = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            "root",
+            "fig1573-superseded-turn",
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "pinned while the lane changes hands",
+        ))
+        .await
+        .expect("enqueue the input a superseded caller must not touch");
+    release_session_execution_lease_for_test(&store, &lease).await;
+    let successor =
+        claim_session_execution_lease_for_test(&store, "root", "fig1573-successor").await;
+    assert!(
+        successor.fencing_token > stale_fence.fencing_token,
+        "a reclaimed lane must advance the generation"
+    );
+    let refusal = store
+        .defer_orphaned_active_turn_inputs(
+            "root",
+            &stale_fence,
+            crate::OrphanedTurnInputScope::Turn("fig1573-superseded-turn"),
+        )
+        .await
+        .expect_err("a superseded fence must be refused inside the repair");
+    assert!(
+        matches!(refusal, StoreError::SessionExecutionLeaseExpired { .. }),
+        "a superseded repair must be refused as a lost lease, not silently applied: {refusal:?}"
+    );
+    let after_refusal = store
+        .list_pending_turn_inputs("root")
+        .await
+        .expect("list pending inputs after the refused repair");
+    let untouched = after_refusal
+        .iter()
+        .find(|input| input.input_id == stranded.input_id)
+        .expect("the refused row is still queued");
+    assert_eq!(untouched.state, crate::TurnInputState::PendingActive);
+    assert_eq!(
+        untouched.ingress.active_turn_id(),
+        Some("fig1573-superseded-turn"),
+        "a refused repair must leave the row exactly as it found it"
+    );
+    // The successor's own fence repairs it.
+    assert_eq!(
+        store
+            .defer_orphaned_active_turn_inputs(
+                "root",
+                &successor.fence(),
+                crate::OrphanedTurnInputScope::Turn("fig1573-superseded-turn"),
+            )
+            .await
+            .expect("the live holder repairs the row the superseded caller could not"),
+        1,
+    );
+    release_session_execution_lease_for_test(&store, &successor).await;
 }
 
 async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {

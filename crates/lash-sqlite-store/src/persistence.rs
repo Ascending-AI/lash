@@ -1173,6 +1173,15 @@ impl SessionExecutionLeaseStore for Store {
                         now,
                         lease_ttl_ms,
                     )?;
+                    // FIG-1573: this claim deliberately does NOT repair
+                    // orphaned active-turn inputs. A takeover proves the
+                    // previous *runner* is gone, not that its turn is: cold
+                    // recovery resumes the interrupted turn under the same turn
+                    // id at the new generation, and it must still receive the
+                    // inputs pinned to it (proved by the cold-process crash
+                    // matrix, which fails with a replay hash conflict if they
+                    // are swept here). The repair belongs to the runtime, which
+                    // knows whether the turn is coming back.
                     Ok(SessionExecutionLeaseClaimOutcome::Acquired(
                         match displaced {
                             Some((
@@ -2806,6 +2815,45 @@ impl TurnInputStore for Store {
         Ok(())
     }
 
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, StoreError> {
+        let session_id = session_id.to_string();
+        let session_execution_lease = session_execution_lease.clone();
+        let scope = OwnedOrphanedScope::from(scope);
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome: Result<usize, StoreError> = (|| {
+                    // The fence is re-read here, not upstream: between an
+                    // upstream check and this write the lane can be displaced,
+                    // and a stale-generation repair would clear the new
+                    // holder's claim columns.
+                    ensure_session_execution_lease_conn(
+                        tx,
+                        &session_id,
+                        &session_execution_lease,
+                        now,
+                    )?;
+                    defer_orphaned_active_turn_inputs_conn(
+                        tx,
+                        &session_id,
+                        session_execution_lease.fencing_token,
+                        scope.borrow(),
+                    )
+                })();
+                Ok(match outcome {
+                    Ok(repaired) => TxOutcome::Commit(Ok(repaired)),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn abandon_turn_input_claims(
         &self,
         claims: &[lash_core::TurnInputClaim],
@@ -2813,9 +2861,61 @@ impl TurnInputStore for Store {
         if claims.is_empty() {
             return Ok(());
         }
-        let mut sql = "UPDATE pending_turn_inputs
+        // FIG-1573: the restored state is the claim's own mode, exactly as the
+        // singular sibling resolves it. A next-turn claim restored to
+        // `pending_active` would be addressable only by a turn id that never
+        // claimed it. Both partitions are written in ONE transaction: a batch
+        // abandon is one caller giving up one set of rows, and a crash between
+        // two statements would leave half the batch claimed by a claim id the
+        // caller has already dropped.
+        let mut statements = Vec::new();
+        for (mode, claims) in [
+            (
+                lash_core::TurnInputState::PendingActive,
+                claims
+                    .iter()
+                    .filter(|claim| {
+                        matches!(claim.mode, lash_core::TurnInputClaimMode::ActiveTurn { .. })
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                lash_core::TurnInputState::DeferredNextTurn,
+                claims
+                    .iter()
+                    .filter(|claim| matches!(claim.mode, lash_core::TurnInputClaimMode::NextTurn))
+                    .collect::<Vec<_>>(),
+            ),
+        ] {
+            if claims.is_empty() {
+                continue;
+            }
+            statements.push(abandon_turn_input_claims_statement(&claims, mode));
+        }
+        self.conn
+            .write(move |tx| {
+                for (sql, values) in &statements {
+                    tx.execute(sql, rusqlite::params_from_iter(values.iter()))?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+}
+
+/// One `UPDATE` restoring a batch of abandoned claims to `restored_state`.
+///
+/// Split out so the plural abandon can execute every mode partition inside a
+/// single transaction (FIG-1573).
+fn abandon_turn_input_claims_statement(
+    claims: &[&lash_core::TurnInputClaim],
+    restored_state: lash_core::TurnInputState,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut sql = "UPDATE pending_turn_inputs
              SET state = CASE
-                     WHEN state = 'accepted' THEN 'pending_active'
+                     WHEN state = 'accepted' THEN ?
                      ELSE state
                  END,
                  claim_id = NULL,
@@ -2825,24 +2925,20 @@ impl TurnInputStore for Store {
                  claim_token = NULL,
                  claim_session_lease_generation = 0
              WHERE (session_id, claim_id, claim_token) IN ("
-            .to_string();
-        let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(claims.len() * 3);
-        for (index, claim) in claims.iter().enumerate() {
-            if index > 0 {
-                sql.push_str(", ");
-            }
-            sql.push_str("(?, ?, ?)");
-            values.push(claim.session_id.clone().into());
-            values.push(claim.claim_id.clone().into());
-            values.push(claim.lease_token.clone().into());
+        .to_string();
+    let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(claims.len() * 3 + 1);
+    values.push(restored_state.as_str().to_string().into());
+    for (index, claim) in claims.iter().enumerate() {
+        if index > 0 {
+            sql.push_str(", ");
         }
-        sql.push(')');
-        self.conn
-            .write(move |tx| tx.execute(&sql, rusqlite::params_from_iter(values.iter())))
-            .await
-            .map_err(sqlite_error)?;
-        Ok(())
+        sql.push_str("(?, ?, ?)");
+        values.push(claim.session_id.clone().into());
+        values.push(claim.claim_id.clone().into());
+        values.push(claim.lease_token.clone().into());
     }
+    sql.push(')');
+    (sql, values)
 }
 
 #[async_trait::async_trait]
@@ -3673,6 +3769,134 @@ fn ensure_session_execution_lease_conn(
         fence,
         now,
     )
+}
+
+/// An owned [`lash_core::OrphanedTurnInputScope`], because the write flow moves
+/// its work into a `'static` closure.
+enum OwnedOrphanedScope {
+    Turn(String),
+    LaneGeneration { resumable_turn_id: Option<String> },
+}
+
+impl From<lash_core::OrphanedTurnInputScope<'_>> for OwnedOrphanedScope {
+    fn from(scope: lash_core::OrphanedTurnInputScope<'_>) -> Self {
+        match scope {
+            lash_core::OrphanedTurnInputScope::Turn(turn_id) => Self::Turn(turn_id.to_string()),
+            lash_core::OrphanedTurnInputScope::LaneGeneration { resumable_turn_id } => {
+                Self::LaneGeneration {
+                    resumable_turn_id: resumable_turn_id.map(str::to_string),
+                }
+            }
+        }
+    }
+}
+
+impl OwnedOrphanedScope {
+    fn borrow(&self) -> lash_core::OrphanedTurnInputScope<'_> {
+        match self {
+            Self::Turn(turn_id) => lash_core::OrphanedTurnInputScope::Turn(turn_id.as_str()),
+            Self::LaneGeneration { resumable_turn_id } => {
+                lash_core::OrphanedTurnInputScope::LaneGeneration {
+                    resumable_turn_id: resumable_turn_id.as_deref(),
+                }
+            }
+        }
+    }
+}
+
+/// Re-defer the active-turn-scoped rows `scope` proves are orphaned (FIG-1573).
+///
+/// The write is the commit-time re-defer's write: `deferred_next_turn` with
+/// `NextTurn` ingress and cleared claim columns. Row selection is delegated to
+/// [`lash_core::store_backend_support::orphaned_active_turn_input_is_repairable`]
+/// rather than expressed as a `json_extract` predicate, so this backend and the
+/// in-memory one cannot drift on which rows a repair may touch. `live_generation`
+/// is the caller's fencing token, already re-validated on this connection.
+fn defer_orphaned_active_turn_inputs_conn(
+    conn: &Connection,
+    session_id: &str,
+    live_generation: u64,
+    scope: lash_core::OrphanedTurnInputScope<'_>,
+) -> Result<usize, StoreError> {
+    let candidates = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT input_id, state, ingress_json, claim_token, claim_session_lease_generation
+                 FROM pending_turn_inputs
+                 WHERE session_id = ?1 AND state IN (?2, ?3)",
+            )
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    session_id,
+                    lash_core::TurnInputState::PendingActive.as_str(),
+                    lash_core::TurnInputState::Accepted.as_str(),
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
+    };
+    let mut repairable = Vec::new();
+    for (input_id, state, ingress_json, claim_token, claim_generation) in candidates {
+        let state = decode_turn_input_state(state)?;
+        let ingress = decode_turn_input_ingress(ingress_json)?;
+        let claim_generation = u64_from_sql(
+            "pending_turn_input",
+            "claim_session_lease_generation",
+            claim_generation,
+        )
+        .map_err(sqlite_error)?;
+        if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+            scope,
+            live_generation,
+            state,
+            &ingress,
+            claim_token.is_some(),
+            claim_generation,
+        ) {
+            repairable.push(input_id);
+        }
+    }
+    if repairable.is_empty() {
+        return Ok(0);
+    }
+    let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn)?;
+    let mut stmt = conn
+        .prepare(
+            "UPDATE pending_turn_inputs
+             SET state = ?3,
+                 ingress_json = ?4,
+                 claim_id = NULL,
+                 claim_owner_id = NULL,
+                 claim_owner_incarnation_id = NULL,
+                 claim_owner_liveness_json = NULL,
+                 claim_token = NULL,
+                 claim_session_lease_generation = 0
+             WHERE session_id = ?1 AND input_id = ?2",
+        )
+        .map_err(sqlite_error)?;
+    let mut repaired = 0usize;
+    for input_id in repairable {
+        repaired += stmt
+            .execute(params![
+                session_id,
+                input_id,
+                lash_core::TurnInputState::DeferredNextTurn.as_str(),
+                next_turn_ingress
+            ])
+            .map_err(sqlite_error)?;
+    }
+    Ok(repaired)
 }
 
 fn release_session_execution_lease_conn(

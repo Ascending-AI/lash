@@ -1029,6 +1029,162 @@ impl LashRuntime {
         }
     }
 
+    /// Drain-time backstop for inputs no turn can deliver (FIG-1573).
+    ///
+    /// Runs only when the drain holds the session-execution lane and found
+    /// nothing claimable - the wedge's exact signature - so a drain with work to
+    /// do never touches a pending row.
+    ///
+    /// Why the sweep cannot hit a live turn: driving a turn takes `&mut self`,
+    /// so this runtime has no turn of its own in flight here, and holding the
+    /// lane means no other lane holder has one either - a peer runtime mints its
+    /// own executor id, so it would be refused rather than admitted as reentry.
+    /// The store re-validates the fence inside the repair's own transaction, so
+    /// a lane displaced between the claim above and this call refuses the repair
+    /// instead of clearing the new holder's claim columns.
+    /// A turn running with no lane at all is unprotected by the lease by design
+    /// (ADR 0029); for such a turn this only moves its pinned input to the next
+    /// turn boundary, which changes delivery timing and never drops the input.
+    ///
+    /// The drain passes the turn id it is about to execute as
+    /// `resumable_turn_id`, so a row pinned to a turn this very drain can still
+    /// resume - the cold-recovery case, where the interrupted turn returns under
+    /// the same turn id at a new generation - is excluded from the sweep. Its
+    /// agent-frame follow-ons are excluded with it, because they are the same
+    /// execution continuing.
+    ///
+    /// This is the only trigger that reaches a session already wedged by a
+    /// pre-fix binary, or wedged inside a still-live process that keeps
+    /// reentering its lane without ever minting a new generation.
+    ///
+    /// Accepted cost: a host may pin an input to a turn id *before* starting
+    /// that turn, and an otherwise idle drain cannot tell that row apart from an
+    /// orphan. Such a row is re-deferred and delivered at the next turn instead
+    /// of the pre-named one - delivery timing, never a dropped input.
+    async fn defer_orphaned_turn_inputs_before_drain(
+        &self,
+        store: &Arc<dyn crate::store::RuntimePersistence>,
+        fence: &crate::SessionExecutionLeaseAuthority,
+        resumable_turn_id: &str,
+    ) -> usize {
+        match store
+            .defer_orphaned_active_turn_inputs(
+                &self.state.session_id,
+                fence,
+                crate::OrphanedTurnInputScope::LaneGeneration {
+                    resumable_turn_id: Some(resumable_turn_id),
+                },
+            )
+            .await
+        {
+            Ok(0) => 0,
+            Ok(repaired) => {
+                tracing::info!(
+                    session_id = %self.state.session_id,
+                    repaired,
+                    live_generation = fence.fencing_token,
+                    event = "turn_input.deferred_before_drain",
+                    "re-deferred active-turn inputs pinned to turns that can no longer commit"
+                );
+                repaired
+            }
+            // The lane went out from under this drain; whoever holds it now owns
+            // the repair, and the drain's own next store call reports the loss.
+            Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                tracing::debug!(
+                    session_id = %self.state.session_id,
+                    event = "turn_input.defer_before_drain_fenced",
+                    "a superseded lane leaves the orphan repair to its successor"
+                );
+                0
+            }
+            Err(err) => {
+                tracing::warn!(
+                    session_id = %self.state.session_id,
+                    error = %err,
+                    event = "turn_input.defer_before_drain_failed",
+                    "failed to re-defer orphaned active-turn inputs before a queued-work drain"
+                );
+                0
+            }
+        }
+    }
+
+    /// Re-defer the inputs a torn-down turn can no longer deliver (FIG-1573).
+    ///
+    /// A turn's final commit carries this repair for the inputs it did not
+    /// deliver, so a turn that ends *without* committing owes it here instead.
+    /// Nothing else can: the rows are addressed only by the dead turn's id, and
+    /// no later turn will ever carry that id again.
+    ///
+    /// Runs under the authority the dying turn itself held. A turn that held no
+    /// lane cannot repair anything here, and a turn whose lane has already been
+    /// taken over must not: the new holder resumes this same turn id and
+    /// delivers those rows itself. Both cases fall through to the drain backstop
+    /// ([`crate::OrphanedTurnInputScope::LaneGeneration`]) for rows no live
+    /// generation claims - an accepted row still claimed at the live generation
+    /// stays put until that generation is superseded, which is exactly the row
+    /// the resuming holder owns.
+    ///
+    /// Best-effort by construction - the turn is already failing and this repair
+    /// must not replace its error.
+    pub(super) async fn defer_orphaned_turn_inputs_after_teardown(
+        &self,
+        trace_turn_id: &str,
+        session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+    ) {
+        let Some(store) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+        else {
+            return;
+        };
+        let Some(fence) = session_execution_lease else {
+            tracing::debug!(
+                session_id = %self.state.session_id,
+                turn_id = %trace_turn_id,
+                event = "turn_input.defer_after_teardown_skipped",
+                "a lane-less turn leaves its orphaned inputs to the drain backstop"
+            );
+            return;
+        };
+        match store
+            .defer_orphaned_active_turn_inputs(
+                &self.state.session_id,
+                fence,
+                crate::OrphanedTurnInputScope::Turn(trace_turn_id),
+            )
+            .await
+        {
+            Ok(0) => {}
+            Ok(repaired) => tracing::info!(
+                session_id = %self.state.session_id,
+                turn_id = %trace_turn_id,
+                repaired,
+                event = "turn_input.deferred_after_teardown",
+                "re-deferred active-turn inputs pinned to a turn that ended without committing"
+            ),
+            // A fence refusal is the ordinary outcome for a turn whose lane was
+            // taken over: the repair is the new holder's, not ours.
+            Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                tracing::debug!(
+                    session_id = %self.state.session_id,
+                    turn_id = %trace_turn_id,
+                    event = "turn_input.defer_after_teardown_fenced",
+                    "a superseded lane leaves the torn-down turn's inputs to its successor"
+                )
+            }
+            Err(err) => tracing::warn!(
+                session_id = %self.state.session_id,
+                turn_id = %trace_turn_id,
+                error = %err,
+                event = "turn_input.defer_after_teardown_failed",
+                "failed to re-defer active-turn inputs after a turn ended without committing"
+            ),
+        }
+    }
+
     #[doc(hidden)]
     pub fn set_turn_phase_probe(&mut self, probe: Arc<dyn RuntimeTurnPhaseProbe>) {
         self.turn_phase_probe = Some(probe);
@@ -1756,7 +1912,7 @@ impl LashRuntime {
             }
         }
         if selected_batch_ids.is_none() {
-            let input_claim = store
+            let mut input_claim = store
                 .claim_next_turn_inputs(
                     &self.state.session_id,
                     &session_execution_fence,
@@ -1765,6 +1921,30 @@ impl LashRuntime {
                 )
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
+            // FIG-1573 backstop: a drain that holds the lane and finds nothing
+            // claimable is the wedge's exact signature. Repair the rows no turn
+            // can deliver, then claim once more so the repair lands in this same
+            // drain rather than waiting for another wake.
+            if input_claim.is_none()
+                && self
+                    .defer_orphaned_turn_inputs_before_drain(
+                        &store,
+                        &session_execution_fence,
+                        opts.execution_scope_id(),
+                    )
+                    .await
+                    > 0
+            {
+                input_claim = store
+                    .claim_next_turn_inputs(
+                        &self.state.session_id,
+                        &session_execution_fence,
+                        &self.runtime_lease_owner,
+                        64,
+                    )
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+            }
             if let Some(input_claim) = input_claim {
                 let mut input = input_claim.materialize_turn_input();
                 if let Some(hint) = opts.local_cancel_origin_hint() {

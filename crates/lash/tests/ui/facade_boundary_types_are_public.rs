@@ -10,7 +10,8 @@ use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
     CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, OperationId,
-    PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft, QueuedWorkBatch,
+    OrphanedTurnInputScope, PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft,
+    QueuedWorkBatch,
     QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkStore,
     SelectedQueuedWorkClaimOutcome,
@@ -217,6 +218,15 @@ impl TurnInputStore for FacadeStore {
 
     async fn abandon_turn_input_claim(&self, _claim: &TurnInputClaim) -> Result<(), StoreError> {
         Ok(())
+    }
+
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        _session_id: &str,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _scope: OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, StoreError> {
+        Ok(0)
     }
 }
 

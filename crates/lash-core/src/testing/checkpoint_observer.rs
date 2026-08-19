@@ -717,6 +717,17 @@ impl TurnInputStore for ObservedSessionStore {
     async fn abandon_turn_input_claims(&self, claims: &[TurnInputClaim]) -> Result<(), StoreError> {
         self.inner.abandon_turn_input_claims(claims).await
     }
+
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        scope: crate::OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, StoreError> {
+        self.inner
+            .defer_orphaned_active_turn_inputs(session_id, session_execution_lease, scope)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
