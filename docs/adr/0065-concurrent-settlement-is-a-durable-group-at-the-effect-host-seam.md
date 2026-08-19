@@ -57,6 +57,69 @@ have to be recoverable in a new invocation that holds none of the original
 futures — and it is the reason the cursor lives on the caller's handle rather
 than in a host-side position.
 
+### Restate satisfaction: the group virtual object is the rank authority
+
+That account is closed (ruled 2026-08-19). The Restate host satisfies the cursor
+rule with a **group virtual object keyed by the group key**, using Restate's own
+keyed state as the addressable store the durable-futures reading lacks.
+
+A child, at completion, one-way-sends its settlement to that object, idempotent
+on the child's replay key. The handler — single-writer by Restate's own
+per-key guarantee — assigns `rank = counter + 1`, writes the settlement under
+that rank, and resolves the parent's wake awakeable, all in one durable handler
+step, so rank assignment and rank readability are one journal entry rather than
+two. `await_next_settlement` reads rank `consumed + 1` out of that state first
+and only otherwise waits, which is the recorded-first read the determinism
+argument rests on. A fresh invocation holding none of the original futures
+performs the same read, so the rule holds verbatim: the host keeps no per-caller
+consumption state, any settled rank is re-readable until the group is closed,
+and awaiting rank `consumed + 1` before and after a crash yields the same
+settlement. The **shape fence lives beside the counter** in the same object, so a
+reopen under a shrunk or reshaped group is refused by the same single writer that
+allocates ranks. Ranks outlive the parent invocation, which is what lets
+`RunToCompletion` losers rank themselves after the caller has gone.
+
+Three consequences are ratified with it.
+
+**The deployment surface grows.** An endpoint wiring this controller must bind
+the group object's handler alongside the durable-wait services. A group is not a
+thing lash can journal into a handler that is not there.
+
+**Settlement payloads never transit object state as bytes.** The object
+rank-indexes a *reference* into wherever the child's output already lives on
+Restate — the existing large-payload discipline — so object state stays a
+counter, a shape fence, and a rank → reference map.
+
+**Close deletes the object's state, and the delete is idempotent** because close
+is. `close_effect_group(Cancel)` returns once one idempotent cancel per unsettled
+child has been durably issued — keyed by the child's replay key, so the handle is
+derivable from state the group already carries and nothing extra is recorded at
+open — and does **not** await confirmed loser termination. Awaiting it would
+block the winner on loser teardown, re-introduce the unbounded-tail coupling
+`Cancel` exists to sever, and make Restate stronger than the contract, which is
+itself the divergence this ADR exists to prevent. A loser's actual terminal —
+cancelled, or completed in the race — still routes through the object for rank
+like any other settlement, so a `wait_signal` deadline may return `Expired` while
+the losing arm winds down for a bounded moment; that is the ECMA-262 race
+semantics ADR 0062 already ratified and the same promise the SQL tiers make. A
+redriven close re-issues the same idempotent cancels harmlessly.
+
+**There is no TTL on that state, ever.** It lives until an entitled caller
+reopens, consumes, or closes the group — the same continuation-not-audit reading
+the SQL tiers take and the same standing no-TTLs rule claims take. Reclaiming a
+truly severed group is ownership-severance work (FIG-1494), never a clock:
+time-based deletion would make Restate the one tier where a saved continuation
+becomes unresumable by waiting, which contradicts the refused-not-clamped
+philosophy of the cursor rule itself. Because that leak is real until severance
+lands, the host **exposes open group keys through its existing inspection
+surface**, so orphaned groups are countable before there is a lever to reclaim
+them.
+
+Two alternatives were rejected. Narrowing the cursor rule per engine forks
+contract semantics and makes a restored frame's saved cursor unresumable on one
+tier. Mirroring settlements into the lash SQL store rebuilds the effect journal
+lash does not own, and a Restate deployment may not mount a SQL store at all.
+
 ## Decision
 
 **Concurrent settlement is a structured, durable group at the effect-host seam.**
