@@ -5,8 +5,9 @@
 //! lash-core's own tests, where they could reach that host's internals. This
 //! module is the same matrix expressed through the *contract surface alone* —
 //! `EffectHost::scoped`, the four `RuntimeEffectController` group methods, and
-//! the executors the caller supplies — so the inline tier and the two SQL tiers
-//! can be held to one set of laws instead of three copies that drift.
+//! the `GroupExecutors` resolver the host is registered with — so the inline
+//! tier and the two SQL tiers can be held to one set of laws instead of three
+//! copies that drift.
 //!
 //! # What is asserted here and what is not
 //!
@@ -25,6 +26,7 @@
 //! Each law takes its own host from the factory and namespaces its own group
 //! keys, so the suite is safe against a shared substrate.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -35,7 +37,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::{
-    CheckedEffectGroup, EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserDisposition,
+    EffectGroupHandle, GroupExecutors, GroupSettlement, GroupWakePolicy, LoserDisposition,
     RuntimeEffectGroup,
 };
 
@@ -44,7 +46,10 @@ type Host = Arc<dyn EffectHost>;
 
 /// Run the durable effect-group host suite.
 ///
-/// `make` returns a host object over **one** substrate: two calls must reach the
+/// `make` is handed the suite's [`GroupExecutors`] resolver and must register it
+/// on the host it builds — **and must build an unregistered host when it is
+/// handed `None`**, because two laws are about exactly that host. It returns a
+/// host object over **one** substrate: two calls must reach the
 /// same journal, because a second host is how a law says "the process that
 /// resumes this continuation". On a store-backed tier that is a second host over
 /// the same database; on the inline tier, whose substrate is the process, it is
@@ -52,9 +57,13 @@ type Host = Arc<dyn EffectHost>;
 /// and scopes, so sharing costs them nothing.
 pub async fn effect_group_host_conformance<F>(make: F)
 where
-    F: Fn() -> Host,
+    F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
 {
+    let unwired = || make(None);
+    let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
     let prefix = format!("group-conformance-{}", uuid::Uuid::new_v4().simple());
+    an_unregistered_host_reports_no_groups_and_refuses_all_three(&unwired, &prefix).await;
+    a_refused_open_journals_nothing(&unwired, &make, &prefix).await;
     the_capability_flag_and_the_group_surface_agree(&make, &prefix).await;
     duplicate_replay_keys_are_refused_before_a_host_sees_them(&make, &prefix).await;
     the_first_settlement_wakes_the_caller_while_the_loser_still_runs(&make, &prefix).await;
@@ -82,8 +91,9 @@ where
 /// assertions.
 pub async fn effect_group_cancelled_child_terminal_is_durable<F>(make: F)
 where
-    F: Fn() -> Host,
+    F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
 {
+    let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
     let prefix = format!("group-cancel-terminal-{}", uuid::Uuid::new_v4().simple());
     let host = make();
     let scoped = host
@@ -111,7 +121,7 @@ where
         .expect("a scope binds on the reading host");
     let mut reopened = resumed
         .controller()
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(&key, 1, GroupWakePolicy::First, LoserDisposition::Cancel),
             vec![never()],
         ))
@@ -143,6 +153,128 @@ where
 // =============================================================================
 // The laws
 // =============================================================================
+
+/// A host with no registered resolver reports no group support **and** refuses
+/// all three group methods with the capability code.
+///
+/// The other half of the coherence relation, at the seam where it can actually
+/// drift: since a host's flag is now "a resolver is registered", an unwired host
+/// is a host that does not implement groups, and it must say so with one code on
+/// the whole surface. A host that refused `open` with a routing error while
+/// answering `close` with `Ok(())` would tell an operator to fix the group when
+/// the deployment is what is unwired — and a caller could not tell "this
+/// deployment does not do groups" from "this group is malformed".
+async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn() -> Host>(
+    unwired: &F,
+    prefix: &str,
+) {
+    let unsupported = crate::RuntimeErrorCode::EffectGroupUnsupported;
+    let host = unwired();
+    let scoped = host
+        .scoped(scope(prefix, "unwired"))
+        .expect("a scope binds");
+    assert!(
+        !scoped.controller().supports_effect_groups(),
+        "a host with no registered resolver has no runner for any child, so \
+         deployment validation must be told rather than a turn discovering it"
+    );
+
+    let key = group_key(prefix, "unwired");
+    let staged_group = staged(group(&key, 1, GroupWakePolicy::All, RUN), vec![settles(0)]);
+    let fallback = EffectGroupHandle::new(&staged_group);
+    let open_refusal = scoped
+        .controller()
+        .open_effect_group(staged_group)
+        .await
+        .expect_err("an unwired host cannot open a group");
+    assert_eq!(
+        open_refusal.code, unsupported,
+        "the refusal names the missing capability, not the group"
+    );
+
+    let mut handle = fallback;
+    let await_refusal = next(&scoped, &mut handle)
+        .await
+        .expect_err("an unwired host cannot serve a settlement");
+    assert_eq!(await_refusal.code, unsupported);
+    assert_eq!(
+        handle.consumed(),
+        0,
+        "a refused await leaves the cursor of record where it was"
+    );
+
+    let close_refusal = close(&scoped, handle, RUN)
+        .await
+        .expect_err("an unwired host cannot close a group");
+    assert_eq!(
+        close_refusal.code, unsupported,
+        "close is idempotent on a host that has groups; on one that does not, an \
+         Ok would contradict the flag"
+    );
+}
+
+/// The refusal above costs the group key nothing: nothing is journaled under it,
+/// so a wired host over the same substrate opens it as a first open.
+///
+/// Expressed the way this suite can express a durable fact — through the
+/// contract, by asking a second host — rather than by counting rows, which only
+/// two of the three tiers have. The refused open therefore declares a *different
+/// child count* than the open that follows it: a group row left behind by the
+/// refusal is a recorded group of three children, and the two-child open after
+/// it trips the durable reopen fence rather than succeeding. A child row left
+/// behind shows up as rank 1 already allocated. On the inline tier, which
+/// journals nothing, both halves are true by construction and the law still pins
+/// the refusal.
+async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
+    unwired: &U,
+    make: &F,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "refused");
+    let refused_on = unwired();
+    let refused_scope = refused_on
+        .scoped(scope(prefix, "refused"))
+        .expect("a scope binds");
+    let refusal = refused_scope
+        .controller()
+        .open_effect_group(staged(
+            // Three children, against the two the wired open below declares: a
+            // group row this refusal left behind is a recorded group of three,
+            // and the reopen fence refuses the two-child open rather than
+            // serving it.
+            group(&key, 3, GroupWakePolicy::All, RUN),
+            vec![settles(0), settles(1), settles(2)],
+        ))
+        .await
+        .expect_err("an unwired host cannot open a group");
+    assert_eq!(
+        refusal.code,
+        crate::RuntimeErrorCode::EffectGroupUnsupported
+    );
+
+    let host = make();
+    let scoped = host
+        .scoped(scope(prefix, "refused"))
+        .expect("a scope binds on the wired host");
+    let mut handle = open(
+        &scoped,
+        &key,
+        2,
+        GroupWakePolicy::All,
+        RUN,
+        vec![settles(0), settles(1)],
+    )
+    .await;
+    let settlement = next(&scoped, &mut handle)
+        .await
+        .expect("the refused open left the key untouched, so it opens cleanly");
+    assert_eq!(
+        settlement.sequence, 1,
+        "rank 1 is still unallocated: a refused open journals no group row and \
+         no child row for a counter to have moved past"
+    );
+    close(&scoped, handle, RUN).await.expect("the group closes");
+}
 
 /// The capability flag is the admission gate, and the scoped view a host is
 /// actually reached through must answer it the same way.
@@ -651,7 +783,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host>(
     // A reopen of the same shape is legal and must not run anything again.
     let reopened = scoped
         .controller()
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(&key, 2, GroupWakePolicy::All, RUN),
             vec![counted(&runs, 0), counted(&runs, 1)],
         ))
@@ -668,7 +800,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host>(
     // A reopen under a different child count is refused: the fence is on shape.
     let error = scoped
         .controller()
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(&key, 1, GroupWakePolicy::All, RUN),
             vec![counted(&runs, 0)],
         ))
@@ -736,7 +868,7 @@ async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -> Ho
     };
     let mut reopened = resumed
         .controller()
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(&key, 2, GroupWakePolicy::First, RUN),
             vec![counted(0), counted(1)],
         ))
@@ -831,11 +963,91 @@ fn group(
     .expect("a group with at least one child assembles")
 }
 
-fn checked(
+/// A test-side [`GroupExecutors`] resolver, keyed by replay key.
+///
+/// FIG-1578 moved execution off the open call: a host resolves each child of a
+/// journaled group through the resolver it was registered with, so a test can no
+/// longer hand executors in beside the group. Instead it *stages* them here
+/// under the children's replay keys, registers this resolver on the host it
+/// builds, and opens the group the staging returned.
+///
+/// Crate-visible because every tier's tests inside lash-core need the same seam
+/// — the shared suite below and the inline reference tests — while a store's own
+/// tests get the resolver handed to them by the suite factory.
+pub(crate) struct StagedGroupExecutors {
+    staged: std::sync::Mutex<HashMap<String, RuntimeEffectLocalExecutor<'static>>>,
+}
+
+impl StagedGroupExecutors {
+    /// An empty resolver: every child is a routing miss until it is staged.
+    pub(crate) fn new() -> Self {
+        Self {
+            staged: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Stages one executor per child under the children's replay keys, and hands
+    /// back the group to open.
+    ///
+    /// An executor is taken by the first resolution that asks for it: a child
+    /// runs once per open, and a replayed child is served from its record
+    /// without an ask.
+    pub(crate) fn stage(
+        &self,
+        group: RuntimeEffectGroup,
+        executors: Vec<RuntimeEffectLocalExecutor<'static>>,
+    ) -> RuntimeEffectGroup {
+        assert_eq!(
+            group.children().len(),
+            executors.len(),
+            "a test stages one executor per child"
+        );
+        let mut staged = self.staged.lock_recover();
+        for (child, executor) in group.children().iter().zip(executors) {
+            let replay_key = child
+                .invocation
+                .replay_key()
+                .expect("a group child carries its replay key")
+                .to_string();
+            staged.insert(replay_key, executor);
+        }
+        group
+    }
+}
+
+impl Default for StagedGroupExecutors {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GroupExecutors for StagedGroupExecutors {
+    fn executor_for(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+        let replay_key = envelope.invocation.replay_key()?;
+        self.staged.lock_recover().remove(replay_key)
+    }
+}
+
+/// The one resolver every host in this suite is built with.
+///
+/// Process-wide rather than per-law because a law's *second* host — the one that
+/// stands in for the process that resumes a continuation — must answer the same
+/// routing question as the first, and it was never handed the first's memory.
+/// Group keys carry a per-run uuid prefix, so two laws can never stage the same
+/// child.
+fn suite_executors() -> Arc<StagedGroupExecutors> {
+    static EXECUTORS: std::sync::OnceLock<Arc<StagedGroupExecutors>> = std::sync::OnceLock::new();
+    Arc::clone(EXECUTORS.get_or_init(|| Arc::new(StagedGroupExecutors::new())))
+}
+
+fn staged(
     group: RuntimeEffectGroup,
     executors: Vec<RuntimeEffectLocalExecutor<'static>>,
-) -> CheckedEffectGroup {
-    CheckedEffectGroup::try_new(group, executors).expect("one executor per child aligns")
+) -> RuntimeEffectGroup {
+    suite_executors().stage(group, executors)
 }
 
 /// The outcome a settling child produces, carrying its own position so a
@@ -924,7 +1136,7 @@ async fn open(
 ) -> EffectGroupHandle {
     scoped
         .controller()
-        .open_effect_group(checked(group(key, children, wake, disposition), executors))
+        .open_effect_group(staged(group(key, children, wake, disposition), executors))
         .await
         .expect("the group opens")
 }

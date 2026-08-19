@@ -575,9 +575,9 @@ pub mod runtime {
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
     pub use lash_core::runtime::{
-        AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver, CheckedEffectGroup,
-        CheckpointClaimSet, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient,
-        EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope,
+        AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver, CheckpointClaimSet,
+        DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient, EffectGroupHandle,
+        EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
         GroupSettlement, GroupWakePolicy, InlineRuntimeEffectController, LashRuntime,
         LlmAttachmentSpec, LlmRequestSpec, LoserDisposition, NoopEventSink, NoopTurnActivitySink,
         ProcessCommand, ProcessEffectOutcome, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,

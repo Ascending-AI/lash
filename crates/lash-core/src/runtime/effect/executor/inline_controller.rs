@@ -45,9 +45,9 @@ use super::super::envelope::{
     ProcessCommand, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome,
 };
 use super::super::group::{
-    CheckedEffectGroup, EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserDisposition,
-    RuntimeEffectGroup,
+    EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserDisposition, RuntimeEffectGroup,
 };
+use super::super::group_drain::GroupExecutors;
 use super::control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
     ResolveOutcome, RuntimeEffectController,
@@ -193,24 +193,41 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
         }
     }
 
-    /// `true`: the inline tier implements every observable semantic of the
-    /// contract, and [`InlineEffectHost::scoped_static`](crate::InlineEffectHost)
-    /// hands out the `'static` scopes the flag's other half requires, so a child
-    /// can outlive its caller.
+    /// `true` exactly when a [`GroupExecutors`] resolver has been registered
+    /// with [`register_group_executors`](Self::register_group_executors): the
+    /// inline tier implements every observable semantic of the contract, and the
+    /// resolver is where the `'static` executors the flag's other half requires
+    /// come from, so a child can outlive its caller.
+    ///
+    /// It is a **per-deployment** fact, established at wiring time: before the
+    /// registration this controller answers `false` and refuses all three group
+    /// methods with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// which is the coherence law the flag owes. A *per-child* resolver miss on
+    /// a registered controller is a different fact and keeps its own typed
+    /// routing refusal.
     ///
     /// The flag is not a durability claim and must not be read as one — that
     /// stays `replay_ownership`. What it asserts is that a group opened here runs
     /// its children durably *for the life of the runtime* and reports settlement
     /// order as a fact rather than re-racing it.
     fn supports_effect_groups(&self) -> bool {
-        true
+        self.groups.executors.get().is_some()
     }
 
+    /// Refused with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
+    /// while no resolver is registered, exactly as
+    /// [`await_next_settlement`](Self::await_next_settlement) and
+    /// [`close_effect_group`](Self::close_effect_group) are: the flag and the
+    /// three methods are one answer, and an unwired controller is a controller
+    /// that does not implement groups.
     async fn open_effect_group(
         &self,
-        group: CheckedEffectGroup,
+        group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        InlineEffectGroups::open(&self.groups, group)
+        let executors = self.groups.registered_executors()?;
+        InlineEffectGroups::open(&self.groups, &executors, group)
     }
 
     async fn await_next_settlement(
@@ -218,6 +235,7 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
         handle: &mut EffectGroupHandle,
         cancel: CancellationToken,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        self.groups.registered_executors()?;
         InlineEffectGroups::await_next_settlement(&self.groups, handle, cancel).await
     }
 
@@ -226,11 +244,30 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
         handle: EffectGroupHandle,
         disposition: LoserDisposition,
     ) -> Result<(), RuntimeEffectControllerError> {
+        self.groups.registered_executors()?;
         InlineEffectGroups::close(&self.groups, &handle, disposition)
     }
 }
 
 impl InlineRuntimeEffectController {
+    /// Register the resolver that says what code runs a grouped child, once.
+    ///
+    /// Until this is called the controller answers
+    /// [`supports_effect_groups`](RuntimeEffectController::supports_effect_groups)
+    /// `false` and refuses all three group methods with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// because the `'static` executors a child needs in order to outlive its
+    /// caller have nowhere to come from. A second
+    /// registration of a *different* resolver is refused: one host has one answer
+    /// to what runs a child, and two would make the answer depend on when a path
+    /// asked. Re-registering the resolver already held is a no-op.
+    pub fn register_group_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.groups.register_executors(executors)
+    }
+
     /// Opt into externally routable keys that remain valid only while this
     /// controller's process and owned registry remain alive.
     pub fn allow_process_lifetime_completion_keys(mut self) -> Self {
@@ -309,6 +346,10 @@ type RecordedSettlement = (usize, u64, bool);
 #[derive(Default)]
 pub(crate) struct InlineEffectGroups {
     open: std::sync::RwLock<HashMap<String, Arc<InlineEffectGroup>>>,
+    /// This tier's one answer to "what code runs a grouped child", registered by
+    /// the host that owns the runners. Absent until then, which is the same
+    /// thing as this controller not supporting effect groups.
+    executors: std::sync::OnceLock<Arc<dyn GroupExecutors>>,
     /// The final record of every reaped group, so the reference tier's own
     /// tests can observe a completed group's settlement order. Test-only, in the
     /// style of `AwaitEventRegistry`'s cache counter: production keeps nothing
@@ -432,24 +473,110 @@ impl InlineEffectGroup {
 }
 
 impl InlineEffectGroups {
+    /// Registers this tier's envelope→executor resolver, once.
+    ///
+    /// [`OnceLock::set`] is the arbiter rather than a preceding `get`: a
+    /// get-then-set pair leaves a window in which two threads both read `None`
+    /// and both believe they registered, and the loser's resolver would be
+    /// silently discarded under an `Ok`. `set` decides, and its `Err` hands back
+    /// the rejected resolver — identical to the held one means the caller
+    /// re-registered what is already there, and anything else is the typed
+    /// different-resolver refusal.
+    fn register_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let Err(rejected) = self.executors.set(executors) else {
+            return Ok(());
+        };
+        let held = self
+            .executors
+            .get()
+            .expect("a rejected set means the lock is initialized");
+        if Arc::ptr_eq(held, &rejected) {
+            Ok(())
+        } else {
+            Err(group_shape_error(
+                "this inline effect controller already has a different \
+                 registered group executor resolver; one host has one answer \
+                 to what runs a grouped child",
+            ))
+        }
+    }
+
+    /// The registered resolver, or the refusal that says this controller does
+    /// not implement groups at all.
+    ///
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
+    /// rather than a shape refusal, because an unwired controller is not a
+    /// controller with a bad group: it is a controller whose
+    /// `supports_effect_groups` answers `false`, and the coherence law says the
+    /// flag and the three methods must agree.
+    fn registered_executors(
+        &self,
+    ) -> Result<Arc<dyn GroupExecutors>, RuntimeEffectControllerError> {
+        self.executors.get().cloned().ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::EffectGroupUnsupported,
+                "this inline effect controller has no registered group executor \
+                 resolver, so it does not implement durable effect groups; \
+                 register one with register_group_executors at wiring time",
+            )
+        })
+    }
+
+    /// Resolves every child before anything is recorded, refusing the group if
+    /// this host has no runner for one of them.
+    fn resolve_children(
+        executors: &Arc<dyn GroupExecutors>,
+        group: &RuntimeEffectGroup,
+    ) -> Result<Vec<RuntimeEffectLocalExecutor<'static>>, RuntimeEffectControllerError> {
+        group
+            .children()
+            .iter()
+            .enumerate()
+            .map(|(position, child)| {
+                executors.executor_for(child).ok_or_else(|| {
+                    group_shape_error(format!(
+                        "child {position} of durable effect group {} names a command \
+                         this host has no runner for, so the group is refused before \
+                         it is recorded: a group whose child can never settle holds a \
+                         rank no settlement can take",
+                        group.group_key()
+                    ))
+                })
+            })
+            .collect()
+    }
+
     /// Opens — or reopens — a group, dispatching one host-owned task per child.
     ///
-    /// A reopen of a group this controller already holds dispatches nothing: the
-    /// children are already running under host ownership, and re-running them
-    /// would double every side effect the first dispatch is still producing. The
-    /// returned handle is always at `consumed = 0` because only the caller knows
-    /// how far it consumed; a caller resuming from a durable continuation restores
-    /// its own cursor with [`EffectGroupHandle::restored`].
+    /// Every child is resolved through the registered [`GroupExecutors`] on the
+    /// **first-open path**, before the group is recorded here and before any
+    /// child is dispatched, and a child this host has no runner for refuses the
+    /// whole open: a recorded group holding a child that can never settle owns a
+    /// rank no settlement can take, and every rank above it is unservable.
+    ///
+    /// A reopen of a group this controller already holds resolves nothing and
+    /// dispatches nothing: the children are already running under host
+    /// ownership, re-running them would double every side effect the first
+    /// dispatch is still producing, and resolving N executors only to drop them
+    /// is work whose sole output would be a refusal for a group that is already
+    /// open and settling. The returned handle is always at `consumed = 0`
+    /// because only the caller knows how far it consumed; a caller resuming from
+    /// a durable continuation restores its own cursor with
+    /// [`EffectGroupHandle::restored`].
     fn open(
         groups: &Arc<Self>,
-        checked: CheckedEffectGroup,
+        executors: &Arc<dyn GroupExecutors>,
+        group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        let (group, executors) = checked.into_parts();
         let handle = EffectGroupHandle::new(&group);
         if let Some(existing) = groups.open.read_recover().get(group.group_key()).cloned() {
             existing.fence_reopen(&group)?;
             return Ok(handle);
         }
+        let resolved = Self::resolve_children(executors, &group)?;
         let state = {
             let mut open = groups.open.write_recover();
             if let Some(existing) = open.get(group.group_key()) {
@@ -460,7 +587,7 @@ impl InlineEffectGroups {
             open.insert(group.group_key().to_string(), Arc::clone(&state));
             state
         };
-        Self::dispatch(groups, &state, group, executors);
+        Self::dispatch(groups, &state, group, resolved);
         Ok(handle)
     }
 

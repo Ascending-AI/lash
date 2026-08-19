@@ -49,11 +49,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::runtime::effect::group_drain::{
-    ChildDrainOutcome, EffectGroupDrain, GroupDrainExecutors, GroupDrainReport,
+    ChildDrainOutcome, EffectGroupDrain, GroupDrainReport, GroupExecutors,
 };
 use crate::{
-    CheckedEffectGroup, EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserDisposition,
-    RuntimeEffectGroup,
+    EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserDisposition, RuntimeEffectGroup,
 };
 
 /// One host over the substrate under test, plus the drain wired to it.
@@ -63,8 +62,8 @@ use crate::{
 pub struct DrainWorld {
     /// The effect host a law opens and closes groups through.
     pub host: Arc<dyn EffectHost>,
-    /// The drain over the same journal, carrying the executors the law asked
-    /// for.
+    /// The drain over the same journal, resolving children through the same
+    /// registered resolver the host does.
     pub drain: Arc<dyn EffectGroupDrain>,
 }
 
@@ -76,7 +75,12 @@ pub struct DrainWorldSpec {
     pub lease_ttl_ms: u64,
     /// The host wiring seam under test, supplied per law so a law can count what
     /// the drain asked to run.
-    pub executors: Arc<dyn GroupDrainExecutors>,
+    ///
+    /// Since FIG-1578 this is the host's *one* registered resolver: a backend
+    /// must register it on the host it builds, and the drain it returns resolves
+    /// through the same one. A law's own open-time executors ride the staging
+    /// table instead, so what this resolver is asked is what the drain asked.
+    pub executors: Arc<dyn GroupExecutors>,
 }
 
 /// Builds a world over one substrate, as many times as a law needs.
@@ -726,7 +730,7 @@ const AWAIT_BUDGET: Duration = Duration::from_secs(30);
 fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
-        executors: Arc::clone(executors) as Arc<dyn GroupDrainExecutors>,
+        executors: Arc::clone(executors) as Arc<dyn GroupExecutors>,
     }
 }
 
@@ -911,6 +915,20 @@ fn group(key: &str, children: usize, disposition: LoserDisposition) -> RuntimeEf
     .expect("a group with at least one child assembles")
 }
 
+/// The executors a law stages for its own *opens*, kept apart from the answers a
+/// host gives the drain.
+///
+/// FIG-1578 put the open and the drain on one resolver per host. A law's opens
+/// are setup, not the behaviour under test, so they are staged here: this table
+/// is consulted first, an entry is taken by the open that staged it, and none of
+/// it reaches a [`RecordingExecutors`] ask log. Group keys carry a per-run uuid
+/// prefix, so one table is safe across laws — including across the separate
+/// process a crash law runs its setup in.
+fn staged_executors() -> &'static StagedGroupExecutors {
+    static STAGED: std::sync::OnceLock<StagedGroupExecutors> = std::sync::OnceLock::new();
+    STAGED.get_or_init(StagedGroupExecutors::new)
+}
+
 async fn open(
     scoped: &ScopedEffectController<'_>,
     key: &str,
@@ -920,10 +938,7 @@ async fn open(
 ) -> EffectGroupHandle {
     scoped
         .controller()
-        .open_effect_group(
-            CheckedEffectGroup::try_new(group(key, children, disposition), executors)
-                .expect("one executor per child aligns"),
-        )
+        .open_effect_group(staged_executors().stage(group(key, children, disposition), executors))
         .await
         .expect("the group opens")
 }
@@ -1144,11 +1159,16 @@ impl RecordingExecutors {
     }
 }
 
-impl GroupDrainExecutors for RecordingExecutors {
+impl GroupExecutors for RecordingExecutors {
     fn executor_for(
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+        // A law's own open-time executor is not a routing answer this host gave,
+        // so it is served first and left out of the ask log.
+        if let Some(staged) = staged_executors().executor_for(envelope) {
+            return Some(staged);
+        }
         let replay_key = envelope
             .invocation
             .replay_key()

@@ -81,8 +81,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::runtime::effect::group::{
-    CheckedEffectGroup, EffectGroupHandle, EffectGroupMembership, GroupSettlement,
-    LoserDisposition, RuntimeEffectGroup,
+    EffectGroupHandle, EffectGroupMembership, GroupSettlement, LoserDisposition, RuntimeEffectGroup,
 };
 
 /// How long a caller parked on rank `n` waits before re-reading the journal.
@@ -250,18 +249,37 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// host's tasks and re-running them would double the side effects the first
     /// dispatch is still producing.
     ///
+    /// A host with no registered [`GroupExecutors`] resolver refuses here —
+    /// coherently with `supports_effect_groups`, with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// and **before the group row is written**, so a refused open journals
+    /// nothing at all.
+    ///
+    /// On a **first open** every child is then resolved through the resolver
+    /// before any child is dispatched, and any child the resolver declines
+    /// refuses the whole open with a typed group-shape error: a child with no
+    /// runner is a routing fact, not an outcome, and a group whose child can
+    /// never settle makes every rank above it unservable. A **reopen** resolves
+    /// nothing it does not dispatch and refuses nothing: a journaled group
+    /// meeting a deployment that lost one child's runner is a deployment change,
+    /// which the drain reports as `NoExecutor` (ADR 0065) rather than something
+    /// this open may deny — the group is already recorded, and refusing it here
+    /// would only make the ranks it already holds unreadable.
+    ///
     /// The returned handle is always at `consumed = 0`: only the caller knows
     /// how far it consumed, and a caller resuming from a durable continuation
     /// restores its own cursor with [`EffectGroupHandle::restored`].
     pub async fn open_effect_group(
         self: &Arc<Self>,
         scope: &ExecutionScope,
-        checked: CheckedEffectGroup,
+        group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let journal_identity = scope
             .journal_identity()
             .map_err(RuntimeEffectControllerError::from)?;
-        let (group, executors) = checked.into_parts();
+        // Ahead of the group row on purpose: a host that does not implement
+        // groups must journal nothing when it refuses one.
+        self.group_executors()?;
         let handle = EffectGroupHandle::new(&group);
         let record = EffectGroupRecord::from_group(
             &group,
@@ -271,18 +289,39 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         );
         let persisted = self.persistence.open_group(&record).await?;
         fence_reopen(&record, &persisted)?;
+        // `open_group` inserts `ON CONFLICT DO NOTHING` and returns the row as it
+        // stands, so the row is this open's own exactly when what came back is
+        // what went in — the fence above has already equated the shape columns,
+        // which leaves the opening scope and the open instant as the tell. A
+        // reopen inside the same millisecond of the same scope would read as a
+        // first open, which errs towards resolving all N and refusing a missing
+        // runner: the conservative direction, and the one this code took
+        // unconditionally before.
+        let first_open = persisted == record;
+        if self.groups.get(group.group_key()).is_some() {
+            // Already running here. The durable fence above has already judged
+            // the shape, so there is nothing left to check, nothing to dispatch,
+            // and no reason to resolve N executors only to drop them.
+            return Ok(handle);
+        }
 
+        let executors = self.resolve_group_children(&group, first_open)?;
+        let dispatched = executors
+            .iter()
+            .filter(|executor| executor.is_some())
+            .count();
         let replay_keys = replay_keys_of(&group)?;
         let state = {
             let mut open = self.groups.open.write_recover();
             if open.contains_key(group.group_key()) {
-                // Already running here. The durable fence above has already
-                // judged the shape, so there is nothing left to check and
-                // nothing to dispatch.
                 return Ok(handle);
             }
             let state = Arc::new(OpenGroup {
-                outstanding: AtomicUsize::new(replay_keys.len()),
+                // The children this process actually dispatched, not the group's
+                // arity: a reopen that has no runner for one child never spawns a
+                // task that could report it finished, and counting it here would
+                // pin the entry open for the life of the process.
+                outstanding: AtomicUsize::new(dispatched),
                 replay_keys,
                 cancel: CancellationToken::new(),
                 state: Mutex::new(OpenGroupState {
@@ -298,20 +337,75 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         Ok(handle)
     }
 
-    /// Spawns one host-owned task per child.
+    /// Resolves each child's executor through this host's registered resolver.
+    ///
+    /// On a first open this is all or nothing: resolving lazily — child by child
+    /// as each is dispatched — would journal the group first and discover the gap
+    /// after, leaving a recorded group whose missing child permanently owns a
+    /// rank no settlement can take. The refusal names the child's position and
+    /// replay key, because "some child of this group has no runner" is not
+    /// something an operator can act on.
+    ///
+    /// On a reopen a `None` is passed through instead. The group is already
+    /// journaled, so the damage the refusal exists to prevent has either already
+    /// happened or cannot: what is left is a deployment that lost a runner, which
+    /// ADR 0065 makes the drain's `NoExecutor` case. Refusing here would deny a
+    /// resuming caller the ranks the group already holds.
+    fn resolve_group_children(
+        &self,
+        group: &RuntimeEffectGroup,
+        first_open: bool,
+    ) -> Result<Vec<Option<RuntimeEffectLocalExecutor<'static>>>, RuntimeEffectControllerError>
+    {
+        let executors = self.group_executors()?;
+        group
+            .children()
+            .iter()
+            .enumerate()
+            .map(|(position, child)| match executors.executor_for(child) {
+                Some(executor) => Ok(Some(executor)),
+                None if !first_open => Ok(None),
+                None => Err(group_shape_error(format!(
+                    "child {position} of durable effect group {} names a command \
+                     this host has no runner for{}, so the group is refused \
+                     before any child of it is journaled: a recorded group whose \
+                     child can never settle holds a rank no settlement can take, \
+                     and every rank above it is unservable",
+                    group.group_key(),
+                    child
+                        .invocation
+                        .replay_key()
+                        .map(|key| format!(" (replay key {key})"))
+                        .unwrap_or_default(),
+                ))),
+            })
+            .collect()
+    }
+
+    /// Spawns one host-owned task per child this host has a runner for.
     ///
     /// The task set is the host's, not the caller's: a group whose children ran
     /// inside the caller's future would drop its losers the moment the caller
     /// was dropped, which is precisely what `RunToCompletion` forbids.
+    ///
+    /// A `None` executor reaches here only on a reopen, and the child is left
+    /// alone rather than failed: the deployment cannot run it, which is the
+    /// drain's `NoExecutor` report and not a terminal this host may synthesize.
     fn dispatch_group_children(
         self: &Arc<Self>,
         scope: &ExecutionScope,
         state: &Arc<OpenGroup>,
         group: RuntimeEffectGroup,
-        executors: Vec<RuntimeEffectLocalExecutor<'static>>,
+        executors: Vec<Option<RuntimeEffectLocalExecutor<'static>>>,
     ) {
         let group_key = Arc::<str>::from(group.group_key());
-        for (child, executor) in group.children().iter().cloned().zip(executors) {
+        for (child, executor) in group
+            .children()
+            .iter()
+            .cloned()
+            .zip(executors)
+            .filter_map(|(child, executor)| executor.map(|executor| (child, executor)))
+        {
             let driver = Arc::clone(self);
             let state = Arc::clone(state);
             let group_key = Arc::clone(&group_key);
@@ -385,11 +479,16 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// The cursor advances on exactly the settlement returned, so a cancelled or
     /// refused await leaves rank `n` to be read again — by this caller or by a
     /// replayed frame — rather than skipped.
+    ///
+    /// An unwired host refuses here as it refuses an open, with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported):
+    /// the capability flag answers for the whole surface, not for `open` alone.
     pub async fn await_next_group_settlement(
         &self,
         handle: &mut EffectGroupHandle,
         cancel: CancellationToken,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        self.group_executors()?;
         let state = self
             .groups
             .get(handle.group_key())
@@ -530,11 +629,18 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// its own fence, allocating a rank exactly as any other outcome would.
     /// Children of this group that this process does not run are the drain's
     /// (FIG-1536), which applies the disposition on the group row.
+    ///
+    /// An unwired host refuses here too, with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
+    /// and ahead of the idempotent success below: a host that answers `false` to
+    /// the capability flag and `Ok(())` to a close is the incoherence the flag's
+    /// law forbids.
     pub async fn close_effect_group(
         &self,
         handle: &EffectGroupHandle,
         requested: LoserDisposition,
     ) -> Result<(), RuntimeEffectControllerError> {
+        self.group_executors()?;
         let Some(state) = self.groups.get(handle.group_key()) else {
             return Ok(());
         };

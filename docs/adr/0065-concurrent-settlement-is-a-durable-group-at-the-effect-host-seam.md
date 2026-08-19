@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended 2026-08-19 (FIG-1578): a group carries envelopes and nothing
+else, and what runs a child is the host's registered `GroupExecutors` resolver
+rather than a caller-supplied executor vec paired with the group.
 
 ## Context
 
@@ -73,32 +75,63 @@ caller has moved on.
   per call. The group path is the only tool-batch path, so a controller
   answering `false` has no batch path at all, and a host wiring one should learn
   that at startup rather than mid-turn on its first `Promise.all`. It gates
-  admission, not dispatch. A host may answer `true` **only if it can also supply
-  `'static` executors** for the children: a child must be able to outlive its
-  caller to honor `RunToCompletion`, and `EffectHost::scoped_static` is
-  explicitly not universally available. The two capabilities are one question and
-  must not drift apart.
+  admission, not dispatch. A host may answer `true` **only if it has a registered
+  `GroupExecutors` resolver**, because that resolver is where the `'static`
+  executors come from: a child must be able to outlive its caller to honor
+  `RunToCompletion`, and the borrow-scoped executor `execute_effect` takes carries
+  the one lifetime this contract exists to break. The two capabilities are one
+  question and must not drift apart, so on the in-process tiers this answer *is*
+  "a resolver is registered" rather than a constant.
+
+  It is therefore a **per-deployment fact established at wiring time**: before
+  the resolver is registered a host answers `false`, and deployment validation
+  reads it *after* wiring, which is where the check belongs in any case — a
+  deployment is validated once it is assembled. The coherence law follows the
+  flag across the whole surface: a host answering `false` refuses
+  `open_effect_group`, `await_next_settlement` and `close_effect_group` alike
+  with `EffectGroupUnsupported`, and journals nothing when it does. An unwired
+  host is not a host with a bad group; it is a host that does not do groups, and
+  one code for the whole surface is what lets a caller tell that from a group it
+  cannot route.
 - `open_effect_group(group)` — returns once the group is durably recorded, **not**
-  when a child settles. Its one parameter is a `CheckedEffectGroup`: the group
-  paired with one `'static` executor per child, positionally aligned with the
-  group's children. **That pairing type is the mechanism, and it is normative.**
-  `CheckedEffectGroup::try_new` is its only constructor and runs the alignment
-  check, and `open_effect_group` accepts nothing else, so an unaligned pair cannot
-  reach a host at all — the check is a property of the argument rather than an
-  obligation each implementation is asked to remember, which is what "positionally
-  aligned" degenerates to in a two-parameter signature. A child must outlive its
-  caller's future under `RunToCompletion`; the borrow-scoped executor taken by
-  `execute_effect` carries the one lifetime this contract exists to break. The
-  `'static` break is the ratified property; a checked `Vec` rather than a factory
-  closure keeps it while making arity mismatch and double construction
-  unrepresentable. Each executor is single-execution — `execute` consumes it, and
-  a host takes ownership through `CheckedEffectGroup::into_parts` — so a host that
-  retries a child takes a fresh executor from `EffectHost::scoped_static`. A
-  reopen must be **fenced on
-  group shape** — a recorded group whose child count or wake rule differs from
-  the group passed in is refused, because a shrunk child vec under one key
-  silently renumbers every rank above the truncation and the per-child hash fence
-  cannot see it.
+  when a child settles. Its one parameter is the `RuntimeEffectGroup` itself:
+  **envelopes, and nothing else.** What code runs a child is answered by the
+  host's registered `GroupExecutors` resolver, which maps an envelope to a
+  `'static` executor. **That resolver is the contract's only executor-resolution
+  seam, and it is normative**: the open, a retry after a claim expires, and the
+  loser drain all reach for a child's runner through the same registered object,
+  so one host has one answer to what runs a journaled child.
+
+  It has to be the host's, not the caller's, because three of the four paths that
+  need a child's runner happen where no caller is in scope — a retry, the drain,
+  and a resuming process reopening a group it never opened — and a fourth,
+  `child-as-invocation` on an engine tier, cannot carry a closure across a fresh
+  handler execution at all. A caller-supplied vec can answer only the first path,
+  which is how the pairing type this ADR originally made normative
+  (`CheckedEffectGroup`) came to be retired: arity was the wrong thing to make
+  unrepresentable, since the question is routing, not alignment.
+
+  **A child with no runner is a routing fact, not an outcome.** A resolver that
+  answers `None` for a child means the deployment cannot run it — not that the
+  child failed — so no terminal is ever synthesized from a miss. On a **first
+  open** in-process hosts resolve **all N children before dispatching any of
+  them**: any `None` refuses the whole open with a typed group-shape error, and
+  no child is journaled, so a group is never half-opened around a child that will
+  never settle. Resolution belongs to the first-open path alone. A **reopen**
+  resolves only what it dispatches and refuses nothing: the group is already
+  journaled, and a journaled group meeting a host that cannot run one of its
+  children is a deployment change rather than an open — the drain reports it as
+  `NoExecutor`, leaving the group unreclaimable and visible rather than inventing
+  a terminal for it. Refusing at a reopen instead would deny a resuming caller
+  the ranks the group already holds, which is the opposite of what the refusal is
+  for.
+
+  Each executor is single-execution: `execute` consumes it, so a host that
+  retries a child resolves a fresh one through the same registered resolver. A
+  reopen must be **fenced on group shape** — a recorded group whose child count
+  or wake rule differs from the group passed in is refused, because a shrunk
+  child vec under one key silently renumbers every rank above the truncation and
+  the per-child hash fence cannot see it.
 - `await_next_settlement(handle, cancel)` — delivers settlements one at a time.
   The handle is taken by `&mut` and is **the sole cursor of record**: the host
   advances it on exactly the settlements it returns and keeps no per-caller
@@ -350,10 +383,13 @@ been an active corruption source rather than a passive one.
 
 ### Tier split
 
-`supports_effect_groups()` is `true` on every in-tree tier **as target state** —
-no controller answers `true` in the contract layer that introduces these types,
-and each tier flips its own flag as it lands. Groups add **no second durability
-flag**. The durability claim stays the existing
+Every in-tree tier **implements** the group surface as target state — no tier
+does so in the contract layer that introduces these types, and each one lands its
+own implementation. What `supports_effect_groups()` answers is not a property of
+the tier, though: it is the per-deployment fact above, so an in-tree tier whose
+host has not been handed a `GroupExecutors` resolver answers `false` and refuses
+coherently, and answers `true` once wiring registers one. Groups add **no second
+durability flag**. The durability claim stays the existing
 `replay_ownership` / journal-addressing fact, which the contract already warns
 is only a routing fact and not an end-to-end durability claim.
 

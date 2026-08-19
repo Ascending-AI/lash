@@ -38,8 +38,8 @@
 //! decides a lease: it only sleeps — `Sleep` effect due times, busy-retry
 //! backoff, and the lease renewal interval.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -54,6 +54,7 @@ use super::executor::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectJournalRetirement, ExecutionScope, Resolution,
     ResolveOutcome, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
 };
+use super::group_drain::GroupExecutors;
 /// The durable group shape this port's backends implement, re-exported so a
 /// backend imports the whole effect-journal vocabulary from one place.
 pub use super::group_journal::{
@@ -786,6 +787,14 @@ pub struct EffectReplayDriver<P, A> {
     /// opened the group knows — which child is at which position, and the
     /// cancellation token its own children select on.
     groups: groups::DurableEffectGroups,
+    /// This host's one answer to "what code runs a journaled grouped child".
+    ///
+    /// Registered once, by the host that owns the runners, and read by every
+    /// path that has to execute a child: the open, a retry, and the loser drain.
+    /// Absent until a host registers one, which is the same thing as this host
+    /// not supporting effect groups — see
+    /// [`register_group_executors`](EffectReplayDriver::register_group_executors).
+    group_executors: OnceLock<Arc<dyn GroupExecutors>>,
 }
 
 impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> {
@@ -820,7 +829,87 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             replay_mode: AtomicBool::new(false),
             lease_timings,
             groups: groups::DurableEffectGroups::default(),
+            group_executors: OnceLock::new(),
         }
+    }
+
+    /// Register this host's envelope→executor resolver, once.
+    ///
+    /// One host has one answer to "what code runs this journaled grouped child",
+    /// so this is set once and then read by the open, by a retry, and by the
+    /// loser drain alike. A second registration of a *different* resolver is
+    /// refused rather than allowed to win: two resolvers on one journal means two
+    /// answers for one child, and which one a given path got would depend on when
+    /// it asked. Re-registering the resolver already held is a no-op, so a host
+    /// handed out repeatedly need not track whether it has been wired yet.
+    ///
+    /// Until it is called, this host does not support effect groups — the
+    /// `'static` executors a grouped child needs to outlive its caller have
+    /// nowhere to come from — so
+    /// [`supports_effect_groups`](EffectReplayDriver::supports_effect_groups)
+    /// answers `false` and all three group methods refuse with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
+    /// rather than journaling a group nothing can run.
+    ///
+    /// [`OnceLock::set`] is the arbiter rather than a preceding `get`: a
+    /// get-then-set pair leaves a window in which two threads both read `None`,
+    /// both write, and the loser is told `Ok` while its resolver was dropped on
+    /// the floor — the exact drift this refusal exists to prevent. `set` decides,
+    /// and its `Err` hands back the rejected resolver so the same-resolver case
+    /// stays a no-op.
+    pub fn register_group_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let Err(rejected) = self.group_executors.set(executors) else {
+            return Ok(());
+        };
+        let held = self
+            .group_executors
+            .get()
+            .expect("a rejected set means the lock is initialized");
+        if Arc::ptr_eq(held, &rejected) {
+            Ok(())
+        } else {
+            Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                "this effect host already has a different registered group \
+                 executor resolver; one host has one answer to what runs a \
+                 journaled grouped child, and a second answer would make which \
+                 one a path got depend on when it asked",
+            ))
+        }
+    }
+
+    /// Whether a resolver has been registered, which is exactly whether this
+    /// host supports effect groups.
+    ///
+    /// A **per-deployment** fact established at wiring time: deployment
+    /// validation reads it after the registration, and before wiring it reads
+    /// `false` and the three group methods refuse coherently with it.
+    pub fn supports_effect_groups(&self) -> bool {
+        self.group_executors.get().is_some()
+    }
+
+    /// The registered resolver, or the refusal that says this host does not
+    /// implement groups at all.
+    ///
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// not a shape refusal: an unwired host is not a host with a bad group, it is
+    /// the host `supports_effect_groups` answers `false` for, and the coherence
+    /// law binds the flag to all three methods. A *per-child* resolver miss on a
+    /// wired host is the other fact and keeps its typed routing refusal.
+    pub(super) fn group_executors(
+        &self,
+    ) -> Result<&Arc<dyn GroupExecutors>, RuntimeEffectControllerError> {
+        self.group_executors.get().ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::EffectGroupUnsupported,
+                "this effect host has no registered group executor resolver, so \
+                 it does not implement durable effect groups; register one with \
+                 register_group_executors at wiring time",
+            )
+        })
     }
 
     /// Force strict replay mode: missing effect history fails instead of

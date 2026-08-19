@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::envelope::{RuntimeEffectOutcome, RuntimeInvocation};
-use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor};
+use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
 
 /// Wake rule of a durable effect group, recorded in the group's journal
 /// identity so replay cannot silently change it (FIG-1416).
@@ -267,102 +267,10 @@ impl RuntimeEffectGroup {
     pub fn loser_disposition(&self) -> LoserDisposition {
         self.loser_disposition
     }
-
-    /// Refuses an executor vec that is not positionally aligned with this
-    /// group's children.
-    ///
-    /// Private on purpose: the only way to reach it is
-    /// [`CheckedEffectGroup::try_new`], so the check is structural rather than
-    /// an obligation each host is asked to remember.
-    fn check_executors(
-        &self,
-        executors: &[RuntimeEffectLocalExecutor<'static>],
-    ) -> Result<(), RuntimeEffectControllerError> {
-        if executors.len() == self.children.len() {
-            return Ok(());
-        }
-        Err(group_shape_error(format!(
-            "durable effect group {} has {} children but was opened with {} \
-             executors; executor i runs child i, so an unaligned vec either \
-             panics on an index or journals a group whose missing children can \
-             never settle. A child with no runnable executor is \
-             RuntimeEffectLocalExecutor::unavailable, not a missing element",
-            self.group_key,
-            self.children.len(),
-            executors.len()
-        )))
-    }
 }
 
 fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(crate::RuntimeErrorCode::RuntimeEffectGroupShape, message)
-}
-
-/// A durable effect group paired with one `'static` executor per child, the
-/// alignment already checked — the sole parameter of
-/// [`open_effect_group`](super::RuntimeEffectController::open_effect_group).
-///
-/// The pairing is a type rather than two parameters because "executor `i` runs
-/// child `i`" is the load-bearing claim and a two-parameter signature makes
-/// checking it an obligation on every implementation. An implementation that
-/// skipped the check would resolve a short vec by panicking on an index or by
-/// silently running a prefix of the group — journaling a group whose missing
-/// children can never settle, so every rank above the truncation is unservable
-/// and the caller waits forever. Since [`try_new`](Self::try_new) is the only
-/// constructor and `open_effect_group` takes nothing else, an unaligned pair
-/// cannot reach a host at all: the check happens once, at the boundary, and no
-/// host is asked to remember it.
-///
-/// A child with no runnable executor is expressed as
-/// [`RuntimeEffectLocalExecutor::unavailable`], not as a missing element, which
-/// is why the alignment is an equality rather than a lower bound.
-pub struct CheckedEffectGroup {
-    group: RuntimeEffectGroup,
-    executors: Vec<RuntimeEffectLocalExecutor<'static>>,
-}
-
-impl std::fmt::Debug for CheckedEffectGroup {
-    /// Hand-written because `RuntimeEffectLocalExecutor` is not `Debug`. The
-    /// count is the only interesting thing about the vec anyway — it is the half
-    /// of the invariant this type exists to hold.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CheckedEffectGroup")
-            .field("group", &self.group)
-            .field("executors", &self.executors.len())
-            .finish()
-    }
-}
-
-impl CheckedEffectGroup {
-    /// Pairs a group with its executors, refusing any vec not positionally
-    /// aligned with [`RuntimeEffectGroup::children`] with a typed group-shape
-    /// error.
-    pub fn try_new(
-        group: RuntimeEffectGroup,
-        executors: Vec<RuntimeEffectLocalExecutor<'static>>,
-    ) -> Result<Self, RuntimeEffectControllerError> {
-        group.check_executors(&executors)?;
-        Ok(Self { group, executors })
-    }
-
-    /// The group, for a host that needs its key, wake rule, or children before
-    /// taking ownership of the executors.
-    #[must_use]
-    pub fn group(&self) -> &RuntimeEffectGroup {
-        &self.group
-    }
-
-    /// Splits the checked pair into its parts, for a host that dispatches the
-    /// children.
-    ///
-    /// By value because [`RuntimeEffectLocalExecutor::execute`] consumes its
-    /// executor: the vec funds one attempt per child and no retry, and a host
-    /// that retries takes a fresh executor from
-    /// [`EffectHost::scoped_static`](super::EffectHost::scoped_static).
-    #[must_use]
-    pub fn into_parts(self) -> (RuntimeEffectGroup, Vec<RuntimeEffectLocalExecutor<'static>>) {
-        (self.group, self.executors)
-    }
 }
 
 /// Refuses an effect that carries group membership on a path that cannot honor
@@ -1281,58 +1189,6 @@ mod effect_group_contract_tests {
         )
         .expect_err("a child whose disposition disagrees must not assemble");
         assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeEffectGroupShape);
-    }
-
-    /// The executor-vec alignment is held by a type rather than by each host's
-    /// prose: without the check a short vec journals a group whose missing
-    /// children can never settle, so every rank above the truncation is
-    /// unservable and the caller waits forever.
-    ///
-    /// Asserted through `CheckedEffectGroup::try_new` because that is the only
-    /// path — it is the type's sole constructor and `open_effect_group` takes
-    /// nothing else, so an unaligned pair cannot reach a host regardless of what
-    /// the host remembers to do.
-    #[test]
-    fn an_unaligned_executor_vec_cannot_be_paired_with_a_group() {
-        let checked = CheckedEffectGroup::try_new(
-            group_of(2),
-            vec![
-                RuntimeEffectLocalExecutor::unavailable(),
-                RuntimeEffectLocalExecutor::unavailable(),
-            ],
-        )
-        .expect("one executor per child is the aligned shape");
-        let (group, executors) = checked.into_parts();
-        assert_eq!(
-            executors.len(),
-            group.children().len(),
-            "into_parts hands the host a pair it can index one-to-one"
-        );
-
-        for (name, executors) in [
-            ("short", vec![RuntimeEffectLocalExecutor::unavailable()]),
-            ("empty", Vec::new()),
-            (
-                "long",
-                vec![
-                    RuntimeEffectLocalExecutor::unavailable(),
-                    RuntimeEffectLocalExecutor::unavailable(),
-                    RuntimeEffectLocalExecutor::unavailable(),
-                ],
-            ),
-        ] {
-            let error = CheckedEffectGroup::try_new(group_of(2), executors)
-                .expect_err(&format!("a {name} executor vec must be refused"));
-            assert_eq!(
-                error.code,
-                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                "a {name} executor vec must be a typed group-shape refusal"
-            );
-            assert!(
-                error.message.contains("scope:group:batch:0"),
-                "the refusal must name the group: {error}"
-            );
-        }
     }
 
     /// A grouped child on a path with no membership slot must be refused, never
