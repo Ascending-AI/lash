@@ -29,6 +29,58 @@ pub(crate) const THREAD_ROOT_SEED_PREFIX: &str =
 const ROOT_ADMISSION_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const ROOT_ADMISSION_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
+/// Test-only record of what the root-admission wait actually did.
+///
+/// Tests that pin a fail-fast path need the fact "the root wait budget was not
+/// spent". Wall-clock time is a poor proxy for it: on a loaded runner a
+/// scheduling stall is indistinguishable from a real wait, so a tight
+/// `tokio::time::timeout` around the call reddens for the one reason the test
+/// does not care about. These counters make the fact directly observable —
+/// `probes` counts loop turns that found no authoritative root, and `budget`
+/// accumulates the wait each turn asked for (the requested nap, never the
+/// observed elapsed time, so runner load cannot inflate it).
+#[cfg(test)]
+#[derive(Default)]
+pub struct RootWaitObserver {
+    missing_root_observed: tokio::sync::Notify,
+    probes: std::sync::atomic::AtomicU64,
+    budget_spent_nanos: std::sync::atomic::AtomicU64,
+}
+
+#[cfg(test)]
+impl RootWaitObserver {
+    fn observe_missing_root(&self) {
+        self.probes
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.missing_root_observed.notify_one();
+    }
+
+    fn observe_budget_spent(&self, nap: Duration) {
+        self.budget_spent_nanos.fetch_add(
+            u64::try_from(nap.as_nanos()).unwrap_or(u64::MAX),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// Resolve the next time the wait loop sees a missing root.
+    pub async fn missing_root(&self) {
+        self.missing_root_observed.notified().await;
+    }
+
+    /// How many loop turns found no authoritative root.
+    pub fn probes(&self) -> u64 {
+        self.probes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// How much of the root-admission wait budget was asked for.
+    pub fn budget_spent(&self) -> Duration {
+        Duration::from_nanos(
+            self.budget_spent_nanos
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+}
+
 /// Result of opening the deterministic child behind a Slack thread.
 pub enum ThreadSessionOpen {
     Ready(LashSession),
@@ -57,7 +109,7 @@ pub async fn open_thread_session(
     core: &LashCore,
     ledger: &EventLedger,
     record: &EventRecord,
-    #[cfg(test)] missing_root_observed: &tokio::sync::Notify,
+    #[cfg(test)] root_wait: &RootWaitObserver,
     root_wait_budget: Duration,
 ) -> Result<ThreadSessionOpen> {
     let thread_ts = record
@@ -75,7 +127,7 @@ pub async fn open_thread_session(
         let started = tokio::time::Instant::now();
         let mut backoff = ROOT_ADMISSION_INITIAL_BACKOFF;
         let fork_node = loop {
-            let route = root_route(core, ledger, &channel, record, thread_ts).await?;
+            let route = root_route(core, ledger, record, thread_ts).await?;
             if let RootRoute::Ready(fork_node) = route {
                 break fork_node;
             }
@@ -83,7 +135,7 @@ pub async fn open_thread_session(
                 return Ok(ThreadSessionOpen::RootNotAvailable);
             }
             #[cfg(test)]
-            missing_root_observed.notify_one();
+            root_wait.observe_missing_root();
 
             let elapsed = started.elapsed();
             if elapsed >= root_wait_budget {
@@ -96,7 +148,10 @@ pub async fn open_thread_session(
                 });
             }
             let remaining = root_wait_budget.saturating_sub(elapsed);
-            tokio::time::sleep(backoff.min(remaining)).await;
+            let nap = backoff.min(remaining);
+            #[cfg(test)]
+            root_wait.observe_budget_spent(nap);
+            tokio::time::sleep(nap).await;
             backoff = backoff.saturating_mul(2).min(ROOT_ADMISSION_MAX_BACKOFF);
         };
         core.pin(&fork_node)
@@ -130,7 +185,6 @@ pub async fn open_thread_session(
 async fn root_route(
     core: &LashCore,
     ledger: &EventLedger,
-    channel: &LashSession,
     record: &EventRecord,
     thread_ts: &str,
 ) -> Result<RootRoute> {
@@ -145,7 +199,15 @@ async fn root_route(
     {
         // A turn application is durable even if the process died after pinning
         // its boundary and before projecting that node into the Slack ledger.
-        retain_applied_turn_boundary(core, ledger, channel, &input_id)
+        //
+        // The repair reads the graph through a session opened now, not through
+        // the caller's handle: that handle was opened when this thread reply
+        // started waiting, and its graph predates the root turn this repair is
+        // about. A snapshot that old can never carry the boundary being derived.
+        let repair_view = open_channel_session(core, &record.channel_id)
+            .await
+            .context("open a current channel view for thread-root repair")?;
+        try_retain_applied_turn_boundary(core, ledger, &repair_view, &input_id)
             .await
             .context("re-derive committed thread-root boundary")?;
         root = ledger
@@ -192,12 +254,52 @@ async fn root_route(
 /// The lookup uses typed application records. No Lash id is parsed: the
 /// application names the turn, and every input applied by that turn receives the
 /// same retained leaf boundary.
+///
+/// For a caller holding the handle the turn just committed on, a boundary that
+/// cannot be derived is a defect, not a wait: it fails loudly here rather than
+/// silently skipping the retention and the ledger write. The polling repair path
+/// wants the opposite answer and calls [`try_retain_applied_turn_boundary`].
 pub async fn retain_applied_turn_boundary(
     core: &LashCore,
     ledger: &EventLedger,
     session: &LashSession,
     input_id: &str,
 ) -> Result<()> {
+    retain_boundary(core, ledger, session, input_id, Derivation::Required)
+        .await
+        .map(|_| ())
+}
+
+/// [`retain_applied_turn_boundary`] for a caller that is still waiting.
+///
+/// `Ok(false)` means the turn's application is not on this handle's active path
+/// *yet*, so nothing was retained and the caller should poll again. Only the
+/// thread-root repair may treat that as a legal state: it reads applications
+/// from the store while the graph comes from a handle opened earlier, so it can
+/// legitimately see the application before the commit that carries it.
+pub async fn try_retain_applied_turn_boundary(
+    core: &LashCore,
+    ledger: &EventLedger,
+    session: &LashSession,
+    input_id: &str,
+) -> Result<bool> {
+    retain_boundary(core, ledger, session, input_id, Derivation::MayBePending).await
+}
+
+/// Whether an underivable boundary is a defect or a "not yet".
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Derivation {
+    Required,
+    MayBePending,
+}
+
+async fn retain_boundary(
+    core: &LashCore,
+    ledger: &EventLedger,
+    session: &LashSession,
+    input_id: &str,
+    derivation: Derivation,
+) -> Result<bool> {
     let applications = session
         .turn_input_applications()
         .await
@@ -207,9 +309,14 @@ pub async fn retain_applied_turn_boundary(
         .find(|application| application.input_id == input_id)
         .map(|application| application.turn_id.clone())
     else {
-        return Ok(());
+        return Ok(false);
     };
-    let leaf = committed_turn_boundary(session, &applications, &turn_id)?;
+    let Some(leaf) = committed_turn_boundary(session, &applications, &turn_id)? else {
+        if derivation == Derivation::MayBePending {
+            return Ok(false);
+        }
+        bail!("committed turn application message is absent from the active channel graph");
+    };
     core.pin(&leaf)
         .await
         .with_context(|| format!("pin committed channel turn boundary {leaf}"))?;
@@ -221,7 +328,8 @@ pub async fn retain_applied_turn_boundary(
     ledger
         .record_fork_node_for_inputs(input_ids, leaf)
         .await
-        .context("record fork boundary for committed Slack inputs")
+        .context("record fork boundary for committed Slack inputs")?;
+    Ok(true)
 }
 
 /// Resolve the graph boundary committed by `turn_id`, even when later turns
@@ -231,11 +339,18 @@ pub async fn retain_applied_turn_boundary(
 /// active graph path, the parent of the next turn's first application is the
 /// exact leaf selected by this turn. When there is no later application, the
 /// current leaf is still this turn's boundary (the ordinary under-lock path).
+///
+/// `None` means the turn's application is not on this handle's active graph
+/// path *yet*. Application records are read from the store while the graph comes
+/// from the handle's own state, so a caller polling with a handle opened before
+/// the turn committed can legitimately see the application first. That is a
+/// "come back later", not a broken graph, and the caller's wait loop is what
+/// resolves it.
 fn committed_turn_boundary(
     session: &LashSession,
     applications: &[lash::TurnInputApplication],
     turn_id: &lash::persistence::TurnId,
-) -> Result<String> {
+) -> Result<Option<String>> {
     let graph = session.read_view().session_graph().clone();
     let nodes_by_id: std::collections::HashMap<&str, _> = graph
         .nodes
@@ -262,7 +377,7 @@ fn committed_turn_boundary(
         .filter(|application| &application.turn_id == turn_id)
         .map(|application| application.committed_message_id.as_str())
         .collect();
-    let target_index = active_path
+    let Some(target_index) = active_path
         .iter()
         .enumerate()
         .filter_map(|(index, node)| {
@@ -271,7 +386,9 @@ fn committed_turn_boundary(
                 .map(|_| index)
         })
         .next_back()
-        .context("committed turn application message is absent from the active channel graph")?;
+    else {
+        return Ok(None);
+    };
 
     let later_application_ids: HashSet<&str> = applications
         .iter()
@@ -284,11 +401,13 @@ fn committed_turn_boundary(
         return next_turn
             .parent_node_id
             .clone()
+            .map(Some)
             .context("a later committed turn has no preceding graph boundary");
     }
     graph
         .leaf_node_id
         .clone()
+        .map(Some)
         .context("committed turn has no graph leaf")
 }
 

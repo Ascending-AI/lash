@@ -17462,8 +17462,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionNodeRecord::message_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/slack-clone/src/bot/threads.rs:296#node.message_id()"
-assertion = "examples/slack-clone/src/tests/bot_events.rs:1052#!requests[2].contains(\"later channel turn\"),"
+usage = "examples/slack-clone/src/bot/threads.rs:415#node.message_id()"
+assertion = "examples/slack-clone/src/tests/bot_events.rs:1068#!requests[2].contains(\"later channel turn\"),"
 
 [[api]]
 symbol = "lash::persistence::SessionNodeRecord::node_id"
