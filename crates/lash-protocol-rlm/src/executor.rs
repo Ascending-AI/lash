@@ -4877,7 +4877,6 @@ finish final_ids"#;
     /// the cell boundary, so a closure from cell N is re-validated against cell
     /// N+1's function table. See FIG-1562.
     #[test]
-    #[ignore = "FIG-1562: heap closures outlive their program and fail the next cell's validation"]
     fn a_closure_from_one_typescript_cell_does_not_poison_the_next_cell() {
         block_on(async {
             for cell in CLOSURE_BEARING_TYPESCRIPT_CELLS {

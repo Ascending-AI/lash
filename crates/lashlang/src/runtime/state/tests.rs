@@ -42,7 +42,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             .expect("program-independent snapshot encoding accepts closure metadata");
         let decoded = Snapshot::from_canonical_bytes(&bytes)
             .expect("program-independent snapshot decoding accepts closure metadata");
-        let state = State::from_snapshot(decoded);
+        let mut state = State::from_snapshot(decoded);
         assert!(matches!(
             state.validate_program(&program),
             Err(RuntimeError::ClosureCaptureCountMismatch {
@@ -1314,11 +1314,11 @@ impl crate::runtime::ExecutionHost for CrossProgramHost {
 /// program B, and an RLM session compiles a fresh program per cell. See
 /// FIG-1562.
 ///
-/// Red on `main`: `State::snapshot` collects the heap but keeps closures its
-/// roots reach, so the restored state rejects the next program with
-/// `UnknownFunction { index: 0 }`.
+/// Was red on `main`: `State::snapshot` collects the heap but keeps closures
+/// its roots reach, so the restored state rejected the next program with
+/// `UnknownFunction { index: 0 }`. The closure no longer survives the
+/// execution that allocated it, so the snapshot carries none to reject with.
 #[test]
-#[ignore = "FIG-1562: heap closures outlive their program and fail the next program's validation"]
 fn a_restored_real_closure_does_not_reject_a_different_program() {
     let closure_program = compile_program_internal(&Program::block(vec![
         Expr::Assign {
@@ -1347,7 +1347,7 @@ fn a_restored_real_closure_does_not_reject_a_different_program() {
         .snapshot()
         .to_canonical_bytes()
         .expect("a real closure snapshot encodes");
-    let restored = State::from_snapshot(
+    let mut restored = State::from_snapshot(
         Snapshot::from_canonical_bytes(&bytes).expect("a real closure snapshot decodes"),
     );
 

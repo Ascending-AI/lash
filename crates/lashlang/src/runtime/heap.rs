@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+mod closure_reach;
 mod id;
 mod javascript_exotics;
 mod object;
