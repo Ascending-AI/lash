@@ -25,7 +25,7 @@ use lash_core::facade_support::effect_replay_driver::{
     decide_effect_claim,
 };
 
-use lash_core::{EffectGroupDrain, GroupDrainExecutors};
+use lash_core::{EffectGroupDrain, GroupExecutors};
 
 use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
 use tokio_util::sync::CancellationToken;
@@ -84,18 +84,28 @@ impl PostgresEffectHost {
         self.inner.start_replay();
     }
 
+    /// Register the resolver that says how a grouped child is run.
+    ///
+    /// This is the host's one wiring seam: it is supplied here — by the host
+    /// that owns those runners — rather than discovered from whatever session is
+    /// in scope, and every path resolves through it, the open of a group, a
+    /// retry, and the loser drain alike. Until it is called this host answers
+    /// [`RuntimeEffectController::supports_effect_groups`] `false` and refuses an
+    /// open rather than journaling a group nothing can run.
+    pub fn register_group_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
+    }
+
     /// The host-owned drain over this host's effect journal.
     ///
-    /// `executors` is the wiring seam: it says how a child this host did not
-    /// open is run, and it is supplied here — by the host that owns those
-    /// runners — rather than discovered from whatever session is in scope when a
-    /// group turns out to need draining. The drain shares this host's driver, so
-    /// it claims under the same owner identity and the same journal.
-    pub fn group_drain(
-        &self,
-        executors: Arc<dyn GroupDrainExecutors>,
-    ) -> Arc<dyn EffectGroupDrain> {
-        Arc::clone(&self.inner).into_group_drain(executors)
+    /// The drain shares this host's driver, so it claims under the same owner
+    /// identity, over the same journal, and resolves children through the same
+    /// registered resolver.
+    pub fn group_drain(&self) -> Arc<dyn EffectGroupDrain> {
+        Arc::clone(&self.inner).into_group_drain()
     }
 }
 
@@ -301,17 +311,18 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
         .await
     }
 
-    /// `true`: the group methods below are implemented against the durable
-    /// journal, and this store's [`EffectHost::scoped_static`] hands out the
-    /// `'static` scopes the flag's other half requires — a child must be able to
-    /// outlive its caller to honor
-    /// [`LoserDisposition::RunToCompletion`](lash_core::LoserDisposition::RunToCompletion).
+    /// `true` exactly when this host has a registered
+    /// [`GroupExecutors`] resolver.
     ///
-    /// The two capabilities are one question and must not drift apart, which is
-    /// why the flag is answered here rather than defaulted: the surface it
-    /// admits is exactly the surface below.
+    /// The group methods below are implemented against the durable journal, so
+    /// the remaining question is where a child's runner comes from: the resolver
+    /// is what supplies the `'static` executors the flag's other half requires,
+    /// since a child must be able to outlive its caller to honor
+    /// [`LoserDisposition::RunToCompletion`](lash_core::LoserDisposition::RunToCompletion).
+    /// A host with no resolver would admit a group and then have nothing to run
+    /// it with, which is the drift this answer forecloses.
     fn supports_effect_groups(&self) -> bool {
-        true
+        self.inner.supports_effect_groups()
     }
 
     /// Delegated to the shared driver exactly as `execute_effect` is: the group
@@ -321,7 +332,7 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
     /// copy of the state machine.
     async fn open_effect_group(
         &self,
-        group: lash_core::CheckedEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, RuntimeEffectControllerError> {
         Box::pin(self.inner.open_effect_group(&self.scope, group)).await
     }

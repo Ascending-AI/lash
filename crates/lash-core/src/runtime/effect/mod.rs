@@ -28,11 +28,11 @@ pub use executor::{
     ScopedEffectController, SegmentProgress,
 };
 pub use group::{
-    CheckedEffectGroup, EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy,
-    LoserDisposition, RuntimeEffectGroup, refuse_unhonored_group_membership,
+    EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserDisposition,
+    RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
 pub use group_drain::{
-    ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainExecutors, GroupDrainReport,
+    ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainReport, GroupExecutors,
 };
 pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;

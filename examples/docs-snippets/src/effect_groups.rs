@@ -6,12 +6,15 @@
 //! order the scheduler happened to finish things in. Hosts meet it from two
 //! sides, and this module covers both.
 //!
-//! **Driving one** — a caller builds a [`RuntimeEffectGroup`], pairs it with one
-//! `'static` executor per child, opens it, consumes settlements by rank, and
-//! closes it with the disposition its losers should be subject to. Everything in
-//! that sentence is checked by a type: an unaligned executor vec cannot reach a
-//! host, a handle refuses a cursor past its own child count, and a close may
-//! only narrow the disposition the group declared.
+//! **Driving one** — a caller builds a [`RuntimeEffectGroup`], opens it,
+//! consumes settlements by rank, and closes it with the disposition its losers
+//! should be subject to. A group carries envelopes and nothing else: what code
+//! runs a child is the [`GroupExecutors`] resolver its host was registered with,
+//! because three of the four paths that need a child's runner — a retry after a
+//! crash, the loser drain, a resuming process reopening the group — happen where
+//! no caller is in scope. The rest is checked by a type: a handle refuses a
+//! cursor past its own child count, and a close may only narrow the disposition
+//! the group declared.
 //!
 //! **Implementing it** — an effect host overrides
 //! [`supports_effect_groups`](lash::runtime::RuntimeEffectController::supports_effect_groups)
@@ -25,12 +28,13 @@
 //! memory, for the life of the runtime. Cross-process settlement durability is
 //! the SQL and engine tiers' half, and no flag in this module claims it.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash::CancellationToken;
 use lash::runtime::{
-    CheckedEffectGroup, EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy,
+    EffectGroupHandle, EffectGroupMembership, GroupExecutors, GroupSettlement, GroupWakePolicy,
     LoserDisposition, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeErrorCode, RuntimeInvocation, RuntimeScope,
@@ -105,13 +109,67 @@ fn gated() -> (
     (executor, release, completions)
 }
 
-/// Pairs a group with one executor per child, which is the only way to reach
-/// `open_effect_group`.
-fn checked(
-    group: RuntimeEffectGroup,
-    executors: Vec<RuntimeEffectLocalExecutor<'static>>,
-) -> CheckedEffectGroup {
-    CheckedEffectGroup::try_new(group, executors).expect("one executor per child aligns")
+/// A host's answer to "what code runs this journaled grouped child".
+///
+/// This is the contract's only executor-resolution seam: the open of a group,
+/// a retry, and the loser drain all reach for a child's runner here. A real
+/// deployment maps the command onto the runners it was deployed with; an example
+/// stages the executors it is about to assert on, keyed by the child's replay
+/// key, which is the identity the journal knows a child by.
+#[derive(Default)]
+struct DocsGroupExecutors {
+    staged: std::sync::Mutex<HashMap<String, RuntimeEffectLocalExecutor<'static>>>,
+}
+
+impl DocsGroupExecutors {
+    /// Stages one executor per child and hands back the group to open.
+    fn stage(
+        &self,
+        group: RuntimeEffectGroup,
+        executors: Vec<RuntimeEffectLocalExecutor<'static>>,
+    ) -> RuntimeEffectGroup {
+        let mut staged = self.staged.lock().expect("staged executors");
+        for (child, executor) in group.children().iter().zip(executors) {
+            let replay_key = child
+                .invocation
+                .replay_key()
+                .expect("a group child carries its replay key")
+                .to_string();
+            staged.insert(replay_key, executor);
+        }
+        group
+    }
+}
+
+impl GroupExecutors for DocsGroupExecutors {
+    fn executor_for(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+        let replay_key = envelope.invocation.replay_key()?;
+        self.staged
+            .lock()
+            .expect("staged executors")
+            .remove(replay_key)
+    }
+}
+
+/// An inline controller and the resolver it was registered with.
+///
+/// Registration is what makes the controller support groups at all: a host with
+/// no resolver has nowhere to get the `'static` executors a child needs in order
+/// to outlive its caller, so it answers `supports_effect_groups` `false` and
+/// refuses an open rather than journaling a group nothing can run.
+fn inline_host() -> (
+    lash::runtime::InlineRuntimeEffectController,
+    Arc<DocsGroupExecutors>,
+) {
+    let executors = Arc::new(DocsGroupExecutors::default());
+    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    controller
+        .register_group_executors(Arc::clone(&executors) as Arc<dyn GroupExecutors>)
+        .expect("a fresh controller has no resolver yet");
+    (controller, executors)
 }
 
 /// Spins until a host-owned task has reached the state under assertion, so an
@@ -132,8 +190,8 @@ async fn until(mut condition: impl FnMut() -> bool) {
 /// Children arrive unstamped and leave carrying the group's identity, so a host
 /// never fishes a group's key out of `children[0]` and a child can never hash a
 /// wake rule the group does not record.
-#[test]
-fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
+#[tokio::test]
+async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
     let group = two_arm_group(
         "docs:race:0",
         GroupWakePolicy::First,
@@ -192,10 +250,18 @@ fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
     assert_eq!(all.wake(), GroupWakePolicy::All);
     assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);
 
-    // Executor alignment is the other agreement a host never has to check for
-    // itself: an unaligned pair cannot be built, so it cannot reach a host. A
-    // child with no runnable executor is `unavailable`, not a missing element.
-    assert!(CheckedEffectGroup::try_new(all, vec![settles_now()]).is_err());
+    // Where a child's runner comes from is not part of the group: a group is
+    // envelopes. A host with no registered resolver has no runner for any of
+    // them, so it refuses the open outright rather than journaling children
+    // nothing can run — a child with no runner is a routing fact, not an
+    // outcome.
+    let unwired = lash::runtime::InlineRuntimeEffectController::default();
+    assert!(!unwired.supports_effect_groups());
+    let unroutable = unwired
+        .open_effect_group(all)
+        .await
+        .expect_err("a host with no resolver cannot run any child of this group");
+    assert_eq!(unroutable.code, RuntimeErrorCode::RuntimeEffectGroupShape);
 }
 
 /// The `race` shape: open two arms, resume on the first settlement, leave the
@@ -206,7 +272,7 @@ fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
 /// position and a durable sequence rather than "whichever future woke us".
 #[tokio::test]
 async fn a_race_resumes_on_the_first_settlement_and_leaves_the_loser_running() {
-    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    let (controller, executors) = inline_host();
     assert!(
         controller.supports_effect_groups(),
         "a host must answer this before a group is opened against it; it gates \
@@ -221,7 +287,7 @@ async fn a_race_resumes_on_the_first_settlement_and_leaves_the_loser_running() {
         LoserDisposition::RunToCompletion,
     );
     let mut handle = controller
-        .open_effect_group(checked(group, vec![slow, settles_now()]))
+        .open_effect_group(executors.stage(group, vec![slow, settles_now()]))
         .await
         .expect("open returns once the group is recorded, not when a child settles");
     assert_eq!(handle.group_key(), group_key);
@@ -270,7 +336,7 @@ async fn a_race_resumes_on_the_first_settlement_and_leaves_the_loser_running() {
 /// consumed, so the caller's cursor is the one that wins.
 #[tokio::test]
 async fn a_restored_cursor_re_reads_the_same_settlement() {
-    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    let (controller, executors) = inline_host();
     let group_key = "docs:all:0";
     let group = two_arm_group(
         group_key,
@@ -278,7 +344,7 @@ async fn a_restored_cursor_re_reads_the_same_settlement() {
         LoserDisposition::RunToCompletion,
     );
     let mut handle = controller
-        .open_effect_group(checked(group, vec![settles_now(), settles_now()]))
+        .open_effect_group(executors.stage(group, vec![settles_now(), settles_now()]))
         .await
         .expect("the group opens");
     let first = controller
@@ -330,7 +396,7 @@ async fn a_restored_cursor_re_reads_the_same_settlement() {
 /// take is still the next one served.
 #[tokio::test]
 async fn a_cancelled_await_leaves_the_rank_owed() {
-    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    let (controller, executors) = inline_host();
     let group_key = "docs:await-cancel:0";
     let (slow, release, _) = gated();
     let group = two_arm_group(
@@ -339,7 +405,7 @@ async fn a_cancelled_await_leaves_the_rank_owed() {
         LoserDisposition::RunToCompletion,
     );
     let mut handle = controller
-        .open_effect_group(checked(group, vec![slow, settles_now()]))
+        .open_effect_group(executors.stage(group, vec![slow, settles_now()]))
         .await
         .expect("the group opens");
 
@@ -371,12 +437,12 @@ async fn a_cancelled_await_leaves_the_rank_owed() {
 /// caller declared, rather than under one the drain path invented.
 #[tokio::test]
 async fn a_deadline_arm_cancels_its_losers_and_journals_the_cancellation() {
-    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    let (controller, executors) = inline_host();
     let group_key = "docs:deadline:0";
     let (slow, release, loser_completions) = gated();
     let group = two_arm_group(group_key, GroupWakePolicy::First, LoserDisposition::Cancel);
     let mut handle = controller
-        .open_effect_group(checked(group, vec![slow, settles_now()]))
+        .open_effect_group(executors.stage(group, vec![slow, settles_now()]))
         .await
         .expect("the group opens");
     controller
@@ -410,7 +476,7 @@ async fn a_deadline_arm_cancels_its_losers_and_journals_the_cancellation() {
 /// failed settlement is delivered at its rank with its own error.
 #[tokio::test]
 async fn a_first_success_group_still_reports_the_failures_before_it() {
-    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    let (controller, executors) = inline_host();
     let group_key = "docs:any:0";
     let (slow, release, _) = gated();
     let rejects = RuntimeEffectLocalExecutor::testing(|_| async {
@@ -426,7 +492,7 @@ async fn a_first_success_group_still_reports_the_failures_before_it() {
     );
     assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);
     let mut handle = controller
-        .open_effect_group(checked(group, vec![rejects, slow]))
+        .open_effect_group(executors.stage(group, vec![rejects, slow]))
         .await
         .expect("the group opens");
 
@@ -488,10 +554,22 @@ impl RuntimeEffectController for HostWithoutGroups {
 /// the shape a durable host implements, and the two obligations that make it
 /// conformant are visible in twenty lines: one allocation point for the
 /// sequence, and a rank read that consults the record before it waits.
-#[derive(Default)]
 struct MinimalGroupHost {
+    /// This host's one answer to what runs a journaled grouped child, held
+    /// because the paths that need it run where no caller is in scope.
+    executors: Arc<dyn GroupExecutors>,
     settled: std::sync::Mutex<Vec<GroupSettlement>>,
     declared: std::sync::Mutex<Option<LoserDisposition>>,
+}
+
+impl MinimalGroupHost {
+    fn new(executors: Arc<dyn GroupExecutors>) -> Self {
+        Self {
+            executors,
+            settled: std::sync::Mutex::new(Vec::new()),
+            declared: std::sync::Mutex::new(None),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -513,12 +591,21 @@ impl RuntimeEffectController for MinimalGroupHost {
 
     async fn open_effect_group(
         &self,
-        group: CheckedEffectGroup,
+        group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        // The pairing arrives checked, so there is no arity check to write: an
-        // executor vec unaligned with the children could not have been built.
-        assert_eq!(group.group().children().len(), 2);
-        let (group, executors) = group.into_parts();
+        // Every child is resolved before anything is recorded: a group whose
+        // children this host cannot all run is refused whole, rather than
+        // half-opened around a child nothing will ever settle.
+        let mut executors = Vec::with_capacity(group.children().len());
+        for child in group.children() {
+            let Some(executor) = self.executors.executor_for(child) else {
+                return Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeEffectGroupShape,
+                    "this host has no runner for a child of this group",
+                ));
+            };
+            executors.push(executor);
+        }
         *self.declared.lock().expect("declared disposition") = Some(group.loser_disposition());
         for (position, (child, executor)) in
             group.children().iter().cloned().zip(executors).enumerate()
@@ -579,6 +666,7 @@ impl RuntimeEffectController for MinimalGroupHost {
 /// The two sides of the capability flag, asserted against a host of each kind.
 #[tokio::test]
 async fn a_host_either_implements_groups_or_refuses_them_by_name() {
+    let executors = Arc::new(DocsGroupExecutors::default());
     let refusing = HostWithoutGroups;
     assert!(
         !refusing.supports_effect_groups(),
@@ -592,7 +680,7 @@ async fn a_host_either_implements_groups_or_refuses_them_by_name() {
     );
     let mut handle = EffectGroupHandle::new(&group);
     let refused = refusing
-        .open_effect_group(checked(group, vec![settles_now(), settles_now()]))
+        .open_effect_group(executors.stage(group, vec![settles_now(), settles_now()]))
         .await
         .expect_err("a host without groups fails closed");
     assert_eq!(
@@ -613,7 +701,7 @@ async fn a_host_either_implements_groups_or_refuses_them_by_name() {
         .expect_err("closing on a host without groups fails closed too");
     assert_eq!(refused_close.code, RuntimeErrorCode::EffectGroupUnsupported);
 
-    let implementing = MinimalGroupHost::default();
+    let implementing = MinimalGroupHost::new(Arc::clone(&executors) as Arc<dyn GroupExecutors>);
     assert!(implementing.supports_effect_groups());
     let group = two_arm_group(
         "docs:minimal:0",
@@ -621,7 +709,7 @@ async fn a_host_either_implements_groups_or_refuses_them_by_name() {
         LoserDisposition::RunToCompletion,
     );
     let mut handle = implementing
-        .open_effect_group(checked(group, vec![settles_now(), settles_now()]))
+        .open_effect_group(executors.stage(group, vec![settles_now(), settles_now()]))
         .await
         .expect("the minimal host opens the group");
     let first = implementing

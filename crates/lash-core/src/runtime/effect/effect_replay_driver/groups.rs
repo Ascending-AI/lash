@@ -81,8 +81,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::runtime::effect::group::{
-    CheckedEffectGroup, EffectGroupHandle, EffectGroupMembership, GroupSettlement,
-    LoserDisposition, RuntimeEffectGroup,
+    EffectGroupHandle, EffectGroupMembership, GroupSettlement, LoserDisposition, RuntimeEffectGroup,
 };
 
 /// How long a caller parked on rank `n` waits before re-reading the journal.
@@ -250,18 +249,26 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// host's tasks and re-running them would double the side effects the first
     /// dispatch is still producing.
     ///
+    /// Every child is resolved through this host's registered
+    /// [`GroupExecutors`] **before the group row is written**, and any child the
+    /// resolver declines refuses the whole open with a typed group-shape error
+    /// while nothing is journaled. A child with no runner is a routing fact, not
+    /// an outcome: a recorded group holding a child that can never settle makes
+    /// every rank above it unservable, and the caller waits on a rank no
+    /// settlement will ever take.
+    ///
     /// The returned handle is always at `consumed = 0`: only the caller knows
     /// how far it consumed, and a caller resuming from a durable continuation
     /// restores its own cursor with [`EffectGroupHandle::restored`].
     pub async fn open_effect_group(
         self: &Arc<Self>,
         scope: &ExecutionScope,
-        checked: CheckedEffectGroup,
+        group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let journal_identity = scope
             .journal_identity()
             .map_err(RuntimeEffectControllerError::from)?;
-        let (group, executors) = checked.into_parts();
+        let executors = self.resolve_group_children(&group)?;
         let handle = EffectGroupHandle::new(&group);
         let record = EffectGroupRecord::from_group(
             &group,
@@ -296,6 +303,44 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         };
         self.dispatch_group_children(scope, &state, group, executors);
         Ok(handle)
+    }
+
+    /// Resolves every child's executor through this host's registered resolver,
+    /// refusing the whole group if any child has no runner here.
+    ///
+    /// All or nothing, and *before* anything is journaled. Resolving lazily —
+    /// child by child as each is dispatched — would journal the group first and
+    /// discover the gap after, leaving a recorded group whose missing child
+    /// permanently owns a rank no settlement can take. The refusal names the
+    /// child's position and replay key, because "some child of this group has no
+    /// runner" is not something an operator can act on.
+    fn resolve_group_children(
+        &self,
+        group: &RuntimeEffectGroup,
+    ) -> Result<Vec<RuntimeEffectLocalExecutor<'static>>, RuntimeEffectControllerError> {
+        let executors = self.group_executors()?;
+        group
+            .children()
+            .iter()
+            .enumerate()
+            .map(|(position, child)| {
+                executors.executor_for(child).ok_or_else(|| {
+                    group_shape_error(format!(
+                        "child {position} of durable effect group {} names a command \
+                         this host has no runner for{}, so the group is refused \
+                         before it is journaled: a recorded group whose child can \
+                         never settle holds a rank no settlement can take, and every \
+                         rank above it is unservable",
+                        group.group_key(),
+                        child
+                            .invocation
+                            .replay_key()
+                            .map(|key| format!(" (replay key {key})"))
+                            .unwrap_or_default(),
+                    ))
+                })
+            })
+            .collect()
     }
 
     /// Spawns one host-owned task per child.

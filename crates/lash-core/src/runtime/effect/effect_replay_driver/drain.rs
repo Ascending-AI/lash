@@ -25,14 +25,13 @@ use super::groups::{LocalDrainConflict, drain_deferred_error, group_shape_error}
 use super::*;
 use crate::runtime::effect::group::LoserDisposition;
 use crate::runtime::effect::group_drain::{
-    ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainExecutors, GroupDrainReport,
+    ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainReport,
 };
 
-/// The drain a durable effect host hands out: one effect-replay driver plus the
-/// host wiring that says how a journaled child is run.
+/// The drain a durable effect host hands out: one effect-replay driver, which
+/// already holds the host wiring that says how a journaled child is run.
 struct DurableGroupDrain<P, A> {
     driver: Arc<EffectReplayDriver<P, A>>,
-    executors: Arc<dyn GroupDrainExecutors>,
 }
 
 #[async_trait]
@@ -44,40 +43,41 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static> Effec
         group_key: &str,
         cancel: &CancellationToken,
     ) -> Result<GroupDrainReport, RuntimeEffectControllerError> {
-        self.driver
-            .drain_effect_group(group_key, self.executors.as_ref(), cancel)
-            .await
+        self.driver.drain_effect_group(group_key, cancel).await
     }
 }
 
 impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     EffectReplayDriver<P, A>
 {
-    /// Wire this driver's journal to a host's executors and hand back the drain.
+    /// Hand back the drain over this driver's journal.
     ///
-    /// The executors arrive here, once, from the host that owns the runners a
-    /// journaled command needs — not from whatever session is in scope when a
-    /// group turns out to need draining. That is the whole point of the seam: a
-    /// drain assembled from ambient state would run a losing child against a
-    /// session that never opened it.
+    /// It resolves children through the same
+    /// [`GroupExecutors`](crate::runtime::effect::group_drain::GroupExecutors)
+    /// the open and every retry resolve through, registered
+    /// once on this driver by the host that owns the runners a journaled command
+    /// needs — not reached for out of whatever session is in scope when a group
+    /// turns out to need draining. That is the whole point of the seam: a drain
+    /// assembled from ambient state would run a losing child against a session
+    /// that never opened it, and a drain with a *different* resolver from the
+    /// open would run it against different code than the caller would have.
+    ///
+    /// A host that has registered no resolver still gets a drain, and its passes
+    /// report every child as
+    /// [`NoExecutor`](crate::ChildDrainOutcome::NoExecutor) — the queue is real
+    /// and another host can still finish it, which is exactly what that outcome
+    /// says.
     ///
     /// Takes `Arc<Self>` because the drain executes children through this same
     /// driver: one lease identity, one owner id, one journal.
-    pub fn into_group_drain(
-        self: Arc<Self>,
-        executors: Arc<dyn GroupDrainExecutors>,
-    ) -> Arc<dyn EffectGroupDrain> {
-        Arc::new(DurableGroupDrain {
-            driver: self,
-            executors,
-        })
+    pub fn into_group_drain(self: Arc<Self>) -> Arc<dyn EffectGroupDrain> {
+        Arc::new(DurableGroupDrain { driver: self })
     }
 
     /// One drain pass. See [`EffectGroupDrain::drain_group`].
     async fn drain_effect_group(
         self: &Arc<Self>,
         group_key: &str,
-        executors: &dyn GroupDrainExecutors,
         cancel: &CancellationToken,
     ) -> Result<GroupDrainReport, RuntimeEffectControllerError> {
         match self.groups.local_drain_conflict(group_key) {
@@ -124,9 +124,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
                 interrupted = true;
                 ChildDrainOutcome::Interrupted
             } else {
-                let outcome = self
-                    .drain_group_child(&record, &child, now, executors, cancel)
-                    .await?;
+                let outcome = self.drain_group_child(&record, &child, now, cancel).await?;
                 interrupted = outcome == ChildDrainOutcome::Interrupted;
                 attempted |= outcome == ChildDrainOutcome::Settled;
                 outcome
@@ -158,7 +156,6 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         record: &EffectGroupRecord,
         child: &UnsettledGroupChild,
         now_ms: u64,
-        executors: &dyn GroupDrainExecutors,
         cancel: &CancellationToken,
     ) -> Result<ChildDrainOutcome, RuntimeEffectControllerError> {
         // The unsettled read promises a `status` and promises not to filter a
@@ -199,7 +196,14 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
                 ),
             )
         })?;
-        let Some(executor) = executors.executor_for(&envelope) else {
+        // A host that registered no resolver answers `NoExecutor` for every
+        // child, which is the accurate report: the queue is real and another
+        // host can still finish it.
+        let executor = match self.group_executors() {
+            Ok(executors) => executors.executor_for(&envelope),
+            Err(_) => None,
+        };
+        let Some(executor) = executor else {
             return Ok(ChildDrainOutcome::NoExecutor);
         };
         // The `Ok`/`Err` distinction is dropped on purpose. A child reports its

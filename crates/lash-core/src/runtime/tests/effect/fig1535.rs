@@ -16,9 +16,8 @@ use tokio::sync::{Barrier, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-use crate::{
-    CheckedEffectGroup, EffectGroupHandle, GroupWakePolicy, LoserDisposition, RuntimeEffectGroup,
-};
+use crate::testing::conformance::StagedGroupExecutors;
+use crate::{EffectGroupHandle, GroupWakePolicy, LoserDisposition, RuntimeEffectGroup};
 
 const SCOPE: &str = "fig1535-session";
 
@@ -55,11 +54,24 @@ fn group(
     .expect("a group with at least one child assembles")
 }
 
-fn checked(
+/// The resolver every host in this file is registered with.
+///
+/// Since FIG-1578 a group carries envelopes and nothing else: what runs a child
+/// is the resolver its host was registered with. A test stages the executors it
+/// wants under the children's replay keys and opens the group `staged` hands
+/// back. One table for the file is safe — every test namespaces its own group
+/// key, and a test's *second* host must answer the same routing question as its
+/// first without inheriting the first's memory.
+fn executors() -> Arc<StagedGroupExecutors> {
+    static EXECUTORS: std::sync::OnceLock<Arc<StagedGroupExecutors>> = std::sync::OnceLock::new();
+    Arc::clone(EXECUTORS.get_or_init(|| Arc::new(StagedGroupExecutors::new())))
+}
+
+fn staged(
     group: RuntimeEffectGroup,
-    executors: Vec<RuntimeEffectLocalExecutor<'static>>,
-) -> CheckedEffectGroup {
-    CheckedEffectGroup::try_new(group, executors).expect("one executor per child aligns")
+    executors_for_children: Vec<RuntimeEffectLocalExecutor<'static>>,
+) -> RuntimeEffectGroup {
+    executors().stage(group, executors_for_children)
 }
 
 /// An executor that settles as soon as it is polled.
@@ -122,7 +134,17 @@ async fn until(mut condition: impl FnMut() -> bool) {
 }
 
 fn controller() -> InlineRuntimeEffectController {
-    InlineRuntimeEffectController::default()
+    let controller = InlineRuntimeEffectController::default();
+    controller
+        .register_group_executors(executors() as Arc<dyn crate::GroupExecutors>)
+        .expect("a fresh controller has no resolver yet");
+    controller
+}
+
+/// An inline host whose controller resolves grouped children through this
+/// file's staging table.
+fn inline_host() -> crate::InlineEffectHost {
+    crate::InlineEffectHost::new(Arc::new(controller()))
 }
 
 /// The capability flag is the admission gate, and the scoped view a host
@@ -135,7 +157,7 @@ fn controller() -> InlineRuntimeEffectController {
 async fn the_inline_tier_supports_groups_through_the_scoped_host_view() {
     use crate::EffectHost;
 
-    let host = crate::InlineEffectHost::default();
+    let host = inline_host();
     let scoped = host
         .scoped(crate::ExecutionScope::runtime_operation("fig1535-scoped"))
         .expect("scoped controller");
@@ -147,7 +169,7 @@ async fn the_inline_tier_supports_groups_through_the_scoped_host_view() {
     let key = "fig1535:scoped";
     let mut handle = scoped
         .controller()
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 1,
@@ -184,9 +206,17 @@ async fn the_inline_host_satisfies_the_shared_effect_group_suite() {
     // view of the same substrate", and on a tier whose substrate *is* the
     // process, that is this object. A fresh `InlineEffectHost` per call would be
     // a different substrate, which is the one thing the factory may not be.
-    let host: std::sync::Arc<dyn crate::EffectHost> =
-        std::sync::Arc::new(crate::InlineEffectHost::default());
-    crate::testing::conformance::effect_group_host_conformance(move || {
+    //
+    // The suite hands its own resolver to every factory call, and registering it
+    // is what makes this host support groups at all.
+    let controller = Arc::new(InlineRuntimeEffectController::default());
+    let host: std::sync::Arc<dyn crate::EffectHost> = std::sync::Arc::new(
+        crate::InlineEffectHost::new(Arc::clone(&controller) as Arc<dyn RuntimeEffectController>),
+    );
+    crate::testing::conformance::effect_group_host_conformance(move |suite_executors| {
+        controller
+            .register_group_executors(suite_executors)
+            .expect("the suite registers one resolver on this host");
         std::sync::Arc::clone(&host)
     })
     .await;
@@ -204,7 +234,7 @@ async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs() {
     let key = "fig1535:race";
     let (slow, loser) = gated();
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 2,
@@ -249,7 +279,7 @@ async fn settlement_n_is_stable_across_re_reads() {
     let key = "fig1535:stable";
     let (slow, loser) = gated();
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 2,
@@ -320,7 +350,7 @@ async fn siblings_settling_together_get_distinct_sequences() {
         })
         .collect::<Vec<_>>();
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 width,
@@ -366,7 +396,7 @@ async fn awaiting_past_the_last_child_is_refused() {
     let controller = controller();
     let key = "fig1535:exhausted";
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 1,
@@ -402,7 +432,7 @@ async fn a_cancelled_await_leaves_the_rank_to_be_read_again() {
     let key = "fig1535:cancelled-await";
     let (gate, child) = gated();
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 1,
@@ -447,7 +477,7 @@ async fn run_to_completion_losers_settle_after_the_caller_is_gone() {
     let key = "fig1535:run-to-completion";
     let (slow, loser) = gated();
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 3,
@@ -490,7 +520,7 @@ async fn cancel_gives_every_unsettled_child_a_cancellation_terminal() {
     let key = "fig1535:cancel";
     let (slow, loser) = gated();
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(key, 3, GroupWakePolicy::First, LoserDisposition::Cancel),
             vec![immediate(), slow, never()],
         ))
@@ -533,7 +563,7 @@ async fn close_may_narrow_but_never_widen() {
 
     let declared_cancel = "fig1535:declared-cancel";
     let handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 declared_cancel,
                 1,
@@ -567,7 +597,7 @@ async fn close_may_narrow_but_never_widen() {
     // had left running.
     let declared_run = "fig1535:declared-run";
     let handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 declared_run,
                 1,
@@ -615,7 +645,7 @@ async fn closing_twice_under_one_disposition_succeeds() {
     let controller = controller();
     let key = "fig1535:idempotent-close";
     let handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(key, 2, GroupWakePolicy::First, LoserDisposition::Cancel),
             vec![never(), never()],
         ))
@@ -639,7 +669,7 @@ async fn a_closed_group_serves_its_caller_no_further_settlements() {
     let controller = controller();
     let key = "fig1535:closed";
     let handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 2,
@@ -685,7 +715,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
         })
         .collect::<Vec<_>>();
     let handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 2,
@@ -701,7 +731,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
     assert_eq!(handle.group_key(), key);
 
     let narrowed = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 1,
@@ -718,7 +748,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
     );
 
     let rewaked = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 2,
@@ -735,7 +765,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
     );
 
     let redeclared = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(key, 2, GroupWakePolicy::All, LoserDisposition::Cancel),
             vec![immediate(), immediate()],
         ))
@@ -747,7 +777,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
     );
 
     let reopened = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 2,
@@ -787,7 +817,7 @@ async fn the_wake_rule_is_identity_and_the_host_filters_nothing() {
     let key = "fig1535:first-success";
     let (slow, success) = gated();
     let mut handle = controller
-        .open_effect_group(checked(
+        .open_effect_group(staged(
             group(
                 key,
                 2,
@@ -856,7 +886,7 @@ async fn a_close_racing_its_children_seats_one_terminal_per_child() {
             })
             .collect::<Vec<_>>();
         let handle = controller
-            .open_effect_group(checked(
+            .open_effect_group(staged(
                 group(&key, width, GroupWakePolicy::All, LoserDisposition::Cancel),
                 executors,
             ))

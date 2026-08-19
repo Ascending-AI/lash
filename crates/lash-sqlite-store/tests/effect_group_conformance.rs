@@ -12,7 +12,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_core::EffectHost;
+use lash_core::{EffectHost, GroupExecutors};
 use lash_sqlite_store::SqliteEffectHost;
 
 /// Blocks on `future` from a synchronous context.
@@ -35,6 +35,23 @@ where
     .expect("runtime thread")
 }
 
+/// One host over `path`, registered with the suite's executor resolver.
+///
+/// Registration is what makes the host support groups at all: since FIG-1578 a
+/// group carries envelopes, and what runs a child is the resolver its host was
+/// built with.
+fn host(path: &std::path::Path, executors: Arc<dyn GroupExecutors>) -> SqliteEffectHost {
+    let path = path.to_path_buf();
+    let host = sync_await(async move {
+        SqliteEffectHost::open(&path)
+            .await
+            .expect("SQLite effect-group host")
+    });
+    host.register_group_executors(executors)
+        .expect("a freshly opened host has no resolver yet");
+    host
+}
+
 /// The durable SQLite tier answers the effect-group contract the same way the
 /// in-memory reference host does (FIG-1564).
 ///
@@ -44,13 +61,8 @@ where
 async fn sqlite_effect_host_satisfies_the_effect_group_contract() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("effect-groups.db");
-    lash_core::testing::conformance::effect_group_host_conformance(|| {
-        let path = path.clone();
-        Arc::new(sync_await(async move {
-            SqliteEffectHost::open(&path)
-                .await
-                .expect("SQLite effect-group host")
-        })) as Arc<dyn EffectHost>
+    lash_core::testing::conformance::effect_group_host_conformance(|executors| {
+        Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
     })
     .await;
 }
@@ -64,13 +76,8 @@ async fn sqlite_effect_host_satisfies_the_effect_group_contract() {
 async fn sqlite_journals_a_cancelled_child_as_its_terminal() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cancelled-child-terminal.db");
-    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable(|| {
-        let path = path.clone();
-        Arc::new(sync_await(async move {
-            SqliteEffectHost::open(&path)
-                .await
-                .expect("SQLite effect-group host")
-        })) as Arc<dyn EffectHost>
-    })
+    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable(
+        |executors| Arc::new(host(&path, executors)) as Arc<dyn EffectHost>,
+    )
     .await;
 }

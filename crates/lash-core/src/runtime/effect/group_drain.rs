@@ -66,8 +66,9 @@
 //!
 //! Not which effects this host can run: a journaled envelope names a command,
 //! and whether this process can execute that command is the host's own fact.
-//! [`GroupDrainExecutors`] is where the host answers, and answering "not mine"
-//! is a first-class answer rather than a fabricated outcome.
+//! [`GroupExecutors`] is where the host answers, and answering "not mine"
+//! is a first-class answer rather than a fabricated outcome. That seam is no
+//! longer the drain's alone — see its own documentation.
 //!
 //! Not *when* to run: the drain is a driver a host calls, not a background
 //! sweeper that decides its own cadence. A never-closed group stays the named
@@ -80,30 +81,54 @@ use super::envelope::RuntimeEffectEnvelope;
 use super::executor::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor};
 use super::group::LoserDisposition;
 
-/// How a host supplies the executor a drained child runs on.
+/// How a host says what runs a grouped child, from that child's envelope alone.
 ///
-/// The drain rebuilds a child's envelope from the journal, but an envelope is
-/// not an execution: a `Process` command needs the process runner, a tool
-/// attempt needs the host's tool surface, and neither is a fact the effect
-/// journal records or the drain could reconstruct. This is the wiring seam for
-/// that, and it is explicit on purpose — passed to
-/// [`into_group_drain`](super::effect_replay_driver::EffectReplayDriver::into_group_drain)
-/// by the host that owns those runners, rather than reached for out of whatever
-/// session happens to be in scope. A drain assembled from ambient state would
-/// run a losing child against a session that is not the one that opened it.
+/// **This is the contract's only executor-resolution seam** (ADR 0065, amended).
+/// An envelope names a command; it is not an execution. A `Process` command
+/// needs the process runner, a tool attempt needs the host's tool surface, and
+/// neither is a fact the effect journal records or a caller could ship across a
+/// crash. The host owns those runners, so the host answers — once, wired at the
+/// host rather than reached for out of whatever session happens to be in scope,
+/// because a resolver assembled from ambient state would run a losing child
+/// against a session that is not the one that opened it.
+///
+/// # Every path resolves here
+///
+/// [`open_effect_group`](super::RuntimeEffectController::open_effect_group)
+/// resolves each child through this seam before journaling the group, a host
+/// retrying a child resolves it again through this seam, and the loser drain
+/// resolves the children of a group whose caller is gone through this seam. One
+/// host therefore has exactly one answer to "what code runs this journaled
+/// child", whichever path is asking, which is the property that made the earlier
+/// caller-supplied executor vec redundant: three of the four paths already
+/// bypassed it, and the fourth accepted it only to drop it.
+///
+/// This is also where the ratified `'static` property lives. A grouped child
+/// must be able to outlive the caller that opened it, because
+/// [`LoserDisposition::RunToCompletion`] says a losing promise keeps running;
+/// the executors handed out here are `'static`, so
+/// [`supports_effect_groups`](super::RuntimeEffectController::supports_effect_groups)
+/// may answer `true` exactly where a host has registered one of these and not
+/// otherwise.
+///
+/// # `None` is a routing fact, not an outcome
 ///
 /// Returning `None` is a supported answer and the honest one when this host
-/// cannot run the command: the child stays unsettled and the pass reports
-/// [`ChildDrainOutcome::NoExecutor`], which is a queue another host can still
-/// finish. The alternative — an executor that fabricates an outcome — would
-/// journal a terminal no effect ever produced.
-pub trait GroupDrainExecutors: Send + Sync {
+/// cannot run the command. It never becomes a settlement: an executor that
+/// fabricated an outcome would journal a terminal no effect ever produced. What
+/// it becomes depends on who asked. An **open** refuses the whole group with a
+/// typed group-shape error before anything is journaled, because a group whose
+/// child can never settle is a group whose ranks above that child can never be
+/// served. A **drain pass** leaves the child alone and reports
+/// [`ChildDrainOutcome::NoExecutor`], because there the group is already
+/// journaled and a queue another host can finish is the accurate description.
+pub trait GroupExecutors: Send + Sync {
     /// The executor for `envelope`, or `None` when this host cannot run it.
     ///
-    /// Called once per child per pass, with the envelope as the journal
-    /// recorded it, including its
-    /// [`EffectGroupMembership`](super::group::EffectGroupMembership) — so a
-    /// host can route on the group as well as on the command.
+    /// Called once per child per resolution, with the envelope as the journal
+    /// recorded it — or, at open, as the group carries it — including its
+    /// [`EffectGroupMembership`](super::group::EffectGroupMembership), so a host
+    /// can route on the group as well as on the command.
     fn executor_for(
         &self,
         envelope: &RuntimeEffectEnvelope,
@@ -274,7 +299,7 @@ pub enum ChildDrainOutcome {
     /// from here would be the drain inventing a terminal for a child it never
     /// ran.
     CancelDeclared,
-    /// Left alone: [`GroupDrainExecutors`] had no executor for this command, so
+    /// Left alone: [`GroupExecutors`] had no executor for this command, so
     /// this host cannot run it. Reported rather than skipped silently, because a
     /// child no host will run is a queue that never empties and an operator has
     /// to be able to see it.

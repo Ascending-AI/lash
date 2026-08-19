@@ -4,11 +4,12 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CheckedEffectGroup,
-    EffectGroupHandle, EffectHost, EffectJournalRetirement, ExecutionScope, GroupSettlement,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectGroupHandle,
+    EffectHost, EffectJournalRetirement, ExecutionScope, GroupSettlement,
     InlineRuntimeEffectController, LoserDisposition, Resolution, ResolveOutcome,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
+    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
+    SegmentProgress,
 };
 use crate::RuntimeError;
 
@@ -258,7 +259,7 @@ impl RuntimeEffectController for InlineHostScopedController {
 
     async fn open_effect_group(
         &self,
-        group: CheckedEffectGroup,
+        group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         self.controller.open_effect_group(group).await
     }

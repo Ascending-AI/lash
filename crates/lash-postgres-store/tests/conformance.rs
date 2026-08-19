@@ -1439,14 +1439,20 @@ async fn postgres_effect_host_satisfies_the_effect_group_contract_when_configure
     reset(&storage).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_core::testing::conformance::effect_group_host_conformance(|| {
+    lash_core::testing::conformance::effect_group_host_conformance(|executors| {
         let database_url = database_url.clone();
         let storage = sync_await(async move {
             PostgresStorage::connect(&database_url)
                 .await
                 .expect("PostgreSQL effect-group host")
         });
-        Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
+        let host = storage.effect_host();
+        // Registration is what makes the host support groups at all: since
+        // FIG-1578 a group carries envelopes, and what runs a child is the
+        // resolver its host was built with.
+        host.register_group_executors(executors)
+            .expect("a freshly connected host has no resolver yet");
+        Arc::new(host) as Arc<dyn EffectHost>
     })
     .await;
     drop(database_lock);
@@ -1468,15 +1474,23 @@ async fn postgres_journals_a_cancelled_child_as_its_terminal_when_configured() {
     reset(&storage).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable(|| {
-        let database_url = database_url.clone();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("PostgreSQL effect-group host")
-        });
-        Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
-    })
+    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable(
+        |executors| {
+            let database_url = database_url.clone();
+            let storage = sync_await(async move {
+                PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("PostgreSQL effect-group host")
+            });
+            let host = storage.effect_host();
+            // Registration is what makes the host support groups at all: since
+            // FIG-1578 a group carries envelopes, and what runs a child is the
+            // resolver its host was built with.
+            host.register_group_executors(executors)
+                .expect("a freshly connected host has no resolver yet");
+            Arc::new(host) as Arc<dyn EffectHost>
+        },
+    )
     .await;
     drop(database_lock);
 }

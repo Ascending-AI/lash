@@ -64,12 +64,10 @@ impl RuntimeEffectController for GroupSupportingEffectController {
 
     async fn open_effect_group(
         &self,
-        group: crate::CheckedEffectGroup,
+        group: crate::RuntimeEffectGroup,
     ) -> Result<crate::EffectGroupHandle, RuntimeEffectControllerError> {
-        // No arity check to write: the pairing arrived checked, which is the
-        // point of taking `CheckedEffectGroup` rather than two parameters.
-        let (group, executors) = group.into_parts();
-        assert_eq!(executors.len(), group.children().len());
+        // Nothing to check about executors here: since FIG-1578 a group is
+        // envelopes, and what runs a child is this host's registered resolver.
         *self.declared.lock().expect("declared disposition") = Some(group.loser_disposition());
         Ok(crate::EffectGroupHandle::new(&group))
     }
@@ -130,17 +128,6 @@ fn one_child_group() -> crate::RuntimeEffectGroup {
     .expect("a one-child group assembles")
 }
 
-/// Pairs a group with one unavailable executor per child. Callers cannot skip
-/// this step: `CheckedEffectGroup` is the only thing `open_effect_group` accepts.
-fn checked(group: crate::RuntimeEffectGroup) -> crate::CheckedEffectGroup {
-    let executors = group
-        .children()
-        .iter()
-        .map(|_| crate::RuntimeEffectLocalExecutor::unavailable())
-        .collect();
-    crate::CheckedEffectGroup::try_new(group, executors).expect("one executor per child aligns")
-}
-
 #[tokio::test]
 async fn a_controller_without_group_support_fails_closed_on_every_group_method() {
     let controller = GrouplessEffectController::default();
@@ -153,7 +140,7 @@ async fn a_controller_without_group_support_fails_closed_on_every_group_method()
     let group = one_child_group();
     let mut handle = crate::EffectGroupHandle::new(&group);
     let open = controller
-        .open_effect_group(checked(group))
+        .open_effect_group(group)
         .await
         .expect_err("opening a group must fail closed");
     assert_eq!(
@@ -202,7 +189,7 @@ async fn the_group_capability_flag_and_the_group_methods_must_agree() {
         let declared = group.loser_disposition();
         let fallback = crate::EffectGroupHandle::new(&group);
 
-        let opened = controller.open_effect_group(checked(group)).await;
+        let opened = controller.open_effect_group(group).await;
         let refuses_open = opened
             .as_ref()
             .err()

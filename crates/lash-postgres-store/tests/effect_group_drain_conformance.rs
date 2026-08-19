@@ -38,7 +38,9 @@ async fn world(database_url: String, spec: DrainWorldSpec) -> DrainWorld {
             .expect("the suite asks for a ttl at least three renew intervals wide"),
     };
     let host = PostgresEffectHost::with_options(&storage, options);
-    let drain = host.group_drain(spec.executors);
+    host.register_group_executors(spec.executors)
+        .expect("a freshly connected host has no resolver yet");
+    let drain = host.group_drain();
     DrainWorld {
         host: Arc::new(host) as Arc<dyn EffectHost>,
         drain,

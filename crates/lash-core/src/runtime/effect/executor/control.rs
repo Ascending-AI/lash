@@ -10,7 +10,7 @@ use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{
-    CheckedEffectGroup, EffectGroupHandle, GroupSettlement, LoserDisposition,
+    EffectGroupHandle, GroupSettlement, LoserDisposition, RuntimeEffectGroup,
 };
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor};
 
@@ -1057,11 +1057,14 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// startup instead of mid-turn on the first `Promise.all`. It gates
     /// *admission*, not dispatch.
     ///
-    /// A host may answer `true` only if it can also supply `'static` executors
-    /// for the children: a child must be able to outlive its caller to honor
-    /// [`LoserDisposition::RunToCompletion`], and
-    /// [`EffectHost::scoped_static`] is explicitly not universally available.
-    /// The two capabilities are one question and must not drift apart.
+    /// A host may answer `true` only if it owns a registered
+    /// [`GroupExecutors`](super::super::group_drain::GroupExecutors) resolver,
+    /// because that resolver is where the children's `'static` executors come
+    /// from: a child must be able to outlive its caller to honor
+    /// [`LoserDisposition::RunToCompletion`], and a host with nothing to resolve
+    /// a journaled child's envelope through cannot run one child, let alone
+    /// outlive a caller with it. The capability and the resolver are one
+    /// question and must not drift apart.
     fn supports_effect_groups(&self) -> bool {
         false
     }
@@ -1070,33 +1073,35 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     ///
     /// Returns once the group is durably recorded, **not** when a child settles.
     ///
-    /// The single [`CheckedEffectGroup`] parameter carries the group together
-    /// with one `'static` executor per child, positionally aligned with
-    /// [`RuntimeEffectGroup::children`](crate::RuntimeEffectGroup::children) — an
-    /// alignment [`CheckedEffectGroup::try_new`] has already established, since it
-    /// is the type's only constructor and this method takes nothing else. That is
-    /// deliberate: "executor `i` runs child `i`" is the load-bearing claim, and a
-    /// two-parameter signature would leave checking it an obligation on every
-    /// implementation rather than a property of the argument.
+    /// The one parameter is the group itself: **envelopes, and nothing else**.
+    /// A caller does not supply the code that runs a child, because a caller
+    /// cannot: three of the four paths that execute a grouped child — a retry, a
+    /// drain of a group whose caller is gone, and an engine tier's own child
+    /// invocation — happen where no caller is in scope, so a host that could
+    /// only run what a caller handed it could not honor the contract at all. The
+    /// host resolves every child from its journaled envelope through its
+    /// registered [`GroupExecutors`](super::super::group_drain::GroupExecutors),
+    /// which is the same seam the loser drain resolves through, so one host has
+    /// one answer to "what code runs this child" on every path.
     ///
-    /// The `'static` lifetime is the ratified property: children must outlive the
-    /// caller's future under [`LoserDisposition::RunToCompletion`], and the
-    /// borrow-scoped `RuntimeEffectLocalExecutor<'_>` taken by
+    /// The `'static` property is unchanged and still ratified — children must
+    /// outlive the caller's future under
+    /// [`LoserDisposition::RunToCompletion`], and the borrow-scoped
+    /// `RuntimeEffectLocalExecutor<'_>` taken by
     /// [`execute_effect`](Self::execute_effect) carries the one lifetime this
-    /// contract exists to break. A checked `Vec` rather than a factory closure
-    /// keeps that property while making an out-of-range position, a second
-    /// executor for one child, and an arity mismatch unrepresentable instead of
-    /// resolved by panic or convention. A child with no runnable executor is
-    /// expressed as [`RuntimeEffectLocalExecutor::unavailable`], not as a missing
-    /// element.
+    /// contract exists to break — it just lives at the resolver now rather than
+    /// at the argument.
     ///
-    /// Each executor is **single-execution**:
-    /// [`RuntimeEffectLocalExecutor::execute`] consumes `self`, so the vec funds
-    /// one attempt per child and no retry. A host that retries a child obtains a
-    /// fresh executor from [`EffectHost::scoped_static`] — the same source the
-    /// capability flag's `'static` requirement points at, and the mechanism by
-    /// which the group-drain path runs or cancels losers after the caller is
-    /// gone. Take ownership through [`CheckedEffectGroup::into_parts`].
+    /// **A child with no runner is a routing fact, not an outcome.** An
+    /// in-process host resolves *all* of the group's children before it journals
+    /// anything, and refuses the whole open with a typed
+    /// [`RuntimeEffectGroupShape`](crate::RuntimeErrorCode::RuntimeEffectGroupShape)
+    /// error if any child resolves to `None`. Journaling first and discovering
+    /// the gap later would leave a recorded group holding a child that can never
+    /// settle, so every rank above it is unservable and the caller waits forever
+    /// — the same failure the retired executor-vec arity check existed to
+    /// prevent, now unrepresentable by absence because there is no vec to
+    /// misalign.
     ///
     /// A reopen must be fenced on group shape: a host that finds a recorded group
     /// under this key whose child count or wake rule differs from the group
@@ -1110,7 +1115,7 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// error.
     async fn open_effect_group(
         &self,
-        _group: CheckedEffectGroup,
+        _group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         Err(RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::EffectGroupUnsupported,

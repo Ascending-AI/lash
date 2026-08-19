@@ -3,8 +3,9 @@
 //!
 //! The suite lives in `lash-core` so both SQL tiers answer one set of laws. All
 //! this file supplies is the wiring the laws are about: a host over a fixed
-//! database file, built with the lease window the law asked for, and the drain
-//! that host hands out when it is given executors.
+//! database file, built with the lease window the law asked for, registered with
+//! the resolver the law supplied, and the drain that host hands out over the
+//! same journal and the same resolver.
 //!
 //! Its own integration test rather than a case in the group-contract file: the
 //! drain laws destroy Tokio runtimes on purpose, and a law that kills the
@@ -34,7 +35,9 @@ async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
     let host = SqliteEffectHost::open_with_options(&path, options)
         .await
         .expect("SQLite effect host");
-    let drain = host.group_drain(spec.executors);
+    host.register_group_executors(spec.executors)
+        .expect("a freshly opened host has no resolver yet");
+    let drain = host.group_drain();
     DrainWorld {
         host: Arc::new(host) as Arc<dyn EffectHost>,
         drain,
