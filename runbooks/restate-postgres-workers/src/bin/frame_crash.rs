@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
-use lash::TurnInput;
+use lash::{QueuedTurnDrain, TurnInput};
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
 use lash_core::{LeaseOwnerIdentity, ProcessRegistry, facade_support::LeaseTimings};
 use lash_postgres_store::PostgresStorage;
@@ -124,16 +124,17 @@ async fn run(mode: &str) -> Result<()> {
             let deadline = tokio::time::Instant::now() + RECOVERY_DEADLINE;
             loop {
                 match session.queued_turn().run().await? {
-                    None if tokio::time::Instant::now() < deadline => {
+                    QueuedTurnDrain::Empty(_) if tokio::time::Instant::now() < deadline => {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
-                    None => {
+                    QueuedTurnDrain::Empty(reason) => {
                         anyhow::bail!(
                             "mid-follow worker did not acquire the expired session lease within \
-                             {RECOVERY_DEADLINE:?}"
+                             {RECOVERY_DEADLINE:?} (last drain: {})",
+                            reason.as_str()
                         );
                     }
-                    Some(_) => {
+                    QueuedTurnDrain::Ran(_) => {
                         anyhow::bail!(
                             "mid-follow reached a terminal result before the effect-loop crash probe"
                         );
@@ -145,14 +146,15 @@ async fn run(mode: &str) -> Result<()> {
             let deadline = tokio::time::Instant::now() + RECOVERY_DEADLINE;
             let recovered = loop {
                 match session.queued_turn().run().await? {
-                    Some(recovered) => break recovered,
-                    None if tokio::time::Instant::now() < deadline => {
+                    QueuedTurnDrain::Ran(recovered) => break recovered,
+                    QueuedTurnDrain::Empty(_) if tokio::time::Instant::now() < deadline => {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
-                    None => {
+                    QueuedTurnDrain::Empty(reason) => {
                         anyhow::bail!(
                             "recovery worker did not acquire the expired session lease within \
-                             {RECOVERY_DEADLINE:?}"
+                             {RECOVERY_DEADLINE:?} (last drain: {})",
+                            reason.as_str()
                         );
                     }
                 }

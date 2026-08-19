@@ -245,6 +245,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         )
         .await
         .expect("claim queued work under first generation")
+        .claim()
         .expect("queued work claim under first generation exists");
     fenced_store
         .claim_next_turn_inputs(
@@ -267,6 +268,7 @@ async fn session_store_factory_claimable_queued_work_peek(
             )
             .await
             .expect("re-scan live queued-work claim")
+            .claim()
             .is_none(),
         "a live same-generation queued-work claim is fenced"
     );
@@ -331,6 +333,7 @@ async fn session_store_factory_claimable_queued_work_peek(
             )
             .await
             .expect("reclaim queued work under successor generation")
+            .claim()
             .is_some(),
         "a superseded queued-work claim is claimable"
     );

@@ -67,6 +67,7 @@ impl QueuedWorkStore for RuntimePerfStore {
             owner,
             RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand,
         )
+        .map(lash_core::QueuedWorkClaimOutcome::claim)
     }
 
     async fn claim_ready_queued_work(
@@ -76,7 +77,7 @@ impl QueuedWorkStore for RuntimePerfStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<lash_core::QueuedWorkClaimOutcome, StoreError> {
         self.claim_ready_queued_work_perf(
             session_id,
             session_execution_lease,
@@ -105,15 +106,17 @@ impl QueuedWorkStore for RuntimePerfStore {
             max_inputs,
         )
         .await?;
-        let queued_work_claim = self.claim_ready_queued_work_perf(
-            session_id,
-            session_execution_lease,
-            owner,
-            RuntimePerfQueuedWorkClaimKind::TurnWork {
-                boundary: QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                policy,
-            },
-        )?;
+        let queued_work_claim = self
+            .claim_ready_queued_work_perf(
+                session_id,
+                session_execution_lease,
+                owner,
+                RuntimePerfQueuedWorkClaimKind::TurnWork {
+                    boundary: QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+                    policy,
+                },
+            )?
+            .claim();
         Ok((turn_input_claim, queued_work_claim))
     }
 
@@ -262,7 +265,8 @@ impl QueuedWorkStore for RuntimePerfStore {
             boundary,
             &policy,
             now,
-        )?;
+        )?
+        .len;
         if selected_len == 0 {
             return Ok(SelectedQueuedWorkClaimOutcome::new(
                 None,

@@ -48,6 +48,7 @@ pub use crate::session::{
     EnqueueTurnBuilder, LashSession, ObservableSession, ParkedSession, SessionBuilder,
 };
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
+pub use crate::turn::queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub use crate::turn::{
     QueuedTurnBuilder, SelectedQueuedTurnBuilder, SelectedQueuedWorkBatchSatisfaction,
     SelectedQueuedWorkDrainOutcome, TurnActivityFanout, TurnBuilder, TurnOutput, TurnResult,
@@ -60,11 +61,11 @@ pub use lash_core::{
     ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelResult, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, QueuedDrainCandidate, QueuedDrainPolicy,
-    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, Resolution, ResolveOutcome,
-    SessionCreateRequest, SessionError, SessionStartPoint, TurnActivity, TurnActivityId,
-    TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent, TurnInput, TurnInputApplication,
-    facade_support::ExecutionSummary, facade_support::GenerationOverlay,
-    facade_support::PluginStack, facade_support::SessionCommand,
+    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, QueuedWorkClaimRefusal,
+    Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionStartPoint,
+    TurnActivity, TurnActivityId, TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent,
+    TurnInput, TurnInputApplication, facade_support::ExecutionSummary,
+    facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
     facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
     facade_support::TurnAttach, facade_support::TurnCancelOutcome,
@@ -227,7 +228,6 @@ pub mod persistence {
         SessionLeaseDiagnostics, SessionLeaseHolder, SessionLeaseRenewal,
     };
     pub use lash_core::CheckpointKind;
-    pub use lash_core::SelectedQueuedWorkClaimOutcome;
     pub use lash_core::facade_support::FileAttachmentStore;
     pub use lash_core::runtime::{
         DeliveryPolicy, ForkPoint, ForkSessionRequest, ForkSessionResult, InMemorySessionStore,
@@ -241,6 +241,7 @@ pub mod persistence {
         TurnInputIngress, TurnInputState,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
+    pub use lash_core::{QueuedWorkClaimOutcome, SelectedQueuedWorkClaimOutcome};
     pub mod queued_work {
         pub use lash_core::store::queued_work::{
             QueuedWorkClass, claim_scan_limit, derive_batch_id,

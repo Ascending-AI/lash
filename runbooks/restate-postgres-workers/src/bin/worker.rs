@@ -177,6 +177,7 @@ impl AppState {
             .stream_to(&sink)
             .await
             .map_err(terminal_error)?;
+        let turn = turn.ran();
         let final_value = turn
             .as_ref()
             .and_then(|turn| turn.final_value().cloned())
@@ -329,6 +330,7 @@ impl AppState {
             .run()
             .await
             .map_err(terminal_error)?
+            .ran()
             .ok_or_else(|| terminal_error("first queued frame-switch turn did not run"))?;
         let first_value = first_turn.final_value().cloned().ok_or_else(|| {
             terminal_error("queued frame-switch follow-on produced no final value")
@@ -354,6 +356,7 @@ impl AppState {
             .run()
             .await
             .map_err(terminal_error)?
+            .ran()
             .ok_or_else(|| terminal_error("second queued turn did not run"))?;
         let second_value = second_turn
             .final_value()
@@ -421,6 +424,7 @@ impl AppState {
             .run()
             .await
             .map_err(terminal_error)?
+            .ran()
             .ok_or_else(|| terminal_error("cancellable queued turn did not run"))?;
         let cancel_count = canceller
             .await

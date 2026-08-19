@@ -15,7 +15,8 @@ impl RuntimeScenarioContext {
                     crate::testing::queued_work_claim_policy(10),
                 )
                 .await
-                .expect("turn claim before command");
+                .expect("turn claim before command")
+                .claim();
             assert_eq!(
                 blocked_turn.is_none(),
                 expected,
@@ -54,7 +55,8 @@ impl RuntimeScenarioContext {
                 crate::testing::queued_work_claim_policy(10),
             )
             .await
-            .expect("claim ready turn work");
+            .expect("claim ready turn work")
+            .claim();
         assert_eq!(
             turn_claim
                 .as_ref()

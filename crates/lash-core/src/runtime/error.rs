@@ -92,6 +92,11 @@ pub enum RuntimeErrorCode {
     PostgresAwaitEventStore,
     PostgresEffectJournalRetirement,
     QueuedWork,
+    /// One queued row alone renders larger than the whole model context window,
+    /// so no drain policy can make it fit and an automatic drain cannot execute
+    /// it (FIG-1313). Retrying the identical drain fails identically until the
+    /// row is cancelled or the window grows.
+    QueuedWorkRowExceedsContextWindow,
     ProcessPanicked,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose target is outside the invoking session's visible set.
@@ -309,6 +314,7 @@ impl RuntimeErrorCode {
             Self::PostgresAwaitEventStore => "postgres_await_event_store",
             Self::PostgresEffectJournalRetirement => "postgres_effect_journal_retirement",
             Self::QueuedWork => "queued_work",
+            Self::QueuedWorkRowExceedsContextWindow => "queued_work_row_exceeds_context_window",
             Self::ProcessPanicked => "process_panicked",
             Self::ProcessNotVisible => "process_not_visible",
             Self::ProcessAlreadyTerminal => "process_already_terminal",
@@ -489,6 +495,7 @@ impl RuntimeErrorCode {
                 | Self::EffectPanicked
                 | Self::MissingExecutionScopeId
                 | Self::ExecutionScopeTurnIdMismatch
+                | Self::QueuedWorkRowExceedsContextWindow
                 | Self::StoreCommitNodeBudgetExceeded
                 | Self::StoreCommitByteBudgetExceeded
                 | Self::CheckpointComponentEncodingVersionMismatch
@@ -661,6 +668,7 @@ impl RuntimeErrorCode {
             "postgres_await_event_store" => Self::PostgresAwaitEventStore,
             "postgres_effect_journal_retirement" => Self::PostgresEffectJournalRetirement,
             "queued_work" => Self::QueuedWork,
+            "queued_work_row_exceeds_context_window" => Self::QueuedWorkRowExceedsContextWindow,
             "process_panicked" => Self::ProcessPanicked,
             "process_not_visible" => Self::ProcessNotVisible,
             "process_already_terminal" => Self::ProcessAlreadyTerminal,
@@ -1000,6 +1008,7 @@ mod tests {
             | RuntimeErrorCode::EffectPanicked
             | RuntimeErrorCode::MissingExecutionScopeId
             | RuntimeErrorCode::ExecutionScopeTurnIdMismatch
+            | RuntimeErrorCode::QueuedWorkRowExceedsContextWindow
             | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
             | RuntimeErrorCode::StoreCommitByteBudgetExceeded
             | RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
@@ -1188,6 +1197,7 @@ mod tests {
             RuntimeErrorCode::PostgresAwaitEventStore,
             RuntimeErrorCode::PostgresEffectJournalRetirement,
             RuntimeErrorCode::QueuedWork,
+            RuntimeErrorCode::QueuedWorkRowExceedsContextWindow,
             RuntimeErrorCode::ProcessPanicked,
             RuntimeErrorCode::ProcessNotVisible,
             RuntimeErrorCode::ProcessAlreadyTerminal,

@@ -38,6 +38,85 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
     },
 }
 
+/// Why an automatic queued-turn drain executed no turn.
+///
+/// An automatic drain names no batch ids, so there is nothing for a host to
+/// inspect afterwards: this reason is the whole account of the empty drain.
+/// Reading one variant as another is how queued work gets abandoned — a drain
+/// that never reached its input is retryable, while an exhausted queue is not.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EmptyQueuedDrainReason {
+    /// Another execution holds the session execution lane, so this drain never
+    /// looked at the queue. Nothing was consumed and the work is retryable.
+    ExecutionLaneBusy,
+    /// The session has no durable store, so no queue exists to drain.
+    NoDurableQueue,
+    /// The queue was reachable and the claim state machine refused it.
+    ClaimRefused(crate::QueuedWorkClaimRefusal),
+}
+
+/// One automatic queued-turn drain: the turn it ran, or why it ran none.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub enum QueuedTurnDrain<T> {
+    /// The drain claimed queued work and ran a turn.
+    Ran(T),
+    /// The drain ran no turn, for the named reason.
+    Empty(EmptyQueuedDrainReason),
+}
+
+impl<T> QueuedTurnDrain<T> {
+    /// The turn this drain ran, discarding the empty reason.
+    ///
+    /// Only the crate's own suites need this: host code reads the drain itself,
+    /// so a scenario that only asks whether a turn ran lives behind `testing`.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn ran(self) -> Option<T> {
+        match self {
+            Self::Ran(turn) => Some(turn),
+            Self::Empty(_) => None,
+        }
+    }
+}
+
+/// One drain's result before it is projected onto the caller's contract.
+///
+/// The automatic and exact drains share one implementation but publish different
+/// answers: the exact drain reports per-id satisfaction, the automatic drain
+/// reports why it ran no turn. This carries both so neither contract has to be
+/// reconstructed from the other's evidence.
+struct QueuedWorkDrainResult {
+    outcome: SelectedQueuedWorkDrainOutcome<AssembledTurn>,
+    /// Present exactly when an automatic drain ran no turn.
+    empty_reason: Option<EmptyQueuedDrainReason>,
+}
+
+impl QueuedWorkDrainResult {
+    fn selected(outcome: SelectedQueuedWorkDrainOutcome<AssembledTurn>) -> Self {
+        Self {
+            outcome,
+            empty_reason: None,
+        }
+    }
+
+    /// An automatic drain that executed a turn. It records no empty reason
+    /// because there is no empty drain to explain.
+    fn ran(turn: AssembledTurn) -> Self {
+        Self {
+            outcome: SelectedQueuedWorkDrainOutcome::new(Some(turn), Vec::new()),
+            empty_reason: None,
+        }
+    }
+
+    fn empty(reason: EmptyQueuedDrainReason) -> Self {
+        Self {
+            outcome: SelectedQueuedWorkDrainOutcome::new(None, Vec::new()),
+            empty_reason: Some(reason),
+        }
+    }
+}
+
 /// How one distinct requested batch ID satisfied a successful selected drain.
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1796,13 +1875,24 @@ impl LashRuntime {
     pub async fn stream_next_queued_work(
         &mut self,
         opts: TurnOptions<'_>,
-    ) -> Result<Option<AssembledTurn>, RuntimeError> {
+    ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         match self.stream_queued_work(opts, None).await {
-            Ok(outcome) => Ok(outcome.turn),
-            Err(SelectedQueuedWorkDrainError::Runtime(error)) => Err(error),
-            Err(SelectedQueuedWorkDrainError::Refused { .. }) => {
-                unreachable!("automatic queued-work claims cannot be refused as selected drains")
+            Ok(result) => {
+                Ok(match result.outcome.turn {
+                    Some(turn) => QueuedTurnDrain::Ran(turn),
+                    None => QueuedTurnDrain::Empty(result.empty_reason.expect(
+                        "an automatic drain that ran no turn always records why it ran none",
+                    )),
+                })
             }
+            Err(SelectedQueuedWorkDrainError::Runtime(error)) => Err(error),
+            // Selected-drain refusals reason about requested batch ids, which an
+            // automatic drain never has. Naming the cause beats panicking: this
+            // API's whole contract is that it says why it ran no turn.
+            Err(SelectedQueuedWorkDrainError::Refused { cause }) => Err(RuntimeError::new(
+                RuntimeErrorCode::QueuedWork,
+                format!("automatic queued-work drain refused: {cause:?}"),
+            )),
         }
     }
 
@@ -1811,14 +1901,16 @@ impl LashRuntime {
         opts: TurnOptions<'_>,
         batch_ids: &[String],
     ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>, SelectedQueuedWorkDrainError> {
-        self.stream_queued_work(opts, Some(batch_ids)).await
+        self.stream_queued_work(opts, Some(batch_ids))
+            .await
+            .map(|result| result.outcome)
     }
 
     async fn stream_queued_work(
         &mut self,
         opts: TurnOptions<'_>,
         selected_batch_ids: Option<&[String]>,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>, SelectedQueuedWorkDrainError> {
+    ) -> Result<QueuedWorkDrainResult, SelectedQueuedWorkDrainError> {
         let selected_batch_ids = selected_batch_ids.map(|batch_ids| {
             let mut seen = std::collections::BTreeSet::new();
             batch_ids
@@ -1851,17 +1943,19 @@ impl LashRuntime {
                     .iter()
                     .all(|batch_id| !present_ids.contains(batch_id))
                 {
-                    return Ok(SelectedQueuedWorkDrainOutcome::new(
-                        None,
-                        batch_ids
-                            .iter()
-                            .cloned()
-                            .map(
-                                |batch_id| SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
-                                    batch_id,
-                                },
-                            )
-                            .collect(),
+                    return Ok(QueuedWorkDrainResult::selected(
+                        SelectedQueuedWorkDrainOutcome::new(
+                            None,
+                            batch_ids
+                                .iter()
+                                .cloned()
+                                .map(|batch_id| {
+                                    SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                                        batch_id,
+                                    }
+                                })
+                                .collect(),
+                        ),
                     ));
                 }
             }
@@ -1870,7 +1964,22 @@ impl LashRuntime {
                     cause: SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy,
                 })
             } else {
-                Ok(SelectedQueuedWorkDrainOutcome::new(None, Vec::new()))
+                // The lane claim declines for two different reasons, and only one
+                // of them is retryable: a session with no durable store has no
+                // queue at all, while a busy lane means someone else is draining
+                // work this caller can still get later.
+                Ok(QueuedWorkDrainResult::empty(
+                    if self
+                        .session
+                        .as_ref()
+                        .and_then(|session| session.history_store())
+                        .is_none()
+                    {
+                        EmptyQueuedDrainReason::NoDurableQueue
+                    } else {
+                        EmptyQueuedDrainReason::ExecutionLaneBusy
+                    },
+                ))
             };
         };
         // This snapshot stays current while leading commands drain because
@@ -1888,7 +1997,9 @@ impl LashRuntime {
                 .map_err(|err| {
                     RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
                 })?;
-            return Ok(SelectedQueuedWorkDrainOutcome::new(None, Vec::new()));
+            return Ok(QueuedWorkDrainResult::empty(
+                EmptyQueuedDrainReason::NoDurableQueue,
+            ));
         };
         let drain_commands_before_turn_input = if selected_batch_ids.is_some() {
             true
@@ -1997,11 +2108,24 @@ impl LashRuntime {
                 return self
                     .settle_session_execution_lease(session_execution_lease.as_ref(), result)
                     .await
-                    .map(|turn| SelectedQueuedWorkDrainOutcome::new(turn, Vec::new()))
+                    .map(|turn| {
+                        QueuedWorkDrainResult::ran(
+                            turn.expect("logical turn always contains a terminal physical turn"),
+                        )
+                    })
                     .map_err(Into::into);
             }
         }
-        let claim = if let Some(batch_ids) = selected_batch_ids {
+        // Both claim families answer with the rows they took plus, when they took
+        // none, the refusal that explains it. An exact drain reasons about its
+        // requested ids instead, so only the automatic family's refusal travels.
+        let claim: Result<
+            (
+                crate::SelectedQueuedWorkClaimOutcome,
+                Option<crate::QueuedWorkClaimRefusal>,
+            ),
+            crate::StoreError,
+        > = if let Some(batch_ids) = selected_batch_ids {
             let claim_policy = self
                 .host
                 .core
@@ -2018,6 +2142,7 @@ impl LashRuntime {
                     claim_policy,
                 )
                 .await
+                .map(|outcome| (outcome, None))
         } else {
             let claim_policy = self
                 .host
@@ -2034,7 +2159,13 @@ impl LashRuntime {
                     claim_policy,
                 )
                 .await
-                .map(|claim| crate::SelectedQueuedWorkClaimOutcome::new(claim, Vec::new()))
+                .map(|outcome| {
+                    let refusal = outcome.refusal();
+                    (
+                        crate::SelectedQueuedWorkClaimOutcome::new(outcome.claim(), Vec::new()),
+                        refusal,
+                    )
+                })
         };
         let claim_outcome = match claim {
             Err(crate::StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
@@ -2066,6 +2197,20 @@ impl LashRuntime {
                     .map_err(|err| {
                         RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
                     })?;
+                if selected_batch_ids.is_none() {
+                    // An automatic drain names no batch ids, so a selected-drain
+                    // refusal has nothing to refuse. The fault is deterministic
+                    // and terminal: name it as an error the host can classify
+                    // instead of letting it reach the empty-reason contract.
+                    return Err(SelectedQueuedWorkDrainError::Runtime(RuntimeError::new(
+                        RuntimeErrorCode::QueuedWorkRowExceedsContextWindow,
+                        format!(
+                            "queued row `{batch_id}` (enqueue_seq {batch_enqueue_seq}) renders \
+                             {rendered_tokens} tokens, larger than the whole \
+                             {max_context_tokens}-token context window"
+                        ),
+                    )));
+                }
                 return Err(SelectedQueuedWorkDrainError::Refused {
                     cause: SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
                         batch_id,
@@ -2077,6 +2222,7 @@ impl LashRuntime {
             }
             other => other.map_err(super::runtime_error_from_store_commit)?,
         };
+        let (claim_outcome, claim_refusal) = claim_outcome;
         let already_satisfied_batch_ids = claim_outcome.already_satisfied_batch_ids;
         let Some(claim) = claim_outcome.claim else {
             session_execution_lease
@@ -2096,17 +2242,19 @@ impl LashRuntime {
                     .cloned()
                     .collect::<Vec<_>>();
                 if unclaimed_batch_ids.is_empty() {
-                    Ok(SelectedQueuedWorkDrainOutcome::new(
-                        None,
-                        batch_ids
-                            .iter()
-                            .cloned()
-                            .map(
-                                |batch_id| SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
-                                    batch_id,
-                                },
-                            )
-                            .collect(),
+                    Ok(QueuedWorkDrainResult::selected(
+                        SelectedQueuedWorkDrainOutcome::new(
+                            None,
+                            batch_ids
+                                .iter()
+                                .cloned()
+                                .map(|batch_id| {
+                                    SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
+                                        batch_id,
+                                    }
+                                })
+                                .collect(),
+                        ),
                     ))
                 } else {
                     Err(SelectedQueuedWorkDrainError::Refused {
@@ -2116,7 +2264,11 @@ impl LashRuntime {
                     })
                 }
             } else {
-                Ok(SelectedQueuedWorkDrainOutcome::new(None, Vec::new()))
+                Ok(QueuedWorkDrainResult::empty(
+                    EmptyQueuedDrainReason::ClaimRefused(claim_refusal.expect(
+                        "an automatic claim that acquired no rows always names its refusal",
+                    )),
+                ))
             };
         };
         let mut selected_satisfaction = Vec::new();
@@ -2233,7 +2385,12 @@ impl LashRuntime {
         }
         self.settle_session_execution_lease(session_execution_lease.as_ref(), result)
             .await
-            .map(|turn| SelectedQueuedWorkDrainOutcome::new(turn, selected_satisfaction))
+            .map(|turn| {
+                QueuedWorkDrainResult::selected(SelectedQueuedWorkDrainOutcome::new(
+                    turn,
+                    selected_satisfaction,
+                ))
+            })
             .map_err(Into::into)
     }
 

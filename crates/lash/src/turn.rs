@@ -11,9 +11,12 @@ use lash_core::facade_support::{
 
 pub use lash_core::{facade_support::AssistantOutput, facade_support::TurnIssue};
 
+pub(crate) mod queued_drain;
 mod selected_drain;
 
-use selected_drain::{selected_drain_outcome, selected_drain_refusal_cause};
+use lash_core::QueuedWorkClaimRefusal;
+pub(crate) use queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
+use selected_drain::{queued_turn_drain, selected_drain_outcome, selected_drain_refusal_cause};
 
 /// How one distinct requested batch ID satisfied a successful selected drain.
 ///
@@ -676,18 +679,22 @@ impl QueuedTurnBuilder {
         }
     }
 
-    pub async fn run(self) -> Result<Option<TurnOutput>> {
+    /// Drains the next claimable queued work and runs it as one turn.
+    ///
+    /// A drain that runs no turn returns [`QueuedTurnDrain::Empty`] carrying the
+    /// reason, which the host must interpret rather than guess at.
+    pub async fn run(self) -> Result<QueuedTurnDrain<TurnOutput>> {
         let collector = RunActivityCollector::default();
-        let Some(result) = self.stream_to(&collector).await? else {
-            return Ok(None);
-        };
-        Ok(Some(TurnOutput {
+        Ok(self.stream_to(&collector).await?.map(|result| TurnOutput {
             result,
             activities: collector.into_activities(),
         }))
     }
 
-    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<Option<TurnResult>> {
+    pub async fn stream_to(
+        self,
+        events: &dyn TurnActivitySink,
+    ) -> Result<QueuedTurnDrain<TurnResult>> {
         let effect_host = Arc::clone(&self.effect_host);
         reject_controller_owned_replay_host(effect_host.as_ref(), "queued turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
@@ -706,7 +713,7 @@ impl QueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         effect_host: &dyn EffectHost,
-    ) -> Result<Option<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnResult>> {
         let drain_id = self.resolved_drain_id();
         let scope = self
             .runtime
@@ -722,7 +729,7 @@ impl QueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
-    ) -> Result<Option<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnResult>> {
         let drain_id = self.resolved_drain_id();
         let scope = self
             .runtime
@@ -738,7 +745,7 @@ impl QueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<Option<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnResult>> {
         let Self {
             runtime,
             effect_host: _,
@@ -946,18 +953,18 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
         self
     }
 
-    pub async fn run(self) -> Result<Option<TurnOutput>> {
+    pub async fn run(self) -> Result<QueuedTurnDrain<TurnOutput>> {
         let collector = RunActivityCollector::default();
-        let Some(result) = self.stream_to(&collector).await? else {
-            return Ok(None);
-        };
-        Ok(Some(TurnOutput {
+        Ok(self.stream_to(&collector).await?.map(|result| TurnOutput {
             result,
             activities: collector.into_activities(),
         }))
     }
 
-    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<Option<TurnResult>> {
+    pub async fn stream_to(
+        self,
+        events: &dyn TurnActivitySink,
+    ) -> Result<QueuedTurnDrain<TurnResult>> {
         self.builder
             .stream_to_with_effect_controller(events, self.controller)
             .await
@@ -1050,7 +1057,7 @@ impl AdvancedQueuedTurn {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<Option<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnResult>> {
         self.builder
             .stream_to_with_scope(events, scoped_effect_controller)
             .await
@@ -1105,8 +1112,8 @@ pub(crate) async fn stream_next_queued_prepared_turn(
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
-) -> Result<Option<TurnResult>> {
-    let turn = Box::pin(stream_next_queued_prepared_assembled(
+) -> Result<QueuedTurnDrain<TurnResult>> {
+    let drain = Box::pin(stream_next_queued_prepared_assembled(
         runtime,
         sinks,
         scoped_effect_controller,
@@ -1114,7 +1121,7 @@ pub(crate) async fn stream_next_queued_prepared_turn(
         cancel_origin_hint,
     ))
     .await?;
-    Ok(turn.map(TurnResult::from_assembled))
+    Ok(drain.map(TurnResult::from_assembled))
 }
 
 pub(crate) async fn stream_next_queued_prepared_assembled(
@@ -1123,7 +1130,7 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
-) -> Result<Option<AssembledTurn>> {
+) -> Result<QueuedTurnDrain<AssembledTurn>> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
     let observation_sink = SessionObservationTurnActivitySink {
@@ -1137,9 +1144,9 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
         cancel,
     )
     .with_local_cancel_origin_hint(cancel_origin_hint);
-    let turn = writer.stream_next_queued_work(opts).await?;
+    let drain = writer.stream_next_queued_work(opts).await?;
     runtime.publish_from(&writer);
-    Ok(turn)
+    Ok(queued_turn_drain(drain))
 }
 
 pub(crate) async fn stream_selected_queued_prepared_turn(

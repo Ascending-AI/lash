@@ -13,7 +13,8 @@ use lash::persistence::{
     OrphanedTurnInputScope, PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft,
     QueuedWorkBatch,
     QueuedWorkBatchDraft,
-    QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkStore,
+    QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
+    QueuedWorkStore,
     SelectedQueuedWorkClaimOutcome,
     RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult, RuntimePersistence,
     RuntimeSessionState, RuntimeTurnCommitStamp,
@@ -38,7 +39,7 @@ use lash::provider::{
 use lash::runtime::AdvancedLashCoreBuilder;
 use lash::tools::{ToolActivation, ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnIssue};
-use lash::{ModelLimits, ModelSpec};
+use lash::{ModelLimits, ModelSpec, QueuedWorkClaimRefusal};
 
 struct FacadeStore;
 
@@ -255,8 +256,10 @@ impl QueuedWorkStore for FacadeStore {
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
         _policy: QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        Ok(None)
+    ) -> Result<QueuedWorkClaimOutcome, StoreError> {
+        Ok(QueuedWorkClaimOutcome::Refused(
+            QueuedWorkClaimRefusal::Empty,
+        ))
     }
 
     async fn claim_checkpoint_work(

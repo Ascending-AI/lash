@@ -463,7 +463,7 @@ impl InMemorySessionStore {
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
-    ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
+    ) -> Result<crate::QueuedWorkClaimOutcome, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
@@ -485,7 +485,7 @@ impl InMemorySessionStore {
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
         now: u64,
-    ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
+    ) -> Result<crate::QueuedWorkClaimOutcome, crate::store::StoreError> {
         let mut queued = self.queued_work.lock_recover();
         Self::claim_ready_queued_work_for_state(
             &mut queued,
@@ -504,13 +504,15 @@ impl InMemorySessionStore {
         owner: &crate::LeaseOwnerIdentity,
         kind: InMemoryQueuedWorkClaimKind,
         now: u64,
-    ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
+    ) -> Result<crate::QueuedWorkClaimOutcome, crate::store::StoreError> {
         let max_batches = match &kind {
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand => 1,
             InMemoryQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
         if max_batches == 0 {
-            return Ok(None);
+            return Ok(crate::QueuedWorkClaimOutcome::Refused(
+                crate::QueuedWorkClaimRefusal::ZeroLimit,
+            ));
         }
         // The fence is validated live, so its fencing token is the currently-live
         // session-lease generation. A row is claimable when it is unheld or its
@@ -532,7 +534,22 @@ impl InMemorySessionStore {
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         if claimable_indices.is_empty() {
-            return Ok(None);
+            // An exhausted lane and a lane whose next row is still deferred both
+            // read as "no candidate" here, and only the first one is terminal
+            // for a host: the deferred row is intact and drains on a later
+            // attempt.
+            let deferred_row_pending = queued.iter().any(|entry| {
+                entry.batch.session_id == session_id
+                    && entry.batch.available_at_ms > now
+                    && claim_available(entry)
+            });
+            return Ok(crate::QueuedWorkClaimOutcome::Refused(
+                if deferred_row_pending {
+                    crate::QueuedWorkClaimRefusal::NotYetAvailable
+                } else {
+                    crate::QueuedWorkClaimRefusal::Empty
+                },
+            ));
         }
         let candidates = claimable_indices
             .iter()
@@ -546,30 +563,44 @@ impl InMemorySessionStore {
                 ))
             })
             .collect::<Result<Vec<_>, crate::store::StoreError>>()?;
-        let selected_indices: Vec<usize> = match kind {
-            InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
-                let selected_len =
-                    crate::store::queued_work::select_leading_session_command(&candidates);
-                claimable_indices
-                    .iter()
-                    .copied()
-                    .take(selected_len)
-                    .collect()
-            }
-            InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy } => {
-                crate::store::queued_work::select_turn_work_claim_indices(
-                    &candidates,
-                    boundary,
-                    &policy,
-                    now,
-                )?
-                .into_iter()
-                .map(|candidate_index| claimable_indices[candidate_index])
-                .collect()
-            }
-        };
+        let (selected_indices, refusal): (Vec<usize>, Option<crate::QueuedWorkClaimRefusal>) =
+            match kind {
+                InMemoryQueuedWorkClaimKind::LeadingSessionCommand => {
+                    let selected_len =
+                        crate::store::queued_work::select_leading_session_command(&candidates);
+                    (
+                        claimable_indices
+                            .iter()
+                            .copied()
+                            .take(selected_len)
+                            .collect(),
+                        // Only the turn-work family's refusal reaches a host, and
+                        // a successful selection has no refusal to report, so
+                        // this family names one only when it took no rows.
+                        (selected_len == 0).then_some(crate::QueuedWorkClaimRefusal::Empty),
+                    )
+                }
+                InMemoryQueuedWorkClaimKind::TurnWork { boundary, policy } => {
+                    let selection = crate::store::queued_work::select_turn_work_claim_indices(
+                        &candidates,
+                        boundary,
+                        &policy,
+                        now,
+                    )?;
+                    (
+                        selection
+                            .indices
+                            .into_iter()
+                            .map(|candidate_index| claimable_indices[candidate_index])
+                            .collect(),
+                        selection.refusal,
+                    )
+                }
+            };
         if selected_indices.is_empty() {
-            return Ok(None);
+            return Ok(crate::QueuedWorkClaimOutcome::Refused(
+                refusal.unwrap_or(crate::QueuedWorkClaimRefusal::Empty),
+            ));
         }
         let next_fencing_tokens = selected_indices
             .iter()
@@ -603,18 +634,20 @@ impl InMemorySessionStore {
             entry.claim_session_lease_generation = generation;
             batches.push(entry.batch.clone());
         }
-        Ok(Some(crate::QueuedWorkClaim {
-            session_id: session_id.to_string(),
-            claim_id,
-            owner: owner.clone(),
-            lease_token,
-            fencing_token,
-            session_lease_generation: generation,
-            data: crate::QueuedWorkClaimData {
-                batches,
-                abandon_restore_claim_id,
+        Ok(crate::QueuedWorkClaimOutcome::Claimed(
+            crate::QueuedWorkClaim {
+                session_id: session_id.to_string(),
+                claim_id,
+                owner: owner.clone(),
+                lease_token,
+                fencing_token,
+                session_lease_generation: generation,
+                data: crate::QueuedWorkClaimData {
+                    batches,
+                    abandon_restore_claim_id,
+                },
             },
-        }))
+        ))
     }
 
     fn claim_pending_turn_inputs_in_memory(

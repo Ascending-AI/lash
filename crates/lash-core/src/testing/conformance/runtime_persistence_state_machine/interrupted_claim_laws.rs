@@ -32,6 +32,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
             crate::testing::queued_work_claim_policy(4),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("coalesced work absent"))?;
     store

@@ -573,11 +573,10 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkClaim>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
+    ) -> std::result::Result<lash_core::QueuedWorkClaimOutcome, lash_core::store::StoreError> {
+        Ok(lash_core::QueuedWorkClaimOutcome::Refused(
+            lash_core::QueuedWorkClaimRefusal::Empty,
+        ))
     }
 
     async fn claim_checkpoint_work(
@@ -1057,11 +1056,10 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkClaim>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
+    ) -> std::result::Result<lash_core::QueuedWorkClaimOutcome, lash_core::store::StoreError> {
+        Ok(lash_core::QueuedWorkClaimOutcome::Refused(
+            lash_core::QueuedWorkClaimRefusal::Empty,
+        ))
     }
 
     async fn claim_checkpoint_work(

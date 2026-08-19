@@ -77,6 +77,133 @@ impl SelectedQueuedWorkClaimOutcome {
     }
 }
 
+/// Why a turn-work claim attempt acquired no rows.
+///
+/// These are the refusal facts the claim state machine already computes while
+/// deciding a wake (see `record_turn_claim_decision`), plus the ones only a
+/// backend can observe: whether the lane still holds deferred work, and whether
+/// a concurrent writer took the selected rows. Every empty automatic drain
+/// carries one, so a host never has to reconstruct the reason from side
+/// evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum QueuedWorkClaimRefusal {
+    /// The host's claim policy admitted zero rows.
+    ZeroLimit,
+    /// The durable queue holds no pending work for this lane: every row it ever
+    /// held was consumed. Nothing is coming without a fresh enqueue.
+    Empty,
+    /// Pending work exists for this lane, but its earliest `available_at_ms`
+    /// has not arrived, so no row was claimable yet. The work is intact and
+    /// will drain on a later attempt; the re-poll cadence is the host's, so no
+    /// timestamp is part of this contract.
+    NotYetAvailable,
+    /// A session command sits at the queue head and is never skipped.
+    CommandAtHead,
+    /// The head batch may not cross the active turn's delivery boundary.
+    DeliveryBoundaryBlocked,
+    /// Rows were selected, but the physically earliest candidate was withheld,
+    /// so no contiguous prefix remained for a backend that claims by prefix.
+    ///
+    /// No shipped backend reaches this today: the sqlite and postgres
+    /// head-candidate queries never offer a withheld head to the prefix helper,
+    /// and the in-memory and perf stores claim by index instead of by prefix.
+    /// It guards a third-party prefix-claiming backend, whose selection this
+    /// same helper would otherwise silently truncate to nothing.
+    HeadWithheld,
+    /// The selection was legal, but another writer took the rows first.
+    ClaimRaceLost,
+}
+
+impl QueuedWorkClaimRefusal {
+    /// The stable snake_case spelling used in claim-decision diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ZeroLimit => "zero_limit",
+            Self::Empty => "empty",
+            Self::NotYetAvailable => "not_yet_available",
+            Self::CommandAtHead => "command_at_head",
+            Self::DeliveryBoundaryBlocked => "delivery_boundary_blocked",
+            Self::HeadWithheld => "head_withheld",
+            Self::ClaimRaceLost => "claim_race_lost",
+        }
+    }
+}
+
+/// The outcome the claim state machine recorded for one wake.
+///
+/// Refusing variants carry the [`QueuedWorkClaimRefusal`] that reaches the host;
+/// the remaining variants name why rows *were* selected and stay diagnostic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TurnClaimOutcome {
+    Refused(QueuedWorkClaimRefusal),
+    InterruptedClaimRedrive,
+    SingleRow,
+    MaxPendingAgeReached,
+    SingleEligibleRow,
+    HostDrainPolicy,
+}
+
+impl TurnClaimOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Refused(refusal) => refusal.as_str(),
+            Self::InterruptedClaimRedrive => "interrupted_claim_redrive",
+            Self::SingleRow => "single_row",
+            Self::MaxPendingAgeReached => "max_pending_age_reached",
+            Self::SingleEligibleRow => "single_eligible_row",
+            Self::HostDrainPolicy => "host_drain_policy",
+        }
+    }
+}
+
+/// Candidate indices one claim may take, or the refusal that took none.
+///
+/// `refusal` is `Some` exactly when `indices` is empty.
+#[derive(Clone, Debug)]
+pub struct TurnWorkClaimSelection {
+    pub indices: Vec<usize>,
+    pub refusal: Option<QueuedWorkClaimRefusal>,
+}
+
+/// The contiguous leading run one prefix-claiming backend may take, or the
+/// refusal that left it empty.
+///
+/// `refusal` is `Some` exactly when `len` is zero.
+#[derive(Clone, Copy, Debug)]
+pub struct TurnWorkClaimPrefix {
+    pub len: usize,
+    pub refusal: Option<QueuedWorkClaimRefusal>,
+}
+
+/// Whether a claim acquired rows, or why it did not.
+///
+/// This is the automatic counterpart to [`SelectedQueuedWorkClaimOutcome`]: an
+/// automatic drain names no batch ids, so the refusal itself is the answer the
+/// runtime hands back to the host.
+#[derive(Clone, Debug)]
+pub enum QueuedWorkClaimOutcome {
+    Claimed(QueuedWorkClaim),
+    Refused(QueuedWorkClaimRefusal),
+}
+
+impl QueuedWorkClaimOutcome {
+    /// The acquired claim, discarding the refusal evidence.
+    pub fn claim(self) -> Option<QueuedWorkClaim> {
+        match self {
+            Self::Claimed(claim) => Some(claim),
+            Self::Refused(_) => None,
+        }
+    }
+
+    /// The refusal, when this attempt acquired nothing.
+    pub fn refusal(&self) -> Option<QueuedWorkClaimRefusal> {
+        match self {
+            Self::Claimed(_) => None,
+            Self::Refused(refusal) => Some(*refusal),
+        }
+    }
+}
+
 /// Whether a durable queued-work row carries a session command or turn work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -275,34 +402,33 @@ pub fn select_turn_work_claim_indices(
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
-) -> Result<Vec<usize>, StoreError> {
+) -> Result<TurnWorkClaimSelection, StoreError> {
     if policy.max_rows == 0 {
-        record_turn_claim_decision(
+        return Ok(refuse(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
-            0,
-            0,
-            "zero_limit",
-        );
-        return Ok(Vec::new());
+            QueuedWorkClaimRefusal::ZeroLimit,
+        ));
     }
     let Some(first) = candidates.first() else {
-        record_turn_claim_decision(candidates, boundary, policy, now_epoch_ms, 0, 0, "empty");
-        return Ok(Vec::new());
-    };
-    if first.work_class != QueuedWorkClass::TurnWork {
-        record_turn_claim_decision(
+        return Ok(refuse(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
-            0,
-            0,
-            "command_at_head",
-        );
-        return Ok(Vec::new());
+            QueuedWorkClaimRefusal::Empty,
+        ));
+    };
+    if first.work_class != QueuedWorkClass::TurnWork {
+        return Ok(refuse(
+            candidates,
+            boundary,
+            policy,
+            now_epoch_ms,
+            QueuedWorkClaimRefusal::CommandAtHead,
+        ));
     }
     if boundary == QueuedWorkClaimBoundary::ActiveTurnCheckpoint
         && first.delivery_policy != DeliveryPolicy::EarliestSafeBoundary
@@ -322,23 +448,23 @@ pub fn select_turn_work_claim_indices(
                 .collect::<Vec<_>>();
             let selected =
                 select_turn_work_claim_indices(&remaining, boundary, policy, now_epoch_ms)?;
-            if !selected.is_empty() {
-                return Ok(selected
-                    .into_iter()
-                    .map(|index| remaining_indices[index])
-                    .collect());
+            if !selected.indices.is_empty() {
+                return Ok(select(
+                    selected
+                        .indices
+                        .into_iter()
+                        .map(|index| remaining_indices[index])
+                        .collect(),
+                ));
             }
         }
-        record_turn_claim_decision(
+        return Ok(refuse(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
-            0,
-            0,
-            "delivery_boundary_blocked",
-        );
-        return Ok(Vec::new());
+            QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
+        ));
     }
     if let Some(prior_claim_id) = first.prior_claim_id.as_deref() {
         let selected = candidates
@@ -360,9 +486,9 @@ pub fn select_turn_work_claim_indices(
             now_epoch_ms,
             selected.len(),
             rendered_tokens,
-            "interrupted_claim_redrive",
+            TurnClaimOutcome::InterruptedClaimRedrive,
         );
-        return Ok(selected);
+        return Ok(select(selected));
     }
 
     if policy.action_token_reserve >= policy.max_context_tokens {
@@ -384,28 +510,28 @@ pub fn select_turn_work_claim_indices(
         });
     }
     if !first.kind.is_batchable() || first.merge_key.is_none() {
-        let selected = record_turn_claim_decision(
+        record_turn_claim_decision(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
             1,
             first_tokens,
-            "single_row",
+            TurnClaimOutcome::SingleRow,
         );
-        return Ok((0..selected).collect());
+        return Ok(select(vec![0]));
     }
     if now_epoch_ms.saturating_sub(first.enqueued_at_ms) >= policy.max_pending_age_ms {
-        let selected = record_turn_claim_decision(
+        record_turn_claim_decision(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
             1,
             first_tokens,
-            "max_pending_age_reached",
+            TurnClaimOutcome::MaxPendingAgeReached,
         );
-        return Ok((0..selected).collect());
+        return Ok(select(vec![0]));
     }
 
     let mut compatible_prefix_len = 1;
@@ -430,16 +556,16 @@ pub fn select_turn_work_claim_indices(
         // A lone eligible row always drains: no selection is expressible, so
         // the policy is not consulted and its per-row projections are not
         // rendered.
-        let selected = record_turn_claim_decision(
+        record_turn_claim_decision(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
             1,
             first_tokens,
-            "single_eligible_row",
+            TurnClaimOutcome::SingleEligibleRow,
         );
-        return Ok((0..selected).collect());
+        return Ok(select(vec![0]));
     }
     let drain_candidates = candidates[..compatible_prefix_len]
         .iter()
@@ -482,16 +608,48 @@ pub fn select_turn_work_claim_indices(
         selected,
         "queued drain policy selection"
     );
-    let selected = record_turn_claim_decision(
+    record_turn_claim_decision(
         candidates,
         boundary,
         policy,
         now_epoch_ms,
         selected,
         rendered_tokens,
-        "host_drain_policy",
+        TurnClaimOutcome::HostDrainPolicy,
     );
-    Ok((0..selected).collect())
+    Ok(select((0..selected).collect()))
+}
+
+/// A selection that acquired `indices`.
+fn select(indices: Vec<usize>) -> TurnWorkClaimSelection {
+    debug_assert!(!indices.is_empty(), "a selection must acquire rows");
+    TurnWorkClaimSelection {
+        indices,
+        refusal: None,
+    }
+}
+
+/// A selection that acquired nothing, recorded under `refusal`.
+fn refuse(
+    candidates: &[ClaimCandidate],
+    boundary: QueuedWorkClaimBoundary,
+    policy: &QueuedWorkClaimPolicy,
+    now_epoch_ms: u64,
+    refusal: QueuedWorkClaimRefusal,
+) -> TurnWorkClaimSelection {
+    record_turn_claim_decision(
+        candidates,
+        boundary,
+        policy,
+        now_epoch_ms,
+        0,
+        0,
+        TurnClaimOutcome::Refused(refusal),
+    );
+    TurnWorkClaimSelection {
+        indices: Vec::new(),
+        refusal: Some(refusal),
+    }
 }
 
 /// Select the number of rows from a physically contiguous candidate set.
@@ -505,14 +663,29 @@ pub fn select_turn_work_claim_prefix(
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
-) -> Result<usize, StoreError> {
+) -> Result<TurnWorkClaimPrefix, StoreError> {
     let selected = select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms)?;
-    Ok(selected
+    let len = selected
+        .indices
         .iter()
         .copied()
         .enumerate()
         .take_while(|(prefix_index, selected_index)| prefix_index == selected_index)
-        .count())
+        .count();
+    // A selection whose physically earliest row is withheld leaves a
+    // prefix-claiming backend nothing to take. That is a refusal in its own
+    // right, distinct from the state machine's four, and it is named here
+    // because here is where the prefix is derived.
+    let refusal = if len == 0 {
+        Some(
+            selected
+                .refusal
+                .unwrap_or(QueuedWorkClaimRefusal::HeadWithheld),
+        )
+    } else {
+        None
+    };
+    Ok(TurnWorkClaimPrefix { len, refusal })
 }
 
 /// Size an exact, host-named drain composition.
@@ -540,7 +713,7 @@ pub fn select_exact_turn_work_claim_prefix(
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
     now_epoch_ms: u64,
-) -> Result<usize, StoreError> {
+) -> Result<TurnWorkClaimPrefix, StoreError> {
     let policy = QueuedWorkClaimPolicy {
         drain_policy: crate::runtime::exact_selection_drain_policy(),
         max_rows: policy.max_rows.max(candidates.len()),
@@ -640,8 +813,8 @@ fn record_turn_claim_decision(
     now_epoch_ms: u64,
     selected: usize,
     rendered_tokens: usize,
-    outcome: &'static str,
-) -> usize {
+    outcome: TurnClaimOutcome,
+) {
     let oldest_pending_age_ms = candidates
         .first()
         .map(|candidate| now_epoch_ms.saturating_sub(candidate.enqueued_at_ms));
@@ -659,10 +832,9 @@ fn record_turn_claim_decision(
         candidates = ?candidates,
         selected,
         rendered_tokens,
-        outcome,
+        outcome = outcome.as_str(),
         "wake turn claim decision"
     );
-    selected
 }
 
 /// A freshly derived lease for a selected claim prefix.
@@ -756,728 +928,4 @@ pub fn derive_batch_id(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::{
-        collection::vec,
-        prelude::*,
-        test_runner::{Config, RngSeed, TestRunner},
-    };
-
-    #[test]
-    fn claim_id_dialects_preserve_existing_spelling() {
-        let cases = [
-            (ClaimIdDialect::QueuedWork, "qwc:7:3"),
-            (ClaimIdDialect::TurnInput, "tic:7:3"),
-            (ClaimIdDialect::RecordingQueuedWork, "recording-qwc:7:3"),
-            (ClaimIdDialect::RecordingTurnInput, "recording-tic:7:3"),
-            (ClaimIdDialect::PerformanceQueuedWork, "perf-qwc:7:3"),
-            (ClaimIdDialect::PerformanceTurnInput, "perf-tic:7:3"),
-        ];
-        for (dialect, expected) in cases {
-            assert_eq!(derive_claim_id(dialect, 7, 3), expected);
-        }
-    }
-
-    fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
-        ClaimCandidate {
-            batch_id: format!("qwb-{enqueue_seq}"),
-            enqueue_seq,
-            claim_fencing_token: 0,
-            prior_claim_id: None,
-            work_class: QueuedWorkClass::TurnWork,
-            delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
-            kind: QueuedWorkKind::Turn,
-            authority: QueuedWorkAuthority::new("principal"),
-            merge_key: merge_key.map(str::to_string),
-            enqueued_at_ms: 900,
-            turn_causes: Vec::new(),
-            input_texts: vec!["wake".to_string()],
-        }
-    }
-
-    fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
-        let merge_key = prop_oneof![
-            Just(None),
-            Just(Some("wake".to_string())),
-            Just(Some("other".to_string())),
-        ];
-        let kind = prop_oneof![
-            Just(QueuedWorkKind::Turn),
-            Just(QueuedWorkKind::Control),
-            Just(QueuedWorkKind::Cancel),
-        ];
-        let work_class = prop_oneof![
-            Just(QueuedWorkClass::TurnWork),
-            Just(QueuedWorkClass::SessionCommand),
-        ];
-        let delivery_policy = prop_oneof![
-            Just(DeliveryPolicy::EarliestSafeBoundary),
-            Just(DeliveryPolicy::AfterCurrentTurnCommit),
-        ];
-        let authority = prop_oneof![
-            Just(QueuedWorkAuthority::default()),
-            Just(QueuedWorkAuthority::new("principal-a")),
-            Just(QueuedWorkAuthority::new("principal-b").with_elevation("root")),
-        ];
-        let input_texts = vec(0usize..=256, 0..=3).prop_map(|lengths| {
-            lengths
-                .into_iter()
-                .enumerate()
-                .map(|(index, length)| ((b'a' + index as u8) as char).to_string().repeat(length))
-                .collect::<Vec<_>>()
-        });
-        let turn_causes = vec((0usize..=128, 0u8..3), 0..=4).prop_map(|causes| {
-            causes
-                .into_iter()
-                .enumerate()
-                .map(|(index, (text_len, origin_kind))| TurnCause {
-                    id: format!("cause-{index}"),
-                    event_type: format!("event-{origin_kind}"),
-                    origin: match origin_kind {
-                        0 => crate::MessageOrigin::Plugin {
-                            plugin_id: format!("plugin-{index}"),
-                            transient: index % 2 == 0,
-                        },
-                        1 => crate::MessageOrigin::Process {
-                            process_id: format!("process-{index}"),
-                            event_type: "wake".to_string(),
-                            sequence: index as u64,
-                            wake_id: Some(format!("wake-{index}")),
-                            caused_by: None,
-                        },
-                        _ => crate::MessageOrigin::TurnInput {
-                            turn_id: format!("turn-{index}"),
-                            input_id: (index % 2 == 0).then(|| format!("input-{index}")),
-                        },
-                    },
-                    text: "x".repeat(text_len),
-                })
-                .collect::<Vec<_>>()
-        });
-
-        (
-            any::<u64>(),
-            merge_key,
-            kind,
-            work_class,
-            delivery_policy,
-            authority,
-            input_texts,
-            turn_causes,
-        )
-            .prop_map(
-                |(
-                    enqueue_seq,
-                    merge_key,
-                    kind,
-                    work_class,
-                    delivery_policy,
-                    authority,
-                    input_texts,
-                    turn_causes,
-                )| ClaimCandidate {
-                    batch_id: format!("qwb-{enqueue_seq}"),
-                    enqueue_seq,
-                    claim_fencing_token: 0,
-                    prior_claim_id: None,
-                    work_class,
-                    delivery_policy,
-                    kind,
-                    authority,
-                    merge_key,
-                    enqueued_at_ms: 900,
-                    turn_causes,
-                    input_texts,
-                },
-            )
-    }
-
-    #[test]
-    fn exact_selection_requires_the_literal_interrupted_composition() {
-        let candidates = vec![
-            ("w1".to_string(), Some("claim-a".to_string())),
-            ("fresh".to_string(), None),
-            ("w2".to_string(), Some("claim-a".to_string())),
-        ];
-        assert_eq!(
-            select_interrupted_exact_claim_indices(&candidates, &["w1".to_string()]),
-            Err(vec!["w1".to_string(), "w2".to_string()])
-        );
-        assert_eq!(
-            select_interrupted_exact_claim_indices(
-                &candidates,
-                &["w1".to_string(), "w2".to_string()],
-            ),
-            Ok(Some(vec![0, 2]))
-        );
-
-        let two_claims = vec![
-            ("a1".to_string(), Some("claim-a".to_string())),
-            ("a2".to_string(), Some("claim-a".to_string())),
-            ("b1".to_string(), Some("claim-b".to_string())),
-            ("b2".to_string(), Some("claim-b".to_string())),
-        ];
-        assert_eq!(
-            select_interrupted_exact_claim_indices(
-                &two_claims,
-                &["a1".to_string(), "a2".to_string(), "b1".to_string()],
-            ),
-            Err(vec!["b1".to_string(), "b2".to_string()])
-        );
-        assert_eq!(
-            select_interrupted_exact_claim_indices(
-                &two_claims,
-                &[
-                    "a1".to_string(),
-                    "a2".to_string(),
-                    "b1".to_string(),
-                    "b2".to_string(),
-                ],
-            ),
-            Ok(Some(vec![0, 1]))
-        );
-    }
-
-    fn policy(max_context_tokens: usize, action_token_reserve: usize) -> QueuedWorkClaimPolicy {
-        QueuedWorkClaimPolicy {
-            max_context_tokens,
-            action_token_reserve,
-            max_rows: 64,
-            max_pending_age_ms: 1_000,
-            drain_policy: crate::default_queued_drain_policy(),
-        }
-    }
-
-    #[test]
-    fn absent_merge_key_never_merges() {
-        let candidates = vec![candidate(1, None), candidate(2, None)];
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &policy(1_000, 100),
-                1_000,
-            )
-            .unwrap(),
-            1
-        );
-    }
-
-    #[test]
-    fn matching_key_groups_prefix_up_to_row_bound() {
-        let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
-        let mut claim_policy = policy(1_000, 100);
-        claim_policy.max_rows = 1;
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            1
-        );
-    }
-
-    #[test]
-    fn authority_and_elevation_are_independent_compatibility_gates() {
-        let first = candidate(1, Some("wake"));
-        let mut different_principal = candidate(2, Some("wake"));
-        different_principal.authority = QueuedWorkAuthority::new("other");
-        let mut different_elevation = candidate(2, Some("wake"));
-        different_elevation.authority =
-            QueuedWorkAuthority::new("principal").with_elevation("root");
-        for candidates in [
-            vec![first.clone(), different_principal],
-            vec![first.clone(), different_elevation],
-        ] {
-            assert_eq!(
-                select_turn_work_claim_prefix(
-                    &candidates,
-                    QueuedWorkClaimBoundary::Idle,
-                    &policy(1_000, 100),
-                    1_000
-                )
-                .unwrap(),
-                1
-            );
-        }
-    }
-
-    #[test]
-    fn control_and_cancel_kinds_never_batch() {
-        for kind in [QueuedWorkKind::Control, QueuedWorkKind::Cancel] {
-            let mut first = candidate(1, Some("wake"));
-            first.kind = kind;
-            let candidates = vec![first, candidate(2, Some("wake"))];
-            assert_eq!(
-                select_turn_work_claim_prefix(
-                    &candidates,
-                    QueuedWorkClaimBoundary::Idle,
-                    &policy(1_000, 100),
-                    1_000
-                )
-                .unwrap(),
-                1
-            );
-        }
-    }
-
-    #[test]
-    fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
-        let first = candidate(1, Some("a"));
-        let mut different_delivery = candidate(2, Some("a"));
-        different_delivery.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
-        let mut command = candidate(2, Some("a"));
-        command.work_class = QueuedWorkClass::SessionCommand;
-        for candidates in [
-            vec![first.clone(), candidate(2, Some("b"))],
-            vec![first.clone(), different_delivery],
-            vec![first.clone(), command],
-        ] {
-            assert_eq!(
-                select_turn_work_claim_prefix(
-                    &candidates,
-                    QueuedWorkClaimBoundary::Idle,
-                    &policy(1_000, 100),
-                    1_000
-                )
-                .unwrap(),
-                1
-            );
-        }
-    }
-
-    #[test]
-    fn the_default_drain_policy_claims_one_row_however_much_window_is_free() {
-        let mut first = candidate(1, Some("wake"));
-        first.input_texts = vec!["a".repeat(4)];
-        let mut second = candidate(2, Some("wake"));
-        second.input_texts = vec!["b".repeat(4)];
-        // Both rows fit the window several times over; the shipped
-        // one-at-a-time policy still drains only the head (FIG-1313).
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &[first, second],
-                QueuedWorkClaimBoundary::Idle,
-                &policy(1_000, 300),
-                1_000
-            )
-            .unwrap(),
-            1
-        );
-    }
-
-    #[test]
-    fn all_mode_claims_the_whole_compatible_prefix_without_token_arithmetic() {
-        let candidates = vec![
-            candidate(1, Some("wake")),
-            candidate(2, Some("wake")),
-            candidate(3, Some("wake")),
-        ];
-        let mut claim_policy = policy(101, 30);
-        claim_policy.drain_policy =
-            std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
-        // The three rows render past this deliberately tiny window. `All` is a
-        // host statement that the provider is the authority on what fits, so
-        // Lash coalesces every compatible row anyway.
-        assert_eq!(
-            select_turn_work_claim_indices(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            vec![0, 1, 2]
-        );
-    }
-
-    #[test]
-    fn a_custom_policy_selection_is_clamped_to_the_legal_prefix() {
-        #[derive(Debug)]
-        struct GreedyPolicy;
-        impl crate::QueuedDrainPolicy for GreedyPolicy {
-            fn name(&self) -> &str {
-                "test_greedy"
-            }
-
-            fn select_drain(
-                &self,
-                request: &crate::QueuedDrainRequest<'_>,
-            ) -> crate::QueuedDrainSelection {
-                // Every offered candidate carries a projection and a budget.
-                assert!(
-                    request
-                        .candidates()
-                        .iter()
-                        .all(|candidate| candidate.projected_tokens > 0)
-                );
-                assert_eq!(request.max_context_tokens(), 1_000);
-                crate::QueuedDrainSelection::leading(usize::MAX)
-            }
-        }
-
-        let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
-        let mut claim_policy = policy(1_000, 100);
-        claim_policy.drain_policy = std::sync::Arc::new(GreedyPolicy);
-        assert_eq!(
-            select_turn_work_claim_indices(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            vec![0, 1]
-        );
-
-        #[derive(Debug)]
-        struct EmptyPolicy;
-        impl crate::QueuedDrainPolicy for EmptyPolicy {
-            fn name(&self) -> &str {
-                "test_empty"
-            }
-
-            fn select_drain(
-                &self,
-                _request: &crate::QueuedDrainRequest<'_>,
-            ) -> crate::QueuedDrainSelection {
-                crate::QueuedDrainSelection::leading(0)
-            }
-        }
-
-        let mut empty_policy = policy(1_000, 100);
-        empty_policy.drain_policy = std::sync::Arc::new(EmptyPolicy);
-        // A policy cannot starve its own queue: the head always drains.
-        assert_eq!(
-            select_turn_work_claim_indices(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &empty_policy,
-                1_000,
-            )
-            .unwrap(),
-            vec![0]
-        );
-    }
-
-    #[test]
-    fn an_exact_host_selection_is_never_sized_by_the_automatic_drain_policy() {
-        let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
-        let claim_policy = policy(1_000, 100);
-        assert_eq!(claim_policy.drain_policy.name(), "one_at_a_time");
-        // Automatic drains take the head alone under the shipped default...
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            1
-        );
-        // ...but the host named this exact two-row composition, and a partial
-        // exact claim is abandoned as unclaimable by the caller, so shrinking it
-        // would wedge `stream_selected_queued_work` forever.
-        assert_eq!(
-            select_exact_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            2
-        );
-        // `max_rows` is exempt for the same reason: it bounds how many pending
-        // rows Lash gathers on its own, and truncating a host-named composition
-        // with it wedges the claim on a second axis. Redrive already exempts a
-        // committed composition from a successor's row limit.
-        let mut bounded = claim_policy.clone();
-        bounded.max_rows = 1;
-        assert_eq!(
-            select_exact_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &bounded,
-                1_000,
-            )
-            .unwrap(),
-            2
-        );
-        // A genuine claim law still bounds it: incompatible rows never merge.
-        let mut other_key = candidate(2, Some("other"));
-        other_key.batch_id = "qwb-other".to_string();
-        assert_eq!(
-            select_exact_turn_work_claim_prefix(
-                &[candidates[0].clone(), other_key],
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            1
-        );
-    }
-
-    #[test]
-    fn an_oversized_non_head_row_clamps_the_drain_instead_of_failing_it() {
-        let mut first = candidate(1, Some("wake"));
-        first.input_texts = vec!["a".repeat(8)];
-        let mut second = candidate(2, Some("wake"));
-        second.input_texts = vec!["b".repeat(4_000)];
-        let third = candidate(3, Some("wake"));
-        let mut claim_policy = policy(1_000, 100);
-        claim_policy.drain_policy =
-            std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
-        // The fitting head still drains: the selection stops before the
-        // oversized row rather than failing a claim that can make progress.
-        assert_eq!(
-            select_turn_work_claim_indices(
-                &[first.clone(), second.clone(), third],
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            vec![0]
-        );
-        // On the next wake the oversized row is the head, and it is refused
-        // there by name rather than wedging the queue silently.
-        let error = select_turn_work_claim_indices(
-            &[second, first],
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
-            1_000,
-        )
-        .expect_err("an oversized head row must be refused by name");
-        match error {
-            StoreError::QueuedWorkRowExceedsContextWindow {
-                batch_id,
-                batch_enqueue_seq,
-                rendered_tokens,
-                max_context_tokens,
-            } => {
-                assert_eq!(batch_id, "qwb-2");
-                assert_eq!(batch_enqueue_seq, 2);
-                assert!(rendered_tokens > max_context_tokens);
-                assert_eq!(max_context_tokens, 1_000);
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn an_interrupted_redrive_never_consults_the_drain_policy() {
-        #[derive(Debug)]
-        struct PanickingPolicy;
-        impl crate::QueuedDrainPolicy for PanickingPolicy {
-            fn name(&self) -> &str {
-                "test_panicking"
-            }
-
-            fn select_drain(
-                &self,
-                _request: &crate::QueuedDrainRequest<'_>,
-            ) -> crate::QueuedDrainSelection {
-                panic!("replayed drains must serve the journaled selection");
-            }
-        }
-
-        let mut first = candidate(1, Some("wake"));
-        first.prior_claim_id = Some("qwc:1:1".to_string());
-        let mut second = candidate(2, Some("wake"));
-        second.prior_claim_id = Some("qwc:1:1".to_string());
-        let mut claim_policy = policy(1_000, 100);
-        claim_policy.drain_policy = std::sync::Arc::new(PanickingPolicy);
-        assert_eq!(
-            select_turn_work_claim_indices(
-                &[first, second],
-                QueuedWorkClaimBoundary::Idle,
-                &claim_policy,
-                1_000,
-            )
-            .unwrap(),
-            vec![0, 1]
-        );
-    }
-
-    #[test]
-    fn rendered_bound_is_monotonic_over_prefixes() {
-        const SEED: u64 = 0x5eed_f101_4004_0002;
-        let mut runner = TestRunner::new(Config {
-            cases: 512,
-            failure_persistence: None,
-            rng_seed: RngSeed::Fixed(SEED),
-            ..Config::default()
-        });
-
-        runner
-            .run(&vec(rendered_candidate_strategy(), 1..=8), |candidates| {
-                for prefix_len in 1..candidates.len() {
-                    let prefix_bound =
-                        rendered_token_upper_bound(&candidates[..prefix_len]);
-                    let extended_bound =
-                        rendered_token_upper_bound(&candidates[..=prefix_len]);
-                    prop_assert!(
-                        prefix_bound <= extended_bound,
-                        "seed={SEED:#x}, prefix_len={prefix_len}, prefix_bound={prefix_bound}, extended_bound={extended_bound}, candidates={candidates:#?}"
-                    );
-                }
-                Ok(())
-            })
-            .expect("rendered token bound must be monotonic over prefixes");
-    }
-
-    #[test]
-    fn oversized_for_reserve_but_fitting_context_is_attempted_alone() {
-        let mut first = candidate(1, Some("wake"));
-        first.input_texts = vec!["a".repeat(800)];
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &[first],
-                QueuedWorkClaimBoundary::Idle,
-                &policy(1_000, 300),
-                1_000
-            )
-            .unwrap(),
-            1
-        );
-    }
-
-    #[test]
-    fn row_that_cannot_fit_context_fails_loudly() {
-        let mut first = candidate(7, Some("wake"));
-        first.input_texts = vec!["a".repeat(1_001)];
-        assert!(matches!(
-            select_turn_work_claim_prefix(
-                &[first],
-                QueuedWorkClaimBoundary::Idle,
-                &policy(1_000, 300),
-                1_000
-            ),
-            Err(StoreError::QueuedWorkRowExceedsContextWindow {
-                batch_enqueue_seq: 7,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn active_turn_checkpoint_boundary_gates_on_delivery_policy() {
-        let mut first = candidate(1, None);
-        first.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &[first],
-                QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                &policy(1_000, 100),
-                1_000,
-            )
-            .unwrap(),
-            0
-        );
-    }
-
-    #[test]
-    fn leading_session_command_blocks_turn_work_claim() {
-        let mut command = candidate(1, None);
-        command.work_class = QueuedWorkClass::SessionCommand;
-        command.kind = QueuedWorkKind::Control;
-        let candidates = vec![command, candidate(2, None)];
-        assert_eq!(select_leading_session_command(&candidates), 1);
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &policy(1_000, 100),
-                1_000
-            )
-            .unwrap(),
-            0
-        );
-    }
-
-    #[test]
-    fn overdue_head_is_claimed_alone_at_claim_time() {
-        let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
-        assert_eq!(
-            select_turn_work_claim_prefix(
-                &candidates,
-                QueuedWorkClaimBoundary::Idle,
-                &policy(1_000, 100),
-                2_000
-            )
-            .unwrap(),
-            1
-        );
-    }
-
-    #[test]
-    fn lease_derivation_is_deterministic_and_advances_fencing() {
-        let head = ClaimCandidate {
-            batch_id: "qwb-7".to_string(),
-            enqueue_seq: 7,
-            claim_fencing_token: 2,
-            prior_claim_id: None,
-            work_class: QueuedWorkClass::TurnWork,
-            delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
-            kind: QueuedWorkKind::Turn,
-            authority: QueuedWorkAuthority::default(),
-            merge_key: None,
-            enqueued_at_ms: 0,
-            turn_causes: Vec::new(),
-            input_texts: Vec::new(),
-        };
-        let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
-        let lease = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5)
-            .expect("derive lease");
-        assert_eq!(lease.fencing_token, 3);
-        assert_eq!(lease.claim_id, "qwc:7:3");
-        assert_eq!(lease.session_lease_generation, 5);
-        let again = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5)
-            .expect("derive lease again");
-        assert_eq!(lease.lease_token, again.lease_token);
-        assert_eq!(
-            lease.lease_token,
-            "1f1c63a8753631156dc9fd52d5493cd8855684f3a28d65dded7f8f1a57c7c48e"
-        );
-    }
-
-    #[test]
-    fn batch_id_includes_optional_nonce() {
-        let plain = derive_batch_id("session", Some("key"), 1_000, None);
-        let nonced = derive_batch_id("session", Some("key"), 1_000, Some(1));
-        assert_ne!(plain, nonced);
-        assert!(plain.starts_with("qwb:"));
-    }
-
-    #[test]
-    fn pending_session_ordering_compares_timestamps_only() {
-        let key = |enqueued_at_ms, enqueue_seq| PendingWorkOrderingKey {
-            enqueued_at_ms,
-            enqueue_seq,
-        };
-        let precedes = |command, input| {
-            PendingSessionWorkOrdering {
-                session_command: command,
-                turn_input: input,
-            }
-            .session_command_precedes_turn_input()
-        };
-
-        assert!(precedes(Some(key(10, 9)), Some(key(11, 1))));
-        assert!(!precedes(Some(key(11, 1)), Some(key(10, 9))));
-        // A timestamp tie resolves to the turn input whichever way the two
-        // families' independent sequences happen to fall.
-        assert!(!precedes(Some(key(10, 1)), Some(key(10, 2))));
-        assert!(!precedes(Some(key(10, 2)), Some(key(10, 1))));
-        assert!(!precedes(Some(key(10, 1)), Some(key(10, 1))));
-        assert!(precedes(Some(key(10, 1)), None));
-        assert!(!precedes(None, Some(key(10, 1))));
-    }
-}
+mod tests;

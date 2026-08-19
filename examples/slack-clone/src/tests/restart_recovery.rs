@@ -779,7 +779,7 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
         matches!(
             report.settled.first(),
             Some(Disposition::Deferred {
-                reason: "input_claimed_by_live_lease_generation",
+                reason: "drain_did_not_reach_admission",
                 ..
             })
         ),
@@ -916,7 +916,7 @@ async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery()
     assert!(matches!(
         report.settled.first(),
         Some(Disposition::Deferred {
-            reason: "input_claimed_by_live_lease_generation",
+            reason: "drain_did_not_reach_admission",
             ..
         })
     ));

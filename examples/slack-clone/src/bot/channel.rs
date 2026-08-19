@@ -27,7 +27,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use lash::messages::{MessageOrigin, MessageRole};
 use lash::persistence::ChronologicalPayload;
-use lash::{LashCore, LashSession, TurnInput};
+use lash::{
+    EmptyQueuedDrainReason, LashCore, LashSession, QueuedTurnDrain, QueuedWorkClaimRefusal,
+    TurnInput,
+};
 use tokio::sync::RwLock;
 
 use super::ledger::{Claim, EventLedger, EventRecord, KIND_APP_MENTION, KIND_MESSAGE, Stage};
@@ -726,18 +729,20 @@ impl ChannelBot {
     ) -> Result<Disposition> {
         // The drain id is stable per event, so the queue-drain effect scope is
         // the same on a redelivery as it was on the first attempt.
-        let output = session
+        let drain = session
             .queued_turn()
             .drain_id(format!("mention:{}", record.event_id))
             .run()
             .await
             .context("run channel mention turn")?;
 
-        let Some(output) = output else {
-            // `None` is ambiguous and must not be guessed at. It means either
-            // "a committed turn already consumed this input" or "this drain could
-            // not reach the input", and the two demand opposite responses.
-            return self.settle_empty_drain(session, record, input_id).await;
+        let output = match drain {
+            QueuedTurnDrain::Ran(output) => output,
+            QueuedTurnDrain::Empty(reason) => {
+                return self
+                    .settle_empty_drain(session, record, input_id, reason)
+                    .await;
+            }
         };
 
         if record.thread_ts.is_none() {
@@ -768,52 +773,58 @@ impl ChannelBot {
         self.owe_and_post(record, reply, ReplySource::Turn).await
     }
 
-    /// Decide what an empty queued drain means, using committed-turn evidence.
+    /// Decide what an empty queued drain means from the reason Lash reports.
     ///
-    /// A drain returns `None` for two unrelated reasons, and reading one as the
+    /// An empty drain means one of two unrelated things, and reading one as the
     /// other is how a mention gets abandoned:
     ///
-    /// * **A committed turn already consumed the input.** The answer exists (or
-    ///   provably does not) in the transcript. Terminal either way.
-    /// * **This drain never reached the input.** `stream_queued_work` requires the
-    ///   session-execution lease and returns `Ok(None)` when it is busy, and a
-    ///   claim pinned to a still-live lease generation is not stealable. A boot
-    ///   that restarts inside the previous boot's lease TTL hits exactly this.
-    ///   Nothing was consumed, so the work is **retryable and never terminal**.
+    /// * **The queue held nothing for this drain.** A committed turn already
+    ///   consumed the input, so the answer exists (or provably does not) in the
+    ///   transcript. Terminal either way. Only
+    ///   [`QueuedWorkClaimRefusal::Empty`] proves it.
+    /// * **This drain never reached the input.** The lane was busy, the row is
+    ///   not available yet, the head was withheld, another writer won the row,
+    ///   or the host policy admitted none. Nothing was consumed, so the work is
+    ///   **retryable and never terminal**.
     ///
-    /// The discriminator is [`LashSession::turn_input_applications`]: an
-    /// application record is written only when a turn *commits*, and it names the
-    /// `input_id` it consumed. Its absence is positive proof that no turn has
-    /// taken this admission. (`pending_turn_inputs` cannot answer this — it hides
-    /// rows whose claim is pinned to a currently-live lease generation, which is
-    /// precisely the state under investigation.)
+    /// The match is deliberately exhaustive: a new refusal variant is a new
+    /// decision for this bot to make, not something a catch-all should swallow.
     async fn settle_empty_drain(
         &self,
         session: &LashSession,
         record: &EventRecord,
         input_id: &str,
+        reason: EmptyQueuedDrainReason,
     ) -> Result<Disposition> {
-        let applications = session
-            .turn_input_applications()
-            .await
-            .context("read committed turn-input applications")?;
-        let consumed = applications
-            .iter()
-            .any(|application| application.input_id == input_id);
-        if !consumed {
+        let queue_was_exhausted = match reason {
+            EmptyQueuedDrainReason::ClaimRefused(refusal) => match refusal {
+                QueuedWorkClaimRefusal::Empty => true,
+                QueuedWorkClaimRefusal::ZeroLimit
+                | QueuedWorkClaimRefusal::NotYetAvailable
+                | QueuedWorkClaimRefusal::CommandAtHead
+                | QueuedWorkClaimRefusal::DeliveryBoundaryBlocked
+                | QueuedWorkClaimRefusal::HeadWithheld
+                | QueuedWorkClaimRefusal::ClaimRaceLost => false,
+            },
+            EmptyQueuedDrainReason::ExecutionLaneBusy | EmptyQueuedDrainReason::NoDurableQueue => {
+                false
+            }
+        };
+        if !queue_was_exhausted {
             // Retryable. The ledger row is deliberately left at its current
             // non-terminal stage: terminalizing here is what made an interrupted
             // mention permanently unanswered, because no redelivery and no later
             // boot ever revisits a terminal row.
             log_err!(
-                "slack-clone-bot deferring event {}: its admission is claimed by an \
-                 execution lease this boot cannot take yet",
-                record.event_id
+                "slack-clone-bot deferring event {}: the drain never reached its \
+                 admission ({})",
+                record.event_id,
+                reason.as_str()
             );
             return Ok(Disposition::Deferred {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
-                reason: "input_claimed_by_live_lease_generation",
+                reason: "drain_did_not_reach_admission",
             });
         }
         if record.thread_ts.is_none() {

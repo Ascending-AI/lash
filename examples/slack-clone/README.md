@@ -141,7 +141,7 @@ screenshot, and DOM dump. Set
 | MCP tools in that same standard tool loop | `mcp_server.rs`, `bot/runtime.rs` |
 | Idempotent event consumption | `bot/ledger.rs` |
 | Restart recovery, stage by stage | `bot/channel.rs::recover` |
-| Telling "already committed" from "cannot reach it yet" | `bot/channel.rs::settle_empty_drain` |
+| Acting on the typed reason an empty drain reports | `bot/channel.rs::settle_empty_drain` |
 | Bounded retry of fenced work and delayed thread roots | `bot/channel.rs::retry_deferred` |
 | Reading a lost reply back out of the transcript | `bot/channel.rs::reply_from_transcript` |
 | Transactional outbox | `platform/state.rs::post_message` |
@@ -598,32 +598,39 @@ finishes each one:
 | After the text was recorded, before the post | `reply_pending` | Posts the recorded text without asking the model again (`ReplySource::Ledger`). |
 | After the post, before recording it | `reply_pending` | Finds its own reply by the `event_id` in the reply's `metadata` and records it. **No second post.** |
 
-#### An empty drain is ambiguous, and guessing costs a reply
+#### An empty drain names why it ran no turn
 
-`queued_turn().run()` returning `None` means one of two opposite things, and this
-is the single most important thing to get right in a host that recovers queued
-work:
+`queued_turn().run()` answers with `QueuedTurnDrain::Ran(output)` or
+`QueuedTurnDrain::Empty(reason)`, and acting on that reason is the single most
+important thing to get right in a host that recovers queued work. The two
+outcomes it separates are opposite:
 
-- **A committed turn already consumed the input.** Terminal: the answer is in the
-  transcript, or provably nowhere.
-- **This drain never reached the input.** `stream_queued_work` requires the
-  session-execution lease and returns `Ok(None)` when it is busy. A boot that
-  restarts inside the previous boot's lease TTL cannot acquire that lease —
+- **The queue held nothing for this drain.** The durable queue holds no pending
+  work for this lane: a committed turn already consumed the input, so the answer
+  is in the transcript, or provably nowhere. Terminal. Only
+  `EmptyQueuedDrainReason::ClaimRefused(QueuedWorkClaimRefusal::Empty)` proves
+  it.
+- **This drain never reached the input.** Every other reason. The lane was busy —
+  a boot that restarts inside the previous boot's lease TTL gets
+  `ExecutionLaneBusy`, because
   `try_claim_session_execution_lease_with_token` returns `Busy` for a live lease
-  held by a *different* incarnation — so nothing was consumed and the work is
-  **retryable**.
+  held by a *different* incarnation — or the work exists but is not claimable
+  yet (`NotYetAvailable`, a row whose `available_at_ms` has not arrived), or the
+  head was withheld, another writer won the row, or the host policy admitted
+  none. Nothing was consumed, so the work is **retryable**, and the bot re-polls
+  on its own cadence: no reason carries a timestamp.
 
-`settle_empty_drain` discriminates with `session.turn_input_applications()`, which
-records an entry only when a turn *commits* and names the `input_id` it consumed.
-Its absence is positive proof that no turn has taken the admission.
-`pending_turn_inputs()` cannot answer this: it hides rows whose claim is pinned to
-a currently-live lease generation, which is exactly the state in question.
+`settle_empty_drain` matches the reason **exhaustively**, with no catch-all arm:
+a refusal variant added later is a new decision for this bot to make, and the
+compiler makes it say so rather than defaulting it into the terminal branch.
 
 Getting this wrong is not hypothetical — it was FIG-1008, found by the judged
-runbook. Reading the ambiguous `None` as "committed" terminalized the row as
+runbook. Reading an ambiguous `None` as "committed" terminalized the row as
 `ignored` / `reply_lost_after_commit`, and because a terminal row is never
 revisited by a redelivery or a later boot, the mention was **permanently**
-unanswered.
+unanswered. FIG-1575 removed the ambiguity at the source: the reason the claim
+state machine already computed now reaches the host instead of being logged and
+dropped.
 
 #### Why the deferral has to wait, and for how long
 
@@ -648,17 +655,10 @@ a later boot picking it up beats a silently dropped mention. A transient failure
 inside an attempt counts as a retryable iteration, not an abort: the ledger row is
 untouched by a failed attempt, so only the deadline ends the loop.
 
-One caveat on the discriminator: a turn-input application record is written only
-for admissions with non-empty content, so "no record" means "not consumed" only
-because this bot never admits empty input (`compose` always yields
-`author: text`). A host that admits empty inputs would see such a row defer to
-the deadline and stay resumable — a bounded livelock, not a wrong answer — and
-should filter empty admissions the way this bot does.
-
 **The residual gap** is now narrow and specific:
 
-> If a turn provably committed an admission — there is a turn-input application
-> record for it — and neither the ledger nor the committed transcript holds any
+> If the queue is provably exhausted for this drain — the claim was refused as
+> `Empty` — and neither the ledger nor the committed transcript holds any
 > assistant text, there is nothing to post and nothing to recover. The bot reports
 > `Disposition::ReplyLost` and marks the event `ignored` with
 > `reply_lost_after_commit` rather than silently dropping it. This is now the

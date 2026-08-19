@@ -230,6 +230,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                 )
                 .await
                 .expect("claim literal-oracle batch")
+                .claim()
             {
                 observed.push(
                     claim
@@ -390,6 +391,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             )
             .await
             .expect("claim original ready-gap composition")
+            .claim()
             .expect("original ready-gap composition exists");
         assert_eq!(
             claim
@@ -443,6 +445,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             )
             .await
             .expect("redrive ready-gap composition")
+            .claim()
             .expect("ready-gap composition remains reclaimable");
         assert_eq!(
             redriven
@@ -464,6 +467,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             )
             .await
             .expect("claim delayed ready-gap row")
+            .claim()
             .expect("delayed ready-gap row remains separate");
         assert_eq!(
             delayed

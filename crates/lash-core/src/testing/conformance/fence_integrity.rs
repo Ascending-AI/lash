@@ -290,6 +290,7 @@ async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) 
         )
         .await
         .expect("claim divergent fence rows")
+        .claim()
         .expect("divergent fence rows are claimable");
     assert_eq!(claim.batches.len(), 2);
     assert_eq!(

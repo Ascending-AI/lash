@@ -423,7 +423,7 @@ walks the unfinished ledger rows.
 **The answer is not immediate, and a deferral is not a failure.** A boot that restarts inside
 the previous boot's session-execution lease TTL cannot take that lease, so the interrupted
 turn's admission is still fenced and recovery reports
-`Deferred { reason: "input_claimed_by_live_lease_generation" }` while leaving the ledger row
+`Deferred { reason: "drain_did_not_reach_admission" }` while leaving the ledger row
 **non-terminal**. A background retry then re-attempts on an interval until the lease lapses.
 So gate on the *settled* outcome, and allow at least one lease TTL (30s by default) plus the
 retry interval before declaring anything — a render gate of a few seconds fails a correct bot.
