@@ -23,7 +23,6 @@ bench/**/results/
 /*.stratified-*.json
 # Ad hoc screenshots/exported benchmark charts saved from local inspection.
 /*.png
-!/screenshot.png
 __pycache__/
 *.pyc
 .ruff_cache/

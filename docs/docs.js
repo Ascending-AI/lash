@@ -256,18 +256,6 @@
           summary: "Workspace dependency boundaries and crate-layer constraints.",
           kind: "reference",
         },
-        {
-          title: "HTML exporter",
-          href: "architecture/html-exporter.html",
-          summary: "Exporter internals for session trace HTML and static assets.",
-          kind: "reference",
-        },
-        {
-          title: "Trace export",
-          href: "trace-export-edges.html",
-          summary: "Trace edge cases and export behaviors that matter for downstream viewers.",
-          kind: "reference",
-        },
       ],
     },
     {
@@ -341,20 +329,6 @@
           href: "architecture/triggers.html",
           summary: "Session-agnostic ingress: declare, emit, match by source_type, idempotent delivery, and the wake that is the only session-ordered step. Timers and cron as trigger sources.",
           kind: "internal",
-        },
-      ],
-    },
-    {
-      label: "lash CLI",
-      tier: "cli",
-      summary: "The independently released first-party terminal Host Application. Its own repository owns product documentation and releases.",
-      href: "cli.html",
-      items: [
-        {
-          title: "lash CLI",
-          href: "cli.html",
-          summary: "Run the reference binary from the terminal: setup wizard, providers, sessions, slash commands, key bindings, flags, config, and trace export.",
-          kind: "reference",
         },
       ],
     },
@@ -528,12 +502,11 @@
   // Reference, Architecture, and CLI are their own short sections reached
   // from the band. This keeps the guide spine continuous and drops the
   // in-rail tier dividers entirely.
-  const TIER_ORDER = ["guide", "reference", "internals", "cli"];
+  const TIER_ORDER = ["guide", "reference", "internals"];
   const TIER_LABELS = {
     guide: "Guide",
     reference: "Reference",
     internals: "Internals",
-    cli: "CLI",
   };
   // True if `href` is any leaf under this nav node.
   function nodeHasHref(node, href) {

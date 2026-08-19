@@ -13,8 +13,6 @@ the result with your own reasoning, gating on what the browser surface actually 
 Keep the layers separate — a runbook never re-implements a scripted harness, and a
 scripted harness never asks for judgement.
 
-CLI operator runbooks live in the lash-cli repository's `runbooks/` directory.
-
 These are **agent-driven runbooks**, not scripts. Use judgement freely — but never skip a
 scenario's verification gates or the Abort rule below.
 

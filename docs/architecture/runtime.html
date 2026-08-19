@@ -68,7 +68,7 @@ flowchart TD
             <p>Lash can run behind the CLI or inside any long-lived host application. The same session machinery supports active sessions, managed child sessions, parked runtimes, and resumable hosts.</p>
           </div>
           <div class="mode-grid">
-            <article class="panel"><small>interactive</small><h3>CLI host</h3><p><code>lash-cli</code> composes providers, plugins, MCP servers, traces, and terminal rendering around a live <code>LashRuntime</code>.</p></article>
+            <article class="panel"><small>interactive</small><h3>CLI host</h3><p>A terminal host composes providers, plugins, MCP servers, traces, and terminal rendering around a live <code>LashRuntime</code>.</p></article>
             <article class="panel"><small>application</small><h3>Application sessions</h3><p><code>lash</code> exposes <code>LashCore</code>/<code>LashSession</code> for long-lived host applications. Hosts open sessions from ids and stores; parking/resume remains runtime plumbing behind the facade.</p></article>
             <article class="panel"><small>embedded</small><h3>Host services</h3><p>Services can compose the same core with their own providers, plugins, stores, traces, and validation around product-specific session ids.</p></article>
           </div>

@@ -87,7 +87,7 @@ let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
           </div>
           <div class="def-list-grid">
             <article class="panel"><h3>Tool + state + runtime event</h3><p><code>examples/docs-snippets/src/plugins.rs</code>: a compact update-plan plugin with session-local state, semantic runtime-event emission on tool success, and root-session-only gating. Good template for "I want to expose one stateful tool and let hosts choose the presentation."</p></article>
-            <article class="panel"><h3>Prompt contribution + factory state</h3><p><code>lash-cli</code>'s <code>PromptContextPluginFactory</code>: captures an instruction source on the factory, projects it into prompts via <code>reg.prompt().contribute(...)</code>. Good template for "I want to inject something into the system prompt."</p></article>
+            <article class="panel"><h3>Prompt contribution + factory state</h3><p>A host-side <code>PromptContextPluginFactory</code>: captures an instruction source on the factory, projects it into prompts via <code>reg.prompt().contribute(...)</code>. Good template for "I want to inject something into the system prompt."</p></article>
             <article class="panel"><h3>Per-core connection pool</h3><p><code>lash-plugin-mcp</code>: factory keeps an <code>Arc&lt;McpConnectionPool&gt;</code> shared across every session, plus runtime <code>attach_server</code> / <code>detach_server</code> methods. Good template for "I'm wrapping an external service with one persistent connection."</p></article>
           </div>
         </div>

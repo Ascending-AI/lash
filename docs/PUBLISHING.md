@@ -16,9 +16,8 @@ release publishes them all together, in dependency order.
   a-la-carte capability crates (`lash-tools`, `lash-plugin-mcp`,
   `lash-subagents`, `lash-plugin-tool-output-budget`, `lash-llm-tools`).
 - **Not published:** anything marked `publish = false` — examples, E2E
-  harnesses, and dev/internal tooling (`lash-perf`, `lash-trace-viewer`). The
-  CLI product and its private crates live in
-  [`lash-cli`](https://github.com/SamGalanakis/lash-cli). Harness evolution lives in the separate
+  harnesses, and dev/internal tooling (`lash-perf`, `lash-trace-viewer`).
+  Harness evolution lives in the separate
   [`lash-evolve`](https://github.com/SamGalanakis/lash-evolve) repository.
 
 Because of the exact `=` version pins, a published crate's internal deps must
@@ -73,8 +72,9 @@ time (`scripts/release_version.py stamp`, `scripts/publish_workspace.py
      with the curated notes. A retry verifies an existing tag still points to
      that SHA.
 
-The independent `lash-cli` Release workflow owns binary artifacts, checksums,
-the installer, and `lash --version` stamping.
+This repository publishes source crates only. Binary artifacts, checksums,
+installers, and product version stamping are out of scope here; a Host
+Application releases those from its own repository.
 
 The main CI workflow also runs:
 

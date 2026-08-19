@@ -977,8 +977,8 @@ jobs:
 
   # Release-profile coverage is x86_64 Linux only, matching what this
   # repository ships: source crates on crates.io, no platform binaries (the
-  # separate lash-cli repository owns binary artifacts, checksums, and the
-  # installer). Cross-target check legs were removed with no deploy target
+  # binary artifacts, checksums, and installers belong to Host Application
+  # repositories). Cross-target check legs were removed with no deploy target
   # behind them.
   linux-release-cache:
     name: Build Linux release cache

@@ -63,9 +63,9 @@
                 <tr><td><code>RlmProjectedBindings</code>, <code>ProjectionRef</code>, <code>ProjectionResolver</code>, <code>ProjectionRegistry</code></td><td><code>lash-protocol-rlm</code></td><td>Public RLM projection API. Inline bindings carry JSON/lashlang values; lazy bindings carry stable refs that resolve to low-level projected values immediately before execution.</td></tr>
                 <tr><td><code>ProjectedBindings</code>, <code>ProjectedValue</code>, <code>ProjectedHostDescriptor</code>, <code>ProjectedReadRequest</code>, <code>ProjectedReadResponse</code></td><td><code>lashlang</code></td><td>Low-level read-only Lashlang projection protocol. <code>ProjectedValue</code> can carry opaque projection-ref metadata for snapshot/seed rehydration; assignment over a projected name is rejected at runtime.</td></tr>
                 <tr><td><code>ToolResultProjector</code>, <code>ToolOutputBudgetPluginFactory</code>, <code>ToolOutputBudgetConfig</code></td><td><code>lash-plugin-tool-output-budget</code></td><td>Single exclusive tool-result projector (registered via <code>reg.tool_results().projector(...)</code>) that derives the budgeted model-facing <code>ModelToolReturn</code> from each completed call's full <code>ToolCallOutput</code>, with <code>ToolOutputBudgetMode::{Bytes, Tokens}</code> limits (defaults: 16 KiB, 400 lines).</td></tr>
-                <tr><td><code>ToolDiscoveryIndex</code>, <code>CatalogTool</code>, <code>llm_rerank_request</code></td><td><code>lash-cli</code> MCP discovery example</td><td>Host-owned search/load tool discovery pipeline split across catalog preview, ranking, rerank, and schema-index modules.</td></tr>
+                <tr><td><code>ToolDiscoveryIndex</code>, <code>CatalogTool</code>, <code>llm_rerank_request</code></td><td>host-side MCP discovery example</td><td>Host-owned search/load tool discovery pipeline split across catalog preview, ranking, rerank, and schema-index modules.</td></tr>
                 <tr><td><code>TraceSink</code>, <code>TraceEvent::LanguageExecution</code>, <code>OtelTraceSink</code></td><td><code>lash-trace</code> + <code>lash-core</code></td><td>Runtime observability contracts. Ordinary traces flow through the configured trace sink; language execution events carry a producer-stamped <code>language</code> field (<code>"lashlang"</code> for Lashlang), and Lashlang execution graphs use a separate opt-in sink with execution maps, node, branch, and child-link records. Static <code>@label</code> metadata is emitted once in execution-map node <code>label_metadata</code>; OpenTelemetry export is feature-gated.</td></tr>
-                <tr><td><code>UiTimelineItem</code>, <code>ActivityBlock</code>, <code>TuiExtensions</code></td><td><code>lash-cli</code> / <code>lash-tui-extensions</code></td><td>CLI render projection, tool activity display, and host-provided surface slots.</td></tr>
+                <tr><td><code>UiTimelineItem</code>, <code>ActivityBlock</code>, <code>TuiExtensions</code></td><td>external host UI layer</td><td>CLI render projection, tool activity display, and host-provided surface slots.</td></tr>
               </tbody>
             </table>
           </div>
@@ -91,7 +91,7 @@ flowchart LR
   Tools --> Session
   Prompt --> Session
   Runtime --> Session
-  UI --> CLI["lash-cli projection"]
+  UI --> CLI["external host projection"]
             </div>
           </div>
         </div>
@@ -105,7 +105,7 @@ flowchart LR
             <li>
               <div>
                 <h3>No UI vocabulary in core runtime.</h3>
-                <p><code>UiTimelineItem</code> and rendering stay in <code>lash-cli</code>.</p>
+                <p><code>UiTimelineItem</code> and rendering stay in the Host Application.</p>
               </div>
             </li>
             <li>

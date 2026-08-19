@@ -2,7 +2,7 @@
 
 ## Interaction Glossary
 
-- **Host Application**: Deployable product that selects Lash runtime crates, providers, plugins, Execution Modes, persistence, configuration, and presentation. A Host Application owns those composition choices and releases independently from Lash. `lash-cli` is the first-party Host Application. _Avoid_: reference host (when repository or release ownership matters), Lash frontend.
+- **Host Application**: Deployable product that selects Lash runtime crates, providers, plugins, Execution Modes, persistence, configuration, and presentation. A Host Application owns those composition choices and releases independently from Lash. _Avoid_: reference host (when repository or release ownership matters), Lash frontend.
 
 - **Execution Mode**: Host-selected strategy for how an agent conducts turns, interprets model output, and uses tools or executable code. Standard and RLM are Execution Modes; hosts may install others. _Avoid_: Mode (unqualified), model mode.
 - **Harness Package**: Versioned executable definition of a complete agent composition, including one Execution Mode and any supporting behaviors, evaluated as a unit within externally imposed capabilities. It does not own Lash, the evaluator, promotion policy, or capability boundary. _Avoid_: Candidate Plugin Set, editable plugin list.

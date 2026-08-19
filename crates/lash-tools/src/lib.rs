@@ -7,8 +7,8 @@
 //! - [`shell`] — `shell.exec` / `shell.start` / `shell.write`
 //! - [`web`] — `web.fetch` / `web.search`
 //!
-//! CLI-owned local grep lives in the external `lash-cli` Host Application so
-//! embedders do not inherit its native indexing dependency.
+//! Local grep is Host Application policy and lives outside this crate so
+//! embedders do not inherit a native indexing dependency.
 
 pub mod files;
 pub mod shell;

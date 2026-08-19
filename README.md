@@ -117,20 +117,10 @@ OPENROUTER_API_KEY=sk-or-... just slack-clone 3040             # then open http:
 
 See each example's README for environment knobs and Restate recipes.
 
-## The CLI
-
-[`lash-cli`](https://github.com/SamGalanakis/lash-cli) is the first-party terminal Host Application on top of the library — patch-based editing, shell execution, file/web search, planning, subagents, session resume, and live token accounting. It releases independently and is also a useful end-to-end embedding reference.
-
-![lash TUI](screenshot.png)
-
-```bash
-curl -fsSL https://github.com/SamGalanakis/lash-cli/releases/latest/download/install_lash.sh | bash
-
-lash                           # interactive TUI
-lash -p "summarize this repo"  # single-shot to stdout
-```
-
-CLI source and releases: <https://github.com/SamGalanakis/lash-cli>. CLI reference: <https://lash.run/cli.html>.
+Each one is a Host Application in Lash's sense: it picks the runtime crates,
+providers, plugins, and Execution Mode it wants, and keeps ownership of its own
+storage, transport, and presentation. A terminal application embeds Lash the same
+way a web service does.
 
 ## Contributing
 

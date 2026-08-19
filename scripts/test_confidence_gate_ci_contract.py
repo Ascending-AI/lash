@@ -1280,7 +1280,7 @@ derive_mutation_jobs() {{
         self.assertNotIn("0.1.0-alpha.", cargo)
 
         # The publisher stamps the ephemeral checkout before packaging crates.
-        # Host-application binary stamping belongs to lash-cli's release.
+        # Host Application binary stamping belongs to that host's own release.
         self.assertIn("publish_workspace.py --version", release)
         self.assertIn('release_version.py stamp-docs "${version}"', release)
         self.assertIn("git push origin HEAD:main", release)

@@ -135,10 +135,10 @@ flowchart LR
   Graph --> ReadModel["internal SessionReadModel cache<br/>active_events, messages"]
   ReadModel --> View["SessionReadView"]
   View --> Chrono["ChronologicalProjection"]
-  Chrono --> Timeline["external lash-cli UiTimeline"]
+  Chrono --> Timeline["external host UiTimeline"]
   Chrono --> Export["external lash-export HTML/JSON"]
   Chrono --> RlmHistory["RLM history projection"]
-  Timeline --> Render["external lash-tui Frame"]
+  Timeline --> Render["external host TUI frame"]
             </div>
           </div>
         </div>
