@@ -40,14 +40,20 @@ configure_bindgen_headers() {
   fi
 }
 
+# The self-tests of the gates this script and the prek hooks actually run.
+# CI's Repository-gates job runs a longer list, and the remainder there covers
+# gates that only exist in CI (see the omissions block below) — a self-test
+# whose gate nobody runs locally proves nothing about a local push.
 run_release_script_tests() {
   step "Repository script tests"
   python3 scripts/test_check_durable_read_fixture_version.py
   python3 scripts/test_check_format_versions.py
+  python3 scripts/test_check_judged_build_geometry.py
   python3 scripts/test_check_postgres_json_carrier_coverage.py
   python3 scripts/test_check_postgres_payload_shape_version.py
   python3 scripts/test_check_service_gate_pinning.py
   python3 scripts/test_check_transcript_diff.py
+  python3 scripts/test_check_version_bump_fixtures.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
   python3 scripts/test_release_notes.py
@@ -215,6 +221,52 @@ run_minio_conformance() {
       attachment_blob_store_differential_agrees -- --nocapture --include-ignored
 }
 
+# Gates CI runs that this script deliberately does not, and why. Between this
+# file, `.pre-commit-config.yaml`, and `.github/workflows/ci.yml` there are
+# three readable lists and no dispatcher; this block is what keeps the third
+# list from silently drifting away from the first two. A CI gate that appears
+# in none of the three places is an omission, not a decision.
+#
+#   scripts/check_version_bumps.py --base <merge-base>
+#     Base-relative, and the guarantee is CI's rather than the tree's: the
+#     check assumes it is looking at a current merge ref whose target-branch
+#     parent is the latest protected-branch tip (see the script's docstring).
+#     A local merge-base goes stale the moment main moves, so a local answer
+#     is not the answer the merge gets.
+#
+#   scripts/check-transcript-diff.py --enforce
+#     Run above in `--advisory` mode. The enforcing form asks about the pull
+#     request body, which does not exist yet at push time; see the comment at
+#     the invocation.
+#
+#   scripts/check-durable-read-fixture-version.py,
+#   scripts/check_version_bump_fixtures.py,
+#   scripts/lint_orchestrating_tools.py, actionlint
+#     Owned by the prek hooks in `.pre-commit-config.yaml`: file-scoped, run
+#     on every commit that touches their inputs, and not worth a second full
+#     pass here. The two that have self-tests still run them above, because a
+#     hook that has stopped working is invisible from the hook itself.
+#
+#   scripts/check_api_example_coverage.py
+#     Builds rustdoc JSON for the facade crates — its own compile of the
+#     dependency graph, and its own CI job for that reason.
+#
+#   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
+#   scripts/profile_runtime.py, scripts/profile_lashlang.py,
+#   scripts/graceful-drain-e2e.sh, scripts/request-abandon-e2e.sh,
+#   cargo clippy -p slack-clone --features e2e, the Postgres 14/18 majors,
+#   the browser E2E leg, and the package feature checks
+#     Breadth this gate trades for wall-clock. Each resolves a feature graph
+#     or a container stack of its own — a `-p` build is a different
+#     feature-unified graph, not a slice of the workspace one — and CI shards
+#     them across jobs that this script would have to run in series. What it
+#     runs instead is the workspace suite, the Postgres-16 and MinIO store
+#     lanes, and the Restate E2Es above.
+#
+#   scripts/test-worktree-gate-env.sh
+#     Exercises the gate lock this script is currently holding, so running it
+#     from inside the gate would test a state no push ever has.
+
 configure_bindgen_headers
 
 step "Formatting"
@@ -253,6 +305,23 @@ bash scripts/check-rustdoc.sh
 
 step "Test quarantine metadata"
 python3 scripts/check_test_quarantines.py
+
+step "Judged build geometry"
+python3 scripts/check_judged_build_geometry.py
+
+step "Service gate pinning"
+python3 scripts/check_service_gate_pinning.py
+
+step "Durable transcript classification"
+# CI runs this gate as `--enforce` (ci.yml, Lint). Enforcement is a question
+# about the pull request, not about the tree: the `Transcript:` justification
+# lives in the PR body, which the gate reads from the event payload or from the
+# API with GITHUB_TOKEN. At push time the pull request usually does not exist
+# yet and neither source is present, so `--enforce` here would fail every
+# justified change and train people to skip the gate. Advisory prints the same
+# classification — the part that is actionable before pushing — and CI still
+# decides.
+python3 scripts/check-transcript-diff.py --advisory
 
 run_release_script_tests
 check_current_branch_release_notes

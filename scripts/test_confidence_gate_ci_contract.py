@@ -26,6 +26,7 @@ MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 RELEASE_NOTES = ROOT / "scripts" / "release_notes.py"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
+PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
 PERF_STORE_HARDENING_RS = (
@@ -418,6 +419,53 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('git merge-base "$base_ref" HEAD', check)
         self.assertIn("python3 scripts/release_notes.py check-pr", check)
         self.assertIn('--range "${merge_base}..HEAD"', check)
+
+    def test_push_gate_runs_the_gates_whose_self_tests_it_runs(self) -> None:
+        push_gate = PUSH_GATE.read_text(encoding="utf-8")
+        pre_commit = PRE_COMMIT_CONFIG.read_text(encoding="utf-8")
+        self_tests = shell_function_body(push_gate, "run_release_script_tests")
+
+        # A self-test proves the gate works; only the gate proves the tree does.
+        # This script ran `test_check_service_gate_pinning.py` and
+        # `test_check_transcript_diff.py` while running neither gate, so both
+        # CI-blocking failures were invisible until CI.
+        self.assertIn("python3 scripts/check_service_gate_pinning.py", push_gate)
+        self.assertIn("python3 scripts/check-transcript-diff.py", push_gate)
+
+        # Locally a gate may live in this script or in the prek hooks; what it
+        # may not do is exist only as a self-test. Comment lines are stripped
+        # first: the omissions block below names the CI-only gates, and a gate
+        # explained there is precisely one that does not run.
+        local = "\n".join(
+            line
+            for line in f"{push_gate}\n{pre_commit}".splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        for name in re.findall(r"scripts/(test_check_[a-z0-9_]+)\.py", self_tests):
+            stem = name[len("test_") :]
+            candidates = [
+                ROOT / "scripts" / f"{spelling}{suffix}"
+                for spelling in (stem, stem.replace("_", "-"))
+                for suffix in (".py", ".sh")
+            ]
+            gates = [path for path in candidates if path.exists()]
+            with self.subTest(self_test=name):
+                self.assertTrue(gates, f"{name} tests no discoverable gate")
+                self.assertTrue(
+                    any(f"scripts/{path.name}" in local for path in gates),
+                    f"{name} runs here but its gate runs only in CI",
+                )
+
+    def test_pre_commit_clippy_hook_matches_the_ci_clippy_invocation(self) -> None:
+        pre_commit = PRE_COMMIT_CONFIG.read_text(encoding="utf-8")
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        lint = workflow_job_block(workflow, "lint")
+
+        # Without `--locked` the hook may resolve and write a new Cargo.lock,
+        # so it lints a dependency graph the pushed tree does not have.
+        clippy = "cargo clippy --workspace --all-targets --locked"
+        self.assertIn(clippy, lint)
+        self.assertIn(f"entry: {clippy} -- -D warnings", pre_commit)
 
     def test_push_gate_serializes_live_differential_before_postgres_free_suite(
         self,
@@ -1519,7 +1567,7 @@ derive_mutation_jobs() {{
         # that step matched the cache key, logged "cache restored", and then
         # cold-built the entire graph. The flag is a property of the workflow
         # now, so nothing about a job's step list can move it.
-        self.assertEqual(workflow["env"]["RUSTFLAGS"], MOLD_RUSTFLAGS)
+        self.assertEqual((workflow.get("env") or {}).get("RUSTFLAGS"), MOLD_RUSTFLAGS)
         self.assertNotIn("RUSTFLAGS", action_effects)
         self.assertNotIn("inputs", action)
 

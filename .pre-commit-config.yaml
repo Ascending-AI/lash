@@ -119,10 +119,13 @@ repos:
 
       # Mirrors CI Lint "Clippy (workspace, all targets)". Warm-cache this is
       # tens of seconds; run at push so commits stay instant.
+      # `--locked` because CI passes it: without it this hook may resolve and
+      # write a new Cargo.lock, so it lints a dependency graph the pushed tree
+      # does not have and passes a change CI then fails on the lockfile.
       - id: cargo-clippy-workspace
         name: cargo clippy (workspace, all targets)
         language: system
-        entry: cargo clippy --workspace --all-targets -- -D warnings
+        entry: cargo clippy --workspace --all-targets --locked -- -D warnings
         files: '\.rs$'
         pass_filenames: false
         stages: [pre-push]
