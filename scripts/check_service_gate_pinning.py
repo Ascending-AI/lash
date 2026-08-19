@@ -55,11 +55,25 @@ REQUIRE_FLAG_PAIRS = {
 }
 
 # The test binary whose tests are `#[ignore]`d, and the flags that ask for them.
-IGNORED_SUITE_MARKER = "--test cross_backend_store_differential"
-IGNORED_SUITE_FLAGS = ("--run-ignored", "--include-ignored")
+#
+# Both matchers are deliberately token-exact rather than substring searches. A
+# substring rule is one token away from being evaded in either direction:
+# `--test=<binary>` names the same binary without ever containing
+# "--test <binary>", and `--run-ignored default` contains "--run-ignored" while
+# running exactly zero ignored tests. Either would have restored the defect this
+# check exists to refuse, under a diff that reads like a no-op.
+IGNORED_SUITE_BINARY = "cross_backend_store_differential"
 
-# Files rule 2 sweeps beyond the workflows.
-SHELL_GLOBS = ("scripts/*.sh",)
+# nextest's `--run-ignored` takes a mode, and only these two run ignored tests;
+# `default` runs none. libtest's `--include-ignored` takes no value.
+NEXTEST_RUN_IGNORED = "--run-ignored"
+NEXTEST_RUN_IGNORED_MODES = ("all", "ignored-only")
+LIBTEST_INCLUDE_IGNORED = "--include-ignored"
+
+# Files rule 2 sweeps beyond the workflows. The globs are recursive and cover
+# both YAML spellings so a script or workflow filed one directory deeper does
+# not quietly leave the sweep.
+SHELL_GLOBS = ("scripts/**/*.sh",)
 EXTRA_FILES = ("justfile",)
 
 
@@ -73,7 +87,12 @@ class Violation:
 def workflow_paths(root: Path) -> tuple[Path, ...]:
     directory = root / ".github" / "workflows"
     return tuple(
-        sorted(path for path in directory.glob("*.yml") if path.is_file())
+        sorted(
+            path
+            for pattern in ("*.yml", "*.yaml")
+            for path in directory.glob(pattern)
+            if path.is_file()
+        )
     )
 
 
@@ -157,26 +176,61 @@ def shell_commands(text: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in parts if part.strip())
 
 
+def names_ignored_suite(tokens: list[str]) -> bool:
+    """Whether a tokenized command selects the ignored suite's test binary.
+
+    Both spellings count: `--test <binary>` and `--test=<binary>`.
+    """
+    for index, token in enumerate(tokens):
+        if token == "--test" and index + 1 < len(tokens):
+            if tokens[index + 1] == IGNORED_SUITE_BINARY:
+                return True
+        elif token == f"--test={IGNORED_SUITE_BINARY}":
+            return True
+    return False
+
+
+def requests_ignored_tests(tokens: list[str]) -> bool:
+    """Whether a tokenized command actually asks for ignored tests to run.
+
+    `--run-ignored` is only an opt-in at two of its three modes: `default`
+    carries the flag and runs none of them, which is why the mode is checked
+    rather than the flag's presence.
+    """
+    for index, token in enumerate(tokens):
+        if token == LIBTEST_INCLUDE_IGNORED:
+            return True
+        if token == NEXTEST_RUN_IGNORED and index + 1 < len(tokens):
+            if tokens[index + 1] in NEXTEST_RUN_IGNORED_MODES:
+                return True
+        elif token.startswith(f"{NEXTEST_RUN_IGNORED}="):
+            if token.split("=", 1)[1] in NEXTEST_RUN_IGNORED_MODES:
+                return True
+    return False
+
+
 def check_ignored_suite_commands(
     path: Path, fragments: Iterable[tuple[str, str]]
 ) -> list[Violation]:
     """Rule 2: naming the ignored suite obliges asking for ignored tests."""
     violations: list[Violation] = []
+    modes = " or ".join(f"{NEXTEST_RUN_IGNORED} {mode}" for mode in NEXTEST_RUN_IGNORED_MODES)
     for location, text in fragments:
         for command in shell_commands(text):
-            if IGNORED_SUITE_MARKER not in command:
+            tokens = command.split()
+            if not names_ignored_suite(tokens):
                 continue
-            if any(flag in command for flag in IGNORED_SUITE_FLAGS):
+            if requests_ignored_tests(tokens):
                 continue
             violations.append(
                 Violation(
                     path=str(path),
                     location=location,
                     detail=(
-                        "runs the cross-backend differential without "
-                        + " or ".join(IGNORED_SUITE_FLAGS)
-                        + "; its tests are `#[ignore]`d, so this invocation "
-                        "runs none of them and still exits 0."
+                        f"runs the cross-backend differential without {modes} "
+                        f"or {LIBTEST_INCLUDE_IGNORED}; its tests are "
+                        "`#[ignore]`d, so this invocation runs none of them and "
+                        "still exits 0."
                     ),
                 )
             )

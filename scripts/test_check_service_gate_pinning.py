@@ -246,6 +246,123 @@ jobs:
         self.assertEqual(len(violations), 1, violations)
         self.assertIn("justfile", violations[0].path)
 
+    def test_run_ignored_default_does_not_satisfy_the_rule(self) -> None:
+        """`--run-ignored default` carries the flag and runs no ignored tests."""
+        write_workflow(
+            self.root,
+            "ci.yml",
+            """
+name: CI
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Differential
+        run: >-
+          cargo nextest run -p lash-sim
+          --test cross_backend_store_differential
+          --locked --run-ignored default
+""",
+        )
+        violations = checker.check_repository(self.root)
+        self.assertEqual(len(violations), 1, violations)
+
+    def test_run_ignored_ignored_only_satisfies_the_rule(self) -> None:
+        write_workflow(
+            self.root,
+            "ci.yml",
+            """
+name: CI
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Differential
+        run: >-
+          cargo nextest run -p lash-sim
+          --test cross_backend_store_differential
+          --locked --run-ignored ignored-only
+""",
+        )
+        self.assertEqual(checker.check_repository(self.root), [])
+
+    def test_run_ignored_equals_form_is_understood(self) -> None:
+        scripts = self.root / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "gate.sh").write_text(
+            "cargo nextest run --test cross_backend_store_differential"
+            " --run-ignored=all\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(checker.check_repository(self.root), [])
+
+    def test_run_ignored_equals_default_still_fails(self) -> None:
+        scripts = self.root / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "gate.sh").write_text(
+            "cargo nextest run --test cross_backend_store_differential"
+            " --run-ignored=default\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(len(checker.check_repository(self.root)), 1)
+
+    def test_equals_form_of_the_test_selector_is_matched(self) -> None:
+        """`--test=<binary>` names the same binary and must not evade the rule."""
+        scripts = self.root / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "gate.sh").write_text(
+            "cargo test -p lash-sim --test=cross_backend_store_differential --locked\n",
+            encoding="utf-8",
+        )
+        violations = checker.check_repository(self.root)
+        self.assertEqual(len(violations), 1, violations)
+
+    def test_equals_form_with_the_opt_in_passes(self) -> None:
+        scripts = self.root / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "gate.sh").write_text(
+            "cargo test --test=cross_backend_store_differential -- --include-ignored\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(checker.check_repository(self.root), [])
+
+    def test_nested_shell_scripts_are_swept(self) -> None:
+        nested = self.root / "scripts" / "gates"
+        nested.mkdir(parents=True)
+        (nested / "inner.sh").write_text(
+            "cargo test --test cross_backend_store_differential --locked\n",
+            encoding="utf-8",
+        )
+        violations = checker.check_repository(self.root)
+        self.assertEqual(len(violations), 1, violations)
+
+    def test_yaml_extension_workflows_are_swept(self) -> None:
+        write_workflow(
+            self.root,
+            "extra.yaml",
+            """
+name: Extra
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      LASH_POSTGRES_DATABASE_URL: postgres://lash@localhost/lash
+    steps:
+      - run: cargo test
+""",
+        )
+        violations = checker.check_repository(self.root)
+        self.assertEqual(len(violations), 1, violations)
+
+    def test_a_similarly_named_binary_is_not_matched(self) -> None:
+        scripts = self.root / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "gate.sh").write_text(
+            "cargo test --test cross_backend_store_differential_extra --locked\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(checker.check_repository(self.root), [])
+
     def test_unrelated_test_binaries_are_left_alone(self) -> None:
         scripts = self.root / "scripts"
         scripts.mkdir(parents=True)
