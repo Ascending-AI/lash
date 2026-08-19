@@ -266,8 +266,9 @@ pub trait AttachmentManifest: Send + Sync {
     /// This is the single-id counterpart to [`Self::list_all_refs`], used by the
     /// GC lever's delete-time root re-check to spare (and, post-delete, to alarm
     /// on) a blob that was re-referenced in the narrow window between the freshness
-    /// re-check and the delete. Per-session-database backends answer by checking
-    /// only until the first hit rather than materializing the whole root set.
+    /// re-check and the delete. It exists so backends can answer with a single
+    /// indexed lookup that stops at the first hit, rather than materializing
+    /// the whole root set for one id.
     ///
     /// The default is conservative — it treats *any* manifest row for the id as
     /// live (sparing more than strictly necessary, never deleting a referenced
@@ -309,11 +310,12 @@ pub trait AttachmentManifest: Send + Sync {
     ) -> Result<bool, StoreError>;
 
     /// Every live attachment ref (intent or committed) this manifest instance
-    /// can see, deduplicated. For a global manifest table (Postgres) this spans
-    /// all sessions; for a per-session database (SQLite) it is that session's
-    /// refs, which the factory-level
-    /// [`AttachmentRootSet`](crate::AttachmentRootSet) unions across every
-    /// session database at sweep time. Feeds mark-and-sweep GC.
+    /// can see, deduplicated. Both durable backends hold one manifest for every
+    /// session the factory owns — a global table in Postgres, the factory-wide
+    /// `durable-core.db` catalog in SQLite — so this spans all sessions and the
+    /// factory-level [`AttachmentRootSet`](crate::AttachmentRootSet) takes the
+    /// root set from a single call rather than by unioning per-session sources.
+    /// Feeds mark-and-sweep GC.
     fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError>;
 }
 
@@ -321,6 +323,16 @@ pub trait AttachmentManifest: Send + Sync {
 /// that have no attachment-write story (mock backends, in-memory test stores,
 /// runtime-perf harnesses). Pastes no-op impls of every
 /// [`AttachmentManifest`] method.
+///
+/// The no-op [`AttachmentManifest::list_all_refs`] answers with an empty root
+/// set, which is only safe because these stores hold no attachment bytes to
+/// lose. It is **not** a starting point for a real backend: an empty root set
+/// from a store that does own bytes authorizes deleting all of them. The
+/// root-set doctrine is on [`AttachmentRootSet`](crate::AttachmentRootSet) — a
+/// backend that cannot enumerate its roots returns an error from
+/// [`AttachmentRootSet::live_attachment_refs`](crate::AttachmentRootSet::live_attachment_refs)
+/// rather than an empty set, and enumerated emptiness still does not authorize
+/// deletion by itself.
 #[macro_export]
 macro_rules! impl_noop_attachment_manifest {
     ($ty:ty) => {
