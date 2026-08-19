@@ -117,7 +117,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
     let mut core_builder = explicit_durable_test_facets(data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(store_factory)
+        .store_factory(Arc::clone(&store_factory))
         .process_registry(Arc::clone(&process_registry))
         .trigger_store(Arc::clone(&trigger_store));
     if let Some(queued_work_driver) = queued_work_driver {
@@ -134,6 +134,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         core,
         rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
+        session_store_factory: Arc::clone(&store_factory),
         trigger_store,
         process_observer,
         process_work_driver: inert_process_work_driver(process_registry),
