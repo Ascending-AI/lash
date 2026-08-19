@@ -127,6 +127,7 @@ const BATCH_ORACLE_FIXTURES: &[BatchOracleFixture] = &[
 ];
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with --run-ignored all)"]
 async fn coalesced_batches_match_literal_oracles_on_every_backend() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => database_url,
@@ -296,6 +297,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with --run-ignored all)"]
 async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => database_url,

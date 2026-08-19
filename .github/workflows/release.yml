@@ -127,6 +127,9 @@ jobs:
 
     env:
       LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+      # Required mode: a Postgres service that failed to start must fail this
+      # leg rather than let its suites skip themselves green.
+      LASH_REQUIRE_POSTGRES: "1"
 
     steps:
       - name: Check out repository

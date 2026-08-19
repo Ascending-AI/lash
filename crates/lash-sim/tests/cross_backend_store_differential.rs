@@ -2374,6 +2374,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with --run-ignored all)"]
 async fn cross_backend_store_differential_agrees() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => database_url,
