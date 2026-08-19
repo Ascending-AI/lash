@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use crate::scheduler::BoundaryKind;
 use crate::scheduler::DeliveredBoundary;
 use crate::store::{CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointWriteEvent};
-use crate::trace::OracleVerdict;
+use crate::trace::{OracleVerdict, WorkloadExpectations};
 
 #[derive(Default)]
 struct CheckedSession {
@@ -25,12 +25,14 @@ struct CheckedSession {
 pub fn checkpoint_state_consistency(
     events: &[DeliveredBoundary],
     writes: &[CheckpointWriteEvent],
+    expectations: &WorkloadExpectations,
 ) -> OracleVerdict {
-    match check_checkpoint_state(events, writes) {
-        Ok((sessions, commits, runtime_facts, skipped_runtime_facts)) => OracleVerdict::passed(
+    match check_checkpoint_state(events, writes, expectations) {
+        Ok((sessions, commits, runtime_facts)) => OracleVerdict::passed(
             "sim.oracle.independent-checkpoint-state.v1",
             format!(
-                "independent checkpoint checker matched raw rows, read models, and {runtime_facts} runtime-facts observations across {commits} commits in {sessions} sessions; skipped_runtime_facts={skipped_runtime_facts}"
+                "independent checkpoint checker matched raw rows, read models, and {runtime_facts} runtime-facts observations across {commits} commits in {sessions} sessions (workload declared {} session(s))",
+                expectations.session_count()
             ),
         ),
         Err(message) => {
@@ -42,7 +44,8 @@ pub fn checkpoint_state_consistency(
 fn check_checkpoint_state(
     events: &[DeliveredBoundary],
     writes: &[CheckpointWriteEvent],
-) -> Result<(usize, usize, usize, usize), String> {
+    expectations: &WorkloadExpectations,
+) -> Result<(usize, usize, usize), String> {
     let mut sessions = BTreeMap::<String, CheckedSession>::new();
     for write in writes
         .iter()
@@ -88,16 +91,33 @@ fn check_checkpoint_state(
         compare_read_model(checked, accepted_read, &session_id)?;
     }
 
+    // Every session the workload declared must reach the checker, checked by
+    // identity rather than by count. Zero committing sessions used to read as
+    // "consistent across 0 commits in 0 sessions" — a total loss of checkpoint
+    // coverage indistinguishable from compliance. A cardinality floor would not
+    // fix that here: this population is strictly wider than the declared one
+    // (it also reconstructs suspend- and worker-attributed commits), so
+    // `reconstructed >= declared` still passes a run in which every declared
+    // session lost its checkpoints and the undeclared attributions made up the
+    // difference.
+    let missing = expectations.sessions_missing_from(sessions.keys().map(String::as_str));
+    if !missing.is_empty() {
+        return Err(format!(
+            "workload declared {} session(s) but the independent checkpoint checker reconstructed no commits for {:?} (reconstructed {:?}); the declared observation class is absent or incomplete",
+            expectations.session_count(),
+            missing,
+            sessions.keys().collect::<Vec<_>>()
+        ));
+    }
+
     let mut runtime_facts_checked = 0usize;
-    let mut skipped_runtime_facts = 0usize;
     for (session_id, checked) in &sessions {
         let Some(runtime) = events.iter().rev().find(|event| {
             event.actor_alias == *session_id
                 && event.observed.get("runtime_invariant_facts").is_some()
         }) else {
-            skipped_runtime_facts += 1;
             return Err(format!(
-                "checkpoint checker `{session_id}` checked {} commits but found no matching runtime-facts observation; skipped_runtime_facts={skipped_runtime_facts}",
+                "checkpoint checker `{session_id}` checked {} commits but found no matching runtime-facts observation",
                 checked.checked_commits
             ));
         };
@@ -115,12 +135,7 @@ fn check_checkpoint_state(
                 .to_string(),
         );
     }
-    Ok((
-        sessions.len(),
-        checked_commits,
-        runtime_facts_checked,
-        skipped_runtime_facts,
-    ))
+    Ok((sessions.len(), checked_commits, runtime_facts_checked))
 }
 
 fn fold_graph_append(
@@ -476,14 +491,112 @@ mod tests {
         runtime.observed["runtime_invariant_facts"]["usage"]["total_usage"]["input_tokens"] =
             json!(999);
 
-        let verdict = checkpoint_state_consistency(&trace.events, &trace.durable_writes);
+        let verdict =
+            checkpoint_state_consistency(&trace.events, &trace.durable_writes, &trace.expectations);
         assert!(!verdict.is_passed(), "corrupted runtime usage must be red");
         assert!(verdict.message.contains("usage reconstruction diverged"));
     }
 
+    fn declared_sessions(aliases: &[&str]) -> WorkloadExpectations {
+        WorkloadExpectations::new(
+            aliases.iter().map(|alias| (*alias).to_string()).collect(),
+            20,
+            2,
+            4,
+        )
+    }
+
+    #[test]
+    fn independent_checker_rejects_a_declared_workload_that_committed_nothing() {
+        // Red-side proof: the workload declared five sessions and the checker
+        // reconstructed none. Before the declaration rode the trace this read
+        // as "consistent across 0 commits in 0 sessions".
+        let declared = declared_sessions(&[
+            "session-001",
+            "session-002",
+            "session-003",
+            "session-004",
+            "session-005",
+        ]);
+        let verdict = checkpoint_state_consistency(&[], &[], &declared);
+        assert!(!verdict.is_passed(), "an absent commit class must be red");
+        assert!(
+            verdict.message.contains("workload declared 5 session(s)")
+                && verdict.message.contains("session-001"),
+            "{}",
+            verdict.message
+        );
+    }
+
+    /// Red-side proof for the identity floor. The checker's reconstructed
+    /// population is strictly wider than the declared one — a real
+    /// `default-random` run also reconstructs suspend- and worker-attributed
+    /// commits — so a cardinality floor (`reconstructed >= declared`) still
+    /// passes a run in which a declared session lost every checkpoint and the
+    /// undeclared attributions covered the count. Dropping one declared
+    /// session's commits must be red, and must name that session.
+    #[tokio::test]
+    async fn checker_names_a_declared_session_whose_checkpoints_all_vanished() {
+        let workload = generate_workload(5, "default-random", 96).expect("workload");
+        let trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let baseline =
+            checkpoint_state_consistency(&trace.events, &trace.durable_writes, &trace.expectations);
+        assert!(baseline.is_passed(), "{}", baseline.message);
+
+        let dropped = trace
+            .expectations
+            .sessions
+            .first()
+            .expect("declared session")
+            .clone();
+        let reconstructed_before = trace
+            .durable_writes
+            .iter()
+            .filter(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .map(|write| write.attributed_session().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            reconstructed_before.len() > trace.expectations.session_count(),
+            "this proof needs the reconstructed population to be wider than the declared one, got {reconstructed_before:?} for {} declared",
+            trace.expectations.session_count()
+        );
+
+        let mut without_declared_session = trace.durable_writes.clone();
+        without_declared_session.retain(|write| write.attributed_session() != dropped);
+        // A cardinality floor would not fire here: the surviving undeclared
+        // attributions still outnumber the declared sessions.
+        let surviving = without_declared_session
+            .iter()
+            .filter(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .map(|write| write.attributed_session().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            surviving.len() >= trace.expectations.session_count(),
+            "a count-only floor must still be satisfied for this proof to mean anything: {surviving:?}"
+        );
+
+        let verdict = checkpoint_state_consistency(
+            &trace.events,
+            &without_declared_session,
+            &trace.expectations,
+        );
+        assert!(
+            !verdict.is_passed(),
+            "a declared session losing every checkpoint must be red: {}",
+            verdict.message
+        );
+        assert!(
+            verdict.message.contains(&dropped),
+            "the verdict must name the missing declared session `{dropped}`: {}",
+            verdict.message
+        );
+    }
+
     #[test]
     fn independent_checker_rejects_zero_commits() {
-        let verdict = checkpoint_state_consistency(&[], &[]);
+        let verdict = checkpoint_state_consistency(&[], &[], &WorkloadExpectations::default());
         assert!(!verdict.is_passed(), "zero checked commits must be red");
         assert!(verdict.message.contains("checked 0 commits"));
     }
@@ -494,10 +607,18 @@ mod tests {
         let mut trace = run_generated_workload_for_fixture(workload, "bundle")
             .await
             .expect("trace");
-        let baseline = checkpoint_state_consistency(&trace.events, &trace.durable_writes);
+        let baseline =
+            checkpoint_state_consistency(&trace.events, &trace.durable_writes, &trace.expectations);
         assert!(baseline.is_passed(), "{}", baseline.message);
         assert!(!baseline.message.contains("across 0 commits"));
-        assert!(baseline.message.contains("skipped_runtime_facts=0"));
+        assert!(
+            baseline.message.contains(&format!(
+                "workload declared {} session(s)",
+                trace.expectations.session_count()
+            )),
+            "{}",
+            baseline.message
+        );
 
         let v3 = trace
             .durable_writes
@@ -507,9 +628,62 @@ mod tests {
             })
             .expect("generated v3 runtime write");
         v3.state = None;
-        let verdict = checkpoint_state_consistency(&trace.events, &trace.durable_writes);
+        let verdict =
+            checkpoint_state_consistency(&trace.events, &trace.durable_writes, &trace.expectations);
         assert!(!verdict.is_passed(), "v3 state omission must be red");
         assert!(verdict.message.contains("schema v3 without required state"));
+    }
+
+    /// Exercise the legacy-fixture skip path, and prove it is taken for the
+    /// declared-version reason rather than by accident: the same stateless
+    /// commit is skipped when it announces schema v2 and is red when it
+    /// announces v3. Without both halves, "it skipped" and "it never reached
+    /// the branch" are indistinguishable.
+    #[tokio::test]
+    async fn promoted_v1_v2_commits_are_skipped_for_their_declared_schema_version() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let baseline =
+            checkpoint_state_consistency(&trace.events, &trace.durable_writes, &trace.expectations);
+        assert!(baseline.is_passed(), "{}", baseline.message);
+
+        let mut legacy = trace.durable_writes.clone();
+        let mut promoted = legacy
+            .iter()
+            .find(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .expect("runtime write")
+            .clone();
+        promoted.schema = "lash.sim.checkpoint-write-event.v2".to_string();
+        promoted.session_id = "promoted-v2-session".to_string();
+        promoted.attributed_session_id = None;
+        promoted.state = None;
+        legacy.push(promoted.clone());
+
+        let skipped = checkpoint_state_consistency(&trace.events, &legacy, &trace.expectations);
+        assert!(
+            skipped.is_passed(),
+            "a promoted v2 commit must be skipped, not rejected: {}",
+            skipped.message
+        );
+        assert_eq!(
+            skipped.message, baseline.message,
+            "the skipped v2 commit must contribute no session and no commit"
+        );
+
+        // Same commit, same missing state, v3 schema: now it must be red. This
+        // is what proves the skip above was decided by the declared version.
+        let mut current = trace.durable_writes.clone();
+        promoted.schema = CHECKPOINT_WRITE_EVENT_SCHEMA.to_string();
+        current.push(promoted);
+        let verdict = checkpoint_state_consistency(&trace.events, &current, &trace.expectations);
+        assert!(!verdict.is_passed(), "a v3 commit may not omit its state");
+        assert!(
+            verdict.message.contains("schema v3 without required state"),
+            "{}",
+            verdict.message
+        );
     }
 
     #[tokio::test]
@@ -529,7 +703,8 @@ mod tests {
         let mut missing = trace.events.clone();
         missing
             .retain(|event| event.kind != BoundaryKind::Provider || event.actor_alias != session);
-        let verdict = checkpoint_state_consistency(&missing, &trace.durable_writes);
+        let verdict =
+            checkpoint_state_consistency(&missing, &trace.durable_writes, &trace.expectations);
         assert!(!verdict.is_passed(), "missing runtime facts must be red");
         assert!(verdict.message.contains("no matching runtime-facts"));
 
@@ -541,7 +716,8 @@ mod tests {
             .expect("matching provider facts");
         runtime.observed["runtime_invariant_facts"]["graph"]["leaf_node_id"] =
             json!("mutated-leaf");
-        let verdict = checkpoint_state_consistency(&wrong_leaf, &trace.durable_writes);
+        let verdict =
+            checkpoint_state_consistency(&wrong_leaf, &trace.durable_writes, &trace.expectations);
         assert!(
             !verdict.is_passed(),
             "runtime/store leaf mismatch must be red"

@@ -69581,7 +69581,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/oracles.rs:3438#\"lash_core::sansio::TurnMachine\","
+usage = "crates/lash-sim/src/oracles.rs:3601#\"lash_core::sansio::TurnMachine\","
 
 [[api]]
 symbol = "lash_core::TurnMachineConfig"

@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::provider_mutations::TRANSPORT_PROVIDER_MUTATIONS;
+use crate::provider_mutations::{TRANSPORT_PROVIDER_MUTATIONS, is_transport_provider_mutation};
 use crate::runtime_providers::{
     MIGRATED_RUNTIME_PROVIDER_KINDS, runtime_provider_kind_for_session,
     runtime_script_name_for_kind,
 };
 use crate::scheduler::{BoundaryEvent, BoundaryKind, next_seed};
-use crate::trace::StableAliases;
+use crate::trace::{StableAliases, WorkloadExpectations};
 
 pub const GENERATOR_VERSION: &str = "lash-sim.generated-workload.v9";
 pub const WORKLOAD_FAMILY: &str = "deterministic-runtime-state-machine";
@@ -60,6 +60,37 @@ pub struct GeneratedWorkload {
     pub sessions: Vec<GeneratedSession>,
     pub boundaries: Vec<BoundaryEvent>,
     pub aliases: StableAliases,
+}
+
+impl GeneratedWorkload {
+    /// Declare the observation counts this workload commits to producing, read
+    /// straight off the generated plan. Oracles evaluating universally
+    /// quantified laws compare their observations against these counts so an
+    /// absent observation class fails instead of passing vacuously.
+    pub fn expectations(&self) -> WorkloadExpectations {
+        WorkloadExpectations::new(
+            self.sessions
+                .iter()
+                .map(|session| session.alias.clone())
+                .collect(),
+            self.boundary_count(BoundaryKind::Provider),
+            self.boundaries
+                .iter()
+                .filter(|boundary| boundary.kind == BoundaryKind::ProviderMutation)
+                .filter_map(|boundary| boundary.payload.get("mutation"))
+                .filter_map(Value::as_str)
+                .filter(|mutation| is_transport_provider_mutation(mutation))
+                .count(),
+            self.boundary_count(BoundaryKind::LeaseTime),
+        )
+    }
+
+    fn boundary_count(&self, kind: BoundaryKind) -> usize {
+        self.boundaries
+            .iter()
+            .filter(|boundary| boundary.kind == kind)
+            .count()
+    }
 }
 
 pub fn generate_workload(

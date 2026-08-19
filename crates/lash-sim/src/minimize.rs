@@ -22,8 +22,8 @@ use crate::runner::run_generated_workload_for_fixture;
 use crate::scheduler::BoundaryKind;
 use crate::store::ModelStore;
 use crate::trace::{
-    AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceIoError, read_trace,
-    write_replay_report, write_trace,
+    AbstractWorldSummary, OracleStatus, OracleVerdict, SimulationTrace, TraceIoError,
+    WorkloadExpectations, read_trace, write_replay_report, write_trace,
 };
 
 pub const MINIMIZE_REPORT_SCHEMA: &str = "lash.sim.minimize-report.v1";
@@ -387,7 +387,7 @@ fn refresh_trace_verdicts(
 ) -> Result<(), MinimizeError> {
     retain_causally_supported_checkpoint_writes(trace);
     let final_summary = summary_for_trace(trace)?;
-    let oracles = generated_oracles(&trace.events, &final_summary);
+    let oracles = generated_oracles(&trace.events, &final_summary, &trace.expectations);
     let mut oracle = combine_oracles(&oracles);
     if let Some(target) = target
         && let Some(target_oracle) = find_target_oracle(&oracles, target)
@@ -767,39 +767,47 @@ fn fixture_boundary_kind(kind: &str) -> Result<BoundaryKind, MinimizeError> {
     }
 }
 
+/// Re-evaluate the generated oracles against a candidate (shrunk) trace.
+///
+/// The workload's declared expectations ride the trace unchanged: shrinking
+/// deletes observations the workload declared, so the coverage-floor oracles are
+/// expected to go red on a minimized candidate. The minimizer accepts a
+/// candidate on the *target* failure alone, so those extra reds neither block
+/// shrinking nor mask the failure being minimized.
 fn generated_oracles(
     events: &[crate::scheduler::DeliveredBoundary],
     summary: &AbstractWorldSummary,
+    expectations: &WorkloadExpectations,
 ) -> Vec<OracleVerdict> {
     let mut oracles = vec![
         scheduler_controlled_delivery(events),
         scheduler_owned_runtime_completions(events),
         state_machine_semantic_invariants(events, summary),
         operational_coverage(events, summary),
-        ingress_sessions_opened(summary),
+        ingress_sessions_opened(summary, expectations),
         queued_ingress_observed(summary, events),
         cancellation_observed(summary, events),
         trigger_delivery_observed(summary, events),
         observer_reconnect_observed(summary, events),
         backend_failure_observed(summary, events),
         provider_mutation_rejected(summary, events),
-        provider_transport_mutation_classified(events),
-        provider_turn_interleaving_depth(events),
+        provider_transport_mutation_classified(events, expectations),
+        provider_turn_interleaving_depth(events, expectations),
         process_wake_observed(summary, events),
         process_never_double_started(events),
         abandoned_requires_evidence(events),
         tool_boundary_observed(summary, events),
         exec_code_observed(summary, events),
         cross_session_isolation(summary),
-        observer_convergence(summary),
-        runtime_session_graph_contract(summary),
+        observer_convergence(summary, expectations),
+        runtime_session_graph_contract(summary, expectations),
         durable_effect_exactly_once(summary),
         worker_stale_completion_rejected(summary),
         worker_failover_continues_work(events),
         healthy_long_turn_liveness(events),
-        lease_time_monotonic(events),
+        lease_time_monotonic(events, expectations),
         generated_suspend_resume(events),
-        generated_final_value_semantic_channel(events),
+        generated_final_value_semantic_channel(events, expectations),
     ];
     oracles.extend(scenario_contract_mini_oracles(events, summary));
     oracles.extend(scenario_contract_oracles(events, summary));
