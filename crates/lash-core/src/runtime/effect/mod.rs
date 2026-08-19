@@ -4,6 +4,7 @@ pub mod effect_replay_driver;
 mod envelope;
 pub(crate) mod executor;
 mod group;
+pub mod group_drain;
 mod group_journal;
 mod inline_host;
 mod outcome;
@@ -29,6 +30,9 @@ pub use executor::{
 pub use group::{
     CheckedEffectGroup, EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy,
     LoserDisposition, RuntimeEffectGroup, refuse_unhonored_group_membership,
+};
+pub use group_drain::{
+    ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainExecutors, GroupDrainReport,
 };
 pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;

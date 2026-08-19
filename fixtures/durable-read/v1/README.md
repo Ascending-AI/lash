@@ -72,6 +72,25 @@ declaration by two generations (16 to 18) instead of one.
 | --- | --- | --- |
 | `122e7b348` — Reject drifted process wake delivery payloads (#399, FIG-1377) | `ProcessWakeDelivery` gained the stamped `version` field | `wake_delivery.version: 1` appeared in the SQLite expectations |
 | `771e875f2` — Persist session prompts and trace composition changes (#411, FIG-1376) | `PersistedSessionConfig` gained `prompt`, written as an explicit empty layer | `prompt: {}` appeared twice in both backends' expectations, and the `runtime_turn_commits` payload hashes were rewritten |
+| `8a23dca6a` — Guard the durable graph-node body with a versioned surface (#486) | `SessionNodeBody` gained a stamped `schema_version`, defaulted on read for unstamped rows | `"schema_version":1` appeared on every `graph_nodes` payload when FIG-1536's PostgreSQL generation bump forced a regeneration |
+
+### A fixture cannot hold a legacy shape
+
+That last row also shows what this fixture is *not* for. Before the regeneration
+its `graph_nodes` rows happened to be unstamped, which incidentally exercised the
+defaulted-on-read path; regenerating re-stamped them and the exercise vanished.
+That was never coverage worth relying on: a fixture is written by the current
+writer, so every regeneration converts every row to the current shape, and any
+legacy shape sitting here is one bump away from disappearing without a failing
+test.
+
+A shape older than what this build writes therefore belongs in a frozen byte
+literal beside the decoder that must keep reading it —
+`session_graph_tests.rs::unstamped_conversation_bodies_keep_loading` and
+`::unstamped_stored_bodies_keep_loading` are that, for the node body — not in a
+generated artifact. Read this fixture as "the previous committed writer's
+output", which is the drift it exists to catch, and put "some writer, once, long
+ago" somewhere regeneration cannot reach.
 
 ## Coverage
 
@@ -113,13 +132,22 @@ Determinism is now verified cross-environment (Postgres 14/16/18 and across runn
 env/TZ/locale), not just two-consecutive-run on one machine: regenerations must
 produce byte-identical artifacts.
 
-An index-only catalog addition is not a reason to regenerate. Indexes are already
-outside the semantic-read contract above, and the SQLite catalog is created with
-`CREATE INDEX IF NOT EXISTS`, so such an addition does not move a store schema
-version: the committed artifact keeps opening and adopts the new index in the
-copy under test. Regenerating would only replace working old-file evidence with a
-file the current binary just wrote. `sqlite/durable-core.db` therefore predates
-the idle-arbitration ordering indexes on purpose.
+An index-only catalog addition is not a reason to regenerate *when it moves no
+store schema version*. Indexes are outside the semantic-read contract above, and
+the SQLite catalog is created with `CREATE INDEX IF NOT EXISTS`, so on that tier
+such an addition leaves the declared version alone: the committed artifact keeps
+opening and adopts the new index in the copy under test, and regenerating would
+only replace working old-file evidence with a file the current binary just wrote.
+
+PostgreSQL is the exception, and FIG-1536 is the case that proved it. That tier
+has explicit migrations rather than a reject-and-recreate boundary, so an index
+addition is a new component generation with a creation-only migration into it —
+which moves `PostgresStorage::schema_version()`, which the read-back law compares
+against `postgres/version.json`. Once a store schema version moves, step 2 of the
+decision procedure below applies in full: bump `DURABLE_READ_FIXTURE_SCHEMA_VERSION`
+and regenerate *both* backends, because the declaration is embedded in each
+`expected.json` and asserted on read-back. A postgres-only bump cannot be
+regenerated alone.
 
 When a read-back test fails, use this decision procedure:
 

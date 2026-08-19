@@ -117,6 +117,15 @@ pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_runtime_effect_group
          DROP COLUMN group_key,
          DROP COLUMN settlement_seq;";
 
+/// Rewinds a freshly provisioned schema to the published component-54 shape.
+///
+/// One `DROP INDEX` is the whole rewind because one `CREATE INDEX` is the whole
+/// 55 generation. The shape checker ignores non-unique indexes, so a 54 source
+/// and this build differ in the version stamp alone — which is exactly what the
+/// 54 -> 55 migration declares as its source shape.
+pub const REWIND_PAST_55_ARTIFACTS: &str =
+    "DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;";
+
 /// Reads `server_version_num`, for the one assertion that needs a PostgreSQL
 /// feature not present on every major in the support matrix.
 pub async fn postgres_server_version_num() -> i32 {

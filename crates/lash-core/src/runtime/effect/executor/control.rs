@@ -106,6 +106,64 @@ impl ExecutionScope {
         Ok(EffectJournalIdentity::from_scope(self))
     }
 
+    /// The scope a persisted `scope_id` names, or `None` when no version of this
+    /// runtime wrote that key.
+    ///
+    /// The inverse of [`journal_identity`](Self::journal_identity), and
+    /// deliberately beside it: a durable effect row records its scope as the
+    /// journal key alone, so a reader that did not open the effect — the group
+    /// drain, which takes its queue from the journal rather than from a caller —
+    /// has the key and needs the scope. Re-deriving it here rather than at that
+    /// reader keeps one mapping in both directions instead of two that can
+    /// drift.
+    ///
+    /// `None` rather than a guessed scope, for the same reason
+    /// [`EffectGroupColumn::from_column`](super::super::group_journal::EffectGroupColumn::from_column)
+    /// answers `None`: a key this build cannot read is a row it must refuse, not
+    /// one it may re-execute under an invented identity.
+    #[must_use]
+    pub fn from_journal_key(key: &str) -> Option<Self> {
+        #[derive(Deserialize)]
+        struct Wire {
+            version: u8,
+            kind: String,
+            #[serde(default)]
+            session_id: Option<String>,
+            #[serde(default)]
+            execution_id: Option<String>,
+        }
+
+        let wire: Wire = serde_json::from_str(key).ok()?;
+        if wire.version != JOURNAL_IDENTITY_VERSION {
+            return None;
+        }
+        let scope = match wire.kind.as_str() {
+            "turn" => Self::Turn {
+                session_id: wire.session_id?,
+                turn_id: wire.execution_id?,
+            },
+            "drain" => Self::QueueDrain {
+                session_id: wire.session_id?,
+                drain_id: wire.execution_id?,
+            },
+            "delete" => Self::SessionDelete {
+                session_id: wire.session_id?,
+            },
+            "process" => Self::Process {
+                process_id: wire.execution_id?,
+            },
+            "op" => Self::RuntimeOperation {
+                operation_id: wire.execution_id?,
+            },
+            _ => return None,
+        };
+        // A key that decodes to a scope this runtime would refuse to journal is
+        // not a scope: the round trip has to land on a value the forward
+        // direction could have produced.
+        scope.validate().ok()?;
+        Some(scope)
+    }
+
     /// Exposes session id to store and durable-substrate implementors and effect-host implementors
     /// while snapshotting or restoring durable session state. Returns `None` when no session id is
     /// present.
@@ -169,6 +227,10 @@ pub struct EffectJournalIdentity {
     session_id: Option<String>,
 }
 
+/// The `version` field every journal key this build writes carries, and the
+/// only one [`ExecutionScope::from_journal_key`] reads back.
+const JOURNAL_IDENTITY_VERSION: u8 = 2;
+
 impl EffectJournalIdentity {
     fn from_scope(scope: &ExecutionScope) -> Self {
         #[derive(Serialize)]
@@ -199,7 +261,7 @@ impl EffectJournalIdentity {
             }
         };
         let key = serde_json::to_string(&Wire {
-            version: 2,
+            version: JOURNAL_IDENTITY_VERSION,
             kind,
             session_id,
             execution_id,
@@ -1227,6 +1289,60 @@ mod tests {
         }
         for identity in &identities[3..] {
             assert_eq!(identity.session_id(), None);
+        }
+    }
+
+    /// Every variant survives the round trip, not just the one the drain
+    /// happens to exercise.
+    ///
+    /// `from_journal_key` is the drain's only way back from a journal row to a
+    /// scope, and it re-derives each variant from a `kind` string by hand. A
+    /// variant whose forward and backward spellings drift apart makes every
+    /// row written under it undrainable — refused as a scope no version of this
+    /// runtime writes, which is exactly the wrong answer for a scope this
+    /// version writes constantly. Only the whole set proves the mapping; one
+    /// variant proves the plumbing.
+    #[test]
+    fn every_scope_variant_round_trips_through_its_journal_key() {
+        for scope in [
+            ExecutionScope::turn("session", "shared"),
+            ExecutionScope::queue_drain("session", "shared"),
+            ExecutionScope::session_delete("session"),
+            ExecutionScope::process("shared"),
+            ExecutionScope::runtime_operation("shared"),
+        ] {
+            let key = scope
+                .journal_identity()
+                .expect("durable identity")
+                .key()
+                .to_string();
+            assert_eq!(
+                ExecutionScope::from_journal_key(&key),
+                Some(scope.clone()),
+                "scope {scope:?} did not come back from its own journal key `{key}`"
+            );
+        }
+    }
+
+    /// A key this build cannot read is refused rather than guessed at, which is
+    /// what lets the drain treat `None` as corruption instead of as a default.
+    #[test]
+    fn a_journal_key_this_build_cannot_read_is_refused() {
+        for key in [
+            "",
+            "not json",
+            r#"{"version":1,"kind":"turn","session_id":"s","execution_id":"t"}"#,
+            r#"{"version":2,"kind":"nonsense","execution_id":"t"}"#,
+            // Right kind, missing the field that kind requires.
+            r#"{"version":2,"kind":"turn","session_id":"s"}"#,
+            // Decodes, but to a scope the forward direction would refuse.
+            r#"{"version":2,"kind":"process","execution_id":""}"#,
+        ] {
+            assert_eq!(
+                ExecutionScope::from_journal_key(key),
+                None,
+                "`{key}` is not a scope this build wrote"
+            );
         }
     }
 }

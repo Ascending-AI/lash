@@ -296,8 +296,9 @@ pub(crate) use effect::RuntimeEffectControllerHandle;
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
     BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckedEffectGroup,
-    CheckpointClaimSet, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
+    CheckpointClaimSet, ChildDrainOutcome, DrainedChild, EffectGroupDrain, EffectGroupHandle,
+    EffectGroupMembership, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
+    ExecutionScope, ExternalCompletionError, GroupDrainExecutors, GroupDrainReport,
     GroupSettlement, GroupWakePolicy, InlineEffectHost, InlineRuntimeEffectController,
     LlmAttachmentSpec, LlmRequestSpec, LoserDisposition, ProcessCommand, ProcessEffectOutcome,
     ProcessOutcomeObserver, ProcessTurnCancellation, Resolution, ResolveOutcome,

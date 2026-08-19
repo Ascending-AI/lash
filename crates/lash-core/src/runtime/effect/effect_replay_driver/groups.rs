@@ -46,15 +46,30 @@
 //!
 //! # What this layer is not
 //!
-//! It is not the drain (FIG-1536). A close under
-//! [`LoserDisposition::Cancel`](super::super::group::LoserDisposition::Cancel)
-//! cancels the children *this process is running* and each of those journals its
-//! own cancellation terminal through its own fence; children of the same group
-//! being run by another process, or never claimed at all, are left for the
-//! host-owned drain driver, which reads them through
-//! [`EffectReplayPersistence::read_unsettled_group_children`] and applies the
-//! disposition journaled on the group row. That split is why the disposition is
-//! declared at open and durable: the drain never invents one.
+//! It is not the drain. That shipped beside it as
+//! [`group_drain`](crate::runtime::effect::group_drain) (FIG-1536), reading this
+//! layer's [`EffectReplayPersistence::read_unsettled_group_children`] and
+//! executing what it finds through host-supplied executors — the reclamation
+//! this layer's leak note below promises.
+//!
+//! The split between them is *not* symmetric across dispositions, and the reason
+//! is what each side can honestly write:
+//!
+//! * Under
+//!   [`LoserDisposition::Cancel`](super::super::group::LoserDisposition::Cancel),
+//!   a close cancels the children this process is running and each of them
+//!   journals its own cancellation terminal through its own fence. The drain
+//!   never touches a `Cancel` group: a terminal for a child it is not running is
+//!   a terminal it would have to invent, and a cancellation the effect never saw
+//!   is a lie at a rank a real settlement would have taken. It reports such
+//!   children as declared-cancelled and leaves them.
+//! * Under `RunToCompletion` the drain is the executor of last resort, and the
+//!   disposition it applies is the one journaled on the group row at open. That
+//!   is why the disposition is durable: the drain never invents one.
+//!
+//! The residual is therefore narrow and named: children of a `Cancel` group
+//! whose process died between open and close stay `in_progress` until their
+//! rows are retired with the rest of the group's journal.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -102,6 +117,28 @@ const SETTLEMENT_POLL: Duration = BUSY_POLL;
 /// (FIG-1536): a group whose caller is gone is the drain's to finish, and
 /// retiring the entry is a consequence of finishing it, not a policy of its
 /// own.
+///
+/// That drain has now shipped
+/// ([`group_drain`](crate::runtime::effect::group_drain)), and it reclaims what
+/// it was promised and no more. It is named a *closed* group's key by its host,
+/// and the entry it can retire is one whose group is closed, whose outstanding
+/// count has reached zero, and whose journal it has just emptied. An entry whose
+/// caller never closed is still here for the life of the process: nothing about
+/// the drain tells it apart from a caller that has not gotten around to closing
+/// yet, which is precisely the judgment this note refuses to guess at.
+/// Work on a group that this process is doing itself, which a drain pass here
+/// would race.
+pub(super) enum LocalDrainConflict {
+    /// A caller here opened the group and has not closed it.
+    OpenToACaller,
+    /// The group is closed here, but children this process dispatched have not
+    /// reported settling yet.
+    RunningHere {
+        /// How many, so the refusal can say it.
+        outstanding: usize,
+    },
+}
+
 #[derive(Default)]
 pub(super) struct DurableEffectGroups {
     open: RwLock<HashMap<String, Arc<OpenGroup>>>,
@@ -144,6 +181,38 @@ struct OpenGroupState {
 impl DurableEffectGroups {
     fn get(&self, group_key: &str) -> Option<Arc<OpenGroup>> {
         self.open.read_recover().get(group_key).cloned()
+    }
+
+    /// Whether this process holds `group_key` open on behalf of a caller that
+    /// has not closed it.
+    ///
+    /// The drain's local guard. A closed group's entry may outlive the close —
+    /// that is what serves a `RunToCompletion` loser's settlement to a caller
+    /// that is gone — so "present here" is not the question; "still owed to a
+    /// caller" is.
+    fn is_open_to_a_caller(&self, group_key: &str) -> bool {
+        self.open
+            .read_recover()
+            .get(group_key)
+            .is_some_and(|state| !state.state.lock_recover().closed)
+    }
+
+    /// Why this process must not drain `group_key`, if it must not.
+    ///
+    /// Both answers are about work *this* host is doing, which is the only kind
+    /// the drain can see and the only kind it can race. The second is easy to
+    /// miss and cheap to get wrong: a host that closes a `RunToCompletion` group
+    /// and drains it in the same breath finds the group no longer open to a
+    /// caller, and would happily reclaim a child its own executor is still
+    /// running but has stalled long enough for the lease to lapse — stealing
+    /// from itself, which is the one race the claim fence cannot narrate away
+    /// because both sides are this process.
+    pub(super) fn local_drain_conflict(&self, group_key: &str) -> Option<LocalDrainConflict> {
+        if self.is_open_to_a_caller(group_key) {
+            return Some(LocalDrainConflict::OpenToACaller);
+        }
+        let outstanding = self.get(group_key)?.outstanding.load(Ordering::Acquire);
+        (outstanding != 0).then_some(LocalDrainConflict::RunningHere { outstanding })
     }
 
     fn reap(&self, group_key: &str, state: &Arc<OpenGroup>) {
@@ -279,6 +348,18 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         state.settled.notify_waiters();
         state.outstanding.fetch_sub(1, Ordering::AcqRel);
         self.reap_if_complete(group_key, state).await;
+    }
+
+    /// Ask retention's question about a group named only by key.
+    ///
+    /// The drain's entry point into retention: it settles children of groups
+    /// this process may never have opened, so it has a key and no state. A group
+    /// with no entry here is already retired as far as this process is
+    /// concerned, and the call is a no-op.
+    pub(super) async fn retire_group_if_complete(&self, group_key: &str) {
+        if let Some(state) = self.groups.get(group_key) {
+            self.reap_if_complete(group_key, &state).await;
+        }
     }
 
     /// Retire the process-local state of a group that is closed to its caller
@@ -565,8 +646,19 @@ pub(super) fn child_cancelled_error(
     )
 }
 
-fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
+pub(super) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {
     RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeEffectGroupShape, message)
+}
+
+/// A drain refusal a caller fixes by waiting, not by changing anything.
+///
+/// Distinct from [`group_shape_error`] on purpose. "This host is still working
+/// the group" and "no such group exists" are the same shape of `Err` to a
+/// caller that only has a code, and they call for opposite actions: retry
+/// shortly, versus never. A retryable condition that only a message grep can
+/// identify is a seam a host gets wrong once and then works around.
+pub(super) fn drain_deferred_error(message: impl Into<String>) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(RuntimeErrorCode::RuntimeEffectGroupDrainDeferred, message)
 }
 
 fn closed_group_error(group_key: &str) -> RuntimeEffectControllerError {

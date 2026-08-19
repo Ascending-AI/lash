@@ -23,10 +23,11 @@ use lash_core::facade_support::effect_replay_driver::{
     StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild, decide_effect_claim,
 };
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
-    ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, ScopedEffectController, facade_support::LeaseTimings,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectGroupDrain, EffectHost,
+    EffectJournalRetirement, ExecutionScope, GroupDrainExecutors, Resolution, ResolveOutcome,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
+    facade_support::LeaseTimings,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -106,6 +107,20 @@ impl SqliteEffectHost {
     /// executing locally. Normal operation still replays any completed row.
     pub fn start_replay(&self) {
         self.inner.start_replay();
+    }
+
+    /// The host-owned drain over this host's effect journal.
+    ///
+    /// `executors` is the wiring seam: it says how a child this host did not
+    /// open is run, and it is supplied here — by the host that owns those
+    /// runners — rather than discovered from whatever session is in scope when a
+    /// group turns out to need draining. The drain shares this host's driver, so
+    /// it claims under the same owner identity and the same journal.
+    pub fn group_drain(
+        &self,
+        executors: Arc<dyn GroupDrainExecutors>,
+    ) -> Arc<dyn EffectGroupDrain> {
+        Arc::clone(&self.inner).into_group_drain(executors)
     }
 }
 
@@ -655,6 +670,24 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
                     ],
                 )?;
                 select_group_record(tx, &record.group_key)
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
+    /// Reads the group row without writing one, so a drain reads the declared
+    /// disposition instead of inserting a group it was only asking about.
+    async fn read_group(
+        &self,
+        group_key: &str,
+    ) -> Result<Option<EffectGroupRecord>, RuntimeEffectControllerError> {
+        let group_key = group_key.to_string();
+        self.conn
+            .call(move |connection| {
+                let tx = connection.transaction()?;
+                let record = select_group_record(&tx, &group_key).optional()?;
+                tx.commit()?;
+                Ok(record)
             })
             .await
             .map_err(effect_sqlite_error)
