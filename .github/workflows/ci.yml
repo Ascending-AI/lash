@@ -71,6 +71,18 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   LASH_CI_FEATURES: ""
+  # The linker is a property of the caches this workflow shares, not of any
+  # one job's step list. RUSTFLAGS is part of cargo's per-unit fingerprint, so
+  # a job that restores `linux-debug` under a different RUSTFLAGS than the job
+  # that wrote it logs "cache restored" and then cold-builds the whole graph —
+  # which is exactly what the five container/E2E readers did while the flag
+  # was appended by the sccache action they never ran. Setting it here makes
+  # every job in this workflow resolve the same value by default; the one
+  # cache that must stay mold-free (`linux-release`, restored by perf.yml and
+  # release.yml, which do not link through mold) overrides it at job scope.
+  # Linking is what sccache cannot help with: a compilation cache hit still
+  # pays full link cost, and this workspace links a lot of test binaries.
+  RUSTFLAGS: -C link-arg=-fuse-ld=mold
   # Preserve the pre-worktree-isolation artifact tree consumed below.
   LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
 
@@ -863,6 +875,13 @@ jobs:
         with:
           tool: protoc,nextest
 
+      # Provides the linker the workflow-level RUSTFLAGS names. This job
+      # restores the `linux-debug` cache without routing through the sccache
+      # action, so it installs mold directly rather than taking on a
+      # compilation cache it does not otherwise use.
+      - name: Install mold
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
@@ -917,6 +936,13 @@ jobs:
         uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
+
+      # Provides the linker the workflow-level RUSTFLAGS names. This job
+      # restores the `linux-debug` cache without routing through the sccache
+      # action, so it installs mold directly rather than taking on a
+      # compilation cache it does not otherwise use.
+      - name: Install mold
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
 
       - name: Start MinIO and create test bucket
         run: |
@@ -981,6 +1007,13 @@ jobs:
         with:
           tool: protoc
 
+      # Provides the linker the workflow-level RUSTFLAGS names. This job
+      # restores the `linux-debug` cache without routing through the sccache
+      # action, so it installs mold directly rather than taking on a
+      # compilation cache it does not otherwise use.
+      - name: Install mold
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+
       - name: Enforce stack budget
         run: bash scripts/ci-stack-budget.sh
 
@@ -1000,6 +1033,15 @@ jobs:
     # `gh-readonly-queue/...` ref, and there it would also be the longest job
     # gating queue throughput. Cache warming belongs on main.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    # The one job in this workflow that must not inherit the workflow-level
+    # mold RUSTFLAGS. perf.yml and release.yml restore this same
+    # `linux-release` cache and do not link through mold, so linking
+    # differently here would refingerprint the graph and make them rebuild
+    # everything they restored. Empty and unset are the same value to cargo,
+    # which is what makes this override equal to what those workflows resolve.
+    env:
+      RUSTFLAGS: ""
 
     steps:
       - name: Check out repository
@@ -1027,11 +1069,6 @@ jobs:
 
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
-        with:
-          # perf.yml restores this same `linux-release` cache and does not use
-          # this action, so linking differently here would refingerprint the
-          # graph and make perf rebuild everything it restored.
-          link-with-mold: "false"
 
       - name: Build release workspace
         run: cargo build --locked --release --workspace
@@ -1113,6 +1150,13 @@ jobs:
         uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
+
+      # Provides the linker the workflow-level RUSTFLAGS names. This job
+      # restores the `linux-debug` cache without routing through the sccache
+      # action, so it installs mold directly rather than taking on a
+      # compilation cache it does not otherwise use.
+      - name: Install mold
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
 
       - name: Install Node
         if: matrix.node
@@ -1198,6 +1242,13 @@ jobs:
         uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: protoc
+
+      # Provides the linker the workflow-level RUSTFLAGS names. This job
+      # restores the `linux-debug` cache without routing through the sccache
+      # action, so it installs mold directly rather than taking on a
+      # compilation cache it does not otherwise use.
+      - name: Install mold
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
 
       - name: Run distributed backend E2E
         run: bash scripts/restate-postgres-workers-e2e.sh
