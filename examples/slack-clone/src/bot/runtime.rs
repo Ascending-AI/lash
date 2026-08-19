@@ -25,6 +25,7 @@ use super::mcp_client::{DemoElicitationHandler, DemoRootsProvider, DemoSamplingH
 use super::slack_api::SlackApi;
 use super::tools;
 use crate::mcp_server::{API_BASE_URL_ENV, BOT_TOKEN_ENV};
+use crate::{log_err, log_out};
 
 const DEMO_MCP_SERVER_NAME: &str = crate::mcp_server::SERVER_NAME;
 const DEMO_MCP_SERVER_BINARY: &str = "slack-clone-mcp-server";
@@ -199,7 +200,7 @@ pub async fn build_core(
             .context("connect slack-clone MCP servers")?,
     );
     for status in mcp.server_statuses() {
-        println!(
+        log_out!(
             "slack-clone-bot MCP server {}: connected={}, tools={}, last_error={}",
             status.server_name,
             status.connected,
@@ -331,7 +332,7 @@ fn trace_sink(config: &RuntimeConfig) -> Arc<dyn TraceSink> {
         .clone()
         .unwrap_or_else(|| config.data_dir.join("trace.jsonl"));
     if config.trace_to_stderr {
-        eprintln!("slack-clone-bot trace: {}", path.display());
+        log_err!("slack-clone-bot trace: {}", path.display());
         Arc::new(TeeTraceSink::new([
             Arc::new(StderrTraceSink::default()) as Arc<dyn TraceSink>,
             Arc::new(JsonlTraceSink::new(path)),

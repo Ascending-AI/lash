@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 
 use super::apps::{self, MAX_RETRIES};
 use super::state::PlatformState;
+use crate::log_err;
 use crate::wire::events::{RETRY_NUM_HEADER, RETRY_REASON_HEADER};
 
 /// Events read per dispatcher pass.
@@ -40,7 +41,7 @@ pub fn spawn(state: PlatformState) -> JoinHandle<()> {
                 Ok(0) => state.await_delivery_work(IDLE_POLL).await,
                 Ok(_) => {}
                 Err(error) => {
-                    eprintln!("slack-clone-platform delivery pass failed: {error:#}");
+                    log_err!("slack-clone-platform delivery pass failed: {error:#}");
                     tokio::time::sleep(IDLE_POLL).await;
                 }
             }
@@ -108,12 +109,12 @@ async fn deliver_row(state: &PlatformState, row: super::db::OutboxRow) -> anyhow
                 .await?;
             let message = format!("{reason}: {failure}");
             if attempts > MAX_RETRIES {
-                eprintln!(
+                log_err!(
                     "slack-clone-platform abandoned event {} after {attempts} attempts: {message}",
                     row.event_id
                 );
             } else {
-                eprintln!(
+                log_err!(
                     "slack-clone-platform will retry event {} (attempt {attempts}): {message}",
                     row.event_id
                 );

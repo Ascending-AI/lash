@@ -9,6 +9,7 @@ use axum::{Json, RequestExt as _};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use crate::log_err;
 use crate::wire::ApiErrorBody;
 
 /// Extractor accepting arguments the way Slack's Web API does.
@@ -130,7 +131,7 @@ impl ApiError {
     /// The cause goes to stderr, not to the caller: leaking a SQL message into
     /// an API response is how product internals become someone's contract.
     pub fn internal(context: &str, error: impl std::fmt::Display) -> Self {
-        eprintln!("slack-clone-platform: {context}: {error}");
+        log_err!("slack-clone-platform: {context}: {error}");
         Self::new("internal_error")
     }
 }

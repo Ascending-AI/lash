@@ -23,6 +23,7 @@ use super::db::{self, Author};
 use super::state::{LiveEvent, PlatformState};
 use super::{apps, web_api};
 use crate::ids::Ts;
+use crate::log_err;
 
 /// Liveness, workspace identity and delivery counters.
 pub async fn healthz(
@@ -67,7 +68,7 @@ pub async fn register_app(
         .map_err(|error| {
             // Verification failure is the caller's problem, not an internal one:
             // it means the URL did not echo the challenge.
-            eprintln!("slack-clone-platform url_verification failed: {error:#}");
+            log_err!("slack-clone-platform url_verification failed: {error:#}");
             ApiError::new("request_url_verification_failed")
         })?;
     let identity = state.identity();

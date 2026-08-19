@@ -26,6 +26,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 
 use crate::store::SqliteHandle;
+use crate::{log_err, log_out};
 use channel::{BotIdentity, ChannelBot};
 use ledger::EventLedger;
 use runtime::RuntimeConfig;
@@ -100,9 +101,12 @@ pub async fn run(config: BotConfig) -> Result<()> {
     // `U…` id before it can recognise a mention of itself. Retried because the
     // platform and the bot are independent processes with no start-up ordering.
     let identity = resolve_identity(&api).await?;
-    println!(
+    log_out!(
         "slack-clone-bot is {} ({} / {}) in team {}",
-        identity.handle, identity.bot_user_id, identity.bot_id, identity.team_id
+        identity.handle,
+        identity.bot_user_id,
+        identity.bot_id,
+        identity.team_id
     );
 
     let ledger_database = SqliteHandle::open(&config.data_dir.join("events.db"), ledger::SCHEMA)
@@ -136,14 +140,14 @@ pub async fn run(config: BotConfig) -> Result<()> {
     ));
     let host_result: Result<()> = async {
         if let Err(error) = bot.refresh_directory().await {
-            eprintln!("slack-clone-bot could not preload the user directory: {error:#}");
+            log_err!("slack-clone-bot could not preload the user directory: {error:#}");
         }
 
         let listener = tokio::net::TcpListener::bind(config.addr)
             .await
             .with_context(|| format!("bind {}", config.addr))?;
         let request_url = config.request_url();
-        println!(
+        log_out!(
             "slack-clone-bot listening on http://{} (events at {request_url})",
             config.addr
         );
@@ -172,7 +176,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
         match bot.recover().await {
             Ok(report) => {
                 if !report.settled.is_empty() {
-                    println!(
+                    log_out!(
                         "slack-clone-bot recovery settled {} event(s), deferred {}",
                         report.settled.len() - report.deferred.len(),
                         report.deferred.len()
@@ -185,14 +189,14 @@ pub async fn run(config: BotConfig) -> Result<()> {
                             .retry_deferred(event_id.clone(), channel::DEFERRED_RETRY_DEADLINE)
                             .await
                         {
-                            eprintln!(
+                            log_err!(
                                 "slack-clone-bot deferred retry of {event_id} failed: {error:#}"
                             );
                         }
                     });
                 }
             }
-            Err(error) => eprintln!("slack-clone-bot recovery pass failed: {error:#}"),
+            Err(error) => log_err!("slack-clone-bot recovery pass failed: {error:#}"),
         }
 
         if let Err(error) = register(&api, &config, &request_url).await {
@@ -243,7 +247,7 @@ pub async fn shutdown_core(core: &lash::LashCore) -> Result<()> {
     let flush_result = core.flush_trace_sink().context("flush Lash trace sink");
     shutdown_result?;
     flush_result?;
-    println!("slack-clone-bot plugin shutdown complete");
+    log_out!("slack-clone-bot plugin shutdown complete");
     Ok(())
 }
 
@@ -262,7 +266,7 @@ async fn resolve_identity(api: &SlackApi) -> Result<BotIdentity> {
             }
             Err(error) => {
                 if attempt == 0 {
-                    println!(
+                    log_out!(
                         "slack-clone-bot waiting for the platform at {}",
                         api.base_url()
                     );
@@ -296,7 +300,7 @@ async fn register(api: &SlackApi, config: &BotConfig, request_url: &str) -> Resu
             .await;
         match response {
             Ok(response) if response.status().is_success() => {
-                println!("slack-clone-bot registered {request_url} with the platform");
+                log_out!("slack-clone-bot registered {request_url} with the platform");
                 return Ok(());
             }
             Ok(response) => {
@@ -333,5 +337,5 @@ async fn shutdown_signal() {
         _ = interrupt => {}
         _ = terminate => {}
     }
-    println!("slack-clone-bot draining");
+    log_out!("slack-clone-bot draining");
 }

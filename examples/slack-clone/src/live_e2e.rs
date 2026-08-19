@@ -37,6 +37,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::bot::slack_api::{ChatPostMessageRequest, HistoryQuery, SlackApi};
+use crate::log_out;
 
 pub const DEFAULT_RLM_MODEL: &str = "anthropic/claude-sonnet-5";
 pub const DEFAULT_STANDARD_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
@@ -453,7 +454,7 @@ impl Config {
             .ok()
             .filter(|value| !value.trim().is_empty())
         else {
-            println!("SKIP: OPENROUTER_API_KEY is unset; live Slack-clone E2E was not run");
+            log_out!("SKIP: OPENROUTER_API_KEY is unset; live Slack-clone E2E was not run");
             return Ok(None);
         };
         let mut base_url = None;
@@ -1467,7 +1468,7 @@ pub async fn run() -> Result<()> {
     if config.smoke_only {
         let report = final_report(&config, &ledger, smoke, Vec::new(), None, None);
         write_json(&config.artifact_dir.join("run-summary.json"), &report)?;
-        println!(
+        log_out!(
             "slack-clone live smoke PASS: calls={} cost_usd={:.6}",
             report.spend.records.len(),
             report.spend.total_usd
@@ -1511,7 +1512,7 @@ pub async fn run() -> Result<()> {
     let report = final_report(&config, &ledger, smoke, attempts, passed_attempt, failure);
     write_json(&config.artifact_dir.join("run-summary.json"), &report)?;
     if report.passed {
-        println!(
+        log_out!(
             "slack-clone live nonce swap PASS: attempt={} cost_usd={:.6}",
             report.passed_attempt.unwrap_or_default(),
             report.spend.total_usd

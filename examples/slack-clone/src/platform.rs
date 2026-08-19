@@ -21,6 +21,7 @@ use anyhow::{Context as _, Result};
 use axum::Router;
 use axum::routing::{get, post};
 
+use crate::log_out;
 use crate::store::SqliteHandle;
 use state::PlatformState;
 
@@ -147,9 +148,12 @@ pub async fn run(config: PlatformConfig) -> Result<()> {
         .await
         .with_context(|| format!("bind {}", config.addr))?;
     let identity = state.identity();
-    println!(
+    log_out!(
         "slack-clone-platform listening on http://{} (team {}, app {}, bot user {})",
-        config.addr, identity.team_id, identity.app_id, identity.bot_user_id
+        config.addr,
+        identity.team_id,
+        identity.app_id,
+        identity.bot_user_id
     );
 
     axum::serve(listener, router(state))
@@ -182,5 +186,5 @@ async fn shutdown_signal() {
         _ = interrupt => {}
         _ = terminate => {}
     }
-    println!("slack-clone-platform draining");
+    log_out!("slack-clone-platform draining");
 }

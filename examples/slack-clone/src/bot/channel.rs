@@ -34,6 +34,7 @@ use super::ledger::{Claim, EventLedger, EventRecord, KIND_APP_MENTION, KIND_MESS
 use super::runtime::session_id;
 use super::slack_api::{ChatPostMessageRequest, SlackApi, find_posted_reply};
 use super::threads;
+use crate::log_err;
 use crate::secrets::constant_time_eq;
 use crate::wire::events::{self, Event, EventCallback};
 
@@ -311,7 +312,7 @@ impl ChannelBot {
                         .await?
                 }
             };
-            eprintln!(
+            log_err!(
                 "slack-clone-bot recovered event {} ({}, {}): {outcome:?}",
                 record.event_id,
                 record.kind,
@@ -394,7 +395,7 @@ impl ChannelBot {
             let outcome = match attempt {
                 Ok(outcome) => outcome,
                 Err(error) => {
-                    eprintln!(
+                    log_err!(
                         "slack-clone-bot retry attempt for event {event_id} failed \
                          (will retry until the deadline): {error:#}"
                     );
@@ -409,11 +410,11 @@ impl ChannelBot {
                 outcome,
                 Disposition::Deferred { .. } | Disposition::RecoverableFailure { .. }
             ) {
-                eprintln!("slack-clone-bot settled deferred event {event_id}: {outcome:?}");
+                log_err!("slack-clone-bot settled deferred event {event_id}: {outcome:?}");
                 return Ok(outcome);
             }
             if started.elapsed() >= deadline {
-                eprintln!(
+                log_err!(
                     "slack-clone-bot gave up retrying event {event_id} after {:?}; its ledger row \
                      stays resumable for the next boot",
                     started.elapsed()
@@ -440,7 +441,7 @@ impl ChannelBot {
             });
         }
         if let Some(retry) = retry_num {
-            eprintln!(
+            log_err!(
                 "slack-clone-bot redelivery {retry} of event {}",
                 envelope.event_id
             );
@@ -795,7 +796,7 @@ impl ChannelBot {
             // non-terminal stage: terminalizing here is what made an interrupted
             // mention permanently unanswered, because no redelivery and no later
             // boot ever revisits a terminal row.
-            eprintln!(
+            log_err!(
                 "slack-clone-bot deferring event {}: its admission is claimed by an \
                  execution lease this boot cannot take yet",
                 record.event_id
@@ -943,7 +944,7 @@ impl ChannelBot {
             .advance(record.event_id.clone(), record.stage, to, reply_ts, detail)
             .await?
         {
-            eprintln!(
+            log_err!(
                 "slack-clone-bot: event {} moved on before this handler settled it",
                 record.event_id
             );

@@ -5,6 +5,7 @@
 //! through its own admin API rather than at boot.
 
 use anyhow::{Context as _, Result};
+use slack_clone::log_out;
 use slack_clone::mcp_http_server::{ADDR_ENV, DEFAULT_TOKEN, MCP_PATH, TOKEN_ENV, router};
 
 #[tokio::main]
@@ -15,7 +16,7 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("bind {addr}"))?;
     let bound = listener.local_addr().context("resolve bound address")?;
-    println!("slack-clone-mcp-http-server listening on http://{bound}{MCP_PATH}");
+    log_out!("slack-clone-mcp-http-server listening on http://{bound}{MCP_PATH}");
     axum::serve(listener, router(token))
         .await
         .context("serve the HTTP MCP endpoint")
