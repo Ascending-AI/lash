@@ -4536,7 +4536,7 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution::Cancelled"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/turn.rs:72#Resolution::Cancelled => Err(RuntimeError::new("
+usage = "crates/lash-restate/src/turn.rs:87#Resolution::Cancelled => Err(RuntimeError::new("
 
 [[api]]
 symbol = "lash::Resolution::Err"
@@ -24231,7 +24231,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonEvidence::epoch_ms"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/mod.rs:485#epoch_ms: restate_now_ms(),"
+usage = "crates/lash-restate/src/process/mod.rs:490#epoch_ms: restate_now_ms(),"
 
 [[api]]
 symbol = "lash::process::AbandonEvidence::owner"
@@ -24240,7 +24240,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonEvidence::owner"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/mod.rs:484#owner: None,"
+usage = "crates/lash-restate/src/process/mod.rs:489#owner: None,"
 
 [[api]]
 symbol = "lash::process::AbandonEvidence::writer"
@@ -24249,7 +24249,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonEvidence::writer"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/mod.rs:483#writer: AbandonWriter::ReconciledRequest,"
+usage = "crates/lash-restate/src/process/mod.rs:488#writer: AbandonWriter::ReconciledRequest,"
 
 [[api]]
 symbol = "lash::process::AbandonRequest"
@@ -24303,7 +24303,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonWriter::EngineGaveUp"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/workflow.rs:356#writer: AbandonWriter::EngineGaveUp,"
+usage = "crates/lash-restate/src/process/workflow.rs:371#writer: AbandonWriter::EngineGaveUp,"
 
 [[api]]
 symbol = "lash::process::AbandonWriter::OwnerDrain"
@@ -24321,7 +24321,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonWriter::ReconciledRequest"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/mod.rs:483#writer: AbandonWriter::ReconciledRequest,"
+usage = "crates/lash-restate/src/process/mod.rs:488#writer: AbandonWriter::ReconciledRequest,"
 
 [[api]]
 symbol = "lash::process::AbandonWriter::Sweep"
@@ -24330,7 +24330,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonWriter::Sweep"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/workflow.rs:333#writer: AbandonWriter::Sweep,"
+usage = "crates/lash-restate/src/process/workflow.rs:348#writer: AbandonWriter::Sweep,"
 
 [[api]]
 symbol = "lash::process::CausalRef"
@@ -76456,7 +76456,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:11188#probe_slot.set_for_session("
+usage = "crates/lash-restate/src/tests.rs:11329#probe_slot.set_for_session("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -91486,7 +91486,7 @@ kind = "function"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:56#    lash_core::testing::conformance::effect_group_drain_conformance(make).await;"
+usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:61#    lash_core::testing::conformance::effect_group_drain_conformance(make).await;"
 reason = "The loser-drain laws are one matrix both SQL tiers answer, so the suite lives where both can reach it; only test code calls it, which is what the `testing` feature exists for (FIG-1536)."
 
 [[api]]
@@ -91495,7 +91495,7 @@ kind = "type_alias"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:52#    let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {"
+usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:57#    let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {"
 reason = "How a backend hands the suite a host builder it can call from a runtime it is about to destroy; only the store test crates supply one (FIG-1536)."
 
 [[api]]
@@ -91522,7 +91522,7 @@ kind = "field"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:38#    host.register_group_executors(spec.executors)"
+usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:41#    if let Some(resolver) = spec.executors {"
 reason = "The executor-supply seam a law wires in so it can count what the drain asked to run; only the store test crates read it (FIG-1536)."
 
 [[api]]
@@ -91531,7 +91531,7 @@ kind = "struct"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:41#    DrainWorld {"
+usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:46#    DrainWorld {"
 reason = "One host plus the drain over the same journal, which is what makes a law about reclamation rather than about an empty database; only the store test crates build one (FIG-1536)."
 
 [[api]]
@@ -91540,7 +91540,7 @@ kind = "field"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:42#        host: Arc::new(host) as Arc<dyn EffectHost>,"
+usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:47#        host: Arc::new(host) as Arc<dyn EffectHost>,"
 reason = "The effect host a law opens and closes groups through; only the store test crates supply it (FIG-1536)."
 
 [[api]]
@@ -91549,7 +91549,7 @@ kind = "field"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:43#        drain,"
+usage = "crates/lash-sqlite-store/tests/effect_group_drain_conformance.rs:48#        drain,"
 reason = "The drain over the same journal as the host beside it; only the store test crates supply it (FIG-1536)."
 
 [[api]]

@@ -1102,17 +1102,22 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// at the argument.
     ///
     /// **A child with no runner is a routing fact, not an outcome.** On a
-    /// **first open** an in-process host resolves *all* of the group's children
-    /// before it dispatches any of them, and refuses the whole open with a typed
+    /// **first open** a host resolves *all* of the group's children **before it
+    /// records the group**, and refuses the whole open with a typed
     /// [`RuntimeEffectGroupShape`](crate::RuntimeErrorCode::RuntimeEffectGroupShape)
-    /// error if any child resolves to `None`. Dispatching first and discovering
+    /// error if any child resolves to `None`. Recording first and discovering
     /// the gap later would leave a recorded group holding a child that can never
     /// settle, so every rank above it is unservable and the caller waits forever
     /// — the same failure the retired executor-vec arity check existed to
     /// prevent, now unrepresentable by absence because there is no vec to
-    /// misalign. On a **reopen** the same miss is not an open refusal: the group
-    /// is already journaled, and a deployment that has lost one child's runner is
-    /// the drain's `NoExecutor` case (ADR 0065).
+    /// misalign. **The refusal must journal nothing, including the group row**:
+    /// a host that recorded the group and then refused would answer the retry as
+    /// a reopen, and a reopen passes the miss through, so the second attempt
+    /// would succeed around a child that can never settle — a strand one attempt
+    /// later, which is worse than the refusal it replaced. On a **reopen** the
+    /// same miss is not an open refusal: the group is already journaled, and a
+    /// deployment that has lost one child's runner is the drain's `NoExecutor`
+    /// case (ADR 0065).
     ///
     /// A host with **no registered resolver at all** is a different fact from a
     /// child it cannot route, and answers differently: it reports

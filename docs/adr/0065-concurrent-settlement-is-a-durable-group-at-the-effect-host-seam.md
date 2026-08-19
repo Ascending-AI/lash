@@ -177,17 +177,39 @@ caller has moved on.
   **A child with no runner is a routing fact, not an outcome.** A resolver that
   answers `None` for a child means the deployment cannot run it — not that the
   child failed — so no terminal is ever synthesized from a miss. On a **first
-  open** in-process hosts resolve **all N children before dispatching any of
-  them**: any `None` refuses the whole open with a typed group-shape error, and
-  no child is journaled, so a group is never half-opened around a child that will
-  never settle. Resolution belongs to the first-open path alone. A **reopen**
-  resolves only what it dispatches and refuses nothing: the group is already
-  journaled, and a journaled group meeting a host that cannot run one of its
-  children is a deployment change rather than an open — the drain reports it as
-  `NoExecutor`, leaving the group unreclaimable and visible rather than inventing
-  a terminal for it. Refusing at a reopen instead would deny a resuming caller
-  the ranks the group already holds, which is the opposite of what the refusal is
-  for.
+  open** a host resolves **all N children before it records the group**: any
+  `None` refuses the whole open with a typed group-shape error naming the child's
+  position and replay key, and **nothing of the group is journaled — the group
+  row included**, so a group is never half-opened around a child that will never
+  settle.
+
+  That the group row is inside the refusal is load-bearing rather than tidiness
+  (FIG-1579). Whether a miss refuses is decided by whether the journal already
+  holds the group, so a host that wrote the row and then refused would answer the
+  operator's retry as a **reopen** — and a reopen passes a miss through by design.
+  The second attempt would open successfully, dispatch only the children it can
+  route, and park its caller forever on a rank nothing will allocate: a strand one
+  attempt after a refusal, which is worse than the refusal it replaced. Two
+  identical refusals are the observable form of "the refusal journals nothing".
+
+  A **reopen** — a group the journal already holds — resolves only what it
+  dispatches and refuses nothing: a journaled group meeting a host that cannot
+  run one of its children is a deployment change rather than an open, and the
+  drain reports it as `NoExecutor`, leaving the group unreclaimable and visible
+  rather than inventing a terminal for it. Refusing at a reopen instead would
+  deny a resuming caller the ranks the group already holds, which is the opposite
+  of what the refusal is for. A host with **no registered resolver at all** still
+  hands out a drain, and its passes report every child as `NoExecutor` for the
+  same reason: the queue is real, this host cannot finish it, and reporting an
+  empty pass would mark the group reclaimable.
+
+  **The engine tier's form of the same fact is a 404.** A child invocation
+  addressed to a service or handler no registered deployment binds is a routing
+  fact too, and it must surface as the engine's own terminal — on Restate, a
+  `TerminalError` carrying `404` — never as an ordinary handler error. Restate
+  retries a handler error with infinite exponential backoff, so a retryable 404
+  turns a forgotten `bind` into an invocation backing off forever with nobody
+  told what is wrong: the engine-tier twin of the warn-and-strand above.
 
   Each executor is single-execution: `execute` consumes it, so a host that
   retries a child resolves a fresh one through the same registered resolver. A

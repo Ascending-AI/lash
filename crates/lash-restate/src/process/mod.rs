@@ -433,10 +433,15 @@ impl RestateProcessIngressRunner {
             )
             .await
             .map_err(|err| {
-                RestateEffectError::BackgroundScheduler(format!(
-                    "ingress submit for process `{process_id}` failed: {err}"
-                ))
-                .into_plugin_error()
+                // A 404 here is a deployment that never bound the process
+                // workflow, not a busy engine: named as such so the operator is
+                // not told to look at scheduling.
+                let detail = if err.is_service_unregistered() {
+                    crate::ingress::unregistered_service_message("LashProcessWorkflow", "run", &err)
+                } else {
+                    format!("ingress submit for process `{process_id}` failed: {err}")
+                };
+                RestateEffectError::BackgroundScheduler(detail).into_plugin_error()
             })?;
         // Record the durable backend reference so the process is observably
         // owned by Restate, mirroring `schedule_restate_process`.
@@ -641,6 +646,18 @@ impl ProcessAttach for RestateProcessIngressRunner {
                     PluginError::ProcessAttachCeilingElapsed {
                         process_id: process_id.to_string(),
                     }
+                } else if err.is_service_unregistered() {
+                    // A shared handler, so the 404 has two readings and this
+                    // client cannot tell them apart: nothing binds the service,
+                    // or nothing is left of this process's invocation.
+                    RestateEffectError::BackgroundScheduler(
+                        crate::ingress::unresolvable_call_target_message(
+                            "LashProcessWorkflow",
+                            "await_terminal",
+                            &err,
+                        ),
+                    )
+                    .into_plugin_error()
                 } else {
                     RestateEffectError::BackgroundScheduler(format!(
                         "ingress await for process `{process_id}` failed: {err}"

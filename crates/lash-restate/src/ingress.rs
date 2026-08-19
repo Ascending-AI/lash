@@ -158,6 +158,124 @@ impl RestateHttpError {
                 if source.kind == lash_core::ProviderFailureKind::Timeout
         )
     }
+
+    /// Whether the engine answered "no such service or handler" — a **missing
+    /// registration**, not a transport fault (FIG-1579).
+    ///
+    /// Restate answers an invocation addressed to a service no registered
+    /// deployment binds, or to a handler a bound service does not declare, with
+    /// `404`. That is a deterministic contract failure and the engine tier's
+    /// form of the routing fact ADR 0065 names on the effect-group seam: *a
+    /// child with no runner*. It is classified rather than folded into "some
+    /// HTTP status came back" because the two call for opposite handling — a
+    /// transport fault is worth retrying and an unbound service is not, and no
+    /// amount of retrying makes a service somebody forgot to `bind` appear.
+    ///
+    /// Callers inside a Restate handler must turn this into a **terminal**.
+    /// Restate retries a handler error with infinite exponential backoff by
+    /// default, so a retryable 404 is a deployment mistake that silently becomes
+    /// an invocation backing off forever with nobody told what is wrong — the
+    /// engine-tier twin of the warn-and-strand this contract rules out.
+    ///
+    /// # Only a direct service-call route can say this
+    ///
+    /// The status alone does not carry the meaning; the **route** does, which is
+    /// why this reads [`operation`](Self::Status) as well. A `404` from
+    /// `{service}/{key}/{handler}` or its `/send` form is addressing failure:
+    /// there is no such service or handler to invoke. A `404` from a **control
+    /// route** — `PATCH /invocations/{id}/{action}`, the SQL query endpoint — is
+    /// about a *resource*, and most often means the invocation named is already
+    /// gone: completed, killed, or aged out of retention. Those are deliberately
+    /// excluded. Answering `true` for them would let a caller terminalize real
+    /// work over a cancel that arrived one moment late, which is the opposite of
+    /// the mistake this predicate exists to prevent.
+    ///
+    /// A new ingress route must therefore opt in by name. That is the safe
+    /// default: an unclassified route keeps the retryable handling every 404 had
+    /// before this predicate existed.
+    pub fn is_service_unregistered(&self) -> bool {
+        matches!(
+            self,
+            Self::Status { status, operation, .. }
+                if *status == 404 && SERVICE_CALL_OPERATIONS.contains(operation)
+        )
+    }
+}
+
+/// The ingress routes that address a service by name, where a `404` is a missing
+/// registration rather than a missing resource.
+///
+/// Exactly the three routes that post to `{service}/{key}/{handler}`. Everything
+/// else this client speaks — the invocation control routes and the SQL query
+/// endpoint — is deliberately absent; see
+/// [`RestateHttpError::is_service_unregistered`].
+const SERVICE_CALL_OPERATIONS: &[&str] = &[
+    "Restate workflow call",
+    "Restate object call",
+    "Restate /send",
+];
+
+/// What an operator is told when a child invocation names a service or handler
+/// no registered deployment binds.
+///
+/// Names the address rather than restating the status, because "404 from
+/// Restate" is not something an operator can act on and "nothing binds
+/// `LashProcessWorkflow`" is.
+pub(crate) fn unregistered_service_message(
+    service: &str,
+    handler: &str,
+    error: &RestateHttpError,
+) -> String {
+    format!(
+        "Restate has no `{service}/{handler}` to invoke: no registered \
+         deployment binds that service, or the service it does bind declares no \
+         such handler. This is a deployment fact rather than a transport fault \
+         — retrying cannot make an unbound service appear — so bind `{service}` \
+         on every endpoint that wires a Lash Restate controller ({error})"
+    )
+}
+
+/// What an operator is told when a call to a **shared handler** cannot be
+/// addressed.
+///
+/// Deliberately weaker than [`unregistered_service_message`], because on this
+/// route the status genuinely carries two readings and the client cannot tell
+/// them apart: nothing binds the service, *or* the service is bound and the
+/// workflow key names no invocation the engine still holds — completed and aged
+/// out of retention, or never submitted. Asserting the first would send an
+/// operator to check a deployment that is fine. Both readings are named, and the
+/// one that distinguishes them (does anything bind it?) is the one an operator
+/// can check first.
+pub(crate) fn unresolvable_call_target_message(
+    service: &str,
+    handler: &str,
+    error: &RestateHttpError,
+) -> String {
+    format!(
+        "Restate could not address `{service}/{handler}`: either no registered \
+         deployment binds that service, or it is bound and this workflow key \
+         names no invocation the engine still holds — one that completed and \
+         aged out of retention, or was never submitted. Check the binding \
+         first; a service nothing binds fails every call this way, while a \
+         lapsed invocation fails only its own key ({error})"
+    )
+}
+
+/// The engine-native terminal a missing registration must surface as from inside
+/// a handler.
+///
+/// `404` is carried through as the terminal's own status so the failure reads
+/// the same to an operator at the ingress as it does in the invocation's
+/// journal.
+pub(crate) fn unregistered_service_terminal(
+    service: &str,
+    handler: &str,
+    error: &RestateHttpError,
+) -> restate_sdk::errors::TerminalError {
+    restate_sdk::errors::TerminalError::new_with_code(
+        404,
+        unregistered_service_message(service, handler, error),
+    )
 }
 /// Host-owned Restate ingress connectivity.
 ///

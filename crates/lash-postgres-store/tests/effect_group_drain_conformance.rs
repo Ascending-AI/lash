@@ -38,8 +38,13 @@ async fn world(database_url: String, spec: DrainWorldSpec) -> DrainWorld {
             .expect("the suite asks for a ttl at least three renew intervals wide"),
     };
     let host = PostgresEffectHost::with_options(&storage, options);
-    host.register_group_executors(spec.executors)
-        .expect("a freshly connected host has no resolver yet");
+    // `None` is a law's request for a host with no resolver at all, not a
+    // default for this file to fill in: the drain such a host hands out is what
+    // one of the laws is about.
+    if let Some(executors) = spec.executors {
+        host.register_group_executors(executors)
+            .expect("a freshly connected host has no resolver yet");
+    }
     let drain = host.group_drain();
     DrainWorld {
         host: Arc::new(host) as Arc<dyn EffectHost>,

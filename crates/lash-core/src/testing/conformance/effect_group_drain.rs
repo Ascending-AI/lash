@@ -80,7 +80,13 @@ pub struct DrainWorldSpec {
     /// must register it on the host it builds, and the drain it returns resolves
     /// through the same one. A law's own open-time executors ride the staging
     /// table instead, so what this resolver is asked is what the drain asked.
-    pub executors: Arc<dyn GroupExecutors>,
+    ///
+    /// **`None` means build the host with no resolver registered at all**, which
+    /// is a different fact from a resolver that answers `None` and has its own
+    /// law: such a host still hands out a drain, and that drain still has a real
+    /// queue to report. A backend must honour it rather than substituting a
+    /// resolver of its own.
+    pub executors: Option<Arc<dyn GroupExecutors>>,
 }
 
 /// Builds a world over one substrate, as many times as a law needs.
@@ -102,6 +108,7 @@ pub async fn effect_group_drain_conformance(make: DrainWorldFactory) {
     a_child_another_drain_holds_is_reported_contested(&make, &prefix).await;
     a_cancel_group_is_never_re_executed_by_the_drain(&make, &prefix).await;
     a_child_this_host_cannot_run_is_reported_not_invented(&make, &prefix).await;
+    a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(&make, &prefix).await;
 }
 
 // =============================================================================
@@ -705,6 +712,72 @@ async fn a_child_this_host_cannot_run_is_reported_not_invented(
     assert_eq!(capable.executions(), vec![child_replay_key(&key, 0)]);
 }
 
+/// A host with **no registered resolver at all** still hands out a drain, and
+/// that drain reports the queue as `NoExecutor` rather than an empty pass.
+///
+/// The other absent-runner fact, and the one a host is likeliest to get wrong,
+/// because the code path is not "the resolver said no" but "there is no resolver
+/// to ask". Two wrong answers are available and both are worse than the queue:
+/// failing the pass makes an unwired operator's diagnostic tool refuse to
+/// diagnose, and reporting an *empty* pass makes
+/// [`GroupDrainReport::is_complete`] answer `true` for a group that still holds
+/// unsettled children — which is a reclamation signal, so the group's journal
+/// would be retired around work nobody ran. `NoExecutor` is the accurate
+/// answer: the queue is real, this host cannot finish it, and another one can.
+async fn a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(
+    make: &DrainWorldFactory,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "unwired-drain");
+    let scope = scope(prefix, "unwired-drain");
+    crashed_process(make, {
+        let key = key.clone();
+        let scope = scope.clone();
+        move |world| {
+            Box::pin(async move {
+                let scoped = world.host.scoped(scope).expect("scope");
+                let entered = Arc::new(AtomicUsize::new(0));
+                let handle = open(&scoped, &key, 1, RUN, vec![blocking(&entered)]).await;
+                until(|| entered.load(Ordering::SeqCst) == 1).await;
+                close(&scoped, handle, RUN)
+                    .await
+                    .expect("the caller closes");
+            })
+        }
+    })
+    .await;
+    until_leases_lapse(make, &key).await;
+
+    let unwired = make(unwired_spec(CRASH_LEASE_MS)).await;
+    let report = pass(&unwired, &key)
+        .await
+        .expect("an unwired host's drain runs the pass rather than refusing it");
+    assert_eq!(
+        report.children.len(),
+        1,
+        "the pass reports the queue it read; an empty pass would say this group \
+         is reclaimable"
+    );
+    assert_eq!(
+        report.children[0].outcome,
+        ChildDrainOutcome::NoExecutor,
+        "a host with nothing to ask cannot run the child, which is the same \
+         routing fact as a resolver that answers `None`"
+    );
+    assert!(
+        !report.is_complete(),
+        "an unwired host must not report a group with unsettled children as \
+         complete: that answer retires the journal of work nobody ran"
+    );
+
+    // The queue survives untouched: a wired host still finds the child and runs it.
+    let capable = RecordingExecutors::settling();
+    let second = make(spec(CRASH_LEASE_MS, &capable)).await;
+    let report = drain_until_no_live_lease(&second, &key).await;
+    assert_eq!(report.settled(), 1);
+    assert_eq!(capable.executions(), vec![child_replay_key(&key, 0)]);
+}
+
 // =============================================================================
 // Fixtures
 // =============================================================================
@@ -730,7 +803,15 @@ const AWAIT_BUDGET: Duration = Duration::from_secs(30);
 fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
     DrainWorldSpec {
         lease_ttl_ms,
-        executors: Arc::clone(executors) as Arc<dyn GroupExecutors>,
+        executors: Some(Arc::clone(executors) as Arc<dyn GroupExecutors>),
+    }
+}
+
+/// The same world with no resolver registered on its host at all.
+fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
+    DrainWorldSpec {
+        lease_ttl_ms,
+        executors: None,
     }
 }
 
