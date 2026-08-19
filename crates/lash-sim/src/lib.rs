@@ -5,6 +5,8 @@ mod canonical_scripts;
 mod clock;
 mod lease;
 #[cfg(test)]
+mod oracle_coverage_tests;
+#[cfg(test)]
 mod recorded_reality;
 #[cfg(test)]
 mod request_snapshot;

@@ -402,6 +402,9 @@ pub(super) async fn run_generated_workload(
     trace_path: &Path,
 ) -> Result<SimulationTrace, FixedScriptRunnerError> {
     let mut world = GeneratedRuntimeWorld::new();
+    // Declared before the run so oracles can prove an observation class is
+    // absent rather than passing vacuously over an empty set.
+    let expectations = workload.expectations();
     let (events, final_summary) = drive_generated_workload(&mut world, &workload).await?;
     let durable_writes = world.checkpoint_write_events();
     // Per-seed live provider FAILURE turns: real `session.turn().run()`s that
@@ -414,16 +417,16 @@ pub(super) async fn run_generated_workload(
         scheduler_owned_runtime_completions(&events),
         state_machine_semantic_invariants(&events, &final_summary),
         operational_coverage(&events, &final_summary),
-        ingress_sessions_opened(&final_summary),
+        ingress_sessions_opened(&final_summary, &expectations),
         queued_ingress_observed(&final_summary, &events),
         cancellation_observed(&final_summary, &events),
         trigger_delivery_observed(&final_summary, &events),
         observer_reconnect_observed(&final_summary, &events),
         backend_failure_observed(&final_summary, &events),
         provider_mutation_rejected(&final_summary, &events),
-        provider_transport_mutation_classified(&events),
+        provider_transport_mutation_classified(&events, &expectations),
         generated_runtime_provider_matrix_oracle(&events),
-        provider_turn_interleaving_depth(&events),
+        provider_turn_interleaving_depth(&events, &expectations),
         process_wake_observed(&final_summary, &events),
         process_wake_at_most_once(&events),
         process_never_double_started(&events),
@@ -431,8 +434,8 @@ pub(super) async fn run_generated_workload(
         tool_boundary_observed(&final_summary, &events),
         exec_code_observed(&final_summary, &events),
         cross_session_isolation(&final_summary),
-        observer_convergence(&final_summary),
-        runtime_session_graph_contract(&final_summary),
+        observer_convergence(&final_summary, &expectations),
+        runtime_session_graph_contract(&final_summary, &expectations),
         runtime_graph_acyclic(&durable_writes),
         runtime_single_active_agent_frame(&events),
         runtime_usage_monotonic(&events),
@@ -441,10 +444,10 @@ pub(super) async fn run_generated_workload(
         worker_stale_completion_rejected(&final_summary),
         worker_failover_continues_work(&events),
         healthy_long_turn_liveness(&events),
-        lease_time_monotonic(&events),
+        lease_time_monotonic(&events, &expectations),
         generated_suspend_resume(&events),
-        generated_final_value_semantic_channel(&events),
-        crate::state_checker::checkpoint_state_consistency(&events, &durable_writes),
+        generated_final_value_semantic_channel(&events, &expectations),
+        crate::state_checker::checkpoint_state_consistency(&events, &durable_writes, &expectations),
     ];
     oracles.extend(scenario_contract_mini_oracles(&events, &final_summary));
     oracles.extend(scenario_contract_oracles(&events, &final_summary));
@@ -460,6 +463,7 @@ pub(super) async fn run_generated_workload(
         workload.workload_family,
         workload.workload_id,
         script_bundle_hash,
+        expectations,
         workload.aliases.into_map(),
         events,
         durable_writes,

@@ -12,7 +12,7 @@ use crate::runtime_contracts::RuntimeGraphInvariantFacts;
 use crate::runtime_contracts::{RuntimeAgentFrameInvariantFacts, RuntimeUsageInvariantFacts};
 use crate::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS;
 use crate::scheduler::{BoundaryKind, DeliveredBoundary};
-use crate::trace::{AbstractWorldSummary, OracleVerdict};
+use crate::trace::{AbstractWorldSummary, OracleVerdict, WorkloadExpectations};
 
 pub const CROSS_SESSION_ISOLATION_ORACLE: &str = "sim.oracle.cross-session-isolation.v1";
 pub const BACKEND_FAILURE_ORACLE: &str = "sim.oracle.backend-failure-observed.v1";
@@ -397,7 +397,41 @@ pub fn generated_suspend_resume(events: &[DeliveredBoundary]) -> OracleVerdict {
 /// `outcome_kind` is `assistant_message`, no `semantic_value` leaked, and no
 /// terminal FinalValue/ToolValue event was emitted. A turn that smuggled a
 /// final value through transcript inference would fail.
-pub fn generated_final_value_semantic_channel(events: &[DeliveredBoundary]) -> OracleVerdict {
+/// Reject a universally-quantified law that was evaluated over fewer
+/// observations than the workload declared.
+///
+/// Every law in this module is vacuously true over an empty set, so a broken
+/// generator, delivery path or projection that produces nothing would otherwise
+/// read as compliance — and the further upstream the break, the more oracles go
+/// green together. Comparing against the workload's *declared* count instead of
+/// an ad hoc `is_empty()` guard turns that into a provable statement: "the
+/// workload declared 5 sessions and the law saw 0".
+/// The declared session count, or zero when the law is being evaluated as a
+/// scenario evidence predicate with no workload declaration in scope.
+fn declared_session_count(expectations: Option<&WorkloadExpectations>) -> usize {
+    expectations.map_or(0, WorkloadExpectations::session_count)
+}
+
+fn declared_coverage_shortfall(
+    oracle_id: &'static str,
+    observation_class: &str,
+    declared: usize,
+    observed: usize,
+) -> Option<OracleVerdict> {
+    (observed < declared).then(|| {
+        OracleVerdict::failed(
+            oracle_id,
+            format!(
+                "workload declared {declared} {observation_class} but the law was evaluated over {observed}; the declared observation class is absent or incomplete"
+            ),
+        )
+    })
+}
+
+pub fn generated_final_value_semantic_channel(
+    events: &[DeliveredBoundary],
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
     let mut checked = 0usize;
     for event in events
         .iter()
@@ -443,10 +477,19 @@ pub fn generated_final_value_semantic_channel(events: &[DeliveredBoundary]) -> O
         }
         checked += 1;
     }
+    if let Some(shortfall) = declared_coverage_shortfall(
+        GENERATED_FINAL_VALUE_ORACLE,
+        "provider turn(s)",
+        expectations.provider_turn_count,
+        checked,
+    ) {
+        return shortfall;
+    }
     OracleVerdict::passed(
         GENERATED_FINAL_VALUE_ORACLE,
         format!(
-            "{checked} generated assistant-message turn(s) kept the semantic final-value channel empty (no transcript-inferred final values)"
+            "{checked} generated assistant-message turn(s) (workload declared {}) kept the semantic final-value channel empty (no transcript-inferred final values)",
+            expectations.provider_turn_count
         ),
     )
 }
@@ -500,7 +543,18 @@ pub fn cross_session_isolation(summary: &AbstractWorldSummary) -> OracleVerdict 
     )
 }
 
-pub fn ingress_sessions_opened(summary: &AbstractWorldSummary) -> OracleVerdict {
+pub fn ingress_sessions_opened(
+    summary: &AbstractWorldSummary,
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
+    if let Some(shortfall) = declared_coverage_shortfall(
+        INGRESS_SESSION_OPENED_ORACLE,
+        "session(s)",
+        expectations.session_count(),
+        summary.sessions.len(),
+    ) {
+        return shortfall;
+    }
     for session in &summary.sessions {
         if !session.opened || session.ingress_count != 1 {
             return OracleVerdict::failed(
@@ -514,11 +568,36 @@ pub fn ingress_sessions_opened(summary: &AbstractWorldSummary) -> OracleVerdict 
     }
     OracleVerdict::passed(
         INGRESS_SESSION_OPENED_ORACLE,
-        "each generated session opened through an ingress boundary exactly once",
+        format!(
+            "each of {} observed generated session(s) (workload declared {}) opened through an ingress boundary exactly once",
+            summary.sessions.len(),
+            expectations.session_count()
+        ),
     )
 }
 
-pub fn observer_convergence(summary: &AbstractWorldSummary) -> OracleVerdict {
+pub fn observer_convergence(
+    summary: &AbstractWorldSummary,
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
+    if let Some(shortfall) = declared_coverage_shortfall(
+        OBSERVER_CONVERGENCE_ORACLE,
+        "session(s) whose observer must converge",
+        expectations.session_count(),
+        summary.sessions.len(),
+    ) {
+        return shortfall;
+    }
+    observer_convergence_law(summary, Some(expectations))
+}
+
+/// The convergence law itself, without the declared-coverage floor. Scenario
+/// evidence predicates use this: they ask whether the sessions they *did*
+/// observe converged, and the workload-level coverage floor is the oracle's job.
+fn observer_convergence_law(
+    summary: &AbstractWorldSummary,
+    expectations: Option<&WorkloadExpectations>,
+) -> OracleVerdict {
     for session in &summary.sessions {
         let expected_turns = session.provider_outputs.len();
         let Some(last_observed_turn) = session.observer_turn_indices.last().copied() else {
@@ -539,7 +618,11 @@ pub fn observer_convergence(summary: &AbstractWorldSummary) -> OracleVerdict {
     }
     OracleVerdict::passed(
         OBSERVER_CONVERGENCE_ORACLE,
-        "observer snapshots converged to the generated runtime turn count",
+        format!(
+            "observer snapshots converged to the generated runtime turn count in all {} observed session(s) (workload declared {})",
+            summary.sessions.len(),
+            declared_session_count(expectations)
+        ),
     )
 }
 
@@ -745,8 +828,9 @@ pub fn peak_concurrent_live_turns(events: &[DeliveredBoundary]) -> usize {
 }
 
 /// Count of distinct sessions that ran at least one provider turn. Interleaving
-/// is structurally impossible below two such sessions, so the interleaving
-/// oracle treats those workloads as vacuously satisfied.
+/// is structurally impossible below two such sessions, but the exemption is
+/// decided by the *declared* session count — this number only proves the
+/// declared sessions actually ran.
 fn provider_turn_session_count(events: &[DeliveredBoundary]) -> usize {
     events
         .iter()
@@ -756,19 +840,37 @@ fn provider_turn_session_count(events: &[DeliveredBoundary]) -> usize {
         .len()
 }
 
-/// Make interleaving load-bearing: whenever a workload runs provider turns in at
-/// least two sessions, the scheduler must actually drive at least two of those
-/// turns concurrently. A multi-session workload that never interleaves is a real
-/// scheduling regression and fails this oracle; single-session workloads (and
-/// minimized fixtures that collapse to one session) pass vacuously.
-pub fn provider_turn_interleaving_depth(events: &[DeliveredBoundary]) -> OracleVerdict {
+/// Make interleaving load-bearing: whenever a workload *declares* provider turns
+/// in at least two sessions, the scheduler must actually drive at least two of
+/// those turns concurrently. A multi-session workload that never interleaves is
+/// a real scheduling regression and fails this oracle.
+///
+/// The single-session exemption is proved from the declared workload, never
+/// inferred from the observed sessions: "the workload declared one session" and
+/// "the run produced no sessions at all" are opposite facts, and conflating them
+/// is what let this oracle pass on an empty event set. A workload that declared
+/// two or more sessions but ran provider turns in fewer fails as a coverage
+/// shortfall before interleaving is even considered.
+pub fn provider_turn_interleaving_depth(
+    events: &[DeliveredBoundary],
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
     let peak = peak_concurrent_live_turns(events);
     let sessions = provider_turn_session_count(events);
-    if sessions < 2 {
+    let declared_sessions = expectations.session_count();
+    if let Some(shortfall) = declared_coverage_shortfall(
+        PROVIDER_TURN_INTERLEAVING_ORACLE,
+        "session(s) running provider turns",
+        declared_sessions,
+        sessions,
+    ) {
+        return shortfall;
+    }
+    if declared_sessions < 2 {
         return OracleVerdict::passed(
             PROVIDER_TURN_INTERLEAVING_ORACLE,
             format!(
-                "interleaving not required: only {sessions} session(s) ran provider turns (peak concurrent live turns {peak})"
+                "interleaving does not apply: the workload declared {declared_sessions} session(s) and {sessions} ran provider turns (peak concurrent live turns {peak})"
             ),
         );
     }
@@ -776,7 +878,7 @@ pub fn provider_turn_interleaving_depth(events: &[DeliveredBoundary]) -> OracleV
         OracleVerdict::passed(
             PROVIDER_TURN_INTERLEAVING_ORACLE,
             format!(
-                "scheduler drove {peak} provider turns concurrently across {sessions} sessions"
+                "scheduler drove {peak} provider turns concurrently across {sessions} sessions (workload declared {declared_sessions})"
             ),
         )
     } else {
@@ -794,11 +896,16 @@ pub fn provider_turn_interleaving_depth(events: &[DeliveredBoundary]) -> OracleV
 /// as a retryable stream fault, response-start and chunk timeouts as retryable
 /// timeouts, and a 5xx as a retryable HTTP status carrying its status code.
 /// This proves the new mutation classes drive distinct, executable behaviors
-/// rather than collapsing into a single generic parser error. Workloads that
-/// happen to contain no transport mutation pass vacuously (the class is still
-/// covered by the seeded anchor in every full run).
-pub fn provider_transport_mutation_classified(events: &[DeliveredBoundary]) -> OracleVerdict {
+/// rather than collapsing into a single generic parser error. A workload that
+/// declared no transport mutation imposes no floor; one that declared them and
+/// delivered fewer fails, so a mutation-delivery break can no longer read as a
+/// clean classification.
+pub fn provider_transport_mutation_classified(
+    events: &[DeliveredBoundary],
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
     let mut observed_classes = BTreeSet::new();
+    let mut classified_mutations = 0usize;
     for event in events
         .iter()
         .filter(|event| event.kind == BoundaryKind::ProviderMutation)
@@ -850,12 +957,21 @@ pub fn provider_transport_mutation_classified(events: &[DeliveredBoundary]) -> O
             );
         }
         observed_classes.insert(mutation.to_string());
+        classified_mutations += 1;
+    }
+    if let Some(shortfall) = declared_coverage_shortfall(
+        PROVIDER_TRANSPORT_MUTATION_ORACLE,
+        "transport mutation boundary(ies)",
+        expectations.transport_mutation_count,
+        classified_mutations,
+    ) {
+        return shortfall;
     }
     OracleVerdict::passed(
         PROVIDER_TRANSPORT_MUTATION_ORACLE,
         format!(
-            "transport mutation classes classified on distinct failure paths: {:?}",
-            observed_classes
+            "{classified_mutations} transport mutation boundary(ies) (workload declared {}) classified on distinct failure paths: {observed_classes:?}",
+            expectations.transport_mutation_count
         ),
     )
 }
@@ -980,7 +1096,27 @@ pub fn tool_boundary_observed(
     )
 }
 
-pub fn runtime_session_graph_contract(summary: &AbstractWorldSummary) -> OracleVerdict {
+pub fn runtime_session_graph_contract(
+    summary: &AbstractWorldSummary,
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
+    if let Some(shortfall) = declared_coverage_shortfall(
+        RUNTIME_SESSION_GRAPH_ORACLE,
+        "runtime-backed session(s)",
+        expectations.session_count(),
+        summary.sessions.len(),
+    ) {
+        return shortfall;
+    }
+    runtime_session_graph_law(summary, Some(expectations))
+}
+
+/// The session-graph advancement law without the declared-coverage floor, for
+/// scenario evidence predicates that only judge the sessions they observed.
+fn runtime_session_graph_law(
+    summary: &AbstractWorldSummary,
+    expectations: Option<&WorkloadExpectations>,
+) -> OracleVerdict {
     for session in &summary.sessions {
         if session.provider_outputs.len() < 2 {
             return OracleVerdict::failed(
@@ -1045,7 +1181,11 @@ pub fn runtime_session_graph_contract(summary: &AbstractWorldSummary) -> OracleV
     }
     OracleVerdict::passed(
         RUNTIME_SESSION_GRAPH_ORACLE,
-        "runtime-backed generated sessions advanced provider exchanges, graph nodes, and transcript messages across multiple turns",
+        format!(
+            "all {} observed runtime-backed generated session(s) (workload declared {}) advanced provider exchanges, graph nodes, and transcript messages across multiple turns",
+            summary.sessions.len(),
+            declared_session_count(expectations)
+        ),
     )
 }
 
@@ -1581,7 +1721,19 @@ fn worker_owned_work_continued_by_successor(event: &DeliveredBoundary) -> bool {
 /// fail), this reads the ground-truth fencing token the in-memory/SQLite lease
 /// store handed back, so a broken fencing implementation that reissued or
 /// regressed a token would fail this oracle.
-pub fn lease_time_monotonic(events: &[DeliveredBoundary]) -> OracleVerdict {
+pub fn lease_time_monotonic(
+    events: &[DeliveredBoundary],
+    expectations: &WorkloadExpectations,
+) -> OracleVerdict {
+    lease_time_monotonic_law(events, Some(expectations))
+}
+
+/// The fencing-token monotonicity law without the declared-coverage floor, for
+/// scenario evidence predicates that only judge the boundaries they observed.
+fn lease_time_monotonic_law(
+    events: &[DeliveredBoundary],
+    expectations: Option<&WorkloadExpectations>,
+) -> OracleVerdict {
     let mut last_by_session: BTreeMap<&str, u64> = BTreeMap::new();
     let mut grounded = 0usize;
     for event in events
@@ -1614,10 +1766,19 @@ pub fn lease_time_monotonic(events: &[DeliveredBoundary]) -> OracleVerdict {
             );
         }
     }
+    let declared = expectations.map_or(0, |declared| declared.lease_time_boundary_count);
+    if let Some(shortfall) = declared_coverage_shortfall(
+        LEASE_TIME_MONOTONIC_ORACLE,
+        "lease-time boundary(ies)",
+        declared,
+        grounded,
+    ) {
+        return shortfall;
+    }
     OracleVerdict::passed(
         LEASE_TIME_MONOTONIC_ORACLE,
         format!(
-            "{grounded} lease-time boundaries advanced a real session-execution-lease fencing token monotonically per session"
+            "{grounded} lease-time boundaries (workload declared {declared}) advanced a real session-execution-lease fencing token monotonically per session"
         ),
     )
 }
@@ -2561,7 +2722,7 @@ fn scenario_evidence_satisfied(
                         == Some(session.provider_outputs.len())
                 })
         }
-        "runtime_session_graph" => runtime_session_graph_contract(summary).is_passed(),
+        "runtime_session_graph" => runtime_session_graph_law(summary, None).is_passed(),
         "exec_code" => {
             summary
                 .sessions
@@ -2935,7 +3096,8 @@ fn runtime_contract_semantics(
             "a second incarnation acquired the stale lease after TTL at a strictly higher fence",
         ),
         "runtime.checkpoint_redrive_cancel" => assert_semantic(
-            queued_inputs_have_cancel_targets(events) && observer_convergence(summary).is_passed(),
+            queued_inputs_have_cancel_targets(events)
+                && observer_convergence_law(summary, None).is_passed(),
             "queued input cancellation targeted a source key and observers converged",
         ),
         // The queued (next-turn) input stays pending/hidden while the live turn runs.
@@ -2953,14 +3115,15 @@ fn runtime_contract_semantics(
         ),
         // A command-only queue drains against monotonic lease fencing tokens.
         "runtime.command_only_queue_drain" => assert_semantic(
-            queued_ingress_has_source_keys(events) && lease_time_monotonic(events).is_passed(),
+            queued_ingress_has_source_keys(events)
+                && lease_time_monotonic_law(events, None).is_passed(),
             "command queue source keys drained against monotonically advancing lease fences",
         ),
         // A command applied before turn work still lets later provider turns run.
         "runtime.command_before_turn_work" => assert_semantic(
             queued_ingress_has_source_keys(events)
                 && provider_turns_after_queue(summary)
-                && lease_time_monotonic(events).is_passed(),
+                && lease_time_monotonic_law(events, None).is_passed(),
             "a command queued before turn work preserved later turns and lease ordering",
         ),
         "runtime.observation_replay_preserves_input" => assert_semantic(
@@ -6350,7 +6513,7 @@ fn duplicate_free_stream_finalization(
         .sum::<usize>();
     provider_count == observed_turns
         && provider_exchange_counts_are_turn_indexed(summary)
-        && observer_convergence(summary).is_passed()
+        && observer_convergence_law(summary, None).is_passed()
 }
 
 fn provider_mutation_parser_matrix_observed(events: &[DeliveredBoundary]) -> bool {
@@ -7944,9 +8107,21 @@ mod tests {
                 }),
             )
         };
-        assert!(lease_time_monotonic(&[lease_event(0, 1), lease_event(1, 2)]).is_passed());
+        let two_lease_boundaries =
+            WorkloadExpectations::new(vec!["session-001".to_string()], 0, 0, 2);
         assert!(
-            !lease_time_monotonic(&[lease_event(0, 1), lease_event(1, 1)]).is_passed(),
+            lease_time_monotonic(
+                &[lease_event(0, 1), lease_event(1, 2)],
+                &two_lease_boundaries
+            )
+            .is_passed()
+        );
+        assert!(
+            !lease_time_monotonic(
+                &[lease_event(0, 1), lease_event(1, 1)],
+                &two_lease_boundaries
+            )
+            .is_passed(),
             "lease-time-monotonic must fire when a real store reissues a fence"
         );
 
@@ -9448,7 +9623,18 @@ mod tests {
             provider_completion(3, "session-b", "turn-b"),
         ];
         assert_eq!(peak_concurrent_live_turns(&events), 2);
-        assert!(provider_turn_interleaving_depth(&events).is_passed());
+        assert!(
+            provider_turn_interleaving_depth(
+                &events,
+                &WorkloadExpectations::new(
+                    vec!["session-a".to_string(), "session-b".to_string()],
+                    2,
+                    0,
+                    0,
+                )
+            )
+            .is_passed()
+        );
     }
 
     #[test]
@@ -9462,19 +9648,38 @@ mod tests {
             provider_completion(3, "session-b", "turn-b"),
         ];
         assert_eq!(peak_concurrent_live_turns(&events), 1);
-        let verdict = provider_turn_interleaving_depth(&events);
+        let verdict = provider_turn_interleaving_depth(
+            &events,
+            &WorkloadExpectations::new(
+                vec!["session-a".to_string(), "session-b".to_string()],
+                2,
+                0,
+                0,
+            ),
+        );
         assert!(!verdict.is_passed());
         assert_eq!(verdict.oracle_id, PROVIDER_TURN_INTERLEAVING_ORACLE);
     }
 
     #[test]
-    fn interleaving_oracle_passes_vacuously_for_single_session() {
+    fn interleaving_oracle_is_exempt_only_for_a_declared_single_session() {
         let events = vec![
             provider_event(0, "session-a", "turn-a"),
             provider_completion(1, "session-a", "turn-a"),
         ];
         assert_eq!(peak_concurrent_live_turns(&events), 1);
-        assert!(provider_turn_interleaving_depth(&events).is_passed());
+        let verdict = provider_turn_interleaving_depth(
+            &events,
+            &WorkloadExpectations::new(vec!["session-a".to_string()], 1, 0, 0),
+        );
+        assert!(verdict.is_passed(), "{}", verdict.message);
+        assert!(
+            verdict
+                .message
+                .contains("the workload declared 1 session(s)"),
+            "the exemption must be proved from the declaration: {}",
+            verdict.message
+        );
     }
 
     fn suspend_resume_event(suspended_before: bool, before: u64, after: u64) -> DeliveredBoundary {

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -108,6 +108,87 @@ pub struct WorkerAbstractSummary {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+pub const WORKLOAD_EXPECTATIONS_SCHEMA: &str = "lash.sim.workload-expectations.v1";
+
+/// Observations the *workload* declared before the run started, derived from
+/// the generated plan rather than from anything the run produced.
+///
+/// Universally-quantified oracles are vacuously true over an empty observation
+/// set, so a generator, delivery-path or projection break that yields zero
+/// observations would otherwise read as compliance. Every oracle that evaluates
+/// such a law compares what it saw against what is declared here and fails when
+/// a declared observation class is absent. The declaration is never observed,
+/// so "expected 5 sessions and saw 0" is provable rather than an ad hoc
+/// `is_empty()` suspicion.
+///
+/// Sessions are declared by *identity*, not by count. A count only supports a
+/// cardinality comparison, which is sound only when the observed population is
+/// exactly the declared one; the independent checkpoint checker's population is
+/// strictly wider (it also reconstructs suspend- and worker-attributed
+/// commits), so `observed >= declared` there would still pass a run in which
+/// every declared session lost its checkpoints. Identities make the floor say
+/// which session went missing.
+///
+/// Traces recorded before this declaration existed deserialize to
+/// [`WorkloadExpectations::default()`]: no session aliases and every count
+/// zero, which declares nothing and therefore imposes no floor — those fixtures
+/// are replayed, not oracle-evaluated.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkloadExpectations {
+    #[serde(default)]
+    pub schema: String,
+    /// Stable aliases of the sessions the workload planned. Every one is
+    /// expected to open, converge an observer, advance its session graph and
+    /// commit checkpoints under that alias.
+    #[serde(default)]
+    pub sessions: Vec<String>,
+    /// Provider-turn boundaries the workload planned.
+    pub provider_turn_count: usize,
+    /// Provider-mutation boundaries whose mutation is a transport/HTTP class.
+    pub transport_mutation_count: usize,
+    /// Lease-time boundaries the workload planned.
+    pub lease_time_boundary_count: usize,
+}
+
+impl WorkloadExpectations {
+    /// Declare the observations explicitly. Callers that derive them from a
+    /// generated workload use [`crate::generator::GeneratedWorkload::expectations`].
+    pub fn new(
+        sessions: Vec<String>,
+        provider_turn_count: usize,
+        transport_mutation_count: usize,
+        lease_time_boundary_count: usize,
+    ) -> Self {
+        Self {
+            schema: WORKLOAD_EXPECTATIONS_SCHEMA.to_string(),
+            sessions,
+            provider_turn_count,
+            transport_mutation_count,
+            lease_time_boundary_count,
+        }
+    }
+
+    /// How many sessions the workload declared.
+    pub fn session_count(&self) -> usize {
+        self.sessions.len()
+    }
+
+    /// Declared session aliases absent from an observed session population,
+    /// in declaration order. Empty when every declared session is present —
+    /// including when nothing was declared at all.
+    pub fn sessions_missing_from<'a>(
+        &'a self,
+        observed: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<&'a str> {
+        let observed = observed.into_iter().collect::<BTreeSet<_>>();
+        self.sessions
+            .iter()
+            .map(String::as_str)
+            .filter(|alias| !observed.contains(alias))
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -341,6 +422,11 @@ pub struct SimulationTrace {
     pub workload_family: String,
     pub workload_id: String,
     pub script_bundle_hash: String,
+    /// Observation counts the workload declared, so oracles can distinguish
+    /// "the class was absent" from "the class was never expected". Defaulted
+    /// for traces recorded before the declaration existed.
+    #[serde(default)]
+    pub expectations: WorkloadExpectations,
     pub aliases: BTreeMap<String, String>,
     pub events: Vec<DeliveredBoundary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -361,6 +447,7 @@ impl SimulationTrace {
         workload_family: impl Into<String>,
         workload_id: impl Into<String>,
         script_bundle_hash: impl Into<String>,
+        expectations: WorkloadExpectations,
         aliases: BTreeMap<String, String>,
         events: Vec<DeliveredBoundary>,
         durable_writes: Vec<crate::store::CheckpointWriteEvent>,
@@ -382,6 +469,7 @@ impl SimulationTrace {
             workload_family: workload_family.into(),
             workload_id: workload_id.into(),
             script_bundle_hash: script_bundle_hash.into(),
+            expectations,
             aliases,
             events,
             durable_writes,
