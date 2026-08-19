@@ -309,7 +309,8 @@ Boot, gate `/healthz`, and open `/?session_id=<S>`. Require the composer, the RE
 button, an empty transcript, the rendered session id `<S>`, and
 `/api/state?session_id=<S>` reporting `settings.session_id == <S>` with empty `messages`
 and empty `active_turns`. All three layers start at zero: no `graph_nodes` conversation
-rows, no `<S>` key in the product-event log, no `<S>` trace records. Screenshot
+rows, no `<S>` key in the product-event log, no `<S>` turn or conversation trace records
+(periodic `/api/work` responses are expected and allowed). Screenshot
 `00-scoped-empty.png`.
 
 ## Phase 1 — One composer send, one pair of rows
@@ -401,7 +402,7 @@ Restate container are gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Boot/scope | `/healthz` 200; rendered and API session id both `<S>`; all three layers empty | | `00-scoped-empty.png` |
+| Boot/scope | `/healthz` 200; rendered and API session id both `<S>`; all three conversation layers empty | | `00-scoped-empty.png` |
 | One send, one pair | 1 user + 1 assistant row = 1+1 API = 1+1 store = 1 `turn_completed` | | `01-one-send.png`, `01-one-send-*.json` |
 | Watcher registration | cumulative 2+2 rows = 2+2 API = 2+2 store = 2 `turn_completed` | | `02-watcher-registered.png` |
 | One press, one wake | exactly 1 `workbench-queued-` `turn_completed`; user rows unchanged | | `03-red-press-trace.json` |

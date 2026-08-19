@@ -156,7 +156,7 @@ writer or owner differs, or the observed terminal disagrees with the registry re
 
 Serve `docs/` on loopback and open `/operations.html#graceful-drain`. Poll until
 **Graceful Drain** and **Background Process Recovery** render. Save the Graceful Drain
-section text as `04-docs-claims.txt` and capture `04-graceful-drain.png` with the six-step
+section text as `04-docs-claims.txt` and capture `04-graceful-drain.png` with the nine-step
 procedure and worker-specific paragraph visible.
 
 | Documented claim | Evidence |
