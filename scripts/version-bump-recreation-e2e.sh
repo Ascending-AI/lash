@@ -131,6 +131,73 @@ if seeded["committed_sessions"] != len(seeded["session_ids"]):
 if seeded["trigger_reservations"] != 1:
     fail(f"the seeded trigger did not reserve exactly one delivery: {seeded}")
 
+# The store-readability probe (FIG-1556 pieces 3 and 4) answers "will this
+# durable data open under this build?" without opening the store. These
+# assertions hold it to the refusal the store itself then delivered: a probe
+# that agreed with nothing, or that refused everything, would be worthless as a
+# deploy gate, so the run asserts both directions against controlled fixtures.
+PROBE_FIELDS = ("backend", "mode", "outcome", "schema", "components", "drain", "not_scanned")
+
+
+def probe_of(value, key="probe"):
+    report = value.get(key)
+    if not isinstance(report, dict):
+        fail(f"checkpoint {value.get('checkpoint')!r} carried no {key!r} report")
+    for field in PROBE_FIELDS:
+        if field not in report:
+            fail(f"probe report is missing {field!r}: {sorted(report)}")
+    # A report that does not name its own blind spots reads as complete when it
+    # is not; the enumerated formats with no bounded surface are always listed.
+    if not report["not_scanned"]:
+        fail(f"a probe report named nothing it had not scanned: {report}")
+    if not report["components"]:
+        fail(f"a probe report enumerated no durable formats: {report}")
+    return report
+
+
+def probe_rows(report):
+    return {row["format"]: row for row in report["components"]}
+
+
+def probe_stamp(report):
+    """The one schema database whose recorded version the fixture moved."""
+    # `found` is omitted, not null, when the version was never read, so ask for
+    # it rather than indexing: a matching database would KeyError otherwise.
+    stamped = [db for db in report["schema"]["databases"] if db.get("found") is not None]
+    if len(stamped) != 1:
+        fail(f"expected exactly one mismatched schema database: {report['schema']}")
+    return stamped[0]
+
+
+before = probe_of(seeded, "probe_before_rewind")
+after = probe_of(seeded, "probe_after_rewind")
+for report in (before, after):
+    if report["mode"] != "deep":
+        fail(f"the pre-bump audit did not run the deep walk: {report['mode']}")
+if before["outcome"] != "ready":
+    fail(f"the probe refused a store this build had just written: {before}")
+if before["drain"]:
+    fail(f"a store this build wrote produced drain blockers: {before['drain']}")
+rows = probe_rows(before)
+undecodable = sorted(name for name, row in rows.items() if row["verdict"] == "undecodable")
+if undecodable:
+    fail(f"the deep walk could not decode freshly written data: {undecodable}")
+manifest = rows.get("session checkpoint manifest")
+if manifest is None or manifest["verdict"] != "all_readable":
+    fail(f"the deep walk did not read the seeded session checkpoints: {manifest}")
+if manifest["scanned"] != seeded["committed_sessions"]:
+    fail(f"the deep walk read {manifest['scanned']} of {seeded['committed_sessions']} sessions")
+# Only the schema stamp moved between these two reports. The outcome flips and
+# the drain list does not, which is exactly the distinction piece 4 exists to
+# draw: this deployment cannot open, but it holds nothing that cannot be carried.
+if after["outcome"] != "refused" or after["schema"]["outcome"] != "refused":
+    fail(f"the probe did not refuse the rewound ledger: {after}")
+if after["drain"]:
+    fail(f"moving only the schema stamp invented drain blockers: {after['drain']}")
+stamp = probe_stamp(after)
+if stamp["found"] != seeded["recorded_version"] or stamp["expected"] != seeded["expected_version"]:
+    fail(f"the probe misreported the rewound schema versions: {stamp}")
+
 divergent = checkpoint("refused_divergent_store", "02-refusal.jsonl")
 stale = checkpoint("refused_older_store", "02-refusal.jsonl")
 future = checkpoint("refused_newer_store", "02-refusal.jsonl")
@@ -170,6 +237,26 @@ if stale["current_artifact_count"] != 0:
 if future["found_version"] <= future["expected_version"]:
     fail(f"newer-store refusal was not newer: {future}")
 
+# Every refusal the store delivers, the probe predicted first — in summary mode,
+# the shape a host runs at boot, which skips the per-session walk and says so.
+for refusal, checkpoint_name in (
+    (divergent, "refused_divergent_store"),
+    (stale, "refused_older_store"),
+    (future, "refused_newer_store"),
+):
+    report = probe_of(refusal)
+    if report["mode"] != "summary":
+        fail(f"{checkpoint_name}: the boot-shaped probe ran the deep walk: {report['mode']}")
+    if report["outcome"] != "refused":
+        fail(f"{checkpoint_name}: the probe did not predict the refusal: {report['outcome']}")
+    stamp = probe_stamp(report)
+    if stamp["found"] != refusal["found_version"] or stamp["expected"] != refusal["expected_version"]:
+        fail(f"{checkpoint_name}: probe and refusal disagree about the versions: {stamp}")
+    if not any(entry["what"] == "session checkpoints" for entry in report["not_scanned"]):
+        fail(f"{checkpoint_name}: summary mode did not name the walk it skipped: {report['not_scanned']}")
+    if probe_rows(report)["session checkpoint manifest"]["verdict"] != "not_scanned":
+        fail(f"{checkpoint_name}: a skipped surface was reported as empty rather than unscanned")
+
 recreated = checkpoint("recreated_store", "03-recreation.jsonl")
 if recreated["premise_refusal_kind"] != EXPECTED_REFUSAL_KINDS["recreated_store"]:
     fail(f"recreation ran from the wrong premise refusal: {recreated}")
@@ -182,6 +269,16 @@ if recreated["surviving_seeded_graph_nodes"] != 0:
 if recreated["pre_bump_graph_nodes"] < 1:
     fail(f"the pre-bump store held no committed session content: {recreated}")
 
+# The other direction, on the store recreation just produced: without this, every
+# refusal above would be consistent with a probe that refuses everything.
+recreated_probe = probe_of(recreated)
+if recreated_probe["outcome"] != "ready" or recreated_probe["schema"]["outcome"] != "ready":
+    fail(f"the probe refused the store recreation just produced: {recreated_probe}")
+if recreated_probe["drain"]:
+    fail(f"a freshly recreated store produced drain blockers: {recreated_probe['drain']}")
+if any(db["verdict"] != "matches" for db in recreated_probe["schema"]["databases"]):
+    fail(f"the recreated store's schema did not read as matching: {recreated_probe['schema']}")
+
 health = checkpoint("verified_recreated_deployment", "04-health.jsonl")
 for gate in ("session_turn_committed", "process_ran_to_terminal", "trigger_fired"):
     if health.get(gate) is not True:
@@ -193,7 +290,7 @@ if health["trigger_reservations"] != 1 or health["trigger_process_status"] != "C
 
 print(
     "version-bump recreation gates: seed, divergence/older/newer refusals by kind, "
-    "recreation, and health all asserted"
+    "readability-probe agreement in both directions, recreation, and health all asserted"
 )
 PY
 

@@ -48120,7 +48120,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::wants_segment_boundary"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:473#let Some(reason) = controller.wants_segment_boundary(&progress) else {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:482#let Some(reason) = controller.wants_segment_boundary(&progress) else {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectControllerError"
@@ -67459,7 +67459,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:158#let _phase = context.named_phase(\"rlm_process.load_artifact\");"
+usage = "crates/lash-lashlang-runtime/src/process.rs:167#let _phase = context.named_phase(\"rlm_process.load_artifact\");"
 
 [[api]]
 symbol = "lash_core::ProcessEngineRunContext::plugins"
@@ -67555,7 +67555,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:145#let phase_probe = context.turn_phase_probe();"
+usage = "crates/lash-lashlang-runtime/src/process.rs:154#let phase_probe = context.turn_phase_probe();"
 
 [[api]]
 symbol = "lash_core::ProcessEngineValidationContext"
@@ -68907,7 +68907,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:493#engine_state,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:502#engine_state,"
 
 [[api]]
 symbol = "lash_core::SegmentHandover::program_hash"
@@ -68923,7 +68923,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:491#reason,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:500#reason,"
 
 [[api]]
 symbol = "lash_core::SegmentProgress"
@@ -69627,7 +69627,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:854#kind: lash_core::WaitKind::Signal {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:863#kind: lash_core::WaitKind::Signal {"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal"
@@ -69635,7 +69635,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:854#kind: lash_core::WaitKind::Signal {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:863#kind: lash_core::WaitKind::Signal {"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::event_type"
@@ -69643,7 +69643,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:856#event_type: event_type.clone(),"
+usage = "crates/lash-lashlang-runtime/src/process.rs:865#event_type: event_type.clone(),"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::key"
@@ -69651,7 +69651,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:887#lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:896#lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::name"
@@ -69659,7 +69659,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:855#name: name.clone(),"
+usage = "crates/lash-lashlang-runtime/src/process.rs:864#name: name.clone(),"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::ordinal"
@@ -69667,7 +69667,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:858#ordinal: event_ordinal,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:867#ordinal: event_ordinal,"
 
 [[api]]
 symbol = "lash_core::WaitState"
@@ -69691,7 +69691,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:854#kind: lash_core::WaitKind::Signal {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:863#kind: lash_core::WaitKind::Signal {"
 
 [[api]]
 symbol = "lash_core::WaitState::since_ms"
@@ -69699,7 +69699,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:853#since_ms,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:862#since_ms,"
 
 [[api]]
 symbol = "lash_core::WakeDelivery"
@@ -73461,7 +73461,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:909#Ok(lash_core::facade_support::current_epoch_ms())"
+usage = "crates/lash-lashlang-runtime/src/process.rs:918#Ok(lash_core::facade_support::current_epoch_ms())"
 
 [[api]]
 symbol = "lash_core::facade_support::default_trigger_source_key"
@@ -74630,7 +74630,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:841#let key = lash_core::facade_support::process_signal_wait_key("
+usage = "crates/lash-lashlang-runtime/src/process.rs:850#let key = lash_core::facade_support::process_signal_wait_key("
 
 [[api]]
 symbol = "lash_core::facade_support::process_wake_delivery"
@@ -76412,7 +76412,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:377#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
+usage = "crates/lash-lashlang-runtime/src/process.rs:386#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
 
 [[api]]
 symbol = "lash_core::runtime::RuntimeNamedPhase::begin"
@@ -76420,7 +76420,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:377#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
+usage = "crates/lash-lashlang-runtime/src/process.rs:386#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
 
 [[api]]
 symbol = "lash_core::runtime::RuntimeTurnPhaseProbeSlot"
@@ -86008,6 +86008,963 @@ area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_preflight.rs:266#StoreSchemaVerdict::Unreadable { reason } => eprintln!(\"undecided: {reason}\"),"
 assertion = "examples/docs-snippets/src/fig1556_preflight.rs:603#!reason.is_empty(),"
+
+[[api]]
+symbol = "lash::preflight::DEFAULT_PAGE_SIZE"
+kind = "constant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:66#let options = PreflightOptions::deep().with_page_size(DEFAULT_PAGE_SIZE);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:928#assert_eq!(first.limit, DEFAULT_PAGE_SIZE);"
+
+[[api]]
+symbol = "lash::preflight::probe_store"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:40#let report = probe_store(handle, PreflightOptions::summary())"
+
+[[api]]
+symbol = "lash::preflight::PreflightOptions"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:40#let report = probe_store(handle, PreflightOptions::summary())"
+
+[[api]]
+symbol = "lash::preflight::PreflightOptions::mode"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:81#options.mode.name(),"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:651#assert_eq!(report.mode, PreflightMode::Summary);"
+
+[[api]]
+symbol = "lash::preflight::PreflightOptions::page_size"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:82#options.page_size"
+
+[[api]]
+symbol = "lash::preflight::PreflightOptions::summary"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:40#let report = probe_store(handle, PreflightOptions::summary())"
+
+[[api]]
+symbol = "lash::preflight::PreflightOptions::deep"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:66#let options = PreflightOptions::deep().with_page_size(DEFAULT_PAGE_SIZE);"
+
+[[api]]
+symbol = "lash::preflight::PreflightOptions::with_page_size"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:66#let options = PreflightOptions::deep().with_page_size(DEFAULT_PAGE_SIZE);"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:195#pub fn row_refuses(component: &ComponentReadability) -> bool {"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::format"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:158#component.format,"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::expected"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:160#component.expected,"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:667#assert_eq!(handover.expected, writes);"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::probe"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:161#component.probe,"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:663#assert_eq!(handover.probe, \"comparable\");"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::evidence"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:162#evidence_label(component.evidence)"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:664#assert_eq!(handover.evidence, FormatEvidence::Direct);"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::verdict"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:159#component.verdict.name(),"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:657#assert_eq!(handover.verdict, ComponentVerdict::Refused);"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::scanned"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:164#write!(line, \" scanned={}\", component.scanned).expect(\"a String write cannot fail\");"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:668#assert_eq!(handover.scanned, 2);"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::found"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:165#for FoundVersion { version, count } in &component.found {"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::undecodable"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:168#if component.undecodable > 0 {"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:683#assert_eq!(handover.undecodable, 0);"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::undecodable_reasons"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:204#.undecodable_reasons"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::refused_without_version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:172#if component.refused_without_version > 0 {"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:684#assert_eq!(handover.refused_without_version, 0);"
+
+[[api]]
+symbol = "lash::preflight::ComponentReadability::refuses_open"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:196#component.refuses_open()"
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict"
+kind = "enum"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:121#pub fn verdict_label(verdict: ComponentVerdict) -> &'static str {"
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict::AllReadable"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:123#ComponentVerdict::AllReadable => \"every stored item opens\","
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict::Refused"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:124#ComponentVerdict::Refused => \"at least one stored item refuses\","
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict::Empty"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:125#ComponentVerdict::Empty => \"nothing stored\","
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict::Undecodable"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:126#ComponentVerdict::Undecodable => \"stored items could not be read\","
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict::NotScanned"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:127#ComponentVerdict::NotScanned => \"nobody looked\","
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict::name"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:159#component.verdict.name(),"
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:215#for DrainBlocker {"
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker::process_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:216#process_id,"
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:217#session_id,"
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker::status"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:240#status.as_deref().unwrap_or(\"unknown status\")"
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker::format"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:239#\"{owner} [{}] holds {format} {found}, expected {expected}: {detail}\","
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker::expected"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:239#\"{owner} [{}] holds {format} {found}, expected {expected}: {detail}\","
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker::found"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:236#.map(|version| version.to_string())"
+
+[[api]]
+symbol = "lash::preflight::DrainBlocker::detail"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:239#\"{owner} [{}] holds {format} {found}, expected {expected}: {detail}\","
+
+[[api]]
+symbol = "lash::preflight::FormatEvidence"
+kind = "enum"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:138#pub fn evidence_label(evidence: FormatEvidence) -> String {"
+
+[[api]]
+symbol = "lash::preflight::FormatEvidence::Direct"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:140#FormatEvidence::Direct => \"read from stored bytes\".to_string(),"
+
+[[api]]
+symbol = "lash::preflight::FormatEvidence::CarriedBy"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:141#FormatEvidence::CarriedBy(carrier) => format!(\"carried by {carrier}\"),"
+
+[[api]]
+symbol = "lash::preflight::FormatEvidence::CarriedBy::0"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:141#FormatEvidence::CarriedBy(carrier) => format!(\"carried by {carrier}\"),"
+
+[[api]]
+symbol = "lash::preflight::FormatEvidence::NotPersisted"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:142#FormatEvidence::NotPersisted => \"never persisted\".to_string(),"
+
+[[api]]
+symbol = "lash::preflight::FoundVersion"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:165#for FoundVersion { version, count } in &component.found {"
+
+[[api]]
+symbol = "lash::preflight::FoundVersion::version"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:166#write!(line, \" found {version} x{count}\").expect(\"a String write cannot fail\");"
+
+[[api]]
+symbol = "lash::preflight::FoundVersion::count"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:166#write!(line, \" found {version} x{count}\").expect(\"a String write cannot fail\");"
+
+[[api]]
+symbol = "lash::preflight::NotScanned"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:254#.map(|NotScanned { what, reason }| format!(\"{what}: {reason}\"))"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::what"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:254#.map(|NotScanned { what, reason }| format!(\"{what}: {reason}\"))"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::reason"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:254#.map(|NotScanned { what, reason }| format!(\"{what}: {reason}\"))"
+
+[[api]]
+symbol = "lash::preflight::PreflightMode"
+kind = "enum"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:112#pub fn mode_label(mode: PreflightMode) -> &'static str {"
+
+[[api]]
+symbol = "lash::preflight::PreflightMode::Summary"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:114#PreflightMode::Summary => \"schema and process registry\","
+
+[[api]]
+symbol = "lash::preflight::PreflightMode::Deep"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:115#PreflightMode::Deep => \"schema, process registry and every session\","
+
+[[api]]
+symbol = "lash::preflight::PreflightMode::name"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:50#report.mode.name()"
+
+[[api]]
+symbol = "lash::preflight::PreflightOutcome"
+kind = "enum"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:102#pub fn outcome_label(outcome: PreflightOutcome) -> &'static str {"
+
+[[api]]
+symbol = "lash::preflight::PreflightOutcome::Ready"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:104#PreflightOutcome::Ready => \"safe to start\","
+
+[[api]]
+symbol = "lash::preflight::PreflightOutcome::Refused"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:105#PreflightOutcome::Refused => \"will not open; drain or recreate\","
+
+[[api]]
+symbol = "lash::preflight::PreflightOutcome::Undecided"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:106#PreflightOutcome::Undecided => \"investigate before starting\","
+
+[[api]]
+symbol = "lash::preflight::PreflightOutcome::name"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:49#report.outcome.name(),"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:662#assert_eq!(handover.verdict.name(), \"refused\");"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:64#pub async fn pre_bump_audit(handle: &dyn StorePreflight) -> Result<PreflightReport, StoreError> {"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::backend"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:290#report.backend,"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::mode"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:50#report.mode.name()"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:651#assert_eq!(report.mode, PreflightMode::Summary);"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::outcome"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:49#report.outcome.name(),"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:646#assert_eq!(report.outcome, PreflightOutcome::Refused);"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::schema"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:294#for line in schema_lines(&report.schema)"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::components"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:155#for component in &report.components {"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::drain"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:223#} in &report.drain"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:919#assert_eq!(report.drain.len(), 5, \"a paged walk drops nothing\");"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::not_scanned"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:252#.not_scanned"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::refusals"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:189#.refusals()"
+
+[[api]]
+symbol = "lash::preflight::PreflightReport::refusal_message"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:43#if let Some(refusal) = report.refusal_message() {"
+
+[[api]]
+symbol = "lash::preflight::SchemaDatabaseReport"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:270#pub fn schema_database_line(database: &SchemaDatabaseReport) -> String {"
+
+[[api]]
+symbol = "lash::preflight::SchemaDatabaseReport::name"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:282#database.name, database.location, database.verdict, database.expected"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:662#assert_eq!(handover.verdict.name(), \"refused\");"
+
+[[api]]
+symbol = "lash::preflight::SchemaDatabaseReport::location"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:282#database.name, database.location, database.verdict, database.expected"
+
+[[api]]
+symbol = "lash::preflight::SchemaDatabaseReport::expected"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:282#database.name, database.location, database.verdict, database.expected"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:667#assert_eq!(handover.expected, writes);"
+
+[[api]]
+symbol = "lash::preflight::SchemaDatabaseReport::verdict"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:282#database.name, database.location, database.verdict, database.expected"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:657#assert_eq!(handover.verdict, ComponentVerdict::Refused);"
+
+[[api]]
+symbol = "lash::preflight::SchemaDatabaseReport::found"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:273#.map(|found| format!(\", found {found}\"))"
+
+[[api]]
+symbol = "lash::preflight::SchemaDatabaseReport::reason"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:278#.map(|reason| format!(\" ({reason})\"))"
+
+[[api]]
+symbol = "lash::preflight::SchemaReport"
+kind = "struct"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:261#pub fn schema_lines(schema: &SchemaReport) -> Vec<String> {"
+
+[[api]]
+symbol = "lash::preflight::SchemaReport::outcome"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:262#let mut lines = vec![format!(\"schema: {}\", schema.outcome)];"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:646#assert_eq!(report.outcome, PreflightOutcome::Refused);"
+
+[[api]]
+symbol = "lash::preflight::SchemaReport::databases"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:263#for database in &schema.databases {"
+
+[[api]]
+symbol = "lash::persistence::DurableItem"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:317#surfaces: BTreeMap<DurableSurface, Vec<DurableItem>>,"
+
+[[api]]
+symbol = "lash::persistence::DurableItem::surface"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem::surface"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:443#surface: DurableSurface::ParkedSegment,"
+
+[[api]]
+symbol = "lash::persistence::DurableItem::cursor"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem::cursor"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:397#.position(|item| &item.cursor == cursor)"
+
+[[api]]
+symbol = "lash::persistence::DurableItem::process_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem::process_id"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:552#item.process_id.as_deref().unwrap_or(\"-\"),"
+
+[[api]]
+symbol = "lash::persistence::DurableItem::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem::session_id"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:553#item.session_id.as_deref().unwrap_or(\"-\"),"
+
+[[api]]
+symbol = "lash::persistence::DurableItem::status"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem::status"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:554#item.status.as_deref().unwrap_or(\"-\"),"
+
+[[api]]
+symbol = "lash::persistence::DurableItem::owner_record"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem::owner_record"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:556#if item.owner_record.is_some() {"
+
+[[api]]
+symbol = "lash::persistence::DurableItem::payload"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableItem::payload"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:543#let payload = match &item.payload {"
+
+[[api]]
+symbol = "lash::persistence::DurablePayload"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::DurablePayload"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:449#payload: DurablePayload::Json("
+
+[[api]]
+symbol = "lash::persistence::DurablePayload::Json"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::DurablePayload::Json"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:449#payload: DurablePayload::Json("
+
+[[api]]
+symbol = "lash::persistence::DurablePayload::Json::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurablePayload::Json::0"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:544#DurablePayload::Json(text) => format!(\"{} bytes of JSON\", text.len()),"
+
+[[api]]
+symbol = "lash::persistence::DurablePayload::MessagePack"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::DurablePayload::MessagePack"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:510#payload: DurablePayload::MessagePack(root),"
+
+[[api]]
+symbol = "lash::persistence::DurablePayload::MessagePack::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurablePayload::MessagePack::0"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:545#DurablePayload::MessagePack(bytes) => format!(\"{} bytes of MessagePack\", bytes.len()),"
+
+[[api]]
+symbol = "lash::persistence::DurablePayload::Missing"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::DurablePayload::Missing"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:488#payload: DurablePayload::Missing {"
+
+[[api]]
+symbol = "lash::persistence::DurablePayload::Missing::reason"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurablePayload::Missing::reason"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:546#DurablePayload::Missing { reason } => format!(\"unreadable: {reason}\"),"
+
+[[api]]
+symbol = "lash::persistence::DurableScan"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScan"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:375#async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {"
+
+[[api]]
+symbol = "lash::persistence::DurableScan::surface"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScan::surface"]
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:377#if let Some(reason) = self.unreadable.get(&scan.surface) {"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:926#assert_eq!(first.surface, DurableSurface::ParkedSegment);"
+
+[[api]]
+symbol = "lash::persistence::DurableScan::after"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScan::after"]
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:393#let start = match &scan.after {"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:927#assert_eq!(first.after, None);"
+
+[[api]]
+symbol = "lash::persistence::DurableScan::limit"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScan::limit"]
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:401#let items: Vec<DurableItem> = all.iter().skip(start).take(scan.limit).cloned().collect();"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:928#assert_eq!(first.limit, DEFAULT_PAGE_SIZE);"
+
+[[api]]
+symbol = "lash::persistence::DurableScan::first"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScan::first"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:518#DurableScan::first(surface, DEFAULT_PAGE_SIZE),"
+
+[[api]]
+symbol = "lash::persistence::DurableScan::after"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScan::after"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:519#DurableScan::after(surface, cursor, DEFAULT_PAGE_SIZE),"
+
+[[api]]
+symbol = "lash::persistence::DurableScanPage"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScanPage"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:375#async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {"
+
+[[api]]
+symbol = "lash::persistence::DurableScanPage::items"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScanPage::items"]
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:533#page.items.len(),"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:934#assert_eq!(page.items.len(), 1);"
+
+[[api]]
+symbol = "lash::persistence::DurableScanPage::next"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScanPage::next"]
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:534#page.next"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:933#assert_eq!(page.next, None);"
+
+[[api]]
+symbol = "lash::persistence::DurableScanPage::coverage"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::DurableScanPage::coverage"]
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:526#let coverage = match &page.coverage {"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:932#assert!(matches!(page.coverage, ScanCoverage::Scanned));"
+
+[[api]]
+symbol = "lash::persistence::DurableSurface"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::DurableSurface"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:420#DurableSurface::ParkedSegment,"
+
+[[api]]
+symbol = "lash::persistence::DurableSurface::ParkedSegment"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::DurableSurface::ParkedSegment"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:420#DurableSurface::ParkedSegment,"
+
+[[api]]
+symbol = "lash::persistence::DurableSurface::PendingWake"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::DurableSurface::PendingWake"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:421#DurableSurface::PendingWake,"
+
+[[api]]
+symbol = "lash::persistence::DurableSurface::SessionCheckpoint"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::DurableSurface::SessionCheckpoint"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:422#DurableSurface::SessionCheckpoint,"
+
+[[api]]
+symbol = "lash::persistence::DurableSurface::SessionExecutionState"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::DurableSurface::SessionExecutionState"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:423#DurableSurface::SessionExecutionState,"
+
+[[api]]
+symbol = "lash::persistence::DurableSurface::name"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::DurableSurface::name"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:427#.map(DurableSurface::name)"
+
+[[api]]
+symbol = "lash::persistence::DurableSurface::is_deep"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::DurableSurface::is_deep"]
+area = "stores"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:426#.filter(|surface| surface.is_deep())"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:970#assert!(!DurableSurface::ParkedSegment.is_deep());"
+
+[[api]]
+symbol = "lash::persistence::ScanCoverage"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::ScanCoverage"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:381#coverage: ScanCoverage::NotScanned {"
+
+[[api]]
+symbol = "lash::persistence::ScanCoverage::Scanned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ScanCoverage::Scanned"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:410#coverage: ScanCoverage::Scanned,"
+
+[[api]]
+symbol = "lash::persistence::ScanCoverage::NotScanned"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ScanCoverage::NotScanned"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:381#coverage: ScanCoverage::NotScanned {"
+
+[[api]]
+symbol = "lash::persistence::ScanCoverage::NotScanned::reason"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ScanCoverage::NotScanned::reason"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:528#ScanCoverage::NotScanned { reason } => format!(\"not scanned ({reason})\"),"
+
+[[api]]
+symbol = "lash::persistence::StorePreflight::scan_durable"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::StorePreflight::scan_durable"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:375#async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {"
 
 [[api]]
 symbol = "lash::persistence::StoreSchemaVerdict::is_undecided"

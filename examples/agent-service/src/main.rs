@@ -71,6 +71,66 @@ use lash_restate::{
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 
+/// Ask the store whether its durable data opens under this build, before a
+/// single thing is wired.
+///
+/// Every durable format lash writes fails closed at a version boundary: there
+/// is no migration decoder, so state parked by another build is refused rather
+/// than read. Discovering that by booting is a crash loop — the supervisor sees
+/// a process that died, restarts it, and it dies the same way forever — because
+/// the refusal is permanent and a restart is the one remedy that cannot fix it.
+///
+/// So the host asks first, on a read-only handle built from the paths it is
+/// about to hand its factories rather than from a store it has already
+/// constructed. Constructing the store is itself the side-effectful act this
+/// precedes: it takes the write lock and applies the schema batch.
+///
+/// The answer is one line and one exit. A supervisor reading a single sentence
+/// naming the boundary and the remedy can be configured not to restart; a
+/// supervisor reading a stack trace from somewhere inside turn execution
+/// cannot.
+///
+/// Summary mode is the right mode for a boot: it reads the schema stamps and
+/// the process registry, both bounded by the number of parked processes, and
+/// skips the per-session blob walk that an operator runs deliberately before a
+/// version bump. The report names what it skipped, so the exit code is never
+/// justified by a silence.
+async fn preflight_or_exit(
+    session_store_root: &std::path::Path,
+    process_registry_path: &std::path::Path,
+    trigger_store_path: &std::path::Path,
+) -> anyhow_like::Result<()> {
+    let handle =
+        lash_sqlite_store::SqliteStorePreflight::for_session_store_root(session_store_root)
+            .with_process_registry(process_registry_path)
+            .with_trigger_store(trigger_store_path);
+    let report =
+        lash::preflight::probe_store(&handle, lash::preflight::PreflightOptions::summary())
+            .await
+            .map_err(|err| format!("agent-service could not read its store: {err}"))?;
+    // Only `Refused` exits, which means an `Undecided` report boots. That is
+    // deliberate: undecided says the probe could not read far enough to decide,
+    // usually a surface it could not reach, and refusing to start on a report
+    // that never found a boundary would turn a preflight into an outage of its
+    // own. The store's own open path is still fail-closed, so the boundaries
+    // this probe could not see are still refused where they matter.
+    let Some(refusal) = report.refusal_message() else {
+        eprintln!(
+            "agent-service store preflight: {} ({} mode)",
+            report.outcome.name(),
+            report.mode.name()
+        );
+        return Ok(());
+    };
+    // The drain list is what turns "refused" into work somebody can do. It is
+    // printed beside the refusal rather than left for a second command, because
+    // the process is about to exit and there is no second command.
+    for blocker in &report.drain {
+        eprintln!("agent-service drain first: {}", blocker.detail);
+    }
+    Err(refusal)
+}
+
 fn main() -> anyhow_like::Result<()> {
     let stack_bytes = std::env::var("AGENT_SERVICE_TOKIO_STACK_BYTES")
         .ok()
@@ -152,6 +212,13 @@ async fn async_main() -> anyhow_like::Result<()> {
         lash::persistence::LeaseOwnerIdentity::opaque(worker_id, worker_incarnation);
     let process_registry_path = data_dir.join("processes.db");
     let session_store_root = data_dir.join("lash-sessions");
+    let trigger_store_path = data_dir.join("triggers.db");
+    preflight_or_exit(
+        &session_store_root,
+        &process_registry_path,
+        &trigger_store_path,
+    )
+    .await?;
     let store_factory = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
             &session_store_root,
@@ -171,7 +238,7 @@ async fn async_main() -> anyhow_like::Result<()> {
             .map_err(|err| err.to_string())?,
     );
     let trigger_store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
+        lash_sqlite_store::SqliteTriggerStore::open(&trigger_store_path)
             .await
             .map_err(|err| err.to_string())?,
     );

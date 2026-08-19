@@ -15,6 +15,7 @@ mod core;
 mod error;
 pub mod formats;
 mod plugin_binding;
+pub mod preflight;
 pub(crate) mod process_admin;
 mod prompt_layer;
 pub mod recoverable_chat;
@@ -264,8 +265,9 @@ pub mod persistence {
         facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
-        BlobRef, GcReport, LeaseClaimNonce, LeaseOwnerIdentity, PersistedSessionConfig,
-        PersistedTurnState, ProtocolEvent, QueuedWorkStore, RuntimePersistence, SessionAdmission,
+        BlobRef, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
+        GcReport, LeaseClaimNonce, LeaseOwnerIdentity, PersistedSessionConfig, PersistedTurnState,
+        ProtocolEvent, QueuedWorkStore, RuntimePersistence, ScanCoverage, SessionAdmission,
         SessionBinding, SessionCommitStore, SessionExecutionLease,
         SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,

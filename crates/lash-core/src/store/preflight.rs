@@ -232,6 +232,174 @@ impl std::fmt::Display for StoreSchemaStatus {
     }
 }
 
+/// A place durable payloads live, enumerable one page at a time.
+///
+/// The surfaces are chosen so that one walk answers both questions the
+/// preflight exists for: which durable *formats* would refuse to open, and
+/// which durable *identities* carry them. They are not a table listing — a
+/// backend is free to assemble a surface from however many of its own tables it
+/// takes, and two backends that store the same payload differently still answer
+/// the same surface.
+///
+/// Every surface yields the payload's **logical** bytes. A backend that wraps
+/// stored bytes in a compression or envelope frame of its own unwraps it here,
+/// because that frame is storage bookkeeping rather than a durable format any
+/// version manifest describes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum DurableSurface {
+    /// One parked segment-handover envelope per non-terminal process that has
+    /// one: the durable continuation a process resumes from.
+    ParkedSegment,
+    /// One undelivered wake payload per pending delivery.
+    PendingWake,
+    /// One checkpoint manifest per session that has published a checkpoint
+    /// root.
+    SessionCheckpoint,
+    /// One protocol execution-state component body per session that stores one.
+    SessionExecutionState,
+}
+
+impl DurableSurface {
+    /// The operator-facing name used in reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            DurableSurface::ParkedSegment => "parked segments",
+            DurableSurface::PendingWake => "pending wakes",
+            DurableSurface::SessionCheckpoint => "session checkpoints",
+            DurableSurface::SessionExecutionState => "session execution state",
+        }
+    }
+
+    /// Whether reading this surface costs a per-session blob walk.
+    ///
+    /// The split is what makes a summary mode honest rather than arbitrary: the
+    /// cheap surfaces are bounded by the process registry, the deep ones are
+    /// bounded by the session count and each costs at least one blob read per
+    /// session.
+    pub fn is_deep(self) -> bool {
+        matches!(
+            self,
+            DurableSurface::SessionCheckpoint | DurableSurface::SessionExecutionState
+        )
+    }
+}
+
+/// How one item's logical bytes are framed, so a reader knows how to look at
+/// them without guessing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DurablePayload {
+    /// UTF-8 JSON text.
+    Json(String),
+    /// MessagePack bytes.
+    MessagePack(Vec<u8>),
+    /// The item exists and is named, but its bytes could not be fetched.
+    ///
+    /// First-class rather than an error, for the same reason
+    /// [`StoreSchemaVerdict::Unreadable`] is: a walk that aborted on the first
+    /// dangling reference could not report the thousand items behind it, and
+    /// "this one is unreadable" is a finding worth reporting.
+    Missing {
+        /// The backend's diagnostic, verbatim.
+        reason: String,
+    },
+}
+
+/// One durable payload, with enough identity to appear on a drain list.
+///
+/// The identity fields are what turn a readability answer into an actionable
+/// one: "three segments refuse" is a fact an operator cannot act on, and
+/// "process `p-7` in session `s-2` refuses" is a row in a drain list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableItem {
+    /// Which surface produced this item.
+    pub surface: DurableSurface,
+    /// The keyset key for resuming after this item. Opaque to the caller and
+    /// meaningful only to the backend that minted it.
+    pub cursor: String,
+    /// The process this payload belongs to, when it belongs to one.
+    pub process_id: Option<String>,
+    /// The session this payload belongs to, when it belongs to one.
+    pub session_id: Option<String>,
+    /// The store's own status word for the owner, e.g. `waiting`. Reported
+    /// verbatim so an operator reads the store's vocabulary rather than a
+    /// translation of it.
+    pub status: Option<String>,
+    /// The store's record for the item's owner, when the surface has one.
+    ///
+    /// Carried because an identity-only format cannot be read out of the
+    /// payload at all: the only way to decide whether a stored program identity
+    /// is this build's is to recompute it from the inputs the owner records,
+    /// and only the store holds those.
+    pub owner_record: Option<String>,
+    /// The payload's logical bytes.
+    pub payload: DurablePayload,
+}
+
+/// One page of a surface walk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableScanPage {
+    /// The items, in cursor order.
+    pub items: Vec<DurableItem>,
+    /// The cursor to resume after, or `None` when the surface is exhausted.
+    pub next: Option<String>,
+    /// Whether the surface was walked at all.
+    pub coverage: ScanCoverage,
+}
+
+/// Whether a surface was walked, and if not, why not.
+///
+/// A backend that cannot enumerate a surface says so instead of returning an
+/// empty page, because an empty page and an unwalked surface are the two
+/// answers a preflight must never confuse: one says "nothing here refuses", the
+/// other says "nobody looked".
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ScanCoverage {
+    /// The surface was read, and the page is what it holds.
+    Scanned,
+    /// The surface was not read. The reason is operator-facing and appears in
+    /// the report's "not scanned" list verbatim.
+    NotScanned {
+        /// Why this backend did not walk the surface.
+        reason: String,
+    },
+}
+
+/// A request for one page of one surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurableScan {
+    /// Which surface to walk.
+    pub surface: DurableSurface,
+    /// Resume strictly after this cursor, or start at the beginning.
+    pub after: Option<String>,
+    /// The most items to return. A backend may return fewer; it must not
+    /// return more, because an unbounded page is how a preflight over a large
+    /// deployment becomes the outage it was meant to prevent.
+    pub limit: usize,
+}
+
+impl DurableScan {
+    /// The first page of a surface.
+    pub fn first(surface: DurableSurface, limit: usize) -> Self {
+        Self {
+            surface,
+            after: None,
+            limit,
+        }
+    }
+
+    /// The page after `cursor`.
+    pub fn after(surface: DurableSurface, cursor: impl Into<String>, limit: usize) -> Self {
+        Self {
+            surface,
+            after: Some(cursor.into()),
+            limit,
+        }
+    }
+}
+
 /// A read-only handle a host may inspect before wiring a runtime.
 ///
 /// Implemented on a backend's dedicated preflight handle, never on the wired
@@ -257,6 +425,32 @@ pub trait StorePreflight: Send + Sync {
     /// `Result` is for failures that leave nothing to report at all, such as
     /// an unreachable server.
     async fn schema_status(&self) -> Result<StoreSchemaStatus, StoreError>;
+
+    /// Read one page of one durable surface.
+    ///
+    /// The same read-only obligations as [`StorePreflight::schema_status`]
+    /// apply, and one more: a walk must not decode the payloads it returns.
+    /// Deciding whether stored bytes open under this build is one build-wide
+    /// question that belongs with the format manifest, and a backend that
+    /// answered it locally would be a second place for the answer to drift.
+    ///
+    /// The default returns [`ScanCoverage::NotScanned`]. That is the honest
+    /// answer for a backend that has not implemented the walk — reporting an
+    /// empty page instead would let a host read "nothing refuses" out of a
+    /// surface nobody read.
+    async fn scan_durable(&self, scan: &DurableScan) -> Result<DurableScanPage, StoreError> {
+        Ok(DurableScanPage {
+            items: Vec::new(),
+            next: None,
+            coverage: ScanCoverage::NotScanned {
+                reason: format!(
+                    "the {} backend does not enumerate {}",
+                    self.backend(),
+                    scan.surface.name()
+                ),
+            },
+        })
+    }
 }
 
 #[cfg(test)]

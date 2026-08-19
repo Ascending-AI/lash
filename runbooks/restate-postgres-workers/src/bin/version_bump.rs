@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use lash::persistence::QueuedWorkStore as _;
+use lash::preflight::PreflightOptions;
 use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
@@ -38,7 +39,7 @@ use lash_core::{
     SessionStoreCreateRequest, SessionStoreFactory as _, TriggerCommand, TriggerOccurrenceRequest,
     TriggerOwnerScope, TriggerSubscriptionDraft,
 };
-use lash_postgres_store::PostgresStorage;
+use lash_postgres_store::{PostgresStorage, PostgresStorePreflight};
 use serde_json::json;
 use sqlx::PgPool;
 
@@ -207,6 +208,25 @@ async fn main() -> Result<()> {
         "health" => health(&database_url).await,
         other => bail!("unknown version-bump phase `{other}`"),
     }
+}
+
+/// The store-readability probe's answer for this deployment, serialized.
+///
+/// Read-only and pre-open by construction: the handle is built from the same
+/// connection string rather than from a wired store, so asking costs nothing
+/// the refusal it predicts would have to undo. Every phase below emits the
+/// probe beside the refusal the store then delivers, which is what makes
+/// "safe to start" evidence rather than a claim: the two answers are produced
+/// by different code paths against the same bytes, and the artifacts show them
+/// agreeing.
+async fn probe(database_url: &str, options: PreflightOptions) -> Result<serde_json::Value> {
+    let handle = PostgresStorePreflight::for_database_url(database_url)
+        .context("build the read-only preflight handle")?;
+    let report = lash::preflight::probe_store(&handle, options)
+        .await
+        .context("probe the store's durable readability")?;
+    handle.close().await;
+    serde_json::to_value(&report).context("serialize the preflight report")
 }
 
 fn emit(checkpoint: serde_json::Value) {
@@ -588,15 +608,28 @@ async fn seed(database_url: &str) -> Result<()> {
         live_process.status
     );
 
+    // The probe against the store exactly as this build wrote it: the bytes the
+    // refusal phases will meet, before the ledger moves. Deep mode, because an
+    // operator auditing ahead of a bump can afford the per-session blob walk
+    // that a boot gate on every restart cannot.
+    let probe_before_rewind = probe(database_url, PreflightOptions::deep()).await?;
+
     // Rewind only the ledger. The catalog intentionally retains the current
     // artifacts so the next phase can prove Lash distinguishes divergence from
     // a genuine migration source shape: same stamp, but a catalog carrying
     // relations the recorded generation never had.
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
+    // The same walk over the same bytes with only the schema stamp moved. The
+    // controlled pair is the point: the outcome flips to refused while the
+    // drain list stays empty, which is the difference between "this deployment
+    // cannot open" and "this deployment holds data that cannot be carried".
+    let probe_after_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
     emit(json!({
         "checkpoint": "seeded_older_deployment",
+        "probe_before_rewind": probe_before_rewind,
+        "probe_after_rewind": probe_after_rewind,
         "expected_version": expected_version,
         "recorded_version": recorded_version(&pool).await?,
         "session_ids": SESSION_IDS,
@@ -638,8 +671,12 @@ async fn refuse(database_url: &str) -> Result<()> {
             "the divergence refusal did not enumerate {artifact}: {error}"
         );
     }
+    // Summary mode here, deliberately: this is the shape a host runs at boot,
+    // and the claim is that the cheap walk already refuses.
+    let divergent_probe = probe(database_url, PreflightOptions::summary()).await?;
     emit(json!({
         "checkpoint": "refused_divergent_store",
+        "probe": divergent_probe,
         "direction": "recorded predecessor, current schema artifacts",
         "refusal_kind": divergent_kind.as_str(),
         "divergent_artifacts": DIVERGENT_ARTIFACTS,
@@ -749,8 +786,10 @@ async fn refuse(database_url: &str) -> Result<()> {
         RefusalKind::NoApplicableMigration,
         &error_older,
     )?;
+    let older_probe = probe(database_url, PreflightOptions::summary()).await?;
     emit(json!({
         "checkpoint": "refused_older_store",
+        "probe": older_probe,
         "direction": "new binary, non-migratable older version",
         "refusal_kind": older_kind.as_str(),
         "found_version": older,
@@ -778,8 +817,10 @@ async fn refuse(database_url: &str) -> Result<()> {
         RefusalKind::NoApplicableMigration,
         &error_newer,
     )?;
+    let newer_probe = probe(database_url, PreflightOptions::summary()).await?;
     emit(json!({
         "checkpoint": "refused_newer_store",
+        "probe": newer_probe,
         "direction": "older binary, recreated store",
         "refusal_kind": newer_kind.as_str(),
         "found_version": newer,
@@ -864,8 +905,14 @@ async fn recreate(database_url: &str) -> Result<()> {
             .await
             .context("count surviving seeded graph nodes")?;
 
+    // The other half of the controlled pair: on the store recreation just
+    // produced, the same probe reports ready with an empty drain list. Without
+    // this, every "refused" above would be consistent with a probe that refuses
+    // everything.
+    let recreated_probe = probe(database_url, PreflightOptions::deep()).await?;
     emit(json!({
         "checkpoint": "recreated_store",
+        "probe": recreated_probe,
         "premise_refusal_kind": premise_kind.as_str(),
         "expected_version": expected_version,
         "recorded_version": recorded,
