@@ -69,22 +69,28 @@ Evidence prose carries nine lints, because the prose is the evidence:
   it hid 904 rows' actual contract behind boilerplate.  The same goes for the
   `used-unasserted` wording on a row that names an assertion.  See
   `stale_disposition_reason`.
-* No unconfirmable citations.  Prose that cites `file.rs:line` has to be about
-  the item at that line: the item's own name, or the type that owns it, must
-  appear in the function around it.  64 rows written earlier in this arc cited
+* No unconfirmable citations.  Prose cites a *symbol* --
+  `crates/x/src/y.rs::Type::method`, plus a verbatim `#`snippet`` matched inside
+  that symbol's span when the target is a statement rather than the symbol
+  itself -- and the checker parses the cited file at gate time to resolve it.
+  The citation has to be about the item: the item's own name, or the type that
+  owns it, must appear in the symbol.  64 rows written earlier in this arc cited
   real lines that never mentioned the symbol, which reads as verification and is
   not.  The citation also lands on code, sits in the function the prose names,
-  and -- where a row cites a line to reject it, or admits the resolver cannot tie
-  it -- answers the inverse claim instead.  Every citation in every reason is
+  and -- where a row cites evidence to reject it, or admits the resolver cannot
+  tie it -- answers the inverse claim instead.  Every citation in every reason is
   read: FIG-1223 scoped this to internal dispositions and rows naming the ticket,
   and FIG-1526 re-anchored the 837 rows that scope was hiding and removed it.
+  Line pins are rejected outright: they broke on every rebase that touched an
+  anchored file and rotted silently whenever the shift happened to land on code,
+  so FIG-1550 converted all 2,831 of them and deleted the shape.
   `prose_citations_recorded` pins the citation population, because dropping a
-  `:line` is the one edit that takes a row out of this check.  See
-  `prose_citation_defect`.
+  `::symbol` is the one edit that takes a row out of this check.  See
+  `prose_citation_defect` and `symbol_spans`.
 * No missing repository paths.  A `crates/...`, `examples/...`, `runbooks/...`,
   `scripts/...`, or `docs/...` file cited in reason prose must still exist in
-  the repository; a `:line` anchor is metadata and does not change which file
-  must exist.  See `missing_repository_path`.
+  the repository; the `::symbol` a citation carries is metadata and does not
+  change which file must exist.  See `missing_repository_path`.
 
 Evidence is tiered, and the tier is the *path shape* of the anchor rather than a
 word in the prose.  Four tiers exist, strongest first:
@@ -1168,6 +1174,36 @@ def path_tokens(text: str) -> list[str]:
     return tokens
 
 
+def quoted_prose(reason: str) -> str:
+    """`reason` with every citation's quoted snippet cut back to its symbol.
+
+    A snippet is source text, not prose, and the prose lints read it as prose:
+    `"https://api.openai.com/v1/responses"` inside a quoted line is not a
+    machine-local path, and a sentence a snippet happens to contain is not a
+    claim the row is making.  Evidence anchors have always been read this way --
+    only the location before `#` is a path -- and a citation is the same shape.
+    """
+    return PROSE_CITATION.sub(
+        lambda match: (
+            f"{citation_parts(match)[0]}::{citation_parts(match)[1]}"
+            if citation_parts(match)[1]
+            else citation_parts(match)[0]
+        ),
+        reason,
+    )
+
+
+def citation_file(token: str) -> str:
+    """`token` with a symbol citation's `::symbol` path and `#snippet` tail cut.
+
+    The file a citation names still has to exist; the symbol it names is checked
+    by `prose_citation_defect`, which parses that file rather than reading prose.
+    """
+    token = token.split("#", 1)[0]
+    match = re.match(r"^(.*\.[A-Za-z][A-Za-z0-9]*)::", token)
+    return match.group(1) if match else token
+
+
 def machine_local_path(text: str) -> str | None:
     """The first absolute or home-relative path in `text`, if any.
 
@@ -1193,6 +1229,7 @@ def missing_repository_path(text: str) -> str | None:
     """
     repository = REPO.resolve()
     for token in path_tokens(text):
+        token = citation_file(token)
         if not REPOSITORY_FILE_PATH.match(token):
             continue
         relative = token.removeprefix("./")
@@ -1203,23 +1240,47 @@ def missing_repository_path(text: str) -> str | None:
     return None
 
 
-#: A `file.rs:line` citation inside reason prose.
-PROSE_CITATION = re.compile(r"((?:crates|examples)/[^\s,;:()\"]+\.rs):([0-9]+)")
+#: A `file.rs::Type::method` citation inside reason prose, optionally carrying a
+#: verbatim ``#`snippet` `` for a target that is a statement rather than a symbol.
+#: A backtick cannot appear in Rust code outside a comment or a string, so it is
+#: the one delimiter a snippet can never have to escape.
+PROSE_CITATION = re.compile(
+    r"((?:crates|examples)/[^\s,;:()\"#`]+\.rs)"
+    r"(?:::([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*))?"
+    r"(?:#`([^`\n]+)`)"
+    r"|((?:crates|examples)/[^\s,;:()\"#`]+\.rs)"
+    r"::([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)"
+)
+
+#: The citation shape FIG-1550 retired: a line number pinning prose to a file.
+#: Wider than the citation domain on purpose -- a `runbooks/` reference is not
+#: resolvable against a symbol (the checker parses `crates/` and `examples/`),
+#: but a line number on one is the same rot, and it may not come back either.
+LINE_PINNED_CITATION = re.compile(
+    r"((?:crates|examples|runbooks)/[^\s,;:()\"]+\.rs):([0-9]+)"
+)
 
 #: Prose naming the function a citation it follows sits in.
 CITED_FUNCTION = re.compile(r"^,? (?:in|inside) `([A-Za-z0-9_]+)`")
 
-#: Prose citing a line as evidence *against* itself: the anchor a row rejected.
+#: Prose citing a snippet as evidence *against* itself: the anchor a row rejected.
 COUNTER_CITATION = re.compile(r"^ asserts an unrelated expression in `([A-Za-z0-9_]+)`")
 
-#: A cited line carrying no code: blank, punctuation alone, a comment, an attribute.
+#: A snippet carrying no code: blank, punctuation alone, a comment, an attribute.
 NON_CODE_LINE = re.compile(r"^(?:[\s{}();,\[\]]*|//.*|#!?\[.*)$")
 
-#: Prose citing a line the resolver cannot tie to the item, and saying so.
+#: Prose citing evidence the resolver cannot tie to the item, and saying so.
 UNRESOLVED_CITATION = re.compile(
-    r"^ as a consumer of this path and the checker cannot tie that line to the "
-    r"owning type mechanically"
+    r"^ as a consumer of this path and the checker cannot tie that citation to "
+    r"the owning type mechanically"
 )
+
+
+def citation_parts(match: re.Match[str]) -> tuple[str, str | None, str | None]:
+    """`(file, symbol path or None, snippet or None)` for a `PROSE_CITATION` hit."""
+    if match.group(1) is not None:
+        return match.group(1), match.group(2), match.group(3)
+    return match.group(4), match.group(5), None
 
 #: A plain string literal, escapes honoured, newlines allowed.
 CODE_LITERAL = re.compile(r"b?\"(?:\\.|[^\"\\])*\"", re.S)
@@ -1315,18 +1376,8 @@ def consuming_file_lines(relative: str) -> list[str]:
     return _CONSUMING_LINES[relative]
 
 
-def enclosing_function(relative: str, line_number: int) -> str | None:
-    """The name of the innermost function a line sits in, if any."""
-    start, end = anchor_scope_region(relative, line_number)
-    if start < 0:
-        return None
-    header = (source_file_lines(relative) or [])[start]
-    match = re.search(r"\bfn\s+([A-Za-z0-9_]+)", header)
-    return match.group(1) if match else None
-
-
 def prose_citations(entries: list[dict[str, Any]]) -> int:
-    """How many `file.rs:line` citations the reasons across the ledger carry."""
+    """How many symbol citations the reasons across the ledger carry."""
     return sum(
         len(PROSE_CITATION.findall(entry.get("reason", "") or "")) for entry in entries
     )
@@ -1349,13 +1400,29 @@ def prose_citation_defect(
     reason: str,
     anchors: set[tuple[str, int]] | None = None,
 ) -> str | None:
-    """Why a cited line does not show what the prose says it shows, if so.
+    """Why a cited symbol does not show what the prose says it shows, if so.
 
-    Prose is only evidence while the line it points at is about this item.  The
+    Prose is only evidence while the code it points at is about this item.  The
     rows this arc first wrote cited real files at real lines that never mentioned
     the symbol -- 64 of them -- which reads as verification and is not.  The check
     is deliberately the anchor rule's weaker sibling: the item's own name, or the
-    type that owns it, has to appear in the function around the cited line.
+    type that owns it, has to appear in the symbol the citation names.
+
+    A citation names a *symbol*, never a line (FIG-1550).  `file.rs::Type::method`
+    is resolved by parsing the file at gate time, and a citation whose target is a
+    statement rather than a whole symbol carries the enclosing symbol plus a
+    verbatim ``#`snippet` `` matched inside its span.  Line pins broke on every
+    rebase that touched an anchored file while rotting silently whenever a shift
+    happened to land on code -- 94 citations decayed in one wave, and the seven
+    `--refresh` mis-relocations that wave were repairs to breakage that carried no
+    information.  A symbol citation breaks when the symbol moves file or dies, and
+    a snippet citation additionally when its text leaves the symbol: both are
+    exactly the moment a human should re-read the claim.
+
+    More than one span may answer to one symbol path -- two impl blocks can carry
+    the same method name -- and that is not a defect: the symbol is the anchor and
+    the snippet is the drift detector, so a snippet found in any of them is found.
+    Zero spans, or a snippet in none of them, is the loud break.
 
     Scope: every citation in every reason.  FIG-1223 first scoped the check to
     internal dispositions and rows whose prose invoked FIG-1223, grandfathering
@@ -1363,96 +1430,157 @@ def prose_citation_defect(
     so FIG-1526 re-anchored the grandfathered citations and removed the scope.
 
     Prose says more than *where*, and the rest is checkable too.  A reason that
-    says a line sits `in `some_function`` is read against the function the line
-    is actually in, because a citation whose surrounding prose names a different
-    function reads as a located fact and is a guess.  A reason that cites a line
+    says a citation sits `in `some_function`` is read against the symbol path,
+    because a citation whose surrounding prose names a function the path does not
+    contain reads as a located fact and is a guess.  A reason that cites evidence
     to *reject* it -- the anchor a downgraded row refuses to call evidence -- is
-    held to the inverse: that line has to be an assertion, in the function the
-    prose names, saying nothing about this item.  Without that inverse the only
-    way to keep such a row honest is to drop the line number, which is how 24
+    held to the inverse: it has to quote an assertion, in the function the prose
+    names, whose symbol says nothing about this item.  Without that inverse the
+    only way to keep such a row honest is to drop the citation, which is how 24
     rows went invisible in the first FIG-1526 round.
 
-    The function around a line is the window, not a licence to point anywhere
-    inside it: 588 citations landed on a blank line, a lone brace, a comment or
-    an attribute and read as located facts, because the file or the function
-    elsewhere happened to name the item.  A citation lands on code.
+    A snippet lands on code.  588 citations once landed on a blank line, a lone
+    brace, a comment or an attribute and read as located facts, because the file
+    or the function elsewhere happened to name the item.
 
     A row that says outright that the resolver cannot tie its citation to the
     item -- an extension trait reached only through a `use` and a method call --
-    is held to the weakest honest claim there is: the cited line has to spell the
-    item.  A blank line, a brace, or an attribute cannot, which is the whole
-    difference between recording a candidate and manufacturing one.
+    is held to the weakest honest claim there is: the citation has to spell the
+    item, in its snippet where it has one.  A brace or an attribute cannot, which
+    is the whole difference between recording a candidate and manufacturing one.
 
     Naming is read over `consuming_text`, so a leaf spelled inside a string
     literal or introduced by a `let` is not a use of the item: `.expect("a
     deferred digest keeps its bytes")` and `let mut abort = None;` are the two
     shapes that let a common English word stand in for evidence.
 
-    A citation to the row's own recorded anchor is exempt from the naming rule
-    and from nothing else: `reference_exists` re-reads that exact line and its
-    quoted source on every run, and the anchor rules above decide whether it is
-    evidence.  Prose repeating a location the ledger already proves is not a
-    second, weaker claim -- and an assertion in a test whose function never
-    spells the item is exactly the anchor an example is entitled to record.
+    A citation to the symbol holding the row's own recorded anchor is exempt from
+    the naming rule and from nothing else: `reference_exists` re-reads that exact
+    line and its quoted source on every run, and the anchor rules above decide
+    whether it is evidence.  Prose repeating a location the ledger already proves
+    is not a second, weaker claim -- and an assertion in a test whose function
+    never spells the item is exactly the anchor an example is entitled to record.
     """
     leaf = symbol.split("::")[-1]
     owner = symbol.split("::")[-2] if "::" in symbol else ""
-    for match in PROSE_CITATION.finditer(reason):
-        relative, line_number = match.group(1), int(match.group(2))
-        lines = source_file_lines(relative)
-        if lines is None or line_number > len(lines):
-            return f"cites {relative}:{line_number}, which is not a line in that file"
-        if NON_CODE_LINE.match(lines[line_number - 1].strip()):
-            return (
-                f"cites {relative}:{line_number}, a line carrying no code -- a "
-                "citation lands on the code it is about, not near it"
-            )
-        tail = reason[match.end() :]
-        scope = consuming_text(anchor_scope(relative, line_number))
-        cited_line = consuming_file_lines(relative)[line_number - 1]
-        spelled = names_word(leaf, lines[line_number - 1]) or bool(
-            owner and names_word(owner, lines[line_number - 1])
+    pinned = LINE_PINNED_CITATION.search(reason)
+    if pinned:
+        return (
+            f"pins prose to {pinned.group(0)} by line number; citations name a "
+            "symbol -- `file.rs::Type::method`, with a verbatim `#`snippet`` when "
+            "the target is a statement inside it (FIG-1550)"
         )
-        consumes = names_word(leaf, cited_line) or bool(owner and names_word(owner, cited_line))
-        if spelled and not consumes:
+    for match in PROSE_CITATION.finditer(reason):
+        relative, path, snippet = citation_parts(match)
+        cited = f"{relative}::{path}" if path else relative
+        lines = source_file_lines(relative)
+        if lines is None:
+            return f"cites {cited}, which is not a source file in this repository"
+        if path is None:
+            spans = [((0, len(lines) - 1),)]
+        else:
+            spans = symbol_spans(relative, path)
+            if not spans:
+                return (
+                    f"cites {cited}, but that file declares no such symbol -- it "
+                    "moved to another file or was deleted"
+                )
+        if snippet is not None:
+            if NON_CODE_LINE.match(snippet.strip()):
+                return (
+                    f"cites `{snippet}` in {cited}, which carries no code -- a "
+                    "citation lands on the code it is about, not near it"
+                )
+            found = [
+                span for span in spans if snippet in symbol_span_text(relative, span)
+            ]
+            if not found:
+                return (
+                    f"cites `{snippet}` in {cited}, but that text does not appear "
+                    "there -- the code it quoted has changed or moved away"
+                )
+            spans = found
+        texts = [consuming_text(symbol_span_text(relative, span)) for span in spans]
+        tail = reason[match.end() :]
+        names_item = any(
+            names_word(leaf, text) or bool(owner and names_word(owner, text))
+            for text in texts
+        )
+        # A snippet that survives masking inside its span is code as written; one
+        # that does not is read through `consuming_text` on its own, which is what
+        # separates `assert_eq!(projected["deferred"], 1)` -- a wire key observing
+        # the field -- from `let mut deferred = None;`, a local the author named.
+        code = snippet
+        if snippet is not None and not any(snippet in text for text in texts):
+            code = consuming_text(snippet)
+        spelled = snippet is not None and (
+            names_word(leaf, snippet) or bool(owner and names_word(owner, snippet))
+        )
+        spells_item = code is not None and (
+            names_word(leaf, code) or bool(owner and names_word(owner, code))
+        )
+        if spelled and not spells_item:
             return (
-                f"cites {relative}:{line_number}, where {leaf} is a local name or "
+                f"cites `{snippet}` in {cited}, where {leaf} is a local name or "
                 "literal text rather than a use of the item"
             )
-        names_item = names_word(leaf, scope) or bool(owner and names_word(owner, scope))
+        if path is None and not spells_item:
+            # A citation with no symbol to resolve has the whole file as its
+            # window, and a file that names the item *somewhere* would answer for
+            # a snippet about anything -- which is the shape FIG-1526 removed when
+            # it stopped reading the file as a line's scope.  So the snippet
+            # carries the whole claim: the 18 rows in this form are `use` lines
+            # that spell the item they import.
+            return (
+                f"cites `{snippet}` at file scope in {cited}, where neither {leaf} "
+                "nor the type that owns it appears -- a citation naming no symbol "
+                "is confirmed by its snippet or not at all"
+            )
+        masked_lines = consuming_file_lines(relative)
+        declares_item = any(
+            names_word(leaf, masked_lines[span[-1][0]])
+            or bool(owner and names_word(owner, masked_lines[span[-1][0]]))
+            for span in spans
+            if span[-1][0] < len(masked_lines)
+        )
+        own_anchor = any(
+            relative == anchored and any(span[-1][0] <= line - 1 <= span[-1][1] for span in spans)
+            for anchored, line in (anchors or set())
+        )
         rejected = COUNTER_CITATION.match(tail)
         if rejected:
-            if "assert" not in lines[line_number - 1]:
+            if snippet is None or "assert" not in snippet:
                 return (
-                    f"cites {relative}:{line_number} as the assertion it rejects, "
-                    "but that line asserts nothing"
+                    f"cites {cited} as the assertion it rejects, but quotes no "
+                    "asserting snippet"
                 )
             if names_item:
                 return (
-                    f"calls {relative}:{line_number} unrelated to {leaf}, but the "
-                    "function around it names the item, so the rejection is wrong"
+                    f"calls {cited} unrelated to {leaf}, but that symbol names the "
+                    "item, so the rejection is wrong"
                 )
         elif UNRESOLVED_CITATION.match(tail):
-            if not names_word(leaf, cited_line) and not (
-                owner and names_word(owner, cited_line)
-            ):
+            # The weakest honest claim there is, and it is held to the narrowest
+            # window: the snippet where the citation quotes one, and the symbol's
+            # own declaration line where it does not.  Reading the whole span here
+            # would let a row whose resolver gave up point at any function that
+            # happens to mention the item.
+            if not (spells_item if snippet is not None else declares_item):
                 return (
-                    f"records {relative}:{line_number} as the consumer candidate the "
-                    f"resolver cannot tie to {leaf}, but that line does not name it"
+                    f"records {cited} as the consumer candidate the resolver cannot "
+                    f"tie to {leaf}, but the citation does not name it"
                 )
-        elif not names_item and (relative, line_number) not in (anchors or set()):
+        elif not names_item and not own_anchor:
             return (
-                f"cites {relative}:{line_number}, where neither {leaf} nor the type "
-                "that owns it appears -- in the line or in the function around it"
+                f"cites {cited}, where neither {leaf} nor the type that owns it "
+                "appears anywhere in the symbol"
             )
         named = rejected or CITED_FUNCTION.match(tail)
-        if named:
-            actual = enclosing_function(relative, line_number)
-            if actual != named.group(1):
-                return (
-                    f"places {relative}:{line_number} in `{named.group(1)}`, but that "
-                    f"line sits in {f'`{actual}`' if actual else 'no function'}"
-                )
+        if named and named.group(1) not in (path or "").split("::"):
+            return (
+                f"places {cited} in `{named.group(1)}`, but that name is not part "
+                "of the symbol the citation resolves"
+            )
     return None
 
 
@@ -1720,6 +1848,7 @@ PATH_ATTRIBUTE = re.compile(r"#\[path\s*=\s*\"([^\"]+)\"\s*\]")
 _SOURCE_LINES: dict[str, list[str] | None] = {}
 _CONSUMING_LINES: dict[str, list[str]] = {}
 _SCOPE_BLOCKS: dict[str, list[tuple[int, int, str]]] = {}
+_SYMBOL_BLOCKS: dict[str, list[tuple[int, int, str]]] = {}
 _IMPORTED_TYPES: dict[str, set[str]] = {}
 _TEST_REGIONS: dict[str, list[tuple[int, int]] | None] = {}
 _TEST_MODULES: tuple[frozenset[str], tuple[str, ...]] | None = None
@@ -2348,6 +2477,148 @@ def file_scope_blocks(relative: str) -> list[tuple[int, int, str]]:
         lines = source_file_lines(relative)
         _SCOPE_BLOCKS[relative] = [] if lines is None else scope_blocks(lines)
     return _SCOPE_BLOCKS[relative]
+
+
+#: A named item that opens a block: `mod`, `fn`, `struct`, `enum`, `trait`, `union`.
+#: Qualifiers a declaration may carry before its keyword are consumed first, so
+#: `pub(crate) async unsafe fn drain` names `drain` and not `async`.
+SYMBOL_BLOCK = re.compile(
+    r"^(?:pub(?:\s*\([^)]*\))?\s+)?(?:default\s+)?"
+    r"(?:(?:const|async|unsafe|extern\s+\"[^\"]*\")\s+)*"
+    r"(?P<keyword>mod|fn|struct|enum|trait|union)\s+(?P<name>[A-Za-z_]\w*)"
+)
+
+
+def symbol_header(lines: list[str], index: int) -> tuple[str | None, int]:
+    """The name of the item whose block opens at `index`, and its header line.
+
+    The walk back matches `block_header`'s, and for the same reason: a signature
+    that spans lines opens its block on a line naming nothing, and an item nobody
+    can find is not a citable anchor.  An `impl` block is named by its *type* --
+    `impl Store for PgSessionStore` is where `PgSessionStore`'s methods live, so
+    a citation writes `PgSessionStore::connect` and never spells the trait.
+    """
+    for position in range(index, max(-1, index - 60), -1):
+        stripped = lines[position].strip()
+        declaration = SYMBOL_BLOCK.match(stripped)
+        if declaration:
+            return declaration.group("name"), position
+        implementation = IMPL_HEADER.match(stripped)
+        if implementation:
+            return implementation.group("type").split("::")[-1], position
+        if position < index and (
+            not stripped
+            or stripped.endswith((";", "{", "}"))
+            or stripped.startswith(("//", "#["))
+        ):
+            break
+    return None, index
+
+
+def symbol_blocks(lines: list[str]) -> list[tuple[int, int, str]]:
+    """`(start, end, name)` for every named block a file declares.
+
+    The anchor identity a prose citation resolves against (FIG-1550).  Line
+    numbers move on every edit above them; a symbol moves only when someone
+    moves or deletes it, which is exactly when a human should re-read the claim.
+    """
+    depth = 0
+    open_blocks: list[tuple[int, int, str | None]] = []
+    blocks: list[tuple[int, int, str]] = []
+    for index, line in enumerate(lines):
+        opened = line.count("{")
+        if opened:
+            name, header = symbol_header(lines, index)
+            # A brace inside a body can walk back to the same declaration -- a
+            # struct literal opening two lines under a signature reads as the
+            # signature's own block.  The outermost brace that header opens is
+            # the real one, so a repeat is left unnamed rather than nesting a
+            # symbol inside itself.
+            if any(open_header == header for _, open_header, _ in open_blocks):
+                name = None
+            open_blocks.append((depth, header, name))
+        depth += opened - line.count("}")
+        while open_blocks and depth <= open_blocks[-1][0]:
+            _, position, name = open_blocks.pop()
+            if name:
+                blocks.append((position, index, name))
+    for _, position, name in open_blocks:
+        if name:
+            blocks.append((position, len(lines) - 1, name))
+    return sorted(blocks)
+
+
+def file_symbol_blocks(relative: str) -> list[tuple[int, int, str]]:
+    """`symbol_blocks` for a repository file, read and parsed once per run."""
+    if relative not in _SYMBOL_BLOCKS:
+        lines = source_file_lines(relative)
+        _SYMBOL_BLOCKS[relative] = [] if lines is None else symbol_blocks(lines)
+    return _SYMBOL_BLOCKS[relative]
+
+
+def symbol_spans(relative: str, path: str) -> list[tuple[tuple[int, int], ...]]:
+    """Every chain of regions in a file that a `A::B::c` symbol path names.
+
+    Each segment is resolved inside the region the previous one won, at any
+    nesting depth: `PgSessionStore::connect` finds the method wherever the impl
+    block sits, and `tests::round_trips` finds a test inside its `mod tests`.
+    More than one chain is not an error -- two impl blocks may carry the same
+    method name, and a citation that lands in either is a citation to a real
+    symbol.  Zero chains is the break the ruling wants loud: the symbol moved
+    files or died.
+
+    A chain rather than its last region, because the ancestors are what name the
+    owner: `fn begin(&self, ...)` proves nothing on its own and
+    `impl RuntimeTurnPhaseProbe for WorkbenchProbe` above it proves everything,
+    which is the same window `anchor_scope_text` reads a line anchor in.
+    """
+    lines = source_file_lines(relative)
+    if lines is None:
+        return []
+    blocks = file_symbol_blocks(relative)
+    chains: list[tuple[tuple[int, int], ...]] = [()]
+    for segment in path.split("::"):
+        nested: list[tuple[tuple[int, int], ...]] = []
+        for chain in chains:
+            low, high = chain[-1] if chain else (-1, len(lines))
+            for start, end, name in blocks:
+                if name != segment or start < low or end > high:
+                    continue
+                if (start, end) != (low, high) and (*chain, (start, end)) not in nested:
+                    nested.append((*chain, (start, end)))
+        if not nested:
+            return []
+        chains = nested
+    return chains
+
+
+def symbol_span_text(relative: str, chain: tuple[tuple[int, int], ...]) -> str:
+    """The source a symbol spans: its own block, under each ancestor's header."""
+    lines = source_file_lines(relative) or []
+    start, end = chain[-1]
+    return "\n".join([*(lines[span[0]] for span in chain[:-1]), *lines[start : end + 1]])
+
+
+def enclosing_symbol_path(relative: str, line_number: int) -> str | None:
+    """The `A::B::c` path of the innermost named blocks around a line.
+
+    The inverse of `symbol_spans`, and the only thing the FIG-1550 migration
+    needed: it reads a line pin recorded against a file and answers which symbol
+    the pin was pointing inside.
+    """
+    target = line_number - 1
+    containing = [
+        (start, end, name)
+        for start, end, name in file_symbol_blocks(relative)
+        if start <= target <= end
+    ]
+    if not containing:
+        return None
+    # Outermost first, and a block sharing its start with the one it contains is
+    # still the outer one: sorting by end alone would invert such a pair and
+    # produce a path no resolution can walk.
+    containing.sort(key=lambda block: (block[0], -block[1]))
+    return "::".join(name for _, _, name in containing)
 
 
 def anchor_scope(relative: str, line_number: int) -> str:
@@ -3774,7 +4045,10 @@ def check() -> int:
         if disposition == "unused-remove" and "Breaking:" not in entry.get("reason", ""):
             errors.append(f"{symbol}: removal disposition requires a Breaking: note")
         reason = entry.get("reason", "")
-        for field, value in (("reason", reason), ("usage", usage), ("assertion", assertion)):
+        # The prose lints read the row's claims, not the source it quotes: a
+        # citation's snippet is code, and code may legitimately say `/`.
+        prose = quoted_prose(reason)
+        for field, value in (("reason", prose), ("usage", usage), ("assertion", assertion)):
             # For evidence references only the location is a path; the anchored
             # source text after `#` is code, and code may legitimately say `/`.
             offender = machine_local_path(
@@ -3793,16 +4067,16 @@ def check() -> int:
                 f"{symbol}: reason {citation}. A citation a reader cannot "
                 "confirm is not a justification."
             )
-        stale = stale_disposition_reason(disposition or "", reason)
+        stale = stale_disposition_reason(disposition or "", prose)
         if stale:
             errors.append(f"{symbol}: reason {stale}")
-        missing = missing_repository_path(reason)
+        missing = missing_repository_path(prose)
         if missing:
             errors.append(
                 f"{symbol}: reason cites missing repository file {missing!r}; "
                 "cited evidence paths must exist"
             )
-        migration = impossible_facade_migration(reason, facade_dirs)
+        migration = impossible_facade_migration(prose, facade_dirs)
         if migration:
             errors.append(
                 f"{symbol}: reason parks the consumer at {migration!r} behind a "
@@ -3822,8 +4096,8 @@ def check() -> int:
     if not isinstance(recorded_citations, int) or recorded_citations != counted_citations:
         errors.append(
             f"prose_citations_recorded is {recorded_citations!r} but the reasons "
-            f"hold {counted_citations} line citations; re-anchor a citation rather "
-            "than dropping its line, and move the pin when the population really "
+            f"hold {counted_citations} symbol citations; re-anchor a citation "
+            "rather than dropping it, and move the pin when the population really "
             "changes"
         )
 
