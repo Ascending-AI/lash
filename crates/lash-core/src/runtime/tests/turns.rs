@@ -837,6 +837,92 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
     assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
 }
 
+/// FIG-1573: a turn that ends without committing must not leave an input
+/// pinned to it - no crash required.
+///
+/// The host routed an input into the running turn, so the row is
+/// `pending_active` and scoped to that turn's id. The commit-time re-defer
+/// (`RuntimeCommit::deferring_interrupted_turn_inputs`) is the only writer that
+/// moves such a row back to `deferred_next_turn`, and this turn never reaches
+/// its commit: the store fences it, exactly as a claim fenced at a checkpoint
+/// does in the field. The teardown owes the row the same repair, and this test
+/// reads the durable row directly so it proves the teardown trigger and not the
+/// drain-time backstop.
+#[tokio::test]
+async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown() {
+    let session_id = "root";
+    let live_turn_id = "fig1573-live-turn";
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .complete(|_| async {
+            Ok(LlmResponse {
+                full_text: "answered".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "answered".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        transport,
+        test_host_config(),
+        Arc::clone(&runtime_store),
+    )
+    .await;
+
+    crate::TurnInputStore::enqueue_pending_turn_input(
+        store.as_ref(),
+        crate::PendingTurnInputDraft::new(
+            session_id,
+            crate::TurnInputIngress::active_turn(
+                live_turn_id.to_string(),
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("routed into the live turn"),
+        ),
+    )
+    .await
+    .expect("enqueue an input scoped to the live turn");
+
+    store.fail_next_runtime_commit(crate::StoreError::SessionExecutionLeaseExpired {
+        session_id: session_id.to_string(),
+    });
+    let error = runtime
+        .run_turn_assembled(
+            crate::TurnInput::text("run the turn that will be fenced at commit"),
+            CancellationToken::new(),
+            named_turn_scope(session_id, live_turn_id),
+        )
+        .await
+        .expect_err("a fenced commit must fail the turn");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::SessionExecutionLeaseLost
+    );
+
+    let pending = crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), session_id)
+        .await
+        .expect("list pending turn inputs");
+    assert_eq!(pending.len(), 1, "the routed input is still queued");
+    assert_eq!(
+        pending[0].state,
+        crate::TurnInputState::DeferredNextTurn,
+        "the teardown of a turn that cannot commit must re-defer its pinned input"
+    );
+    assert_eq!(
+        pending[0].ingress,
+        crate::TurnInputIngress::NextTurn,
+        "the repaired row must be addressable by the next turn, not by the dead turn id"
+    );
+}
+
 #[tokio::test]
 async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_prior_state() {
     let executor = Arc::new(FailingCaptureExecutor {

@@ -1297,6 +1297,10 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
             lease_ttl_ms,
         )
         .await?;
+        // FIG-1573: no orphan repair here. A takeover proves the previous runner
+        // is gone, not that its turn is - cold recovery resumes the interrupted
+        // turn under the same turn id at the new generation and must still
+        // receive the inputs pinned to it. The runtime owns the repair.
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
@@ -2608,31 +2612,93 @@ impl TurnInputStore for PostgresSessionStore {
         if claims.is_empty() {
             return Ok(());
         }
-        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-            "UPDATE lash_pending_turn_inputs
-             SET state = CASE
-                     WHEN state = 'accepted' THEN 'pending_active'
-                     ELSE state
-                 END,
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_owner_liveness_json = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
-             WHERE (session_id, claim_id, claim_token) IN ",
-        );
-        query.push_tuples(claims, |mut row, claim| {
-            row.push_bind(&claim.session_id)
-                .push_bind(&claim.claim_id)
-                .push_bind(&claim.lease_token);
-        });
-        query
-            .build()
-            .execute(&self.pool)
-            .await
-            .map_err(store_sqlx_error)?;
+        // FIG-1573: restore each claim to its own mode's pre-claim state, exactly
+        // as the singular sibling does. Hardcoding `pending_active` sent a
+        // next-turn claim's rows to a state only an active-turn claim can reach,
+        // stranding them behind a turn id that will never exist again. Both mode
+        // partitions run in ONE transaction: a batch abandon is one caller
+        // giving up one set of rows, and a failure between two statements would
+        // leave half the batch claimed by a claim id the caller has dropped.
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        for (mode_state, restored_state) in [
+            (
+                lash_core::TurnInputState::PendingActive,
+                lash_core::TurnInputState::PendingActive,
+            ),
+            (
+                lash_core::TurnInputState::DeferredNextTurn,
+                lash_core::TurnInputState::DeferredNextTurn,
+            ),
+        ] {
+            let batch = claims
+                .iter()
+                .filter(|claim| {
+                    let claim_state = match claim.mode {
+                        lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
+                            lash_core::TurnInputState::PendingActive
+                        }
+                        lash_core::TurnInputClaimMode::NextTurn => {
+                            lash_core::TurnInputState::DeferredNextTurn
+                        }
+                    };
+                    claim_state == mode_state
+                })
+                .collect::<Vec<_>>();
+            if batch.is_empty() {
+                continue;
+            }
+            let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+                "UPDATE lash_pending_turn_inputs
+                 SET state = CASE
+                         WHEN state = 'accepted' THEN ",
+            );
+            query.push_bind(restored_state.as_str());
+            query.push(
+                "     ELSE state
+                     END,
+                     claim_id = NULL,
+                     claim_owner_id = NULL,
+                     claim_owner_incarnation_id = NULL,
+                     claim_owner_liveness_json = NULL,
+                     claim_token = NULL,
+                     claim_session_lease_generation = 0
+                 WHERE (session_id, claim_id, claim_token) IN ",
+            );
+            query.push_tuples(batch, |mut row, claim| {
+                row.push_bind(&claim.session_id)
+                    .push_bind(&claim.claim_id)
+                    .push_bind(&claim.lease_token);
+            });
+            query
+                .build()
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
+    }
+
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> Result<usize, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        // Re-validated inside this transaction, not upstream: the lane can be
+        // displaced between an upstream check and this write, and a
+        // stale-generation repair would clear the new holder's claim columns.
+        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        let repaired = defer_orphaned_active_turn_inputs_tx(
+            &mut tx,
+            session_id,
+            session_execution_lease.fencing_token,
+            scope,
+        )
+        .await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(repaired)
     }
 }
 
@@ -2953,6 +3019,85 @@ async fn claim_ready_queued_work_postgres_tx(
             candidates[0].prior_claim_id.clone(),
         ),
     })))
+}
+
+/// Re-defer active-turn-scoped inputs whose pinned turn can no longer commit
+/// (FIG-1573).
+///
+/// Row selection is the shared rule
+/// (`lash_core::store_backend_support::orphaned_active_turn_input_is_repairable`)
+/// and the write is the commit-time interrupted-input re-defer's own shape, so
+/// this backend cannot drift from the SQLite one.
+async fn defer_orphaned_active_turn_inputs_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+    live_generation: u64,
+    scope: lash_core::OrphanedTurnInputScope<'_>,
+) -> Result<usize, StoreError> {
+    let rows: Vec<(String, String, String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT input_id, state, ingress_json, claim_token, claim_session_lease_generation
+         FROM lash_pending_turn_inputs
+         WHERE session_id = $1 AND state = ANY($2)
+         FOR UPDATE",
+    )
+    .bind(session_id)
+    .bind(
+        [
+            lash_core::TurnInputState::PendingActive.as_str(),
+            lash_core::TurnInputState::Accepted.as_str(),
+        ]
+        .as_slice(),
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let mut repairable = Vec::new();
+    for (input_id, state, ingress_json, claim_token, claim_generation) in rows {
+        let state = lash_core::TurnInputState::from_wire_str(&state)
+            .ok_or_else(|| StoreError::Backend(format!("unknown turn-input state `{state}`")))?;
+        let ingress: lash_core::TurnInputIngress =
+            store_decode_json(&ingress_json, "turn-input ingress")?;
+        let claim_generation = u64_from_sql(
+            "PendingTurnInput",
+            "claim_session_lease_generation",
+            claim_generation,
+        )?;
+        if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+            scope,
+            live_generation,
+            state,
+            &ingress,
+            claim_token.is_some(),
+            claim_generation,
+        ) {
+            repairable.push(input_id);
+        }
+    }
+    if repairable.is_empty() {
+        return Ok(0);
+    }
+    let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn)?;
+    let repaired = sqlx::query(
+        "UPDATE lash_pending_turn_inputs
+         SET state = $3,
+             ingress_json = $4,
+             claim_id = NULL,
+             claim_owner_id = NULL,
+             claim_owner_incarnation_id = NULL,
+             claim_owner_liveness_json = NULL,
+             claim_token = NULL,
+             claim_session_lease_generation = 0
+         WHERE session_id = $1 AND input_id = ANY($2)",
+    )
+    .bind(session_id)
+    .bind(&repairable)
+    .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
+    .bind(&next_turn_ingress)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .rows_affected();
+    Ok(repaired as usize)
 }
 
 #[allow(clippy::too_many_arguments)]

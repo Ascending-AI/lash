@@ -733,6 +733,17 @@ impl lash_core::TurnInputStore for SnapshotStore {
     ) -> std::result::Result<(), lash_core::store::StoreError> {
         Ok(())
     }
+
+    // Nothing here holds an input, so the orphan sweep the drain runs finds
+    // nothing to repair.
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        _session_id: &str,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> std::result::Result<usize, lash_core::store::StoreError> {
+        Ok(0)
+    }
 }
 
 #[async_trait]
@@ -1003,6 +1014,17 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _claim: &lash_core::TurnInputClaim,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
         Ok(())
+    }
+
+    // Nothing here holds an input, so the orphan sweep the drain runs finds
+    // nothing to repair.
+    async fn defer_orphaned_active_turn_inputs(
+        &self,
+        _session_id: &str,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> std::result::Result<usize, lash_core::store::StoreError> {
+        Ok(0)
     }
 }
 

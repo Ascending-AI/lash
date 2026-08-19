@@ -173,3 +173,11 @@ async fn perf_store_exact_claim_preserves_physical_order_and_key_breaks() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn perf_store_leaves_no_input_pinned_to_a_turn_that_cannot_commit() {
+    lash_core::testing::conformance::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
+        Arc::new(RuntimePerfStore::default()),
+    )
+    .await;
+}

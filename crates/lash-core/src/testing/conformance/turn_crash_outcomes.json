@@ -140,6 +140,11 @@
     "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
   },
   {
+    "scenario": "active_turn_input_pinned_to_recovered_turn",
+    "outcome": "FIG-1573: with the crashed turn seeded without a next-turn row, recovery's drain claims no next-turn input and evaluates the orphan backstop while an active-turn row is still pinned to the very turn it is about to resume. The resumed turn keeps that row and delivers it at its own checkpoint, so recovery still reaches the exact durable terminal state with no ingress left behind; a sweep that took the row instead would change the replayed provider request.",
+    "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 0 }
+  },
+  {
     "scenario": "peer_reclaim",
     "outcome": "A recovered commit reaches terminal state while leaving the queued-work row owned by the successor lease generation untouched for at-least-once redelivery.",
     "exact": { "terminal": 1, "pending_inputs": 0, "queued_work": 1 }

@@ -163,6 +163,56 @@ pub async fn assert_real_turn_kill_recovery(
         "checkpoint outcome-gap double-crash recovery did not match `{expected_summary}`: {stdout}"
     );
 
+    // FIG-1573: the drain-time orphan backstop must be *evaluated* while an
+    // active-turn row is still pinned to the turn recovery is about to resume.
+    // Crashing mid-stream leaves exactly that row, still undelivered: a row the
+    // turn already delivered is settled by its checkpoint commit and no longer
+    // pending, so an *undelivered* pinned row is the only shape a crash can
+    // leave. This scenario seeds no next-turn row, so the recovering process
+    // claims no next-turn input and therefore *evaluates* the backstop, and a
+    // peer takes the lane and claims the queued-work row so recovery arrives
+    // through its ordinary drain rather than the interrupted-turn path that
+    // skips it. The resumed turn must still deliver the row at its own
+    // checkpoint and reach the reviewed end state.
+    let nonce = format!("peer-reclaim-pinned-active-input-{}", uuid::Uuid::new_v4());
+    let marker = tempdir.join(format!("{nonce}.log"));
+    kill_at_semantic_point(&mut command, "turn_provider_mid_stream", &nonce, &marker).await;
+    let peer = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command("turn_peer_reclaim", &nonce, &marker).output(),
+    )
+    .await
+    .expect("pinned-active-input peer helper timed out")
+    .expect("spawn pinned-active-input peer helper");
+    assert!(
+        peer.status.success(),
+        "pinned-active-input peer helper failed: {}; stdout: {}",
+        String::from_utf8_lossy(&peer.stderr),
+        String::from_utf8_lossy(&peer.stdout)
+    );
+    let recovered = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        command("turn_recover", &nonce, &marker).output(),
+    )
+    .await
+    .expect("pinned-active-input recovery timed out")
+    .expect("spawn pinned-active-input recovery");
+    let stdout = String::from_utf8_lossy(&recovered.stdout);
+    let stderr = String::from_utf8_lossy(&recovered.stderr);
+    assert!(
+        recovered.status.success(),
+        "pinned-active-input recovery failed: {stderr}; stdout: {stdout}"
+    );
+    let expected_end_state =
+        lash_core::testing::conformance::cold_process_durable_recovery_expectation(
+            "active_turn_input_pinned_to_recovered_turn",
+        );
+    let expected_summary = format!("turn_complete {expected_end_state}");
+    assert!(
+        stdout.lines().any(|line| line == expected_summary),
+        "the resumed turn must keep the input pinned to it and reach `{expected_summary}`: {stdout}"
+    );
+
     let nonce = format!("peer-reclaim-{}", uuid::Uuid::new_v4());
     let marker = tempdir.join(format!("{nonce}.log"));
     kill_at_semantic_point(&mut command, "turn_final_commit_boundary", &nonce, &marker).await;

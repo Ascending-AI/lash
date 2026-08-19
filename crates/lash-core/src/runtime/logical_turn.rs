@@ -181,6 +181,11 @@ impl LashRuntime {
                     self.state.turn_scope(&turn_trace_turn_id),
                 ) {
                     Ok(controller) => controller,
+                    // FIG-1573 exempt: this follow-on turn never started, so no
+                    // input can be pinned to `turn_trace_turn_id` - a host can
+                    // only route into a turn it has observed running. The turn
+                    // that *did* run reached its commit, which carried its own
+                    // re-defer.
                     Err(err) => {
                         self.invalidate_resident_session_state();
                         turns
@@ -252,8 +257,31 @@ impl LashRuntime {
             };
             let execution = match execution_result {
                 Ok(execution) => execution,
-                Err(err) if turns.is_empty() => return Err(err),
+                // FIG-1573: this frame ended without reaching a commit, so the
+                // commit-time re-defer never ran. Inputs routed into it while it
+                // was live are pinned to a turn id no later turn will ever carry
+                // again, so the teardown owes them the same repair. Both ids are
+                // dead by construction here, which keeps the live-turn hazard out.
+                Err(err) if turns.is_empty() => {
+                    self.defer_orphaned_turn_inputs_after_teardown(
+                        &turn_trace_turn_id,
+                        session_execution_lease
+                            .as_ref()
+                            .map(|lease| lease.fence())
+                            .as_ref(),
+                    )
+                    .await;
+                    return Err(err);
+                }
                 Err(err) => {
+                    self.defer_orphaned_turn_inputs_after_teardown(
+                        &turn_trace_turn_id,
+                        session_execution_lease
+                            .as_ref()
+                            .map(|lease| lease.fence())
+                            .as_ref(),
+                    )
+                    .await;
                     self.record_follow_on_failure(&mut turns, err);
                     return Ok(AgentFrameRun { turns });
                 }

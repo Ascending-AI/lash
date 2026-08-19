@@ -72,6 +72,52 @@ pub mod store_backend_support {
         claim.abandon_restore_claim_id.as_deref()
     }
 
+    /// The one rule deciding whether an active-turn-scoped pending-input row is
+    /// an orphan this scope may repair.
+    ///
+    /// Every backend answers with this function or with SQL that mirrors it
+    /// literally, so "which rows can a dead turn's repair touch" has exactly one
+    /// definition (FIG-1573). The row must be active-turn scoped and in a state
+    /// only its own turn could advance; the scope then supplies the proof that
+    /// the turn is gone. `live_generation` is the fencing token of the lease the
+    /// backend has just re-validated in this transaction, so a row claimed by
+    /// the live lane is never an orphan.
+    pub fn orphaned_active_turn_input_is_repairable(
+        scope: crate::OrphanedTurnInputScope<'_>,
+        live_generation: u64,
+        state: crate::TurnInputState,
+        ingress: &crate::TurnInputIngress,
+        claim_token_present: bool,
+        claim_session_lease_generation: u64,
+    ) -> bool {
+        if !matches!(
+            state,
+            crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
+        ) {
+            return false;
+        }
+        let Some(pinned_turn_id) = ingress.active_turn_id() else {
+            return false;
+        };
+        match scope {
+            crate::OrphanedTurnInputScope::Turn(turn_id) => pinned_turn_id == turn_id,
+            crate::OrphanedTurnInputScope::LaneGeneration { resumable_turn_id } => {
+                // A turn the caller can still resume owns its pinned rows, even
+                // though its claim generation is dead: durable recovery replays
+                // it under the same turn id, and a swept row changes the
+                // request that replay reconstructs (FIG-1573).
+                if let Some(resumable) = resumable_turn_id
+                    && pinned_turn_id
+                        .strip_prefix(resumable)
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
+                {
+                    return false;
+                }
+                !claim_token_present || claim_session_lease_generation != live_generation
+            }
+        }
+    }
+
     /// Build the SQL predicate admitting exactly the active-turn ingress whose
     /// minimum boundary has been reached at `checkpoint`.
     ///
@@ -987,9 +1033,9 @@ pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
     AttachmentManifestEntry, AttachmentWriteFence, BlobRef, GcReport, LeaseClaimNonce,
-    LeaseOwnerIdentity, QueuedWorkStore, RuntimePersistence, SelectedQueuedWorkClaimOutcome,
-    SessionAdmission, SessionBinding, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    LeaseOwnerIdentity, OrphanedTurnInputScope, QueuedWorkStore, RuntimePersistence,
+    SelectedQueuedWorkClaimOutcome, SessionAdmission, SessionBinding, SessionCommitStore,
+    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
     SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
     StoreBackend, StoreError, StoreMaintenance, StorePreflight, StoreSchemaDatabase,
