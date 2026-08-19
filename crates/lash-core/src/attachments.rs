@@ -86,7 +86,11 @@ pub struct StoredAttachment {
 /// the sweeper pairs each blob's `id` against the live root set and uses
 /// `last_modified_epoch_ms` to apply the write grace period. Backends that
 /// cannot report a modification time leave it `None`, and the sweep treats
-/// such blobs as always past the grace window.
+/// such blobs as always past the grace window. `None` therefore defeats *both*
+/// freshness checks in the same sweep — the snapshot's and the delete-time
+/// re-stat — so such a backend has no write-grace protection at all and rests
+/// entirely on the root set and, depending on the authority, the condemnation
+/// fence or the legacy targeted re-check.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredBlobRef {
     pub id: AttachmentId,
@@ -184,10 +188,12 @@ pub trait AttachmentStore: Send + Sync {
 /// are roots; terminal-owner intents remain roots through their retention
 /// window. Unscoped host puts use the legacy age-only fallback.
 ///
-/// Implemented by session-store factories, which own the full set of sessions:
-/// a global manifest table answers in one query (Postgres); a per-session
-/// database topology answers by iterating the factory's session databases at
-/// sweep time (SQLite); an in-memory factory answers from its live stores. If
+/// Implemented by session-store factories, which own the full set of sessions.
+/// Every durable backend answers from one factory-wide manifest in a single
+/// pass: a global manifest table for Postgres, and for SQLite the single
+/// factory-wide `durable-core.db` catalog, which the factory opens for the
+/// root-set pass and asks for [`AttachmentManifest::list_all_refs`].
+/// An in-memory factory answers from its live stores. If
 /// the implementor cannot enumerate its roots, it must return an error from
 /// [`Self::live_attachment_refs`]. The sweep then lists the backend only to
 /// determine whether a deletion-eligible blob exists: it propagates the error
