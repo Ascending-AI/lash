@@ -16,6 +16,8 @@ mod public_error;
 mod rlm_support;
 pub mod scenario_contracts;
 mod stream_mask;
+#[cfg(test)]
+mod testing;
 mod tool_catalog;
 
 pub use control_tools::continue_as_tool_definition;
