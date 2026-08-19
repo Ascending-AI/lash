@@ -178,6 +178,19 @@ them into an amnesty channel (FIG-1223):
   imports it" is exactly the level of justification that let a dead session
   picker look alive.
 
+An `unused-justify` reason may cite a *successor ticket* as the row's future
+consumer, and that is the one shape of justification that ages badly: a ticket
+number is a promise, and a promise nobody is holding is how a row stays
+`unused-justify` forever.  Ruled 2026-08-19 (FIG-1537), the citation is admissible
+only when **both** halves hold: a conformance suite already exercises the surface
+*runnably* -- so the claim is about a missing in-repo caller, never about
+untested code -- **and** the named successor ticket carries the example in its own
+`done-when`, so a person is accountable for retiring the row.  A successor
+citation missing either half is not a justification, it is a deferral, and the
+honest disposition for it is `unused-add`.  The rule is narrow on purpose: it
+buys one release's grace for a surface whose only in-repo caller has not landed
+yet, and it buys nothing for a surface nobody has committed to calling.
+
 `unused-remove` verdicts leave a tombstone.  `[[removal_verdict]]` records every
 item that has ever carried one, and a verdict may only be discharged by actually
 removing the item -- never by moving it.  Commit `678d567bf` moved 126 items
