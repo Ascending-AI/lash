@@ -6,7 +6,9 @@ use lash_core::plugin::{
     ProtocolSessionContext, ProtocolSessionMaterialization, ProtocolSessionPlugin,
 };
 use lash_core::{CheckpointKind, PluginOptions, ProtocolTurnOptions, SessionError};
-use lash_rlm_types::{RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat};
+use lash_rlm_types::{
+    RlmCreateExtras, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
+};
 
 use super::budget_warning::BUDGET_WARNING_STATUS;
 use super::runtime_state::RlmRuntimeState;
@@ -129,85 +131,191 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
     }
 }
 
-/// Apply-and-default RLM session options with apply-at-open semantics.
+/// The durable RLM facts recorded on a set of protocol turn options.
 ///
-/// Starts from the existing durable options (preserving fields such as
-/// termination that a prior open applied), overlays any explicit extras from the
-/// materialization's plugin options, and defaults `final_answer_format` —
-/// `Markdown` for root sessions, `RawFinalValue` for children — when none was
-/// supplied explicitly.
+/// Absence stays absence: a session that has stated nothing reads as an empty
+/// [`RlmSessionConfig`] rather than as the values the defaults would resolve to.
+pub fn rlm_session_config(
+    options: &ProtocolTurnOptions,
+) -> Result<RlmSessionConfig, RlmSessionConfigDecodeError> {
+    if options.is_empty() {
+        return Ok(RlmSessionConfig::default());
+    }
+    let extras = options
+        .decode::<RlmCreateExtras>()
+        .map_err(|err| RlmSessionConfigDecodeError(err.to_string()))?;
+    Ok(RlmSessionConfig::from(&extras))
+}
+
+/// A recorded RLM options bag that could not be decoded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RlmSessionConfigDecodeError(pub String);
+
+impl std::fmt::Display for RlmSessionConfigDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid RLM session config: {}", self.0)
+    }
+}
+
+impl std::error::Error for RlmSessionConfigDecodeError {}
+
+/// The guarded set-if-unset write for the durable RLM bag (ADR 0066).
+///
+/// Every field the request states is written only while the session has
+/// recorded nothing for it. Restating the value already recorded is a no-op
+/// rather than an error — set-if-unset is idempotent, which is what lets a host
+/// call it on every open. Stating a *different* value is refused with a typed
+/// [`RlmSessionConfigConflict`]; there is no smoothing path, by design.
+///
+/// Fields the request leaves unstated are carried through untouched. That is
+/// the whole of the two clobber fixes: options that name a dialect no longer
+/// restate the termination, and a reopen that names no format no longer resets
+/// one the session recorded.
+pub fn apply_rlm_session_config_if_unset(
+    existing: &RlmSessionConfig,
+    requested: &RlmSessionConfig,
+) -> Result<RlmSessionConfig, RlmSessionConfigConflict> {
+    let mut next = existing.clone();
+    if let Some(requested) = requested.dialect {
+        match existing.dialect {
+            Some(recorded) if recorded != requested => {
+                return Err(RlmSessionConfigConflict::Dialect {
+                    recorded,
+                    requested,
+                });
+            }
+            Some(_) => {}
+            None => next.dialect = Some(requested),
+        }
+    }
+    if let Some(requested) = requested.final_answer_format.clone() {
+        match existing.final_answer_format.clone() {
+            Some(recorded) if recorded != requested => {
+                return Err(RlmSessionConfigConflict::FinalAnswerFormat {
+                    recorded,
+                    requested,
+                });
+            }
+            Some(_) => {}
+            None => next.final_answer_format = Some(requested),
+        }
+    }
+    if let Some(requested) = requested.termination.clone() {
+        match existing.termination.clone() {
+            Some(recorded) if recorded != requested => {
+                return Err(RlmSessionConfigConflict::Termination {
+                    recorded: Box::new(recorded),
+                    requested: Box::new(requested),
+                });
+            }
+            Some(_) => {}
+            None => next.termination = Some(requested),
+        }
+    }
+    Ok(next)
+}
+
+/// The guarded set-if-unset write as an *open session* may perform it.
+///
+/// Same engine as [`apply_rlm_session_config_if_unset`], with one field held
+/// back: the dialect is compared and never written. An open session already
+/// picked its dialect implementation when its plugins were built, and a session
+/// whose bag records no dialect resolved the default one, so the comparison is
+/// against `existing.dialect.unwrap_or_default()` — the dialect the session is
+/// *running*. Writing it here would leave the recorded fact disagreeing with
+/// the plugin that is executing, which is exactly the divergence the typed pin
+/// exists to prevent.
+pub fn apply_rlm_session_config_post_open(
+    existing: &RlmSessionConfig,
+    requested: &RlmSessionConfig,
+) -> Result<RlmSessionConfig, RlmSessionConfigConflict> {
+    if let Some(requested) = requested.dialect {
+        let running = existing.dialect.unwrap_or_default();
+        if running != requested {
+            return Err(RlmSessionConfigConflict::Dialect {
+                recorded: running,
+                requested,
+            });
+        }
+    }
+    apply_rlm_session_config_if_unset(
+        existing,
+        &RlmSessionConfig {
+            dialect: None,
+            ..requested.clone()
+        },
+    )
+}
+
+/// Encode a config back into the durable options bag.
+pub fn rlm_session_config_options(
+    config: &RlmSessionConfig,
+) -> Result<ProtocolTurnOptions, SessionError> {
+    Ok(ProtocolTurnOptions::typed(RlmCreateExtras::from(config))?)
+}
+
+/// Materialize the durable RLM options for a session that is opening.
+///
+/// Applies the materialization's plugin options as a guarded set-if-unset write
+/// over whatever the session already recorded. On a session that has recorded
+/// nothing yet — and only then — the two facts the runtime cannot start without
+/// are filled from their defaults: the language, and the presentation format
+/// the prompt is written against (`Markdown` for root sessions,
+/// `RawFinalValue` for children). That is what pins a session's dialect at its
+/// first open, as it always has.
+///
+/// A session that has recorded something is never *re*-defaulted. A reopen that
+/// states nothing therefore carries every recorded fact through untouched,
+/// which is the whole of the two clobber fixes: a reopen no longer resets the
+/// recorded final-answer format, and options that state only a dialect no
+/// longer restate the termination.
 pub(crate) fn resolve_rlm_session_options(
     existing: &ProtocolTurnOptions,
     plugin_options: &PluginOptions,
     is_root_session: bool,
 ) -> Result<ProtocolTurnOptions, SessionError> {
-    let dialect = resolve_rlm_session_dialect(existing, plugin_options)?;
-    let explicit = plugin_options
-        .decode::<RlmCreateExtras>(RLM_PROTOCOL_PLUGIN_ID)
-        .map_err(|err| SessionError::Protocol(format!("invalid RLM create options: {err}")))?;
+    let mut resolved = guarded_session_config(existing, plugin_options)?;
 
-    let mut extras = if existing.is_empty() {
-        RlmCreateExtras::default()
-    } else {
-        existing
-            .decode()
-            .map_err(|err| SessionError::Protocol(err.to_string()))?
-    };
+    if existing.is_empty() {
+        resolved.dialect = Some(resolved.dialect.unwrap_or_default());
+        resolved.final_answer_format = Some(resolved.final_answer_format.unwrap_or({
+            if is_root_session {
+                RlmFinalAnswerFormat::Markdown
+            } else {
+                RlmFinalAnswerFormat::RawFinalValue
+            }
+        }));
+    }
 
-    let explicit_format = match explicit {
-        Some(explicit) => {
-            extras.termination = explicit.termination;
-            explicit.final_answer_format
-        }
-        None => None,
-    };
-
-    let default_format = if is_root_session {
-        RlmFinalAnswerFormat::Markdown
-    } else {
-        RlmFinalAnswerFormat::RawFinalValue
-    };
-    extras.dialect = Some(dialect);
-    extras.final_answer_format = Some(explicit_format.unwrap_or(default_format));
-
-    Ok(ProtocolTurnOptions::typed(extras)?)
+    rlm_session_config_options(&resolved)
 }
 
-/// Resolve the one language a session is allowed to use. A recorded choice is
-/// authoritative on rebuild; create-time options may select a language only
-/// while no durable protocol options exist yet.
-pub(super) fn resolve_rlm_session_dialect(
+/// The config a session materializes with: what it recorded, with the
+/// materialization's plugin options applied as a guarded set-if-unset write.
+fn guarded_session_config(
     existing: &ProtocolTurnOptions,
     plugin_options: &PluginOptions,
-) -> Result<RlmDialect, SessionError> {
-    let durable = if existing.is_empty() {
-        None
-    } else {
-        Some(
-            existing
-                .decode::<RlmCreateExtras>()
-                .map_err(|err| SessionError::Protocol(err.to_string()))?
-                .dialect
-                .unwrap_or_default(),
-        )
-    };
+) -> Result<RlmSessionConfig, SessionError> {
+    let recorded =
+        rlm_session_config(existing).map_err(|err| SessionError::Protocol(err.to_string()))?;
     let requested = plugin_options
         .decode::<RlmCreateExtras>(RLM_PROTOCOL_PLUGIN_ID)
         .map_err(|err| SessionError::Protocol(format!("invalid RLM create options: {err}")))?
-        .and_then(|extras| extras.dialect);
+        .map(|extras| RlmSessionConfig::from(&extras))
+        .unwrap_or_default();
+    apply_rlm_session_config_if_unset(&recorded, &requested)
+        .map_err(|conflict| SessionError::Protocol(conflict.to_string()))
+}
 
-    match (durable, requested) {
-        (Some(recorded), Some(requested)) if recorded != requested => {
-            Err(SessionError::Protocol(format!(
-                "RLM dialect is durably pinned to `{}` and cannot be reopened as `{}`",
-                recorded.language_id(),
-                requested.language_id()
-            )))
-        }
-        (Some(recorded), _) => Ok(recorded),
-        (None, Some(requested)) => Ok(requested),
-        (None, None) => Ok(RlmDialect::default()),
-    }
+/// The one language this session is allowed to use, for the plugin build that
+/// has to pick a dialect implementation before the session materializes.
+pub(super) fn resolve_rlm_session_dialect(
+    existing: &ProtocolTurnOptions,
+    plugin_options: &PluginOptions,
+) -> Result<lash_rlm_types::RlmDialect, SessionError> {
+    Ok(guarded_session_config(existing, plugin_options)?
+        .dialect
+        .unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -217,6 +325,7 @@ mod tests {
     use super::*;
     use crate::plugin::budget_warning::BUDGET_WARNING_STATUS;
     use crate::projection::RlmProjectedBindings;
+    use lash_rlm_types::RlmDialect;
 
     struct NoopPromptManager;
 
@@ -270,11 +379,13 @@ mod tests {
     #[async_trait::async_trait]
     impl lash_core::plugin::runtime_host::SessionGraphService for NoopPromptManager {}
 
+    /// A session that recorded something is never re-defaulted: the reopen
+    /// carries every recorded fact through and adds nothing it did not state.
     #[test]
     fn resolve_rlm_session_options_preserves_existing_termination() {
         let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
             dialect: None,
-            termination: lash_rlm_types::RlmTermination::Natural,
+            termination: Some(lash_rlm_types::RlmTermination::Natural),
             final_answer_format: None,
         })
         .expect("existing options");
@@ -282,11 +393,17 @@ mod tests {
         let options = resolve_rlm_session_options(&existing, &PluginOptions::default(), true)
             .expect("resolve options");
         let extras: RlmCreateExtras = options.decode().expect("decode options");
-        assert_eq!(extras.dialect, Some(RlmDialect::Lashlang));
-        assert_eq!(extras.termination, lash_rlm_types::RlmTermination::Natural);
         assert_eq!(
-            extras.final_answer_format,
-            Some(RlmFinalAnswerFormat::Markdown)
+            extras.termination,
+            Some(lash_rlm_types::RlmTermination::Natural)
+        );
+        assert_eq!(
+            extras.dialect, None,
+            "a reopen must not invent a pin the session never recorded"
+        );
+        assert_eq!(
+            extras.final_answer_format, None,
+            "a reopen must not invent a format the session never recorded"
         );
     }
 
@@ -312,7 +429,7 @@ mod tests {
             RLM_PROTOCOL_PLUGIN_ID,
             RlmCreateExtras {
                 dialect: None,
-                termination: lash_rlm_types::RlmTermination::FinishRequired { schema: None },
+                termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
                 final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
             },
         )
@@ -324,7 +441,7 @@ mod tests {
         let extras: RlmCreateExtras = options.decode().expect("decode options");
         assert_eq!(
             extras.termination,
-            lash_rlm_types::RlmTermination::FinishRequired { schema: None }
+            Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None })
         );
         assert_eq!(
             extras.final_answer_format,
@@ -372,11 +489,60 @@ mod tests {
             .expect_err("a durable dialect cannot change on reopen");
         assert!(
             error.to_string().contains(
-                "RLM dialect is durably pinned to `typescript` and cannot be reopened as `lashlang`"
+                "RLM session dialect is durably pinned to `typescript` and cannot be set to `lashlang`"
             ),
-            "error message must contain the full pinned message: {error}"
+            "the refusal must render the one typed message: {error}"
         );
-        assert!(error.to_string().contains("RLM dialect is durably pinned"));
+    }
+
+    /// FIG-1555 clobber 1: a reopen that names no format must keep the one the
+    /// session recorded, instead of resetting it to the root default.
+    #[test]
+    fn reopen_without_an_explicit_format_keeps_the_recorded_final_answer_format() {
+        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
+            dialect: Some(RlmDialect::Lashlang),
+            termination: Some(lash_rlm_types::RlmTermination::Natural),
+            final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+        })
+        .expect("existing options");
+
+        let options = resolve_rlm_session_options(&existing, &PluginOptions::default(), true)
+            .expect("resolve options");
+        let extras: RlmCreateExtras = options.decode().expect("decode options");
+        assert_eq!(
+            extras.final_answer_format,
+            Some(RlmFinalAnswerFormat::RawFinalValue),
+            "a reopen that states no format must not reset the recorded one"
+        );
+    }
+
+    /// FIG-1555 clobber 2: options that state a dialect and nothing else must
+    /// not reset a recorded `FinishRequired` termination to the default.
+    #[test]
+    fn stating_only_a_dialect_keeps_the_recorded_termination() {
+        let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
+            dialect: None,
+            termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
+            final_answer_format: None,
+        })
+        .expect("existing options");
+        let requested = PluginOptions::typed(
+            RLM_PROTOCOL_PLUGIN_ID,
+            RlmCreateExtras {
+                dialect: Some(RlmDialect::Lashlang),
+                ..RlmCreateExtras::default()
+            },
+        )
+        .expect("dialect-only options");
+
+        let options =
+            resolve_rlm_session_options(&existing, &requested, true).expect("resolve options");
+        let extras: RlmCreateExtras = options.decode().expect("decode options");
+        assert_eq!(
+            extras.termination,
+            Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
+            "stating a dialect must not silently restate the termination"
+        );
     }
 
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
@@ -484,5 +650,64 @@ mod tests {
         assert!(detail.as_deref().is_some_and(|text| {
             text.contains("120292 tokens used") && text.contains("choose frame switch path")
         }));
+    }
+
+    /// A bag that records no dialect still belongs to a session running the
+    /// default one, so a post-open statement is compared against that default
+    /// and refused when it disagrees -- never written.
+    #[test]
+    fn a_post_open_dialect_is_compared_against_the_running_default() {
+        let bag_without_a_dialect = RlmSessionConfig::new()
+            .termination(lash_rlm_types::RlmTermination::FinishRequired { schema: None });
+        assert_eq!(bag_without_a_dialect.dialect, None);
+
+        let conflict = apply_rlm_session_config_post_open(
+            &bag_without_a_dialect,
+            &RlmSessionConfig::new().dialect(RlmDialect::Typescript),
+        )
+        .expect_err("a session running the default dialect cannot be moved onto another");
+        assert_eq!(
+            conflict,
+            RlmSessionConfigConflict::Dialect {
+                recorded: RlmDialect::Lashlang,
+                requested: RlmDialect::Typescript,
+            },
+            "the conflict names the dialect the session is running, not an absent one"
+        );
+    }
+
+    /// Agreeing with the running default is a no-op: it records nothing, so the
+    /// read half keeps reporting that the session stated no dialect.
+    #[test]
+    fn agreeing_with_the_running_default_dialect_writes_nothing() {
+        let bag_without_a_dialect = RlmSessionConfig::new();
+
+        let resolved = apply_rlm_session_config_post_open(
+            &bag_without_a_dialect,
+            &RlmSessionConfig::new().dialect(RlmDialect::Lashlang),
+        )
+        .expect("stating the dialect the session is running is a no-op");
+        assert_eq!(resolved, bag_without_a_dialect);
+        assert_eq!(resolved.dialect, None);
+    }
+
+    /// The held-back dialect does not hold back the rest: a statement that
+    /// agrees on the dialect still writes the facts the bag has not recorded.
+    #[test]
+    fn a_post_open_write_still_lands_on_the_facts_that_are_unset() {
+        let recorded = RlmSessionConfig::new().dialect(RlmDialect::Typescript);
+
+        let resolved = apply_rlm_session_config_post_open(
+            &recorded,
+            &RlmSessionConfig::new()
+                .dialect(RlmDialect::Typescript)
+                .termination(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
+        )
+        .expect("an unrecorded termination accepts a write");
+        assert_eq!(
+            resolved.termination,
+            Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None })
+        );
+        assert_eq!(resolved.dialect, Some(RlmDialect::Typescript));
     }
 }

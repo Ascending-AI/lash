@@ -128,6 +128,10 @@ from the environment.
 - `RlmSessionBuilderExt::rlm_dialect` is the public host-facing builder path.
   Agent Workbench and `agent-service` accept `LASH_RUNBOOK_DIALECT`, use the
   typed builder, default to Lashlang, and reject unknown values.
+  *Superseded by FIG-1555 / ADR 0066:* that builder no longer exists. A session
+  states its dialect through `SessionBuilder::plugin_option` keyed by
+  `RLM_PROTOCOL_PLUGIN_ID`, and the statement is applied as a guarded
+  set-if-unset write with a typed refusal.
 - The selected language id is written into durable protocol state. Rehydration
   treats that state as authoritative and rejects a create-time mismatch.
 - Tampered durable state fails closed in every shape: an unknown id, a

@@ -306,8 +306,9 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
     fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");
-        let finalization = self.dialect.finalization_copy(&options.termination);
-        let required_output = required_output_block(&options.termination);
+        let termination = options.effective_termination();
+        let finalization = self.dialect.finalization_copy(&termination);
+        let required_output = required_output_block(&termination);
         let vocabulary = self.dialect.prompt_vocabulary();
         let final_answer_format = final_answer_format_prompt(&options, vocabulary);
         let guard = self.last_prompt_usage.read_recover();
@@ -389,14 +390,15 @@ fn final_answer_format_prompt(
     options: &RlmCreateExtras,
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> Option<String> {
+    let termination = options.effective_termination();
     if matches!(
-        options.termination,
+        termination,
         RlmTermination::FinishRequired { schema: Some(_) }
     ) {
         return None;
     }
     match options.final_answer_format.as_ref()? {
-        RlmFinalAnswerFormat::Markdown => Some(match options.termination {
+        RlmFinalAnswerFormat::Markdown => Some(match termination {
             RlmTermination::FinishRequired { schema: None } => format!(
                 "When finishing, call `{}` with a nicely formatted Markdown string, not a raw record/list/tool-result value.",
                 vocabulary.finish_statement
@@ -1479,7 +1481,7 @@ mod tests {
     fn final_answer_format_guidance_renders_markdown_for_unstructured_turns() {
         let guidance = final_answer_format_prompt_test(&RlmCreateExtras {
             dialect: None,
-            termination: RlmTermination::FinishRequired { schema: None },
+            termination: Some(RlmTermination::FinishRequired { schema: None }),
             final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
         })
         .expect("markdown guidance");
@@ -1492,7 +1494,7 @@ mod tests {
     fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
         let custom = final_answer_format_prompt_test(&RlmCreateExtras {
             dialect: None,
-            termination: RlmTermination::Natural,
+            termination: Some(RlmTermination::Natural),
             final_answer_format: Some(RlmFinalAnswerFormat::Custom {
                 guidance: "  Finish concise release-note Markdown.  ".to_string(),
             }),
@@ -1503,7 +1505,7 @@ mod tests {
         assert!(
             final_answer_format_prompt_test(&RlmCreateExtras {
                 dialect: None,
-                termination: RlmTermination::FinishRequired { schema: None },
+                termination: Some(RlmTermination::FinishRequired { schema: None }),
                 final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
             })
             .is_none()
@@ -1514,9 +1516,9 @@ mod tests {
     fn required_output_schema_suppresses_final_answer_format_guidance() {
         let guidance = final_answer_format_prompt_test(&RlmCreateExtras {
             dialect: None,
-            termination: RlmTermination::FinishRequired {
+            termination: Some(RlmTermination::FinishRequired {
                 schema: Some(serde_json::json!({ "type": "object" })),
-            },
+            }),
             final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
         });
 

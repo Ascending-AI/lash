@@ -28,7 +28,11 @@ async fn app_state(
     // view the transcript labels its cells from (FIG-1306).
     let recorded_dialect = {
         use lash::rlm::RlmSessionReadViewExt as _;
-        observation_snapshot.read_view.rlm_dialect()
+        observation_snapshot
+            .read_view
+            .rlm_config()
+            .dialect
+            .unwrap_or_default()
     };
     let active_turns = state.active_turns.for_session(&session_id);
     let active_turn_ids = active_turns

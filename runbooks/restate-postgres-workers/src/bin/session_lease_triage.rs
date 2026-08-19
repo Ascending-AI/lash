@@ -348,11 +348,16 @@ struct TurnCore {
 
 impl TurnCore {
     async fn open(&self, session_id: &str) -> Result<lash::LashSession> {
-        use lash::rlm::RlmSessionBuilderExt as _;
         self.core
             .session(session_id)
-            .rlm_dialect(runbook_dialect())
-            .context("pin the row's dialect")?
+            .plugin_option(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras {
+                    dialect: Some(runbook_dialect()),
+                    ..lash::rlm::RlmCreateExtras::default()
+                },
+            )
+            .context("state the row's dialect")?
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))

@@ -238,11 +238,150 @@ pub struct RlmCreateExtras {
         skip_serializing_if = "Option::is_none"
     )]
     pub dialect: Option<RlmDialect>,
-    #[serde(default)]
-    pub termination: RlmTermination,
+    /// Session-wide termination requirement. Absence is the `Natural` default.
+    ///
+    /// Absence is a distinct statement from an explicit `Natural`: options that
+    /// say nothing about termination must leave a recorded `FinishRequired`
+    /// alone, and only a value that is genuinely stated participates in the
+    /// set-if-unset guard (ADR 0066).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination: Option<RlmTermination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_answer_format: Option<RlmFinalAnswerFormat>,
 }
+
+impl RlmCreateExtras {
+    /// The termination this bag means, resolving absence to the default.
+    pub fn effective_termination(&self) -> RlmTermination {
+        self.termination.clone().unwrap_or_default()
+    }
+}
+
+/// The durable RLM facts a session has recorded, read as recorded.
+///
+/// Every field is `Option`-shaped on purpose: `None` means the session has
+/// stated nothing yet, which is a different answer from the value the default
+/// resolves to. A host that cannot tell those apart has to peek at raw payload
+/// keys to label a fresh session honestly — the hack this type replaces.
+///
+/// This is the read half of the ADR 0066 pair; the write half is a guarded
+/// set-if-unset that refuses with [`RlmSessionConfigConflict`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RlmSessionConfig {
+    pub dialect: Option<RlmDialect>,
+    pub final_answer_format: Option<RlmFinalAnswerFormat>,
+    pub termination: Option<RlmTermination>,
+}
+
+impl RlmSessionConfig {
+    /// An empty request, stating nothing.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn dialect(mut self, dialect: RlmDialect) -> Self {
+        self.dialect = Some(dialect);
+        self
+    }
+
+    pub fn final_answer_format(mut self, format: RlmFinalAnswerFormat) -> Self {
+        self.final_answer_format = Some(format);
+        self
+    }
+
+    pub fn termination(mut self, termination: RlmTermination) -> Self {
+        self.termination = Some(termination);
+        self
+    }
+
+    /// Whether this states nothing at all.
+    pub fn is_empty(&self) -> bool {
+        self.dialect.is_none() && self.final_answer_format.is_none() && self.termination.is_none()
+    }
+}
+
+impl From<&RlmCreateExtras> for RlmSessionConfig {
+    fn from(extras: &RlmCreateExtras) -> Self {
+        Self {
+            dialect: extras.dialect,
+            final_answer_format: extras.final_answer_format.clone(),
+            termination: extras.termination.clone(),
+        }
+    }
+}
+
+impl From<&RlmSessionConfig> for RlmCreateExtras {
+    fn from(config: &RlmSessionConfig) -> Self {
+        Self {
+            dialect: config.dialect,
+            termination: config.termination.clone(),
+            final_answer_format: config.final_answer_format.clone(),
+        }
+    }
+}
+
+/// A guarded write refused because the session already recorded a different
+/// value for that fact.
+///
+/// This is the one typed refusal for the durable RLM bag. Hosts match the
+/// variant and its `recorded` / `requested` values; the message below is the
+/// single place any prose for it is produced, so no caller ever has to match on
+/// a string to tell a pin conflict from an unrelated failure.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RlmSessionConfigConflict {
+    Dialect {
+        recorded: RlmDialect,
+        requested: RlmDialect,
+    },
+    FinalAnswerFormat {
+        recorded: RlmFinalAnswerFormat,
+        requested: RlmFinalAnswerFormat,
+    },
+    Termination {
+        recorded: Box<RlmTermination>,
+        requested: Box<RlmTermination>,
+    },
+}
+
+impl RlmSessionConfigConflict {
+    /// The durable fact that was already pinned.
+    pub fn field(&self) -> &'static str {
+        match self {
+            Self::Dialect { .. } => "dialect",
+            Self::FinalAnswerFormat { .. } => "final_answer_format",
+            Self::Termination { .. } => "termination",
+        }
+    }
+}
+
+impl std::fmt::Display for RlmSessionConfigConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (recorded, requested) = match self {
+            Self::Dialect {
+                recorded,
+                requested,
+            } => (
+                recorded.language_id().to_string(),
+                requested.language_id().to_string(),
+            ),
+            Self::FinalAnswerFormat {
+                recorded,
+                requested,
+            } => (format!("{recorded:?}"), format!("{requested:?}")),
+            Self::Termination {
+                recorded,
+                requested,
+            } => (format!("{recorded:?}"), format!("{requested:?}")),
+        };
+        write!(
+            f,
+            "RLM session {} is durably pinned to `{recorded}` and cannot be set to `{requested}`",
+            self.field()
+        )
+    }
+}
+
+impl std::error::Error for RlmSessionConfigConflict {}
 
 /// Reads a present `dialect` key, refusing an explicit `null`.
 ///

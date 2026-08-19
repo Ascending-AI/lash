@@ -38,7 +38,7 @@ pub(crate) fn decode_rlm_options(
 pub(crate) fn decode_rlm_termination_options(
     options: &lash_core::ProtocolTurnOptions,
 ) -> Result<RlmTermination, String> {
-    decode_rlm_options(options).map(|options| options.termination)
+    decode_rlm_options(options).map(|options| options.effective_termination())
 }
 
 /// Render the "Context Budget" line for the volatile turn-tail message.

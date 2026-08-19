@@ -30,7 +30,9 @@ pub use plugin::{
     ExecutionBound, ExecutionBounds, LashlangCompileSurface, LashlangCompileSurfaceRequest,
     LashlangModuleCompileError, LashlangModuleCompileRequest, ModuleCompileOutput,
     RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmLanguageFeatures, RlmProtocolPluginConfig,
-    RlmProtocolPluginFactory, rlm_lashlang_surface, rlm_protocol_config,
+    RlmProtocolPluginFactory, RlmSessionConfigDecodeError, apply_rlm_session_config_if_unset,
+    apply_rlm_session_config_post_open, rlm_lashlang_surface, rlm_protocol_config,
+    rlm_session_config, rlm_session_config_options,
 };
 pub use projection::{
     ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,

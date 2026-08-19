@@ -414,7 +414,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:340#let parent: lash::CancellationToken = lash::CancellationToken::new();"
+usage = "examples/docs-snippets/src/embedding_turns.rs:349#let parent: lash::CancellationToken = lash::CancellationToken::new();"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -423,8 +423,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:343#lash::CancellationToken::cancel(&parent);"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:346#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:352#lash::CancellationToken::cancel(&parent);"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:355#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
 
 [[api]]
 symbol = "lash::CancellationToken::cancelled"
@@ -432,8 +432,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:353#lash::CancellationToken::cancelled(&child),"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:350#assert!(lash::CancellationToken::is_cancelled(&child));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:362#lash::CancellationToken::cancelled(&child),"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:359#assert!(lash::CancellationToken::is_cancelled(&child));"
 
 [[api]]
 symbol = "lash::CancellationToken::cancelled_owned"
@@ -441,7 +441,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:359#let owned_waiter = tokio::spawn(lash::CancellationToken::cancelled_owned(owned.clone()));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:368#let owned_waiter = tokio::spawn(lash::CancellationToken::cancelled_owned(owned.clone()));"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -450,7 +450,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:341#let child = lash::CancellationToken::child_token(&parent);"
+usage = "examples/docs-snippets/src/embedding_turns.rs:350#let child = lash::CancellationToken::child_token(&parent);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -459,8 +459,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:380#drop(lash::CancellationToken::drop_guard(guarded));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:382#lash::CancellationToken::is_cancelled(&observed_guarded),"
+usage = "examples/docs-snippets/src/embedding_turns.rs:389#drop(lash::CancellationToken::drop_guard(guarded));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:391#lash::CancellationToken::is_cancelled(&observed_guarded),"
 
 [[api]]
 symbol = "lash::CancellationToken::drop_guard_ref"
@@ -468,8 +468,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:387#drop(lash::CancellationToken::drop_guard_ref(&borrowed_guarded));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:389#lash::CancellationToken::is_cancelled(&borrowed_guarded),"
+usage = "examples/docs-snippets/src/embedding_turns.rs:396#drop(lash::CancellationToken::drop_guard_ref(&borrowed_guarded));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:398#lash::CancellationToken::is_cancelled(&borrowed_guarded),"
 
 [[api]]
 symbol = "lash::CancellationToken::is_cancelled"
@@ -477,8 +477,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:350#assert!(lash::CancellationToken::is_cancelled(&child));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:350#assert!(lash::CancellationToken::is_cancelled(&child));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:359#assert!(lash::CancellationToken::is_cancelled(&child));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:359#assert!(lash::CancellationToken::is_cancelled(&child));"
 
 [[api]]
 symbol = "lash::CancellationToken::new"
@@ -486,7 +486,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:340#let parent: lash::CancellationToken = lash::CancellationToken::new();"
+usage = "examples/docs-snippets/src/embedding_turns.rs:349#let parent: lash::CancellationToken = lash::CancellationToken::new();"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -495,8 +495,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:346#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:346#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:355#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:355#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -505,8 +505,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:370#tokio::time::timeout(Duration::from_secs(1), owned_work)"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:370#tokio::time::timeout(Duration::from_secs(1), owned_work)"
+usage = "examples/docs-snippets/src/embedding_turns.rs:379#tokio::time::timeout(Duration::from_secs(1), owned_work)"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:379#tokio::time::timeout(Duration::from_secs(1), owned_work)"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -1813,7 +1813,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1308#let error = AppError::session_open(lash::EmbedError::Session("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1286#let error = AppError::session_open(lash::EmbedError::Session("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -1877,8 +1877,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1301#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1301#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -3029,7 +3029,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::commands"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:729#.commands()"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:733#.commands()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:729, inside `enqueue_tool_catalog_refresh`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:198 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `enqueue_tool_catalog_refresh` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -4776,7 +4776,7 @@ availability = "default+all-features"
 aliases = ["lash::admin::SessionCommandAdmin", "lash::prelude::SessionCommandAdmin"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:730#.refresh_tool_catalog("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:734#.refresh_tool_catalog("
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:730, inside `enqueue_tool_catalog_refresh`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:198 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `enqueue_tool_catalog_refresh` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -4786,7 +4786,7 @@ availability = "default+all-features"
 aliases = ["lash::admin::SessionCommandAdmin::refresh_tool_catalog", "lash::prelude::SessionCommandAdmin::refresh_tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:730#.refresh_tool_catalog("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:734#.refresh_tool_catalog("
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:730, inside `enqueue_tool_catalog_refresh`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:198 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `enqueue_tool_catalog_refresh` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -5141,7 +5141,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1232#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1210#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5304,7 +5304,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1232#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1210#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5314,8 +5314,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1310#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1318#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1288#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1296#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -5324,8 +5324,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1311#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1318#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1289#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1296#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionSpec"
@@ -5691,7 +5691,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::event", "lash_core::TurnActivity::event"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1317#match &activity.event {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1321#match &activity.event {"
 
 [[api]]
 symbol = "lash::TurnActivity::id"
@@ -5710,8 +5710,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::independent", "lash_core::TurnActivity::independent"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1401#sink.emit(TurnActivity::independent("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1420#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1405#sink.emit(TurnActivity::independent("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1424#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivity::new"
@@ -5720,7 +5720,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::new", "lash_core::TurnActivity::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1387#sink.emit(TurnActivity::new("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1391#sink.emit(TurnActivity::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5750,7 +5750,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId", "lash_core::TurnActivityId"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1388#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1392#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5769,7 +5769,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId::new", "lash_core::TurnActivityId::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1388#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1392#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6288,7 +6288,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::event_type", "lash_core::TurnCause::event_type"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1198#event_type: \"process.wake\".to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1200#event_type: \"process.wake\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6298,7 +6298,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::id", "lash_core::TurnCause::id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1197#id: \"wake:abc\".to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1199#id: \"wake:abc\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6308,7 +6308,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::origin", "lash_core::TurnCause::origin"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1199#origin: lash_core::MessageOrigin::Process {"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1201#origin: lash_core::MessageOrigin::Process {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6318,7 +6318,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::text", "lash_core::TurnCause::text"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1206#text: \"Background process wake\\nProcess: process-1\\nEvent: process.wake #7\\nWake input:\\nblue button pressed\".to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1208#text: \"Background process wake\\nProcess: process-1\\nEvent: process.wake #7\\nWake input:\\nblue button pressed\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6346,7 +6346,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta", "lash_core::TurnEvent::AssistantProseDelta"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1410#TurnEvent::AssistantProseDelta {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1322#TurnEvent::AssistantProseDelta {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6356,8 +6356,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta::text", "lash_core::TurnEvent::AssistantProseDelta::text"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1390#text: \"kept \".into(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1420#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1394#text: \"kept \".into(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1424#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage"
@@ -8342,7 +8342,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentCreateMeta"]
 area = "attachments"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:175#lash::attachments::AttachmentCreateMeta::new("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:179#lash::attachments::AttachmentCreateMeta::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -8370,7 +8370,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentCreateMeta::new"]
 area = "attachments"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:175#lash::attachments::AttachmentCreateMeta::new("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:179#lash::attachments::AttachmentCreateMeta::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -8380,7 +8380,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentCreateMeta::type_metadata"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:168#let type_metadata = png_dimensions(&bytes).map(|(width, height)| {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:172#let type_metadata = png_dimensions(&bytes).map(|(width, height)| {"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:181#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
@@ -8604,7 +8604,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentTypeMetadata::image"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:169#lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:173#lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))"
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:176#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
 
 [[api]]
@@ -12173,7 +12173,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::SessionObservation"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:111#cursor: observation_snapshot.cursor,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:115#cursor: observation_snapshot.cursor,"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(observation.cursor, gap.latest_cursor);"
 
 [[api]]
@@ -12183,7 +12183,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::SessionObservation::cursor"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:111#cursor: observation_snapshot.cursor,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:115#cursor: observation_snapshot.cursor,"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(observation.cursor, gap.latest_cursor);"
 
 [[api]]
@@ -17514,7 +17514,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::chronological_projection"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:313#.chronological_projection()"
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:317#.chronological_projection()"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/chat_projection.rs:313, inside `transcript_rows_from_committed`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2206 asserts an unrelated expression in `send_turn_state_projection_stays_readable_and_settles_to_durable_truth`, and `transcript_rows_from_committed` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -17616,7 +17616,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::token_usage"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:55#let used = ctx.state.token_usage().total().max(0) as usize;"
+usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:57#let used = ctx.state.token_usage().total().max(0) as usize;"
 
 [[api]]
 symbol = "lash::persistence::SessionReadView::turn_index"
@@ -18941,8 +18941,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1301#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1301#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -18952,8 +18952,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1298#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1301#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1276#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -20453,7 +20453,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext", "lash_core::plugin::hooks::CheckpointHookContext"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::plugins::CheckpointHookContext` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint` because its canonical identity is the lash-core one. Consumer class: the RLM protocol crate and first-party plugin crates -- this type is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:47, crates/lash-protocol-rlm/src/plugin/protocol_session.rs:463, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: `lash::plugins::CheckpointHookContext` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint` because its canonical identity is the lash-core one. Consumer class: the RLM protocol crate and first-party plugin crates -- this type is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:49, crates/lash-protocol-rlm/src/plugin/protocol_session.rs:629, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::checkpoint"
@@ -20471,7 +20471,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext::session_graph", "lash_core::plugin::hooks::CheckpointHookContext::session_graph"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_graph` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:469, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_graph` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:635, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::session_id"
@@ -20480,7 +20480,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext::session_id", "lash_core::plugin::hooks::CheckpointHookContext::session_id"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:464, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_id` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:630, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::session_lifecycle"
@@ -20489,7 +20489,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext::session_lifecycle", "lash_core::plugin::hooks::CheckpointHookContext::session_lifecycle"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_lifecycle` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:468, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::session_lifecycle` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer evidence: this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:634, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CheckpointHookContext::sessions"
@@ -20507,7 +20507,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::CheckpointHookContext::state", "lash_core::plugin::hooks::CheckpointHookContext::state"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::state` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:50, crates/lash-protocol-rlm/src/plugin/protocol_session.rs:86, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::CheckpointHookContext::state` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::apply_checkpoint`. Consumer class: the RLM protocol crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:52, crates/lash-protocol-rlm/src/plugin/protocol_session.rs:88, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::CompactionContext"
@@ -20750,7 +20750,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents", "lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:474, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:640, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitRuntimeEvents::events"
@@ -20759,7 +20759,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents::events", "lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents::events"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents::events` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: the RLM protocol crate and core runtime internals -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:474, crates/lash-core/src/tool_dispatch/directives.rs:104, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents::events` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: the RLM protocol crate and core runtime internals -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs:640, crates/lash-core/src/tool_dispatch/directives.rs:104, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitTrace"
@@ -23314,7 +23314,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionGraphService::append_session_nodes"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:95#async fn append_session_nodes("
+usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:97#async fn append_session_nodes("
 
 [[api]]
 symbol = "lash::plugins::SessionGraphService::emit_trace_event"
@@ -25184,7 +25184,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessAwaitOutput::terminal_status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1153#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1157#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:211#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -26668,9 +26668,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::originator_id"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:335#originator_id: Some(session_id.to_string()),"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:313#originator_id: Some(session_id.to_string()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1051#assert!(!rail.contains(&reclaimed), \"reclaimed work leaves the rail\");"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:335, which scopes session-delete retention to the rows that session originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1051 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the scoped row left the runtime-wide work rail."
+reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:313, which scopes session-delete retention to the rows that session originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1051 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the scoped row left the runtime-wide work rail."
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::status"
@@ -26679,7 +26679,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:912#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:916#status: lash::process::ProcessStatusFilter::Any,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:211#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -27096,9 +27096,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessPruneReport::pruned_trigger_deliveries"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:283#\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:261#\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1048#assert_eq!(retention.pruned_trigger_deliveries, 0, \"no delivery reserved\");"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:283, which records what session-delete retention reclaimed; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1048 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that rows holding no trigger delivery reconcile none."
+reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:261, which records what session-delete retention reclaimed; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1048 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that rows holding no trigger delivery reconcile none."
 
 [[api]]
 symbol = "lash::process::ProcessRecord"
@@ -28719,7 +28719,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:912#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:916#status: lash::process::ProcessStatusFilter::Any,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -29116,7 +29116,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver", "lash_core::runtime::process_work_driver::ProcessWorkDriver"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1123#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1127#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:152#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -29135,7 +29135,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver::await_terminal", "lash_core::runtime::process_work_driver::ProcessWorkDriver::await_terminal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1123#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1127#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:152#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -29294,7 +29294,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkObserver::snapshot_all"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:911#.snapshot_all(&lash::process::ProcessListFilter {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:915#.snapshot_all(&lash::process::ProcessListFilter {"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:211#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -29446,9 +29446,9 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:331#.prune("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:309#.prune("
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1046#assert_eq!(retention.pruned_processes, 1, \"one finished row reclaimed\");"
-reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:331, where deleting a session reclaims the terminal process rows it originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1046 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the reclamation reports one pruned process."
+reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs:309, where deleting a session reclaims the terminal process rows it originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs:1046 in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the reclamation reports one pruned process."
 
 [[api]]
 symbol = "lash::process::Processes::redrive_wake_delivery"
@@ -32930,7 +32930,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1235#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1239#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -32939,7 +32939,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1235#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1239#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -32948,7 +32948,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1235#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1239#Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1235, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:198 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -32975,7 +32975,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1288#gap: Box::new(gap),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1292#gap: Box::new(gap),"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:724#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -32984,7 +32984,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1278#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1282#Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:724#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -35793,7 +35793,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1236#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1240#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1236, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:198 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -44977,22 +44977,6 @@ disposition = "unused-add"
 reason = "The current example use of lash::rlm::RlmProtocolPluginFactory::with_projection_resolver is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::rlm::RlmSessionBuilderExt"
-kind = "trait"
-availability = "all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "The current example use of lash::rlm::RlmSessionBuilderExt is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
-
-[[api]]
-symbol = "lash::rlm::RlmSessionBuilderExt::final_answer_format"
-kind = "function"
-availability = "all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "The current example use of lash::rlm::RlmSessionBuilderExt::final_answer_format is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
-
-[[api]]
 symbol = "lash::rlm::RlmTurnBuilderExt"
 kind = "trait"
 availability = "all-features"
@@ -45346,7 +45330,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssembledTurn::cancellation", "lash_core::runtime::AssembledTurn::cancellation"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::cancellation` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and facade agent-scenario tests -- this field is exercised in-repo at crates/lash/src/turn.rs:1377, crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2375, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::cancellation` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and facade agent-scenario tests -- this field is exercised in-repo at crates/lash/src/turn.rs:1377, crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2427, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::AssembledTurn::children_usage"
@@ -45382,7 +45366,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssembledTurn::llm_calls", "lash_core::runtime::AssembledTurn::llm_calls"]
 area = "protocol"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::llm_calls` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and facade agent-scenario tests -- this field is exercised in-repo at crates/lash/src/turn.rs:1381, crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2412, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::llm_calls` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and facade agent-scenario tests -- this field is exercised in-repo at crates/lash/src/turn.rs:1381, crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2464, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::AssembledTurn::outcome"
@@ -49150,8 +49134,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1236#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1301#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1214#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -49160,7 +49144,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::cause"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1239#return match error.cause.as_ref() {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1217#return match error.cause.as_ref() {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::code"
@@ -49179,8 +49163,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1236#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1301#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1214#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::is_retryable"
@@ -50672,7 +50656,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::TurnTerminalAwaitTimeout"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:400#err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:378#err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -50718,7 +50702,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::as_str"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1241#Some((session_id.as_str(), Some(error.code.as_str())))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1219#Some((session_id.as_str(), Some(error.code.as_str())))"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::from_wire_code"
@@ -59869,7 +59853,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContext::for_session"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:554#.map(|session_id| TraceContext::default().for_session(session_id))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:532#.map(|session_id| TraceContext::default().for_session(session_id))"
 
 [[api]]
 symbol = "lash::tracing::TraceContext::for_turn"
@@ -60225,7 +60209,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:558#TraceEvent::Custom {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:536#TraceEvent::Custom {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -60235,7 +60219,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom::name"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:559#name: format!(\"agent_workbench.{name}\"),"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:537#name: format!(\"agent_workbench.{name}\"),"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::Custom::payload"
@@ -60244,7 +60228,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom::payload"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:141#payload,"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:119#payload,"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::EffectEnvelopeDiff"
@@ -61243,7 +61227,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1172#state.lashlang_execution.graphs(),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1176#state.lashlang_execution.graphs(),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs:1172, inside `list_lashlang_graphs`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs:198 asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `list_lashlang_graphs` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -63598,7 +63582,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::for_session"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1517#.for_session(session_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1521#.for_session(session_id),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -63798,7 +63782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOperationError::Store::message"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1302#assert_eq!(error.message, deleted_session_message(\"retired-session\"));"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.message, deleted_session_message(\"retired-session\"));"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -64360,7 +64344,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionFilter"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:510#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:514#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -64397,7 +64381,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionFilter::for_session"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:510#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:514#.list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -64474,7 +64458,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionFilter::subscription_key"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:641#filter.subscription_key = Some(subscription_key.to_string());"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:645#filter.subscription_key = Some(subscription_key.to_string());"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionFilter::target"
@@ -64780,7 +64764,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::empty_trigger_source_key"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1492#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1496#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -64854,7 +64838,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssistantOutput", "lash_core::runtime::AssistantOutput"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::turn::AssistantOutput` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::assistant_output` because its canonical identity is the lash-core one. Consumer class: facade agent-scenario tests and the facade boundary type test -- this type is exercised in-repo at crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2381, crates/lash/tests/ui/facade_boundary_types_are_public.rs:471, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: `lash::turn::AssistantOutput` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::assistant_output` because its canonical identity is the lash-core one. Consumer class: facade agent-scenario tests and the facade boundary type test -- this type is exercised in-repo at crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2433, crates/lash/tests/ui/facade_boundary_types_are_public.rs:471, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::turn::AssistantOutput::raw_text"
@@ -64872,7 +64856,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssistantOutput::safe_text", "lash_core::runtime::AssistantOutput::safe_text"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::turn::AssistantOutput::safe_text` directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::assistant_output`. Consumer class: facade agent-scenario tests and the remote-protocol crate -- this field is exercised in-repo at crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2377, crates/lash-remote-protocol/src/core_conversions_tests.rs:869, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::turn::AssistantOutput::safe_text` directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::assistant_output`. Consumer class: facade agent-scenario tests and the remote-protocol crate -- this field is exercised in-repo at crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2429, crates/lash-remote-protocol/src/core_conversions_tests.rs:869, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::turn::AssistantOutput::state"
@@ -65337,7 +65321,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TokenUsage::total"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:55#let used = ctx.state.token_usage().total().max(0) as usize;"
+usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:57#let used = ctx.state.token_usage().total().max(0) as usize;"
 
 [[api]]
 symbol = "lash::usage::TokenUsageOverflow"
@@ -70345,7 +70329,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:571#id: id.to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:573#id: id.to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70354,7 +70338,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:574#origin: None,"
+usage = "crates/lash-protocol-rlm/src/driver.rs:576#origin: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70363,7 +70347,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:573#parts: vec![Part::text(format!(\"{id}.p0\"), text.to_string(), None)].into(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:575#parts: vec![Part::text(format!(\"{id}.p0\"), text.to_string(), None)].into(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70372,7 +70356,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:572#role: MessageRole::User,"
+usage = "crates/lash-protocol-rlm/src/driver.rs:574#role: MessageRole::User,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -71234,7 +71218,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/rlm.rs:145 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash/src/rlm.rs:214 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::facade_support::ProviderFailure"
@@ -72434,7 +72418,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-protocol-rlm/src/driver.rs:315 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash-protocol-rlm/src/driver.rs:316 as a consumer of this path and the checker cannot tie that line to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::LlmRequest::tool_list"
@@ -72635,7 +72619,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2429#assert_eq!(result.usage.input_tokens, 10);"
+usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2481#assert_eq!(result.usage.input_tokens, 10);"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -76231,7 +76215,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::OutputState"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::runtime::AssistantOutput::state` hands `OutputState` to hosts (runtime embedders). Consumer class: facade agent-scenario tests and core runtime assembly tests -- this type is exercised in-repo at crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2384, crates/lash-core/src/runtime/tests/assembler.rs:190, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::runtime::AssistantOutput::state` hands `OutputState` to hosts (runtime embedders). Consumer class: facade agent-scenario tests and core runtime assembly tests -- this type is exercised in-repo at crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2436, crates/lash-core/src/runtime/tests/assembler.rs:190, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::OutputState::EmptyOutput"
@@ -77501,7 +77485,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:63#pending_message_nodes.extend(node.children);"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:67#pending_message_nodes.extend(node.children);"
 reason = "The agent-workbench settled-reconciliation route walks the tree through this field; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
@@ -77510,7 +77494,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:59#node.message.origin.as_ref()"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:63#node.message.origin.as_ref()"
 reason = "The agent-workbench settled-reconciliation route reads each node's message to recover the turn that produced it; the example host runs it, but no executed assertion observes the field directly."
 
 [[api]]
@@ -83970,16 +83954,7 @@ kind = "trait"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:310#read_view.rlm_dialect().language_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:386#transcript_code_languages(&projected),"
-
-[[api]]
-symbol = "lash::rlm::RlmSessionReadViewExt::rlm_dialect"
-kind = "function"
-availability = "all-features"
-area = "protocol"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:310#read_view.rlm_dialect().language_id()"
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:311#.rlm_config()"
 assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:386#transcript_code_languages(&projected),"
 
 [[api]]
@@ -83989,7 +83964,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSessionContext::protocol_turn_options"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Generic plugin-factory reconstruction contract, consumed by the RLM protocol factory before protocol restore at crates/lash-protocol-rlm/src/control_tools.rs:495. The public host-facing dialect choice is exercised through lash::rlm::RlmSessionBuilderExt::rlm_dialect instead of exposing this persistence plumbing in an application example."
+reason = "Generic plugin-factory reconstruction contract, consumed by the RLM protocol factory before protocol restore at crates/lash-protocol-rlm/src/control_tools.rs:495. The public host-facing dialect statement is exercised through the plugin options seam in examples/docs-snippets/src/execution_modes.rs instead of exposing this persistence plumbing in an application example."
 
 [[api]]
 symbol = "lash::rlm::RlmDialect"
@@ -84015,8 +83990,8 @@ kind = "variant"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/execution_modes.rs:65#assert_eq!(RlmDialect::Typescript.language_id(), \"typescript\");"
-assertion = "examples/docs-snippets/src/execution_modes.rs:72#typescript.read_view().protocol_turn_options().payload[\"dialect\"],"
+usage = "examples/docs-snippets/src/execution_modes.rs:69#assert_eq!(RlmDialect::Typescript.language_id(), \"typescript\");"
+assertion = "examples/docs-snippets/src/execution_modes.rs:82#typescript.read_view().protocol_turn_options().payload[\"dialect\"],"
 
 [[api]]
 symbol = "lash::rlm::RlmDialect::language_id"
@@ -84024,8 +83999,8 @@ kind = "function"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/execution_modes.rs:65#assert_eq!(RlmDialect::Typescript.language_id(), \"typescript\");"
-assertion = "examples/docs-snippets/src/execution_modes.rs:65#assert_eq!(RlmDialect::Typescript.language_id(), \"typescript\");"
+usage = "examples/docs-snippets/src/execution_modes.rs:69#assert_eq!(RlmDialect::Typescript.language_id(), \"typescript\");"
+assertion = "examples/docs-snippets/src/execution_modes.rs:69#assert_eq!(RlmDialect::Typescript.language_id(), \"typescript\");"
 
 [[api]]
 symbol = "lash::rlm::RlmDialect::ALL"
@@ -84033,8 +84008,8 @@ kind = "assoc_const"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/execution_modes.rs:81#RlmDialect::ALL.map(RlmDialect::language_id),"
-assertion = "examples/docs-snippets/src/execution_modes.rs:81#RlmDialect::ALL.map(RlmDialect::language_id),"
+usage = "examples/docs-snippets/src/execution_modes.rs:91#RlmDialect::ALL.map(RlmDialect::language_id),"
+assertion = "examples/docs-snippets/src/execution_modes.rs:91#RlmDialect::ALL.map(RlmDialect::language_id),"
 
 [[api]]
 symbol = "lash::rlm::RlmDialect::from_language_id"
@@ -84042,8 +84017,8 @@ kind = "function"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/execution_modes.rs:88#assert_eq!(RlmDialect::from_language_id(\"lashscript\"), None);"
-assertion = "examples/docs-snippets/src/execution_modes.rs:88#assert_eq!(RlmDialect::from_language_id(\"lashscript\"), None);"
+usage = "examples/docs-snippets/src/execution_modes.rs:98#assert_eq!(RlmDialect::from_language_id(\"lashscript\"), None);"
+assertion = "examples/docs-snippets/src/execution_modes.rs:98#assert_eq!(RlmDialect::from_language_id(\"lashscript\"), None);"
 
 [[api]]
 symbol = "lash::rlm::RlmDialect::registered_language_ids"
@@ -84051,17 +84026,8 @@ kind = "function"
 availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/execution_modes.rs:90#RlmDialect::registered_language_ids(),"
-assertion = "examples/docs-snippets/src/execution_modes.rs:91#\"`lashlang`, `typescript`\""
-
-[[api]]
-symbol = "lash::rlm::RlmSessionBuilderExt::rlm_dialect"
-kind = "function"
-availability = "all-features"
-area = "protocol"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/execution_modes.rs:68#.rlm_dialect(RlmDialect::Typescript)?"
-assertion = "examples/docs-snippets/src/execution_modes.rs:72#typescript.read_view().protocol_turn_options().payload[\"dialect\"],"
+usage = "examples/docs-snippets/src/execution_modes.rs:100#RlmDialect::registered_language_ids(),"
+assertion = "examples/docs-snippets/src/execution_modes.rs:101#\"`lashlang`, `typescript`\""
 
 [[api]]
 symbol = "lash::runtime::LashRuntime::from_environment_with_plugin_options"
@@ -89176,3 +89142,342 @@ availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
 usage = "crates/lash-tools/src/shell/mod.rs:299#.external_launch_audit(detached_process_id);"
+
+[[api]]
+symbol = "lash::rlm::RLM_PROTOCOL_PLUGIN_ID"
+kind = "constant"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:73#RLM_PROTOCOL_PLUGIN_ID,"
+assertion = "examples/docs-snippets/src/execution_modes.rs:82#typescript.read_view().protocol_turn_options().payload[\"dialect\"],"
+
+[[api]]
+symbol = "lash::rlm::RlmCreateExtras"
+kind = "struct"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:75#dialect: Some(RlmDialect::Typescript),"
+assertion = "examples/docs-snippets/src/execution_modes.rs:82#typescript.read_view().protocol_turn_options().payload[\"dialect\"],"
+
+[[api]]
+symbol = "lash::rlm::RlmCreateExtras::dialect"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:75#dialect: Some(RlmDialect::Typescript),"
+assertion = "examples/docs-snippets/src/execution_modes.rs:82#typescript.read_view().protocol_turn_options().payload[\"dialect\"],"
+
+[[api]]
+symbol = "lash::rlm::RlmCreateExtras::final_answer_format"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/embedding_turns.rs:318#final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),"
+reason = "Syntax-only evidence: the recorded example anchor states the durable format when the session opens, and no executed assertion in the docs snippets observes the resulting answer shape. Add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::rlm::RlmCreateExtras::termination"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The durable termination is written through RlmSessionConfig::termination, which the guarded write encodes into this field; a host that names the field directly is stating the same fact one layer lower, and the layer hosts are shown is the typed config."
+
+[[api]]
+symbol = "lash::rlm::RlmCreateExtras::effective_termination"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "internal-consumed"
+usage = "crates/lash-protocol-rlm/src/driver.rs:393#let termination = options.effective_termination();"
+reason = "Resolves the absent-means-Natural default at the point of use, consumed by the RLM driver's prompt projection; a host reads the recorded value through RlmSessionConfig instead."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig"
+kind = "struct"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:114#assert!(RlmSessionConfig::new().is_empty());"
+assertion = "examples/docs-snippets/src/execution_modes.rs:114#assert!(RlmSessionConfig::new().is_empty());"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::new"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:114#assert!(RlmSessionConfig::new().is_empty());"
+assertion = "examples/docs-snippets/src/execution_modes.rs:114#assert!(RlmSessionConfig::new().is_empty());"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::dialect"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:113#assert_eq!(typescript.rlm_config().dialect, stated);"
+assertion = "examples/docs-snippets/src/execution_modes.rs:113#assert_eq!(typescript.rlm_config().dialect, stated);"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::dialect"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:137#.set_rlm_config_if_unset(RlmSessionConfig::new().dialect(RlmDialect::Lashlang))"
+assertion = "examples/docs-snippets/src/execution_modes.rs:143#assert_eq!(conflict.field(), \"dialect\");"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::termination"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:116#assert_eq!(recorded.termination, None);"
+assertion = "examples/docs-snippets/src/execution_modes.rs:116#assert_eq!(recorded.termination, None);"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::termination"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:127#RlmSessionConfig::new().termination(RlmTermination::FinishRequired { schema: None }),"
+assertion = "examples/docs-snippets/src/execution_modes.rs:132#assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::final_answer_format"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The recorded final-answer format is read through the same RlmSessionConfig every example reads its dialect and termination from; no reference host branches on the format, so no example asserts this field independently."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::final_answer_format"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The format is stated at open through the plugin options seam in examples/docs-snippets/src/embedding_turns.rs; the post-open builder for it exists for symmetry with the other two facts and has no reference host that prefers it after open."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfig::is_empty"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:114#assert!(RlmSessionConfig::new().is_empty());"
+assertion = "examples/docs-snippets/src/execution_modes.rs:114#assert!(RlmSessionConfig::new().is_empty());"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionExt"
+kind = "trait"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:113#assert_eq!(typescript.rlm_config().dialect, stated);"
+assertion = "examples/docs-snippets/src/execution_modes.rs:113#assert_eq!(typescript.rlm_config().dialect, stated);"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionExt::rlm_config"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:113#assert_eq!(typescript.rlm_config().dialect, stated);"
+assertion = "examples/docs-snippets/src/execution_modes.rs:113#assert_eq!(typescript.rlm_config().dialect, stated);"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionExt::set_rlm_config_if_unset"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:126#.set_rlm_config_if_unset("
+assertion = "examples/docs-snippets/src/execution_modes.rs:132#assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionReadViewExt::rlm_config"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:311#.rlm_config()"
+assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:386#transcript_code_languages(&projected),"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigError"
+kind = "enum"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:139#assert!(matches!(refused, Err(RlmSessionConfigError::Conflict(_))));"
+assertion = "examples/docs-snippets/src/execution_modes.rs:139#assert!(matches!(refused, Err(RlmSessionConfigError::Conflict(_))));"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigError::Conflict"
+kind = "variant"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:139#assert!(matches!(refused, Err(RlmSessionConfigError::Conflict(_))));"
+assertion = "examples/docs-snippets/src/execution_modes.rs:139#assert!(matches!(refused, Err(RlmSessionConfigError::Conflict(_))));"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigError::Conflict::0"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:139#assert!(matches!(refused, Err(RlmSessionConfigError::Conflict(_))));"
+assertion = "examples/docs-snippets/src/execution_modes.rs:139#assert!(matches!(refused, Err(RlmSessionConfigError::Conflict(_))));"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigError::Session"
+kind = "variant"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The non-refusal arm of the guarded write, carrying an EmbedError a host handles the same way it handles any other session failure; a reference host that distinguishes it would be branching on plumbing rather than on the durable fact."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigError::Session::0"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The EmbedError carried by the non-refusal arm; see lash::rlm::RlmSessionConfigError::Session."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict"
+kind = "enum"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:143#assert_eq!(conflict.field(), \"dialect\");"
+assertion = "examples/docs-snippets/src/execution_modes.rs:143#assert_eq!(conflict.field(), \"dialect\");"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::field"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:143#assert_eq!(conflict.field(), \"dialect\");"
+assertion = "examples/docs-snippets/src/execution_modes.rs:143#assert_eq!(conflict.field(), \"dialect\");"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::Dialect"
+kind = "variant"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:144#assert!(matches!(conflict, RlmSessionConfigConflict::Dialect { .. }));"
+assertion = "examples/docs-snippets/src/execution_modes.rs:144#assert!(matches!(conflict, RlmSessionConfigConflict::Dialect { .. }));"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::Dialect::recorded"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:152#assert_eq!(*recorded, RlmDialect::Typescript);"
+assertion = "examples/docs-snippets/src/execution_modes.rs:152#assert_eq!(*recorded, RlmDialect::Typescript);"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::Dialect::requested"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:153#assert_eq!(*requested, RlmDialect::Lashlang);"
+assertion = "examples/docs-snippets/src/execution_modes.rs:153#assert_eq!(*requested, RlmDialect::Lashlang);"
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat"
+kind = "variant"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The final-answer format refusal of the same typed conflict the dialect variant is asserted through; no reference host states a final-answer format that disagrees with a recorded one, and manufacturing one in an example would assert the enum's shape rather than a host outcome."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat::recorded"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Carried by the final-answer format refusal; see lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat::requested"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Carried by the final-answer format refusal; see lash::rlm::RlmSessionConfigConflict::FinalAnswerFormat."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::Termination"
+kind = "variant"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The termination refusal of the same typed conflict the dialect variant is asserted through; no reference host states a termination that disagrees with a recorded one, and manufacturing one in an example would assert the enum's shape rather than a host outcome."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::Termination::recorded"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Carried by the termination refusal; see lash::rlm::RlmSessionConfigConflict::Termination."
+
+[[api]]
+symbol = "lash::rlm::RlmSessionConfigConflict::Termination::requested"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Carried by the termination refusal; see lash::rlm::RlmSessionConfigConflict::Termination."
+
+[[api]]
+symbol = "lash::rlm::RlmTermination"
+kind = "enum"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:132#assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));"
+assertion = "examples/docs-snippets/src/execution_modes.rs:132#assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));"
+
+[[api]]
+symbol = "lash::rlm::RlmTermination::FinishRequired"
+kind = "variant"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:132#assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));"
+assertion = "examples/docs-snippets/src/execution_modes.rs:132#assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));"
+
+[[api]]
+symbol = "lash::rlm::RlmTermination::FinishRequired::schema"
+kind = "field"
+availability = "all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/execution_modes.rs:127#RlmSessionConfig::new().termination(RlmTermination::FinishRequired { schema: None }),"
+assertion = "examples/docs-snippets/src/execution_modes.rs:132#assert!(matches!(term, Some(RlmTermination::FinishRequired { .. })));"
+
+[[api]]
+symbol = "lash::rlm::RlmTermination::Natural"
+kind = "variant"
+availability = "all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The default a session means when it records no termination; the examples assert that absence reads as None rather than as this variant, which is the distinction the Option-shaped read exists to make."

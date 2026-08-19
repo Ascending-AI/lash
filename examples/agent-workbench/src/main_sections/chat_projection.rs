@@ -307,7 +307,11 @@ fn transcript_rows_from_committed(
     // change — the case a language label exists to disambiguate.
     let language = {
         use lash::rlm::RlmSessionReadViewExt as _;
-        read_view.rlm_dialect().language_id()
+        read_view
+            .rlm_config()
+            .dialect
+            .unwrap_or_default()
+            .language_id()
     };
     read_view
         .chronological_projection()

@@ -303,13 +303,22 @@ fn terminal_value_match(result: TurnResult) -> anyhow::Result<()> {
 async fn finish_schema(core: &lash::LashCore) -> anyhow::Result<()> {
     // docs:start:finish-schema
     use lash::rlm::{
-        RlmDialect, RlmFinalAnswerFormat, RlmSessionBuilderExt as _, RlmTurnBuilderExt as _,
+        RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat,
+        RlmTurnBuilderExt as _,
     };
 
+    // Durable session facts are stated once through the plugin options seam and
+    // applied as a guarded set-if-unset write (ADR 0066).
     let session = core
         .session("analysis")
-        .rlm_dialect(RlmDialect::Typescript)?
-        .final_answer_format(RlmFinalAnswerFormat::RawFinalValue)?
+        .plugin_option(
+            RLM_PROTOCOL_PLUGIN_ID,
+            RlmCreateExtras {
+                dialect: Some(RlmDialect::Typescript),
+                final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                ..RlmCreateExtras::default()
+            },
+        )?
         .open()
         .await?;
 

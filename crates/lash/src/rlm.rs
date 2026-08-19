@@ -31,72 +31,138 @@ impl RlmTurnBuilderExt for TurnBuilder {
     }
 }
 
-/// Sugar for setting the RLM final-answer format on a plain [`SessionBuilder`].
+/// Reads the durable RLM facts a session actually recorded (ADR 0066).
 ///
-/// This writes `RlmCreateExtras` into the builder's generic open-time plugin
-/// options bag (the same seam every plugin uses), merging with any RLM options
-/// already present so it never clobbers a termination the host set through the
-/// same key.
-#[cfg(feature = "rlm")]
-pub trait RlmSessionBuilderExt: Sized {
-    /// Pin the RLM source dialect for the durable lifetime of this session.
-    fn rlm_dialect(self, dialect: lash_rlm_types::RlmDialect) -> Result<Self>;
-
-    fn final_answer_format(self, format: lash_rlm_types::RlmFinalAnswerFormat) -> Result<Self>;
-}
-
-/// Reads the dialect a session actually recorded.
+/// Every field is `Option`-shaped: `None` is "this session has stated nothing",
+/// which is a different answer from the value the default resolves to. Anything
+/// a host labels with a language — a rendered transcript, an API payload, an
+/// evidence bundle — reads the recorded value rather than repeating its own
+/// configuration, or it labels the wrong dialect precisely in the case the label
+/// exists to disambiguate.
 ///
-/// The write side of this pair ([`RlmSessionBuilderExt::rlm_dialect`]) is a
-/// *request*: the recorded pin wins, so what a host asked for and what a
-/// session runs can differ whenever the store predates the request. Anything a
-/// host labels with a language — a rendered transcript, an API payload, an
-/// evidence bundle — has to read the recorded value rather than repeat its own
-/// configuration, or it will label the wrong dialect precisely in the case the
-/// label exists to disambiguate.
+/// The write half of the pair is
+/// [`RlmSessionExt::set_rlm_config_if_unset`].
 #[cfg(feature = "rlm")]
 pub trait RlmSessionReadViewExt {
-    /// The dialect recorded on this session, defaulting to Lashlang for a
-    /// session that has recorded none (which is how every pre-dialect session
-    /// reads).
-    fn rlm_dialect(&self) -> lash_rlm_types::RlmDialect;
+    /// The RLM config this session recorded, as recorded.
+    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig;
 }
 
 #[cfg(feature = "rlm")]
 impl RlmSessionReadViewExt for lash_core::SessionReadView {
-    fn rlm_dialect(&self) -> lash_rlm_types::RlmDialect {
-        self.protocol_turn_options()
-            .decode::<lash_rlm_types::RlmCreateExtras>()
-            .ok()
-            .and_then(|extras| extras.dialect)
-            .unwrap_or_default()
+    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig {
+        lash_protocol_rlm::rlm_session_config(self.protocol_turn_options()).unwrap_or_default()
+    }
+}
+
+/// A guarded write that a session refused, or that could not reach the session.
+#[cfg(feature = "rlm")]
+#[derive(Debug)]
+pub enum RlmSessionConfigError {
+    /// The session already recorded a different value for that fact.
+    Conflict(lash_rlm_types::RlmSessionConfigConflict),
+    /// The write never got as far as the durable facts.
+    Session(EmbedError),
+}
+
+#[cfg(feature = "rlm")]
+impl std::fmt::Display for RlmSessionConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict(conflict) => write!(f, "{conflict}"),
+            Self::Session(error) => write!(f, "{error}"),
+        }
     }
 }
 
 #[cfg(feature = "rlm")]
-impl RlmSessionBuilderExt for SessionBuilder {
-    fn rlm_dialect(mut self, dialect: lash_rlm_types::RlmDialect) -> Result<Self> {
-        let mut extras = self
-            .plugin_options
-            .decode::<lash_rlm_types::RlmCreateExtras>(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        extras.dialect = Some(dialect);
-        self = self.plugin_option(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID, extras)?;
-        Ok(self)
+impl std::error::Error for RlmSessionConfigError {}
+
+#[cfg(feature = "rlm")]
+impl From<EmbedError> for RlmSessionConfigError {
+    fn from(error: EmbedError) -> Self {
+        Self::Session(error)
+    }
+}
+
+/// The durable RLM facts of an opened session: a typed read and a guarded
+/// set-if-unset write (ADR 0066).
+///
+/// There is no RLM-specific *request* API for any of these. A host that wants a
+/// fact *asserted* compares [`RlmSessionExt::rlm_config`] against what it
+/// requires and refuses loudly; a host that wants to *prefer* a value calls
+/// [`RlmSessionExt::set_rlm_config_if_unset`] and lets the recorded value win.
+/// Both are one line of host code, and neither can smooth a mismatch away by
+/// accident.
+///
+/// The one fact this surface cannot *introduce* is the dialect: the protocol
+/// plugin selects its dialect implementation when the session's plugins are
+/// built, which is before any post-open write can reach it. A session states
+/// its dialect through the plugin-agnostic
+/// [`SessionBuilder::plugin_option`](crate::SessionBuilder::plugin_option) seam
+/// keyed by [`RLM_PROTOCOL_PLUGIN_ID`] — the same seam `lash-subagents` writes a
+/// parent's dialect forward through — and that statement is applied by the same
+/// guarded set-if-unset engine, refusing with the same typed conflict. Calling
+/// this method with the dialect the session already resolved is a no-op;
+/// calling it with a different one is refused. Reading the recorded dialect
+/// *before* opening is FIG-1556's preflight surface, not this one.
+#[cfg(feature = "rlm")]
+#[async_trait::async_trait]
+pub trait RlmSessionExt {
+    /// The RLM config this session recorded, as recorded.
+    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig;
+
+    /// Write every fact the request states that the session has not recorded,
+    /// and return the resulting config.
+    ///
+    /// Restating a fact the session already recorded is a no-op, so this is
+    /// safe to call on every open. Stating a *different* value is refused with
+    /// [`RlmSessionConfigError::Conflict`] — the write never lands and the
+    /// session keeps what it recorded.
+    ///
+    /// A stated dialect is only ever *compared*, never written. An open session
+    /// is already running one dialect implementation, and a session that
+    /// recorded no dialect resolved the default one, so the comparison is
+    /// against the dialect the session is running rather than against the
+    /// recorded `Option` — writing a dialect here would leave the recorded fact
+    /// disagreeing with the running plugin.
+    ///
+    /// The write follows the durability the pin has always had: it lands with
+    /// the session's next commit.
+    async fn set_rlm_config_if_unset(
+        &self,
+        requested: lash_rlm_types::RlmSessionConfig,
+    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigError>;
+}
+
+#[cfg(feature = "rlm")]
+#[async_trait::async_trait]
+impl RlmSessionExt for crate::LashSession {
+    fn rlm_config(&self) -> lash_rlm_types::RlmSessionConfig {
+        self.read_view().rlm_config()
     }
 
-    fn final_answer_format(mut self, format: lash_rlm_types::RlmFinalAnswerFormat) -> Result<Self> {
-        let mut extras = self
-            .plugin_options
-            .decode::<lash_rlm_types::RlmCreateExtras>(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        extras.final_answer_format = Some(format);
-        self = self.plugin_option(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID, extras)?;
-        Ok(self)
+    async fn set_rlm_config_if_unset(
+        &self,
+        requested: lash_rlm_types::RlmSessionConfig,
+    ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigError> {
+        let writer = self.runtime.writer();
+        let mut runtime = writer.lock().await;
+        let recorded = lash_protocol_rlm::rlm_session_config(runtime.protocol_turn_options())
+            .map_err(|err| {
+                RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
+                    err.to_string(),
+                )))
+            })?;
+        let resolved = lash_protocol_rlm::apply_rlm_session_config_post_open(&recorded, &requested)
+            .map_err(RlmSessionConfigError::Conflict)?;
+        if resolved != recorded {
+            let options = lash_protocol_rlm::rlm_session_config_options(&resolved)
+                .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
+            runtime.set_protocol_turn_options(options);
+            self.runtime.publish_from(&runtime);
+        }
+        Ok(resolved)
     }
 }
 
@@ -108,8 +174,8 @@ pub use lash_lashlang_runtime::{
     LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
 };
 pub use lash_protocol_rlm::{
-    ExecutionBound, ExecutionBounds, NamedDataType, RlmProtocolPluginConfig,
-    RlmProtocolPluginFactory, TypeExpr, TypeField, format_type_expr,
+    ExecutionBound, ExecutionBounds, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
+    RlmProtocolPluginConfig, RlmProtocolPluginFactory, TypeExpr, TypeField, format_type_expr,
 };
 /// Projection vocabulary: register lazy host projections on a
 /// [`ProjectionRegistry`], bind projected values session-wide via
@@ -118,7 +184,10 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     ProjectionRegistry, RlmProjectedBindings, RlmTurnInputExt, rlm_session_projection_extension,
 };
-pub use lash_rlm_types::{RlmDialect, RlmFinalAnswerFormat};
+pub use lash_rlm_types::{
+    RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
+    RlmTermination,
+};
 
 /// The Lashlang compile APIs are operations over an
 /// [`RlmProtocolPluginFactory`] and a plugin host; they live in
@@ -136,7 +205,7 @@ fn rlm_termination(
 ) -> Result<TurnBuilder> {
     let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
         dialect: None,
-        termination,
+        termination: Some(termination),
         final_answer_format: None,
     })?;
     let options = builder

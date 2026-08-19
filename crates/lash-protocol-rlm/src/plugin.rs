@@ -18,3 +18,7 @@ pub use factory::{
     LashlangModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory,
     rlm_lashlang_surface, rlm_protocol_config,
 };
+pub use protocol_session::{
+    RlmSessionConfigDecodeError, apply_rlm_session_config_if_unset,
+    apply_rlm_session_config_post_open, rlm_session_config, rlm_session_config_options,
+};

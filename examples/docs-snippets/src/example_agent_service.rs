@@ -88,19 +88,26 @@ impl AppState {
         chat_id: &str,
         model: lash::ModelSpec,
     ) -> anyhow::Result<LashSession> {
-        use lash::rlm::RlmSessionBuilderExt as _;
-
-        let builder = self
+        // The dialect is a durable fact, so the host *states* it once through
+        // the plugin-agnostic options seam and lets the guarded set-if-unset
+        // write decide: it lands on a chat that recorded nothing, is a no-op on
+        // one that recorded the same dialect, and refuses on one that recorded
+        // another. A refusal reaches the operator — there is no catch-and-reopen
+        // that would quietly run the chat in its old dialect (ADR 0066).
+        let session = self
             .core
             .session(chat_id)
-            .session_spec(lash::SessionSpec::inherit().model(model));
-        let builder = match self.dialect {
-            lash::rlm::RlmDialect::Lashlang => builder,
-            lash::rlm::RlmDialect::Typescript => {
-                builder.rlm_dialect(lash::rlm::RlmDialect::Typescript)?
-            }
-        };
-        Ok(builder.open().await?)
+            .session_spec(lash::SessionSpec::inherit().model(model))
+            .plugin_option(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras {
+                    dialect: Some(self.dialect),
+                    ..lash::rlm::RlmCreateExtras::default()
+                },
+            )?
+            .open()
+            .await?;
+        Ok(session)
     }
 }
 

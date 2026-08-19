@@ -380,10 +380,15 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         .context("build version-bump core")?;
 
     let session = {
-        use lash::rlm::RlmSessionBuilderExt as _;
         core.session(session_id)
-            .rlm_dialect(dialect)
-            .context("pin the row's dialect")?
+            .plugin_option(
+                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash::rlm::RlmCreateExtras {
+                    dialect: Some(dialect),
+                    ..lash::rlm::RlmCreateExtras::default()
+                },
+            )
+            .context("state the row's dialect")?
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))?
