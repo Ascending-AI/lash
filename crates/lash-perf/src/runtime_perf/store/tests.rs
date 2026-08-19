@@ -139,6 +139,7 @@ async fn perf_store_pins_durable_claim_id_dialects() {
         )
         .await
         .expect("claim perf queued work")
+        .claim()
         .expect("perf queued claim");
     let input_claim = store
         .claim_next_turn_inputs(session_id, &lease.fence(), &owner, 1)

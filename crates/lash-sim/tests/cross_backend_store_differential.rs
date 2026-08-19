@@ -1669,6 +1669,7 @@ impl BackendRunner {
                         lash_core::testing::queued_work_claim_policy(1),
                     )
                     .await?
+                    .claim()
                     .ok_or_else(|| {
                         StoreError::Backend(format!(
                             "{} did not return the generated queued-work claim",

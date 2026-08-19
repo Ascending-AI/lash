@@ -63,3 +63,100 @@ pub(super) fn selected_drain_refusal_cause(
         },
     }
 }
+
+/// Mirrors a core empty-drain reason into the facade vocabulary.
+pub(super) fn empty_drain_reason(
+    reason: lash_core::facade_support::EmptyQueuedDrainReason,
+) -> crate::turn::EmptyQueuedDrainReason {
+    match reason {
+        lash_core::facade_support::EmptyQueuedDrainReason::ExecutionLaneBusy => {
+            crate::turn::EmptyQueuedDrainReason::ExecutionLaneBusy
+        }
+        lash_core::facade_support::EmptyQueuedDrainReason::NoDurableQueue => {
+            crate::turn::EmptyQueuedDrainReason::NoDurableQueue
+        }
+        lash_core::facade_support::EmptyQueuedDrainReason::ClaimRefused(refusal) => {
+            crate::turn::EmptyQueuedDrainReason::ClaimRefused(refusal)
+        }
+    }
+}
+
+/// Mirrors a core automatic-drain result into the facade vocabulary.
+pub(super) fn queued_turn_drain<T>(
+    drain: lash_core::facade_support::QueuedTurnDrain<T>,
+) -> crate::turn::QueuedTurnDrain<T> {
+    match drain {
+        lash_core::facade_support::QueuedTurnDrain::Ran(turn) => {
+            crate::turn::QueuedTurnDrain::Ran(turn)
+        }
+        lash_core::facade_support::QueuedTurnDrain::Empty(reason) => {
+            crate::turn::QueuedTurnDrain::Empty(empty_drain_reason(reason))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_core::QueuedWorkClaimRefusal;
+
+    /// Every empty-drain reason the core can report must survive the crossing
+    /// into the facade unchanged. A reason that mutates here is the same bug as
+    /// a reason that is never computed: the host decides on the wrong fact.
+    ///
+    /// [`QueuedWorkClaimRefusal::ClaimRaceLost`] is produced by a SQL backend
+    /// that loses a claimed row to another writer between reading candidates and
+    /// writing the claim. That race is not force-reproducible without a
+    /// production test hook, so it is pinned here, at the seam it crosses.
+    #[test]
+    fn every_empty_drain_reason_crosses_the_facade_unchanged() {
+        use crate::turn::EmptyQueuedDrainReason as Facade;
+        use lash_core::facade_support::EmptyQueuedDrainReason as Core;
+
+        let cases = [
+            (Core::ExecutionLaneBusy, Facade::ExecutionLaneBusy),
+            (Core::NoDurableQueue, Facade::NoDurableQueue),
+            (
+                Core::ClaimRefused(QueuedWorkClaimRefusal::ZeroLimit),
+                Facade::ClaimRefused(QueuedWorkClaimRefusal::ZeroLimit),
+            ),
+            (
+                Core::ClaimRefused(QueuedWorkClaimRefusal::Empty),
+                Facade::ClaimRefused(QueuedWorkClaimRefusal::Empty),
+            ),
+            (
+                Core::ClaimRefused(QueuedWorkClaimRefusal::NotYetAvailable),
+                Facade::ClaimRefused(QueuedWorkClaimRefusal::NotYetAvailable),
+            ),
+            (
+                Core::ClaimRefused(QueuedWorkClaimRefusal::CommandAtHead),
+                Facade::ClaimRefused(QueuedWorkClaimRefusal::CommandAtHead),
+            ),
+            (
+                Core::ClaimRefused(QueuedWorkClaimRefusal::DeliveryBoundaryBlocked),
+                Facade::ClaimRefused(QueuedWorkClaimRefusal::DeliveryBoundaryBlocked),
+            ),
+            (
+                Core::ClaimRefused(QueuedWorkClaimRefusal::HeadWithheld),
+                Facade::ClaimRefused(QueuedWorkClaimRefusal::HeadWithheld),
+            ),
+            (
+                Core::ClaimRefused(QueuedWorkClaimRefusal::ClaimRaceLost),
+                Facade::ClaimRefused(QueuedWorkClaimRefusal::ClaimRaceLost),
+            ),
+        ];
+        for (core, expected) in cases {
+            assert_eq!(empty_drain_reason(core), expected);
+            let crossed =
+                queued_turn_drain::<()>(lash_core::facade_support::QueuedTurnDrain::Empty(core));
+            assert!(
+                matches!(crossed, crate::turn::QueuedTurnDrain::Empty(reason) if reason == expected),
+                "empty drain reason changed crossing the facade: {core:?}"
+            );
+        }
+        assert_eq!(
+            queued_turn_drain(lash_core::facade_support::QueuedTurnDrain::Ran(7)).ran(),
+            Some(7)
+        );
+    }
+}

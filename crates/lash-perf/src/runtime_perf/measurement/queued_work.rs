@@ -126,6 +126,7 @@ async fn run_once_queued_work_claim_stress(
                         lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
                     )
                     .await?
+                    .claim()
                     .ok_or_else(|| anyhow::anyhow!("queued-work stress expected join claim"))
             })
             .await?;
@@ -206,6 +207,7 @@ async fn run_once_queued_work_claim_stress(
                         lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
                     )
                     .await?
+                    .claim()
                     .ok_or_else(|| anyhow::anyhow!("queued-work stress expected exclusive claim"))
             })
             .await?;

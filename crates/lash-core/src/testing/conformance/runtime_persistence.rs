@@ -587,6 +587,13 @@ where
     .await;
     queued_work_join_groups_by_delivery_policy_and_merge_key(make("queued-join")).await;
     queued_work_redrive_preserves_interrupted_batch_composition(make("redrive-composition")).await;
+    // Ordered ahead of the ready-gap law: that law advances the controlled clock
+    // past the shared deferred-row timestamp, after which no row can be deferred.
+    queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
+        make("deferred-versus-exhausted"),
+        lease_timing,
+    )
+    .await;
     queued_work_redrive_selects_claim_identity_across_ready_gap(
         make("redrive-ready-gap"),
         lease_timing,
@@ -2557,6 +2564,7 @@ pub async fn checkpoint_claim_probe_transaction_counts(
         )
         .await
         .expect("claim deferred work at idle boundary")
+        .claim()
         .expect("deferred work remains claimable at idle boundary");
     assert_eq!(deferred_claim.batches[0].batch_id, deferred.batch_id);
 
@@ -3443,6 +3451,7 @@ async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
         )
         .await
         .expect("claim fenced queue work")
+        .claim()
         .expect("queue work claim");
     assert_eq!(claim.batches[0].batch_id, batch.batch_id);
     release_session_execution_lease_for_test(&store, &queue_lease).await;
@@ -4016,6 +4025,7 @@ async fn claim_queued_work_under_short_lease(
                 crate::testing::queued_work_claim_policy(10),
             )
             .await
+            .map(crate::QueuedWorkClaimOutcome::claim)
         {
             Ok(Some(claim)) => return (lease, claim),
             Err(StoreError::SessionExecutionLeaseExpired { .. })
@@ -4738,6 +4748,7 @@ async fn concurrent_queue_and_turn_input_claims_have_one_owner(store: Arc<dyn Ru
                 crate::testing::queued_work_claim_policy(1),
             )
             .await
+            .map(crate::QueuedWorkClaimOutcome::claim)
     });
     let right_queue = crate::task::spawn(async move {
         right_barrier.wait().await;
@@ -4750,6 +4761,7 @@ async fn concurrent_queue_and_turn_input_claims_have_one_owner(store: Arc<dyn Ru
                 crate::testing::queued_work_claim_policy(1),
             )
             .await
+            .map(crate::QueuedWorkClaimOutcome::claim)
     });
     queue_barrier.wait().await;
     let left_queue = left_queue
@@ -4869,6 +4881,7 @@ async fn queued_work_cancel_removes_only_unclaimed_batches(store: Arc<dyn Runtim
         )
         .await
         .expect("claim batch")
+        .claim()
         .expect("claim exists");
     assert_eq!(claim.batches[0].batch_id, claimed.batch_id);
     // The session lease stays live here: a claim is live for lease-less host
@@ -5169,7 +5182,7 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
 
     let rejected_turn_lease =
         claim_session_execution_lease_for_test(&store, "root", "turn-owner").await;
-    assert!(
+    assert_eq!(
         store
             .claim_ready_queued_work(
                 "root",
@@ -5180,8 +5193,10 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
             )
             .await
             .expect("turn claim with leading command")
-            .is_none(),
-        "turn claims must not skip a leading session command"
+            .refusal(),
+        Some(crate::QueuedWorkClaimRefusal::CommandAtHead),
+        "turn claims must not skip a leading session command, and every backend \
+         must name that same reason"
     );
     release_session_execution_lease_for_test(&store, &rejected_turn_lease).await;
 
@@ -5275,6 +5290,7 @@ async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Runtime
         )
         .await
         .expect("claim turn before later command")
+        .claim()
         .expect("turn claim exists");
     assert_eq!(turn_claim.batches[0].batch_id, first_turn.batch_id);
     store
@@ -5321,7 +5337,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
     // blocks the checkpoint boundary only while its own generation still holds
     // the session lease (ADR 0029).
     let session_lease = claim_session_execution_lease_for_test(&store, "root", "owner-a").await;
-    assert!(
+    assert_eq!(
         store
             .claim_ready_queued_work(
                 "root",
@@ -5332,8 +5348,10 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
             )
             .await
             .expect("checkpoint claim")
-            .is_none(),
-        "after-current-commit work at the queue head must wait for the idle boundary"
+            .refusal(),
+        Some(crate::QueuedWorkClaimRefusal::DeliveryBoundaryBlocked),
+        "after-current-commit work at the queue head must wait for the idle \
+         boundary, and every backend must name that same reason"
     );
 
     let idle_claim = store
@@ -5346,6 +5364,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
         )
         .await
         .expect("idle claim")
+        .claim()
         .expect("idle claim exists");
     assert_eq!(idle_claim.batches.len(), 1);
     assert_eq!(idle_claim.batches[0].batch_id, after_commit.batch_id);
@@ -5362,6 +5381,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
         )
         .await
         .expect("checkpoint claim after head is leased")
+        .claim()
         .expect("checkpoint claim exists");
     assert_eq!(checkpoint_claim.batches[0].batch_id, earliest.batch_id);
 
@@ -5381,6 +5401,7 @@ async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
         )
         .await
         .expect("reclaim abandoned work")
+        .claim()
         .expect("reclaimed work exists");
     assert_eq!(reclaimed.batches[0].batch_id, after_commit.batch_id);
     assert!(
@@ -5455,6 +5476,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
         )
         .await
         .expect("first-generation claim")
+        .claim()
         .expect("first-generation claim exists");
     assert_eq!(claim_a.batches[0].batch_id, batch.batch_id);
     assert_eq!(claim_a.session_lease_generation, lease_a.fencing_token);
@@ -5469,6 +5491,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
             )
             .await
             .expect("same-generation re-claim")
+            .claim()
             .is_none(),
         "a live claim must not be re-claimable under its own session-lease generation"
     );
@@ -5491,6 +5514,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
         )
         .await
         .expect("next-generation reclaim")
+        .claim()
         .expect("next-generation reclaim exists");
     assert_eq!(claim_b.batches[0].batch_id, batch.batch_id);
     assert!(claim_b.fencing_token > claim_a.fencing_token);
@@ -5577,6 +5601,7 @@ async fn queued_work_claims_supersede_across_session_lease_generations_with_timi
         )
         .await
         .expect("post-takeover claim")
+        .claim()
         .expect("post-takeover claim exists");
     assert_eq!(claim_taker.batches[0].batch_id, batch.batch_id);
     let takeover_err = store
@@ -5661,6 +5686,7 @@ async fn claim_both_generation_fenced_lanes(
         )
         .await
         .expect("claim generation-fenced queued work")
+        .claim()
         .expect("generation-fenced queued work claim exists");
     let input_claim = store
         .claim_next_turn_inputs(session_id, &lease.fence(), owner, 1)
@@ -5823,6 +5849,7 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
             )
             .await
             .expect("claim bounded-scan queued work")
+            .claim()
             .expect("bounded-scan queued work remains reachable");
         assert_eq!(claim.batches[0].batch_id, expected.batch_id);
     }
@@ -5952,6 +5979,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
         )
         .await
         .expect("claim root")
+        .claim()
         .expect("root claim");
     assert_eq!(
         claim
@@ -5972,6 +6000,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
         )
         .await
         .expect("claim joined")
+        .claim()
         .expect("joined claim");
     release_session_execution_lease_for_test(&store, &root_session_lease).await;
     assert_eq!(next_root.batches[0].batch_id, joined.batch_id);
@@ -5987,6 +6016,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
         )
         .await
         .expect("claim other")
+        .claim()
         .expect("other claim");
     release_session_execution_lease_for_test(&store, &other_session_lease).await;
     assert_eq!(
@@ -6014,6 +6044,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
         )
         .await
         .expect("claim under the first generation")
+        .claim()
         .expect("first-generation claim");
     release_session_execution_lease_for_test(&store, &first_generation_lease).await;
     let reclaim_session_lease =
@@ -6028,6 +6059,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
         )
         .await
         .expect("reclaim under a new generation")
+        .claim()
         .expect("reclaimed superseded claim");
     release_session_execution_lease_for_test(&store, &reclaim_session_lease).await;
     assert_eq!(reclaimed.batches[0].batch_id, reclaimed_source.batch_id);
@@ -6071,6 +6103,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
         )
         .await
         .expect("limited claim")
+        .claim()
         .expect("limited claim exists");
     assert_eq!(
         limited
@@ -6094,6 +6127,7 @@ async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions
         )
         .await
         .expect("remaining claim")
+        .claim()
         .expect("remaining claim exists");
     release_session_execution_lease_for_test(&store, &limited_session_lease).await;
     assert_eq!(remaining.batches[0].batch_id, limited_third.batch_id);
@@ -6149,6 +6183,7 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
         )
         .await
         .expect("claim first group")
+        .claim()
         .expect("first group claim");
     assert_eq!(
         first_claim
@@ -6169,6 +6204,7 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
         )
         .await
         .expect("claim second group")
+        .claim()
         .expect("second group claim");
     assert_eq!(second_claim.batches[0].batch_id, different_merge.batch_id);
     let third_claim = store
@@ -6181,6 +6217,7 @@ async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
         )
         .await
         .expect("claim third group")
+        .claim()
         .expect("third group claim");
     release_session_execution_lease_for_test(&store, &session_lease).await;
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
@@ -6221,6 +6258,7 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
         )
         .await
         .expect("claim original redrive batch")
+        .claim()
         .expect("original redrive batch exists");
     assert_eq!(
         first_claim
@@ -6266,6 +6304,7 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
         )
         .await
         .expect("redrive interrupted claim")
+        .claim()
         .expect("interrupted claim remains reclaimable");
     assert_eq!(
         redriven
@@ -6296,6 +6335,7 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
         )
         .await
         .expect("redrive second interrupted generation")
+        .claim()
         .expect("second interrupted generation remains reclaimable");
     assert_eq!(
         twice_redriven
@@ -6318,6 +6358,7 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
         )
         .await
         .expect("claim post-interruption row")
+        .claim()
         .expect("post-interruption row remains separately claimable");
     assert_eq!(
         subsequent
@@ -6332,6 +6373,85 @@ async fn queued_work_redrive_preserves_interrupted_batch_composition(
 }
 
 #[doc(hidden)]
+/// FIG-1575: a lane holding a deferred row is not an exhausted lane.
+///
+/// Both states present the same "no claimable candidate" view to the claim
+/// state machine, and a host reading one as the other either abandons intact
+/// work or waits forever on a queue that will never fill. Every backend must
+/// tell them apart identically.
+async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
+    store: Arc<dyn RuntimePersistence>,
+    lease_timing: &RuntimePersistenceLeaseTiming,
+) {
+    let session_id = "deferred-versus-exhausted";
+    let owner = lease_owner("deferred-owner");
+    let lease = claim_session_execution_lease_for_test(&store, session_id, &owner.owner_id).await;
+
+    assert_eq!(
+        store
+            .claim_ready_queued_work(
+                session_id,
+                &lease.fence(),
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                crate::testing::queued_work_claim_policy(10),
+            )
+            .await
+            .expect("claim an empty lane")
+            .refusal(),
+        Some(crate::QueuedWorkClaimRefusal::Empty),
+        "a lane that never held a row is exhausted, not deferred"
+    );
+
+    let deferred = store
+        .enqueue_queued_work(
+            queued_draft(session_id, "deferred", DeliveryPolicy::EarliestSafeBoundary)
+                .with_source_key("deferred-row")
+                .with_available_at_ms(lease_timing.delayed_queue_row_available_at_ms()),
+        )
+        .await
+        .expect("enqueue deferred work");
+
+    assert_eq!(
+        store
+            .claim_ready_queued_work(
+                session_id,
+                &lease.fence(),
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                crate::testing::queued_work_claim_policy(10),
+            )
+            .await
+            .expect("claim a deferred lane")
+            .refusal(),
+        Some(crate::QueuedWorkClaimRefusal::NotYetAvailable),
+        "work whose availability has not arrived is intact, so the lane is not \
+         exhausted"
+    );
+
+    store
+        .cancel_queued_work_batch(session_id, &deferred.batch_id)
+        .await
+        .expect("cancel the deferred row");
+
+    assert_eq!(
+        store
+            .claim_ready_queued_work(
+                session_id,
+                &lease.fence(),
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                crate::testing::queued_work_claim_policy(10),
+            )
+            .await
+            .expect("claim a drained lane")
+            .refusal(),
+        Some(crate::QueuedWorkClaimRefusal::Empty),
+        "a lane whose last row is gone is exhausted again"
+    );
+    release_session_execution_lease_for_test(&store, &lease).await;
+}
+
 pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -6376,6 +6496,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
         )
         .await
         .expect("claim ready rows across delayed gap")
+        .claim()
         .expect("ready W1 and W3 form the original claim");
     assert_eq!(
         first_claim
@@ -6401,6 +6522,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
         )
         .await
         .expect("redrive ready-gap claim")
+        .claim()
         .expect("interrupted identity remains reclaimable across gap");
     assert_eq!(
         redriven
@@ -6420,6 +6542,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
         )
         .await
         .expect("claim newly ready gap row")
+        .claim()
         .expect("W2 remains a separate claim");
     assert_eq!(
         delayed
@@ -6459,6 +6582,7 @@ async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
         )
         .await
         .expect("claim delivery-gated work while idle")
+        .claim()
         .expect("idle boundary admits after-commit work");
     assert_eq!(
         first_claim
@@ -6473,7 +6597,7 @@ async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
     let successor = lease_owner("gate-owner-b");
     let successor_lease =
         claim_session_execution_lease_for_test(&store, session_id, &successor.owner_id).await;
-    assert!(
+    assert_eq!(
         store
             .claim_ready_queued_work(
                 session_id,
@@ -6484,8 +6608,10 @@ async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
             )
             .await
             .expect("apply active checkpoint gate before identity redrive")
-            .is_none(),
-        "the active checkpoint boundary must produce a literal empty claim"
+            .refusal(),
+        Some(crate::QueuedWorkClaimRefusal::DeliveryBoundaryBlocked),
+        "the active checkpoint boundary must produce a literal empty claim, and \
+         every backend must name that same reason"
     );
     for (source_key, label) in [("gate-fresh-w1", "fresh-w1"), ("gate-fresh-w2", "fresh-w2")] {
         store
@@ -6507,6 +6633,7 @@ async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
         )
         .await
         .expect("claim fresh work while idle-only predecessor remains withheld")
+        .claim()
         .expect("fresh checkpoint-deliverable work remains claimable");
     assert_eq!(
         fresh_checkpoint_claim
@@ -6530,6 +6657,7 @@ async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
         )
         .await
         .expect("redrive after delivery boundary clears")
+        .claim()
         .expect("original composition remains intact");
     assert_eq!(
         after_boundary
@@ -6586,6 +6714,7 @@ async fn queued_work_redrive_ignores_a_changed_drain_policy(store: Arc<dyn Runti
         )
         .await
         .expect("claim three-row predecessor")
+        .claim()
         .expect("three-row predecessor exists");
     assert_eq!(
         first_claim
@@ -6612,6 +6741,7 @@ async fn queued_work_redrive_ignores_a_changed_drain_policy(store: Arc<dyn Runti
         )
         .await
         .expect("redrive under a one-row successor policy")
+        .claim()
         .expect("predecessor composition survives a changed drain policy");
     assert_eq!(
         redriven
@@ -6656,6 +6786,7 @@ async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn RuntimeP
         )
         .await
         .expect("claim five-row predecessor")
+        .claim()
         .expect("five-row predecessor exists");
     assert_eq!(
         first_claim
@@ -6686,6 +6817,7 @@ async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn RuntimeP
         )
         .await
         .expect("redrive under smaller successor row limit")
+        .claim()
         .expect("predecessor composition ignores successor row limit");
     assert_eq!(
         redriven
@@ -6779,6 +6911,7 @@ async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         )
         .await
         .expect("claim predecessor A")
+        .claim()
         .expect("predecessor A exists");
     assert_eq!(
         claim_a
@@ -6798,6 +6931,7 @@ async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         )
         .await
         .expect("claim predecessor B")
+        .claim()
         .expect("predecessor B exists");
     assert_eq!(
         claim_b
@@ -6927,6 +7061,7 @@ async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {
         )
         .await
         .expect("claim default-key wakes")
+        .claim()
         .expect("default-key wakes exist");
     assert_eq!(
         merged.batches.len(),
@@ -7023,6 +7158,7 @@ async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersisten
         )
         .await
         .expect("claim joined batches")
+        .claim()
         .expect("joined claim exists");
     assert_eq!(
         claim
@@ -7093,6 +7229,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
         )
         .await
         .expect("claim queue")
+        .claim()
         .expect("queue claim");
     assert_eq!(claim.batches[0].batch_id, batch.batch_id);
     let input = store
@@ -8930,6 +9067,7 @@ async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
         )
         .await
         .expect("claim wake")
+        .claim()
         .expect("wake claim");
     assert_eq!(claim.batches.len(), 1);
     assert_eq!(claim.batches[0].items.len(), 1);

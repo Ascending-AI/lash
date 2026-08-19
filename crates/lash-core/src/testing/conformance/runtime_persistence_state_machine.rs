@@ -601,6 +601,7 @@ async fn apply_operation(
                         crate::testing::queued_work_claim_policy(4),
                     )
                     .await
+                    .map(crate::QueuedWorkClaimOutcome::claim)
                     .map_err(|error| error.to_string())?
                     .map(|claim| (claim, None))
             };
@@ -1992,6 +1993,7 @@ async fn law_reclaim_mediates_supersession(
             crate::testing::queued_work_claim_policy(4),
         )
         .await
+        .map(crate::QueuedWorkClaimOutcome::claim)
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("coalesced work absent"))?;
     prop_assert_eq!(stale_claim.batches.len(), 2, "join claim did not coalesce");

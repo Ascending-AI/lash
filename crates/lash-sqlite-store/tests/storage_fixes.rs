@@ -302,6 +302,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
         )
         .await
         .expect("claim queued work")
+        .claim()
         .expect("queued work claim");
     let turn_input_claim = store
         .claim_next_turn_inputs(session_id, &lease.fence(), &owner, 1)
@@ -353,6 +354,7 @@ async fn second_claim_on_held_batch_is_not_won() {
         )
         .await
         .expect("claim a")
+        .claim()
         .expect("owner a wins the only batch");
     assert_eq!(claim_a.batches.len(), 1);
 
@@ -365,7 +367,8 @@ async fn second_claim_on_held_batch_is_not_won() {
             lash_core::testing::queued_work_claim_policy(10),
         )
         .await
-        .expect("claim b");
+        .expect("claim b")
+        .claim();
     assert!(
         claim_b.is_none(),
         "a batch already held by a live claim must not be re-claimed, got {claim_b:?}"
@@ -431,6 +434,7 @@ fn concurrent_claims_never_double_own_a_batch() {
                         lash_core::testing::queued_work_claim_policy(10),
                     )
                     .await
+                    .map(lash_core::QueuedWorkClaimOutcome::claim)
             })
         })
     };

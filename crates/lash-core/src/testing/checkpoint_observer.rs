@@ -803,7 +803,7 @@ impl crate::QueuedWorkStore for ObservedSessionStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError> {
         self.inner
             .claim_ready_queued_work(session_id, session_execution_lease, owner, boundary, policy)
             .await

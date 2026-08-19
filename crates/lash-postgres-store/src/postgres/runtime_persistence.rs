@@ -1609,9 +1609,11 @@ impl QueuedWorkStore for PostgresSessionStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<QueuedWorkClaimOutcome, StoreError> {
         if policy.max_rows == 0 {
-            return Ok(None);
+            return Ok(QueuedWorkClaimOutcome::Refused(
+                QueuedWorkClaimRefusal::ZeroLimit,
+            ));
         }
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
@@ -1640,10 +1642,23 @@ impl QueuedWorkStore for PostgresSessionStore {
             .zip(selected_batches.iter())
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+        let prefix = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+        let selected_len = prefix.len;
         if selected_len == 0 {
+            let refusal = prefix.refusal.expect("an empty prefix names its refusal");
+            // The candidate query applies the boundary rule in SQL, so an empty
+            // scan reaches the claim state machine as a bare `Empty`. Re-ask it
+            // with the unfiltered ready head (and, failing that, look for
+            // deferred work) so this backend names the same fact every other one
+            // names.
+            let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
+                postgres_refusal_for_empty_scan(&mut tx, session_id, generation, boundary, &policy)
+                    .await?
+            } else {
+                refusal
+            };
             tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
+            return Ok(QueuedWorkClaimOutcome::Refused(refusal));
         }
         selected.truncate(selected_len);
         selected_batches.truncate(selected_len);
@@ -1691,11 +1706,13 @@ impl QueuedWorkStore for PostgresSessionStore {
             .rows_affected();
             if changed == 0 {
                 tx.rollback().await.map_err(store_sqlx_error)?;
-                return Ok(None);
+                return Ok(QueuedWorkClaimOutcome::Refused(
+                    QueuedWorkClaimRefusal::ClaimRaceLost,
+                ));
             }
         }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Some(QueuedWorkClaim {
+        Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {
             session_id: session_id.to_string(),
             claim_id: lease.claim_id,
             owner: owner.clone(),
@@ -1987,7 +2004,7 @@ impl QueuedWorkStore for PostgresSessionStore {
             .map(|(row, batch)| claim_candidate_from_row(row, batch))
             .collect::<Result<Vec<_>, StoreError>>()?;
         let selected_len =
-            select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+            select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?.len;
         if selected_len == 0 {
             tx.rollback().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
@@ -2919,6 +2936,71 @@ async fn checkpoint_work_pending_postgres(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Name the refusal behind an empty candidate scan.
+///
+/// The candidate query enforces the delivery-boundary rule in SQL, so a scan
+/// that comes back empty tells the shared claim state machine nothing. Asking
+/// it again with the unfiltered ready head keeps the classification in one
+/// place: whatever the head alone is refused for is what this claim is refused
+/// for. With no ready head at all, a lane still holding deferred work is not an
+/// exhausted lane. Both probes read the same `transaction_timestamp()` cutoff
+/// the candidate query used, and both run only on a refusal.
+async fn postgres_refusal_for_empty_scan(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+    generation: u64,
+    boundary: QueuedWorkClaimBoundary,
+    policy: &QueuedWorkClaimPolicy,
+) -> Result<QueuedWorkClaimRefusal, StoreError> {
+    let now = postgres_transaction_epoch_ms(tx).await?;
+    let head_rows = sqlx::query(&format!(
+        "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+                work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
+                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+         FROM lash_queued_work_batches
+         WHERE {POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+         ORDER BY enqueue_seq ASC
+         LIMIT 1"
+    ))
+    .bind(session_id)
+    .bind(sql_session_lease_generation(generation)?)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if let Some(head_row) = head_rows.into_iter().next() {
+        let head_row = queued_batch_row(head_row)?;
+        let head_batch = queued_work_batch_from_row(tx, head_row.clone()).await?;
+        let head_candidates = vec![claim_candidate_from_row(&head_row, &head_batch)?];
+        let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
+        // A head the state machine would take contradicts the empty scan; there
+        // is no such state, and `Empty` stays the conservative answer.
+        return Ok(head_prefix.refusal.unwrap_or(QueuedWorkClaimRefusal::Empty));
+    }
+    let deferred_row_pending: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+             SELECT 1
+             FROM lash_queued_work_batches
+             WHERE session_id = $1
+               AND available_at_ms > FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000)
+               AND (
+                    claim_token IS NULL
+                    OR claim_session_lease_generation <> $2
+               )
+         )",
+    )
+    .bind(session_id)
+    .bind(sql_session_lease_generation(generation)?)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(if deferred_row_pending {
+        QueuedWorkClaimRefusal::NotYetAvailable
+    } else {
+        QueuedWorkClaimRefusal::Empty
+    })
+}
+
 async fn claim_ready_queued_work_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
@@ -2955,7 +3037,7 @@ async fn claim_ready_queued_work_postgres_tx(
         .zip(selected_batches.iter())
         .map(|(row, batch)| claim_candidate_from_row(row, batch))
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?.len;
     if selected_len == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }

@@ -1035,7 +1035,169 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
             r#"[{"role":"User","blocks":[{"Text":{"text":"queued work","response_meta":null,"cache_breakpoint":false}}]}]"#
         );
     }
-    assert!(session.queued_turn().run().await?.is_none());
+    assert!(session.queued_turn().run().await?.ran().is_none());
+    Ok(())
+}
+
+/// FIG-1575: an exhausted queue and an unreachable one are opposite answers.
+/// Only the exhausted queue is terminal, so the drain names which one it hit.
+#[tokio::test]
+async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(
+            crate::testing::TestProvider::builder()
+                .kind("empty-drain-reason")
+                .complete(|_| async { Ok(text_response("echo")) })
+                .build()
+                .into_handle(),
+        )
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("empty-drain-reason").open().await?;
+
+    let drain = session.queued_turn().run().await?;
+
+    assert!(
+        matches!(
+            drain,
+            crate::QueuedTurnDrain::Empty(crate::EmptyQueuedDrainReason::ClaimRefused(
+                crate::QueuedWorkClaimRefusal::Empty
+            ))
+        ),
+        "an exhausted queue must report an empty claim refusal, got {drain:?}"
+    );
+    Ok(())
+}
+
+/// A session with no durable store has no queue at all. Reporting that as a
+/// busy lane would invite a host to retry forever.
+#[tokio::test]
+async fn a_storeless_session_reports_no_durable_queue() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(
+            crate::testing::TestProvider::builder()
+                .kind("storeless-drain-reason")
+                .complete(|_| async { Ok(text_response("echo")) })
+                .build()
+                .into_handle(),
+        )
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("storeless-drain-reason").open().await?;
+
+    let drain = session.queued_turn().run().await?;
+
+    assert!(
+        matches!(
+            drain,
+            crate::QueuedTurnDrain::Empty(crate::EmptyQueuedDrainReason::NoDurableQueue)
+        ),
+        "a storeless session must report no durable queue, got {drain:?}"
+    );
+    Ok(())
+}
+
+/// An automatic drain names why it ran no turn, and a row that can never fit is
+/// not such a reason: it is a terminal fault. Before FIG-1575 this path reached
+/// a selected-drain refusal on a drain that selected nothing, and panicked.
+#[tokio::test]
+async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(
+            crate::testing::TestProvider::builder()
+                .kind("oversized-queued-row")
+                .complete(|_| async { Ok(text_response("echo")) })
+                .build()
+                .into_handle(),
+        )
+        .model(crate::tests::harness::model_spec("mock-model", None, 1_024))
+        .store_factory(
+            Arc::clone(&store_factory) as Arc<dyn crate::persistence::SessionStoreFactory>
+        )
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("oversized-queued-row").open().await?;
+    {
+        use crate::persistence::SessionStoreFactory as _;
+
+        let store = store_factory
+            .create_store(&crate::persistence::SessionStoreCreateRequest {
+                session_id: session.session_id().to_string(),
+                relation: crate::persistence::SessionRelation::Root,
+                policy: session.policy_snapshot(),
+            })
+            .await?;
+        store
+            .enqueue_queued_work(crate::persistence::QueuedWorkBatchDraft::new(
+                session.session_id(),
+                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    "oversized-frame",
+                    "w".repeat(64 * 1024),
+                    None,
+                )],
+            ))
+            .await?;
+    }
+
+    let error = session
+        .queued_turn()
+        .run()
+        .await
+        .expect_err("a row larger than the window cannot drain automatically");
+
+    let EmbedError::Runtime(runtime) = &error else {
+        panic!("expected a runtime error naming the oversized row, got {error:?}");
+    };
+    assert_eq!(
+        runtime.code,
+        lash_core::RuntimeErrorCode::QueuedWorkRowExceedsContextWindow,
+        "the oversized row must be named, not panicked on: {error:?}"
+    );
+    Ok(())
+}
+
+/// The wedge FIG-1575 exists to prevent: a drain that could not take the lane
+/// consumed nothing, and must never read as an exhausted queue.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_busy_execution_lane_is_never_reported_as_an_exhausted_queue() -> Result<()> {
+    let (started_tx, started_rx) = oneshot::channel::<()>();
+    let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory)
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let holder = core.session("busy-lane-drain-reason").open().await?;
+    holder
+        .enqueue(TurnInput::text("hang queued"))
+        .send()
+        .await?;
+    let drainer = holder.clone();
+    let drain = tokio::spawn(async move { drainer.queued_turn().run().await });
+    started_rx.await.expect("queued drain reached the provider");
+
+    // A second handle over the same durable session cannot take the lane the
+    // hung drain still holds.
+    let peer = core.session("busy-lane-drain-reason").open().await?;
+    let peer_drain = peer.queued_turn().run().await?;
+
+    assert!(
+        matches!(
+            peer_drain,
+            crate::QueuedTurnDrain::Empty(crate::EmptyQueuedDrainReason::ExecutionLaneBusy)
+        ),
+        "a busy execution lane must never be reported as an exhausted queue, got {peer_drain:?}"
+    );
+    assert_eq!(holder.cancel_running_turns(), 1);
+    drain.await.expect("drain task")?;
     Ok(())
 }
 
@@ -1189,6 +1351,7 @@ async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not
         )
         .await
         .expect("claim predecessor composition")
+        .claim()
         .expect("predecessor composition exists");
     assert_eq!(
         claim_a
@@ -1493,7 +1656,7 @@ async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> Result<()> 
     assert_eq!(outcome.satisfied, Vec::new());
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert!(
-        session.queued_turn().run().await?.is_some(),
+        session.queued_turn().run().await?.ran().is_some(),
         "the empty selection must leave unrestricted queued input pending"
     );
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
@@ -1571,6 +1734,7 @@ async fn selected_queued_turn_validates_every_interrupted_composition_before_mut
         )
         .await
         .expect("claim predecessor A")
+        .claim()
         .expect("predecessor A exists");
     let claim_b = store
         .claim_ready_queued_work(
@@ -1582,6 +1746,7 @@ async fn selected_queued_turn_validates_every_interrupted_composition_before_mut
         )
         .await
         .expect("claim predecessor B")
+        .claim()
         .expect("predecessor B exists");
     assert_eq!(
         claim_a
@@ -1778,6 +1943,7 @@ async fn selected_queued_turn_redrive_ignores_successor_max_rows() -> Result<()>
         )
         .await
         .expect("claim selected row-limit predecessor")
+        .claim()
         .expect("selected row-limit predecessor exists");
     assert_eq!(
         predecessor_claim
@@ -4379,7 +4545,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
         active.input_id
     );
     assert!(
-        session.queued_turn().run().await?.is_none(),
+        session.queued_turn().run().await?.ran().is_none(),
         "accepted active steer must not replay as a later queued turn"
     );
     let requests = requests.lock_recover().clone();
@@ -4550,7 +4716,7 @@ async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
     assert!(!waiter.is_finished(), "waiter resolved before any drain");
 
     assert!(
-        session.queued_turn().run().await?.is_none(),
+        session.queued_turn().run().await?.ran().is_none(),
         "a session-command-only drain should not produce a model turn"
     );
 
@@ -7536,7 +7702,7 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
 
     let mut claimed_at_ms = None;
     for _attempt in 0..8 {
-        if let Some(output) = second_session.queued_turn().run().await? {
+        if let Some(output) = second_session.queued_turn().run().await?.ran() {
             assert_eq!(output.assistant_message(), Some("the migration is green"));
             claimed_at_ms = Some(lash_core::Clock::timestamp_ms(clock.as_ref()));
             break;
@@ -7665,7 +7831,7 @@ async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reop
 
     let mut claimed = None;
     for _attempt in 0..10 {
-        if let Some(output) = second_session.queued_turn().run().await? {
+        if let Some(output) = second_session.queued_turn().run().await?.ran() {
             claimed = Some(output);
             break;
         }

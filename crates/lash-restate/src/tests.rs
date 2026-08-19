@@ -4634,7 +4634,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
         policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> Result<Option<lash_core::runtime::QueuedWorkClaim>, lash_core::StoreError> {
+    ) -> Result<lash_core::QueuedWorkClaimOutcome, lash_core::StoreError> {
         self.inner
             .claim_ready_queued_work(session_id, session_execution_lease, owner, boundary, policy)
             .await

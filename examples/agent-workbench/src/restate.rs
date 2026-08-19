@@ -1002,6 +1002,7 @@ async fn run_queued_turn(
             .stream_to(&ui_events)
             .await
             .map_err(AppError::runtime)?
+            .ran()
     } else {
         request
             .selected_queued_turn(&session)

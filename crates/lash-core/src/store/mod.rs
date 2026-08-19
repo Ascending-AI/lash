@@ -46,8 +46,9 @@ pub use preflight::{
     StoreSchemaVerdict,
 };
 pub use queued_work::{
-    PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,
-    SelectedQueuedWorkClaimOutcome,
+    PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClaimOutcome,
+    QueuedWorkClaimRefusal, QueuedWorkClass, SelectedQueuedWorkClaimOutcome, TurnWorkClaimPrefix,
+    TurnWorkClaimSelection,
 };
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
@@ -1308,6 +1309,11 @@ pub trait QueuedWorkStore: Send + Sync {
     /// When the head belongs to an interrupted predecessor-generation claim,
     /// the successor reclaims exactly the rows carrying that durable claim id;
     /// later compatible rows wait for a subsequent claim.
+    ///
+    /// An attempt that acquires nothing must name why: an automatic drain has no
+    /// batch ids to reason about afterwards, so the
+    /// [`QueuedWorkClaimRefusal`] this returns is
+    /// the only account of the empty drain a host ever gets.
     async fn claim_ready_queued_work(
         &self,
         session_id: &str,
@@ -1315,7 +1321,7 @@ pub trait QueuedWorkStore: Send + Sync {
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
+    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError>;
 
     /// Claim both ingress families admitted at an active-turn checkpoint.
     ///

@@ -841,7 +841,7 @@ impl crate::QueuedWorkStore for SeamStore {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimReadyQueuedWork {
             boundary: format!("{boundary:?}").to_ascii_lowercase(),
         });
@@ -1530,6 +1530,7 @@ async fn drive_turn(
             scoped_controller(effect_controller, identity),
         ))
         .await
+        .map(crate::facade_support::QueuedTurnDrain::ran)
 }
 
 fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {

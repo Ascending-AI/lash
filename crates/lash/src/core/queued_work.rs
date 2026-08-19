@@ -108,7 +108,7 @@ impl InlineQueuedWorkRunHandle {
                     error.to_string(),
                 ))
             })?;
-            let ran = crate::turn::stream_next_queued_prepared_turn(
+            let drain = crate::turn::stream_next_queued_prepared_turn(
                 &handle,
                 crate::turn::TurnSinks::default(),
                 scoped,
@@ -124,7 +124,14 @@ impl InlineQueuedWorkRunHandle {
                     facade_support::QueuedWorkRunError::terminal(plugin_error)
                 }
             })?;
-            if ran.is_none() {
+            if let crate::turn::QueuedTurnDrain::Empty(empty_reason) = drain {
+                tracing::debug!(
+                    target: "lash::queued_work_run",
+                    session_id = %session_id,
+                    reason = empty_reason.as_str(),
+                    claimed,
+                    "inline queued-work run stopped on an empty drain"
+                );
                 return Ok(if claimed {
                     facade_support::QueuedWorkRunProgress::Claimed
                 } else {

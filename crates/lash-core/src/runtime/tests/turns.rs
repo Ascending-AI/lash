@@ -1336,6 +1336,7 @@ async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
         ))
         .await
         .expect("peer reclaim must not wait for the lease TTL")
+        .ran()
         .expect("peer immediately receives the abandoned input");
     assert_eq!(reclaimed.assistant_output.safe_text, "peer reclaimed");
 }
@@ -1419,6 +1420,7 @@ async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_re
         ))
         .await
         .expect("a follow-on pre-commit failure must not erase the committed frame")
+        .ran()
         .expect("the committed frame is returned");
     assert!(matches!(
         committed.outcome,
@@ -1443,6 +1445,7 @@ async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_re
         ))
         .await
         .expect("retrying the logical queue call is safe")
+        .ran()
         .expect("the durable handoff is reclaimed");
     assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
     assert!(
@@ -3132,6 +3135,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
         ))
         .await
         .expect("drain deferred input")
+        .ran()
         .expect("deferred input starts a turn");
 
     let requests = requests.lock_recover();
@@ -3157,7 +3161,8 @@ async fn command_only_queued_work_drain_completes_without_turn() {
             named_turn_scope("root", "command-only-queue-drain"),
         ))
         .await
-        .expect("command-only drain succeeds");
+        .expect("command-only drain succeeds")
+        .ran();
 
     assert!(drained.is_none());
     assert!(
@@ -3258,6 +3263,7 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
         ))
         .await
         .expect("queued drain succeeds")
+        .ran()
         .expect("pending turn input drains first");
 
     assert_eq!(
@@ -3487,6 +3493,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
     .await
     .expect("cancelled wake drain should finish")
     .expect("cancelled wake drain should not error")
+    .ran()
     .expect("cancelled queued input turn should still assemble");
     canceller.await.expect("canceller task");
 
@@ -3518,6 +3525,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
             ))
             .await
             .expect("post-cancel drain should succeed")
+            .ran()
             .is_none(),
         "neither the cancelled input nor the claimed wake should replay"
     );
@@ -3687,6 +3695,7 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
             ))
             .await
             .expect("post-turn queue check should succeed")
+            .ran()
             .is_none(),
         "the committed wake `{}` must not replay after the turn",
         wake.wake_id
@@ -3778,6 +3787,7 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
         ))
         .await
         .expect("queued frame chain succeeds")
+        .ran()
         .expect("queued frame chain returns its terminal turn");
 
     assert_eq!(
@@ -3808,6 +3818,7 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
         ))
         .await
         .expect("second queued turn succeeds")
+        .ran()
         .expect("second queued turn runs after the frame chain");
 
     assert_eq!(
@@ -3888,6 +3899,7 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
         ))
         .await
         .expect("the committed frame switch remains a successful public call")
+        .ran()
         .expect("the committed frame switch is returned");
     assert!(matches!(
         first.outcome,
@@ -3929,6 +3941,7 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
         ))
         .await
         .expect("pump recovery succeeds")
+        .ran()
         .expect("pump runs durable handoff");
     assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
     assert!(
@@ -3992,6 +4005,7 @@ async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_hando
         ))
         .await
         .expect("cancelled chain assembles")
+        .ran()
         .expect("cancelled terminal turn");
     assert!(matches!(
         terminal.outcome,
@@ -4049,6 +4063,7 @@ async fn claimed_normalization_failure_commits_and_settles_input() {
         ))
         .await
         .expect("invalid input assembles")
+        .ran()
         .expect("invalid terminal turn");
     assert!(matches!(
         terminal.outcome,
@@ -4104,6 +4119,7 @@ async fn claimed_plugin_abort_commits_and_settles_input() {
         ))
         .await
         .expect("plugin abort assembles")
+        .ran()
         .expect("plugin abort terminal turn");
     assert!(matches!(
         terminal.outcome,
@@ -4424,6 +4440,7 @@ async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
         ))
         .await
         .expect("queued switch succeeds")
+        .ran()
         .expect("queued switch returns a turn");
     assert!(matches!(
         output.outcome,
@@ -4554,6 +4571,7 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
         ))
         .await
         .expect("the committed switch is returned with a loud follow-on failure")
+        .ran()
         .expect("queued turn should run");
 
     assert!(matches!(
@@ -5047,6 +5065,7 @@ async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
         ))
         .await
         .expect("bounded chain terminalizes")
+        .ran()
         .expect("bounded chain returns terminal turn");
     assert!(matches!(
         terminal.outcome,
@@ -5149,6 +5168,7 @@ async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning
         ))
         .await
         .expect("a failed terminal capture preserves the last committed frame")
+        .ran()
         .expect("the last committed frame is returned");
 
     assert!(matches!(
@@ -5205,6 +5225,7 @@ async fn leading_session_command_drains_before_queued_turn() {
         )
         .await
         .expect("queued drain succeeds")
+        .ran()
         .expect("queued turn runs after command");
 
     assert_eq!(drained.assistant_output.safe_text, "queued answer");
@@ -5256,6 +5277,7 @@ async fn idle_ordering_read_is_independent_of_pending_command_depth() {
             ))
             .await
             .expect("depth-invariance drain succeeds")
+            .ran()
             .expect("queued turn runs after commands");
 
         assert_eq!(
@@ -5299,6 +5321,7 @@ async fn later_session_command_does_not_jump_earlier_queued_turn() {
         ))
         .await
         .expect("queued turn drain succeeds")
+        .ran()
         .expect("first queued turn runs");
 
     assert_eq!(drained.assistant_output.safe_text, "first turn answer");
@@ -5320,7 +5343,8 @@ async fn later_session_command_does_not_jump_earlier_queued_turn() {
             named_turn_scope("root", "later-command-drain"),
         ))
         .await
-        .expect("later command drain succeeds");
+        .expect("later command drain succeeds")
+        .ran();
     assert!(command_only.is_none());
     assert!(
         crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
@@ -5412,6 +5436,7 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
         )
         .await
         .expect("turn")
+        .ran()
         .expect("queued turn");
 
     let events = turn_events.snapshot();
@@ -6082,7 +6107,8 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
             named_turn_scope("root", "queued-busy-turn"),
         ))
         .await
-        .expect("busy queued drain should not error");
+        .expect("busy queued drain should not error")
+        .ran();
 
     assert!(
         busy_result.is_none(),
@@ -6110,6 +6136,7 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
         ))
         .await
         .expect("queued drain after release should succeed")
+        .ran()
         .expect("queued turn should still be pending after busy no-op");
 
     assert_eq!(drained.assistant_output.safe_text, "queued answer");
@@ -6159,6 +6186,7 @@ async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_i
         runtime
             .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
             .await
+            .map(crate::facade_support::QueuedTurnDrain::ran)
     });
 
     assert!(
@@ -6225,6 +6253,7 @@ async fn durable_controller_reports_a_retryable_busy_lane_when_the_holder_is_ali
         runtime
             .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
             .await
+            .map(crate::facade_support::QueuedTurnDrain::ran)
     });
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(5), &mut drain)
@@ -6321,6 +6350,7 @@ async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pending() {
         runtime
             .stream_next_queued_work(TurnOptions::new(drain_cancel, scope))
             .await
+            .map(crate::facade_support::QueuedTurnDrain::ran)
     });
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     cancel.cancel();
@@ -6464,7 +6494,8 @@ async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_contract() 
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
         .await
-        .expect("a replay-owning non-workflow controller must not error on Busy");
+        .expect("a replay-owning non-workflow controller must not error on Busy")
+        .ran();
 
     assert!(
         busy_result.is_none(),
@@ -6517,7 +6548,8 @@ async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires(
             named_turn_scope("root", "command-before-lease-ttl"),
         ))
         .await
-        .expect("busy command drain should not error");
+        .expect("busy command drain should not error")
+        .ran();
 
     assert!(busy_result.is_none());
     assert_eq!(
@@ -6538,7 +6570,8 @@ async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires(
             named_turn_scope("root", "command-after-lease-ttl"),
         ))
         .await
-        .expect("command drain after TTL should succeed");
+        .expect("command drain after TTL should succeed")
+        .ran();
 
     assert!(after_ttl.is_none(), "a command-only drain returns no turn");
     assert!(
@@ -7085,6 +7118,7 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
                 named_turn_scope("root", "renewal-failure-mid-turn"),
             ))
             .await
+            .map(crate::facade_support::QueuedTurnDrain::ran)
     });
     provider_stalled_rx
         .await

@@ -240,6 +240,7 @@ pub async fn cold_process_real_turn_driver(
             )
             .await
             .expect("peer reclaims queued-work row")
+            .claim()
             .expect("crashed turn left one queued-work row");
         assert_eq!(claim.batches.len(), 1, "peer reclaims exactly one row");
         store

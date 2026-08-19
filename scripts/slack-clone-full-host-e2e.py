@@ -612,10 +612,22 @@ class Journey:
         self.write_extract("05-killed")
 
         self.restart_bot()
+        # The runtime now names why a drain ran no turn, and the bot logs that
+        # typed reason verbatim instead of inferring one. A boot that restarts
+        # inside the dead boot's session-execution lease TTL cannot take that
+        # lease, so the reported cause on this path is `execution_lane_busy` —
+        # the live-lease fence itself, from the runtime rather than from the
+        # bot's guess about it.
+        live_lease_deferral = re.compile(
+            rf"deferring event {re.escape(self.kill_event)}: the drain never reached its "
+            rf"admission \(execution_lane_busy\)"
+        )
         self.poll(
             "live-lease deferral",
-            lambda: "input_claimed_by_live_lease_generation"
-            in self.bot_log.read_text(encoding="utf-8", errors="replace"),
+            lambda: live_lease_deferral.search(
+                self.bot_log.read_text(encoding="utf-8", errors="replace")
+            )
+            is not None,
             timeout=15,
         )
         for page in self.pages.values():
@@ -627,7 +639,7 @@ class Journey:
         bot_rows = [r for r in self.platform_rows() if r["bot_id"] is not None]
         self.gate("05-recovered", "platform", "platform stores exactly one recovered reply with event metadata", len(bot_rows) == before_platform_bot_rows + 1 and sum(self.kill_event in (r["metadata_json"] or "") for r in bot_rows) == 1, "05-recovered-four-layers.json")
         recovery_log = self.bot_log.read_text(encoding="utf-8", errors="replace")
-        deferred_lines = re.findall(rf"(?:recovered|settled deferred) event {re.escape(self.kill_event)}[^\n]*Deferred \{{[^\n]*input_claimed_by_live_lease_generation[^\n]*", recovery_log)
+        deferred_lines = re.findall(rf"(?:recovered|settled deferred) event {re.escape(self.kill_event)}[^\n]*Deferred \{{[^\n]*drain_did_not_reach_admission[^\n]*", recovery_log)
         settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: Turn[^\n]*", recovery_log)
         after_session = self.session_snapshot()
         channel_lease = next(r for r in after_session["leases"] if r["session_id"] == f"channel:{self.channel}")

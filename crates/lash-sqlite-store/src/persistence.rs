@@ -1582,9 +1582,11 @@ impl QueuedWorkStore for Store {
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
         policy: QueuedWorkClaimPolicy,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<QueuedWorkClaimOutcome, StoreError> {
         if policy.max_rows == 0 {
-            return Ok(None);
+            return Ok(QueuedWorkClaimOutcome::Refused(
+                QueuedWorkClaimRefusal::ZeroLimit,
+            ));
         }
         let session_id = session_id.to_string();
         let session_execution_lease = session_execution_lease.clone();
@@ -1592,7 +1594,7 @@ impl QueuedWorkStore for Store {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<TxOutcome<Option<QueuedWorkClaim>>, StoreError> = (|| {
+                let outcome: Result<TxOutcome<QueuedWorkClaimOutcome>, StoreError> = (|| {
                     ensure_session_execution_lease_conn(
                         tx,
                         &session_id,
@@ -1630,10 +1632,29 @@ impl QueuedWorkStore for Store {
                         .zip(candidate_batches.iter())
                         .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Result<Vec<_>, StoreError>>()?;
-                    let selected_len =
+                    let prefix =
                         select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+                    let selected_len = prefix.len;
                     if selected_len == 0 {
-                        return Ok(TxOutcome::Commit(None));
+                        let refusal = prefix.refusal.expect("an empty prefix names its refusal");
+                        // The candidate query applies the boundary rule in SQL,
+                        // so an empty scan reaches the claim state machine as a
+                        // bare `Empty`. Re-ask it with the unfiltered ready head
+                        // (and, failing that, look for deferred work) so this
+                        // backend names the same fact every other one names.
+                        let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
+                            sqlite_refusal_for_empty_scan(
+                                tx,
+                                &session_id,
+                                now,
+                                generation,
+                                boundary,
+                                &policy,
+                            )?
+                        } else {
+                            refusal
+                        };
+                        return Ok(TxOutcome::Commit(QueuedWorkClaimOutcome::Refused(refusal)));
                     }
                     let mut selected = candidate_rows;
                     selected.truncate(selected_len);
@@ -1698,21 +1719,25 @@ impl QueuedWorkStore for Store {
                             // Lost the race for this batch. Roll back any sibling
                             // rows we already claimed in this transaction so we
                             // never return a half-owned claim.
-                            return Ok(TxOutcome::Rollback(None));
+                            return Ok(TxOutcome::Rollback(QueuedWorkClaimOutcome::Refused(
+                                QueuedWorkClaimRefusal::ClaimRaceLost,
+                            )));
                         }
                     }
-                    Ok(TxOutcome::Commit(Some(QueuedWorkClaim {
-                        session_id: session_id.clone(),
-                        claim_id: lease.claim_id,
-                        owner: owner.clone(),
-                        lease_token: lease.lease_token,
-                        fencing_token: lease.fencing_token,
-                        session_lease_generation: lease.session_lease_generation,
-                        data: lash_core::store_backend_support::queued_work_claim_data(
-                            selected_batches,
-                            candidates[0].prior_claim_id.clone(),
-                        ),
-                    })))
+                    Ok(TxOutcome::Commit(QueuedWorkClaimOutcome::Claimed(
+                        QueuedWorkClaim {
+                            session_id: session_id.clone(),
+                            claim_id: lease.claim_id,
+                            owner: owner.clone(),
+                            lease_token: lease.lease_token,
+                            fencing_token: lease.fencing_token,
+                            session_lease_generation: lease.session_lease_generation,
+                            data: lash_core::store_backend_support::queued_work_claim_data(
+                                selected_batches,
+                                candidates[0].prior_claim_id.clone(),
+                            ),
+                        },
+                    )))
                 })(
                 );
                 // Lower a `StoreError` into the rollback arm so the closure body
@@ -2055,7 +2080,8 @@ impl QueuedWorkStore for Store {
                         .map(|(row, batch)| claim_candidate_from_row(row, batch))
                         .collect::<Result<Vec<_>, StoreError>>()?;
                     let selected_len =
-                        select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+                        select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)?
+                            .len;
                     if selected_len == 0 {
                         return Ok(SelectedQueuedWorkClaimOutcome::new(
                             None,
@@ -3174,6 +3200,89 @@ async fn checkpoint_work_pending_sqlite(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Name the refusal behind an empty candidate scan.
+///
+/// The candidate query enforces the delivery-boundary rule in SQL, so a scan
+/// that comes back empty tells the shared claim state machine nothing. Asking
+/// it again with the unfiltered ready head keeps the classification in one
+/// place: whatever the head alone is refused for is what this claim is refused
+/// for. With no ready head at all, a lane still holding deferred work is not an
+/// exhausted lane. Both probes run only on a refusal, so a successful claim
+/// pays nothing for them.
+fn sqlite_refusal_for_empty_scan(
+    tx: &Connection,
+    session_id: &str,
+    now: u64,
+    generation: u64,
+    boundary: QueuedWorkClaimBoundary,
+    policy: &QueuedWorkClaimPolicy,
+) -> Result<QueuedWorkClaimRefusal, StoreError> {
+    let head_rows = {
+        let mut stmt = tx
+            .prepare(&format!(
+                "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+                        work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
+                        claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
+                        claim_owner_liveness_json, claim_token, claim_session_lease_generation,
+                        claim_id
+                 FROM queued_work_batches
+                 WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
+                 ORDER BY enqueue_seq ASC
+                 LIMIT 1"
+            ))
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    session_id,
+                    now as i64,
+                    sql_session_lease_generation(generation)?
+                ],
+                queued_batch_row_from_sql,
+            )
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
+    };
+    if !head_rows.is_empty() {
+        let head_batches = queued_work_batches_from_conn(tx, &head_rows)?;
+        let head_candidates = head_rows
+            .iter()
+            .zip(head_batches.iter())
+            .map(|(row, batch)| claim_candidate_from_row(row, batch))
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        let head_prefix = select_turn_work_claim_prefix(&head_candidates, boundary, policy, now)?;
+        // A head the state machine would take contradicts the empty scan; there
+        // is no such state, and `Empty` stays the conservative answer.
+        return Ok(head_prefix.refusal.unwrap_or(QueuedWorkClaimRefusal::Empty));
+    }
+    let deferred_row_pending = tx
+        .query_row(
+            "SELECT EXISTS (
+                 SELECT 1
+                 FROM queued_work_batches
+                 WHERE session_id = ?1
+                   AND available_at_ms > ?2
+                   AND (
+                        claim_token IS NULL
+                        OR claim_session_lease_generation <> ?3
+                   )
+             )",
+            params![
+                session_id,
+                now as i64,
+                sql_session_lease_generation(generation)?
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(sqlite_error)?
+        != 0;
+    Ok(if deferred_row_pending {
+        QueuedWorkClaimRefusal::NotYetAvailable
+    } else {
+        QueuedWorkClaimRefusal::Empty
+    })
+}
+
 fn claim_ready_queued_work_sqlite_conn(
     tx: &Connection,
     now: u64,
@@ -3217,7 +3326,7 @@ fn claim_ready_queued_work_sqlite_conn(
         .zip(candidate_batches.iter())
         .map(|(row, batch)| claim_candidate_from_row(row, batch))
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
+    let selected_len = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?.len;
     if selected_len == 0 {
         return Ok(TxOutcome::Commit(None));
     }

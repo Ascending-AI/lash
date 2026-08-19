@@ -290,13 +290,15 @@ impl RuntimePerfStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         kind: RuntimePerfQueuedWorkClaimKind,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
+    ) -> Result<lash_core::QueuedWorkClaimOutcome, StoreError> {
         let max_batches = match &kind {
             RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => 1,
             RuntimePerfQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
         if max_batches == 0 {
-            return Ok(None);
+            return Ok(lash_core::QueuedWorkClaimOutcome::Refused(
+                lash_core::QueuedWorkClaimRefusal::ZeroLimit,
+            ));
         }
         self.verify_session_execution_lease(session_id, session_execution_lease)?;
         // The fence is validated live, so its fencing token is the currently-live
@@ -320,7 +322,20 @@ impl RuntimePerfStore {
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         if claimable_indices.is_empty() {
-            return Ok(None);
+            // A lane with a still-deferred row is not an exhausted lane: the
+            // work is intact and drains on a later attempt.
+            let deferred_row_pending = queued.iter().any(|entry| {
+                entry.batch.session_id == session_id
+                    && entry.batch.available_at_ms > now
+                    && claim_available(entry)
+            });
+            return Ok(lash_core::QueuedWorkClaimOutcome::Refused(
+                if deferred_row_pending {
+                    lash_core::QueuedWorkClaimRefusal::NotYetAvailable
+                } else {
+                    lash_core::QueuedWorkClaimRefusal::Empty
+                },
+            ));
         }
         let candidates = claimable_indices
             .iter()
@@ -334,29 +349,42 @@ impl RuntimePerfStore {
                 ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
-        let selected_indices: Vec<usize> = match kind {
-            RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => {
-                let selected_len = store::queued_work::select_leading_session_command(&candidates);
-                claimable_indices
-                    .iter()
-                    .copied()
-                    .take(selected_len)
-                    .collect()
-            }
-            RuntimePerfQueuedWorkClaimKind::TurnWork { boundary, policy } => {
-                store::queued_work::select_turn_work_claim_indices(
-                    &candidates,
-                    boundary,
-                    &policy,
-                    now,
-                )?
-                .into_iter()
-                .map(|candidate_index| claimable_indices[candidate_index])
-                .collect()
-            }
-        };
+        let (selected_indices, refusal): (Vec<usize>, Option<lash_core::QueuedWorkClaimRefusal>) =
+            match kind {
+                RuntimePerfQueuedWorkClaimKind::LeadingSessionCommand => {
+                    let selected_len =
+                        store::queued_work::select_leading_session_command(&candidates);
+                    (
+                        claimable_indices
+                            .iter()
+                            .copied()
+                            .take(selected_len)
+                            .collect(),
+                        // A successful selection has no refusal to report.
+                        (selected_len == 0).then_some(lash_core::QueuedWorkClaimRefusal::Empty),
+                    )
+                }
+                RuntimePerfQueuedWorkClaimKind::TurnWork { boundary, policy } => {
+                    let selection = store::queued_work::select_turn_work_claim_indices(
+                        &candidates,
+                        boundary,
+                        &policy,
+                        now,
+                    )?;
+                    (
+                        selection
+                            .indices
+                            .into_iter()
+                            .map(|candidate_index| claimable_indices[candidate_index])
+                            .collect(),
+                        selection.refusal,
+                    )
+                }
+            };
         if selected_indices.is_empty() {
-            return Ok(None);
+            return Ok(lash_core::QueuedWorkClaimOutcome::Refused(
+                refusal.unwrap_or(lash_core::QueuedWorkClaimRefusal::Empty),
+            ));
         }
         let first_index = selected_indices[0];
         let first = queued[first_index].batch.clone();
@@ -381,18 +409,20 @@ impl RuntimePerfStore {
             entry.claim_session_lease_generation = generation;
             batches.push(entry.batch.clone());
         }
-        Ok(Some(QueuedWorkClaim {
-            session_id: session_id.to_string(),
-            claim_id,
-            owner: owner.clone(),
-            lease_token,
-            fencing_token,
-            session_lease_generation: generation,
-            data: lash_core::store_backend_support::queued_work_claim_data(
-                batches,
-                abandon_restore_claim_id,
-            ),
-        }))
+        Ok(lash_core::QueuedWorkClaimOutcome::Claimed(
+            QueuedWorkClaim {
+                session_id: session_id.to_string(),
+                claim_id,
+                owner: owner.clone(),
+                lease_token,
+                fencing_token,
+                session_lease_generation: generation,
+                data: lash_core::store_backend_support::queued_work_claim_data(
+                    batches,
+                    abandon_restore_claim_id,
+                ),
+            },
+        ))
     }
 
     fn claim_pending_turn_inputs_perf(

@@ -167,8 +167,9 @@ pub mod store_backend_support {
 #[doc(hidden)]
 pub mod facade_support {
     pub use crate::runtime::turn_loop::{
-        SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainError,
-        SelectedQueuedWorkDrainOutcome, SelectedQueuedWorkDrainRefusalCause,
+        EmptyQueuedDrainReason, QueuedTurnDrain, SelectedQueuedWorkBatchSatisfaction,
+        SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainOutcome,
+        SelectedQueuedWorkDrainRefusalCause,
     };
     pub use crate::tool_provider::orchestration::{
         OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
@@ -1034,13 +1035,14 @@ pub use store::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
     AttachmentManifestEntry, AttachmentWriteFence, BlobRef, DurableItem, DurablePayload,
     DurableScan, DurableScanPage, DurableSurface, GcReport, LeaseClaimNonce, LeaseOwnerIdentity,
-    OrphanedTurnInputScope, QueuedWorkStore, RuntimePersistence, ScanCoverage,
-    SelectedQueuedWorkClaimOutcome, SessionAdmission, SessionBinding, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
-    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
-    StoreBackend, StoreError, StoreMaintenance, StorePreflight, StoreSchemaDatabase,
-    StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnInputStore, VacuumReport,
+    OrphanedTurnInputScope, QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore,
+    RuntimePersistence, ScanCoverage, SelectedQueuedWorkClaimOutcome, SessionAdmission,
+    SessionBinding, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseRenewalInstallMismatch,
+    SessionExecutionLeaseStore, SessionMeta, StoreBackend, StoreError, StoreMaintenance,
+    StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
+    TurnInputStore, VacuumReport,
 };
 pub use store::{
     CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, HydratedCheckpointComponent,

@@ -260,6 +260,7 @@ pub async fn wake_delivery_crash_matrix(
         )
         .await
         .expect("claim authority-separated wakes")
+        .claim()
         .expect("first authority wake is ready");
     assert_eq!(
         authority_claim.batches.len(),

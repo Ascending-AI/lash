@@ -134,6 +134,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             owner,
             InMemoryQueuedWorkClaimKind::LeadingSessionCommand,
         )
+        .map(crate::QueuedWorkClaimOutcome::claim)
     }
 
     async fn claim_ready_queued_work(
@@ -143,7 +144,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
         policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<Option<crate::QueuedWorkClaim>, crate::store::StoreError> {
+    ) -> Result<crate::QueuedWorkClaimOutcome, crate::store::StoreError> {
         self.claim_ready_queued_work_in_memory(
             session_id,
             session_execution_lease,
@@ -220,7 +221,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 policy,
             },
             now,
-        )?;
+        )?
+        .claim();
         *pending = staged_pending;
         *queued = staged_queued;
         Ok((turn_input_claim, queued_work_claim))
@@ -394,7 +396,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             boundary,
             &policy,
             now,
-        )?;
+        )?
+        .len;
         if selected_len == 0 {
             return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
                 None,

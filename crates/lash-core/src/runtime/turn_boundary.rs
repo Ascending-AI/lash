@@ -1357,6 +1357,7 @@ mod tests {
         )
         .await
         .expect("claim predecessor row")
+        .claim()
         .expect("predecessor claim exists");
         assert_eq!(predecessor_claim.batches[0].batch_id, batch.batch_id);
         store
@@ -1386,6 +1387,7 @@ mod tests {
         )
         .await
         .expect("peer reclaims row")
+        .claim()
         .expect("peer claim exists");
         store
             .release_session_execution_lease(&peer_lease.completion())

@@ -407,6 +407,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         )
         .await
         .expect("queue claim must validate against PostgreSQL time")
+        .claim()
         .expect("queued work remains claimable despite future-skewed client clock");
     assert_eq!(queue_claim.batches[0].batch_id, batch.batch_id);
 

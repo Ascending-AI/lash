@@ -431,6 +431,7 @@ async fn measure_store_hardening_backend_turn(
                 lash_core::testing::queued_work_claim_policy(1),
             )
             .await?
+            .claim()
             .ok_or_else(|| anyhow::anyhow!("store-hardening expected queued-work claim"))
     })
     .await?;
