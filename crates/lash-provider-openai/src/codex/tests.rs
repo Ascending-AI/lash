@@ -21,7 +21,10 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
-use ws_testing::{ScriptedWsAction, assistant_item, spawn_scripted_websocket};
+use ws_testing::{
+    InjectedAcceptFault, ScriptedWsAction, assistant_item, spawn_scripted_websocket,
+    spawn_scripted_websocket_with_injected_accept_faults,
+};
 
 fn process_event(state: &mut CodexStreamState, event: Value) {
     CodexProvider::process_sse_event(&event.to_string(), state, None).unwrap();
@@ -1497,6 +1500,157 @@ async fn codex_auto_with_distinct_scopes_uses_uncached_websockets() {
     assert_eq!(
         header(&handshakes[1], "x-client-request-id"),
         Some("direct-b:request")
+    );
+}
+
+#[tokio::test]
+async fn codex_uncached_websockets_survive_a_failed_accept_between_connections() {
+    // The scripted server's accept loop must outlive a failed `accept()`. An
+    // uncached transport opens one connection per request, so a loop that ends
+    // on the first error leaves every later request without a server: the
+    // client falls back to the unroutable HTTP endpoint and the turn fails,
+    // which is how FIG-1267 showed up on an oversubscribed runner (a descriptor
+    // limit hit between two handshakes). The injected fault puts that failure
+    // exactly in the gap between the two connections.
+    let ws = spawn_scripted_websocket_with_injected_accept_faults(
+        vec![
+            ScriptedWsAction::Complete {
+                response_id: "resp_1",
+                message_id: "msg_1",
+                text: "one",
+            },
+            ScriptedWsAction::Complete {
+                response_id: "resp_2",
+                message_id: "msg_2",
+                text: "two",
+            },
+        ],
+        vec![InjectedAcceptFault {
+            after_accepted_connections: 1,
+            kind: std::io::ErrorKind::ConnectionAborted,
+        }],
+    )
+    .await;
+    let mut provider = websocket_test_provider(
+        CodexTransport::Auto,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+    );
+    let mut first = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    first.scope = LlmRequestScope::new("direct-a", "direct-a:frame", "direct-a:request");
+    let mut second = request(vec![LlmMessage::text(LlmRole::User, "next")]);
+    second.scope = LlmRequestScope::new("direct-b", "direct-b:frame", "direct-b:request");
+
+    let first_response = provider.complete(first).await.expect("first response");
+    let second_response = provider.complete(second).await.expect("second response");
+
+    assert_eq!(first_response.full_text, "one");
+    assert_eq!(second_response.full_text, "two");
+    assert_eq!(
+        ws.handshakes().len(),
+        2,
+        "the second connection must reach the scripted server over WebSocket"
+    );
+    assert!(
+        second_response
+            .http_summary
+            .as_deref()
+            .unwrap_or_default()
+            .contains("reused=false"),
+        "the second request must be a fresh connection, not a reused one"
+    );
+}
+
+#[tokio::test]
+async fn codex_scripted_websocket_accept_loop_retries_every_error_kind() {
+    // The loop retries without classifying. That is the whole point of the
+    // FIG-1267 fix: `accept(2)` reports the pending-connection errnos (EPROTO,
+    // ENETDOWN, ENETUNREACH, EHOSTUNREACH) with no stable `ErrorKind`, so any
+    // allowlist of survivable kinds re-creates the silent death for exactly the
+    // errors it failed to name. `ErrorKind::Other` stands in for that
+    // uncategorised class here — `ErrorKind::Uncategorized` is unstable and
+    // cannot be constructed from a test — alongside two kinds no plausible
+    // allowlist would carry.
+    let ws = spawn_scripted_websocket_with_injected_accept_faults(
+        vec![ScriptedWsAction::Complete {
+            response_id: "resp_1",
+            message_id: "msg_1",
+            text: "one",
+        }],
+        vec![
+            InjectedAcceptFault {
+                after_accepted_connections: 0,
+                kind: std::io::ErrorKind::Other,
+            },
+            InjectedAcceptFault {
+                after_accepted_connections: 0,
+                kind: std::io::ErrorKind::PermissionDenied,
+            },
+            InjectedAcceptFault {
+                after_accepted_connections: 0,
+                kind: std::io::ErrorKind::InvalidData,
+            },
+        ],
+    )
+    .await;
+    let mut provider = websocket_test_provider(
+        CodexTransport::Auto,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+    );
+    let mut only = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    only.scope = LlmRequestScope::new("direct-a", "direct-a:frame", "direct-a:request");
+
+    let response = provider.complete(only).await.expect("response");
+
+    assert_eq!(response.full_text, "one");
+    assert_eq!(
+        ws.handshakes().len(),
+        1,
+        "the connection must reach the scripted server after the injected faults"
+    );
+    assert_eq!(
+        ws.accept_failure(),
+        None,
+        "three failures in a row is far short of the give-up bound"
+    );
+}
+
+#[tokio::test]
+async fn codex_scripted_websocket_accept_loop_gives_up_loudly_after_the_bound() {
+    // A listener that never recovers must not leave the test hanging or, worse,
+    // failing as a client-side transport error. Past the bound the loop records
+    // why it stopped, and `accept_failure()` is the seam a test reads before
+    // blaming the code under test.
+    let faults = std::iter::repeat_n(
+        InjectedAcceptFault {
+            after_accepted_connections: 0,
+            kind: std::io::ErrorKind::Other,
+        },
+        ws_testing::MAX_CONSECUTIVE_ACCEPT_FAILURES as usize,
+    )
+    .collect();
+    let ws = spawn_scripted_websocket_with_injected_accept_faults(Vec::new(), faults).await;
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let reason = loop {
+        if let Some(reason) = ws.accept_failure() {
+            break reason;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the accept loop must give up within the bound, not hang"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    };
+
+    assert!(
+        reason.contains("scripted websocket server stopped listening"),
+        "the give-up must name the harness, got {reason}"
+    );
+    assert!(
+        reason.contains(&ws_testing::MAX_CONSECUTIVE_ACCEPT_FAILURES.to_string()),
+        "the give-up must report how many failures in a row it saw, got {reason}"
     );
 }
 

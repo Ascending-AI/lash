@@ -127,6 +127,51 @@ pub enum ScriptedWsAction {
 /// WebSocket handshake the scripted server accepted.
 pub type CapturedHandshakes = Arc<Mutex<Vec<Vec<(String, String)>>>>;
 
+/// One synthetic `accept()` failure, injected into the scripted server's accept
+/// loop in place of a real poll of the listener.
+///
+/// **Fault injection for [`spawn_scripted_websocket_with_injected_accept_faults`]
+/// alone.** [`spawn_scripted_websocket`], the default path every other test
+/// uses, injects nothing; a fault only ever exists because a test asked for one
+/// by name. The synthetic failure yields no connection, exactly like a real
+/// `accept()` that fails before handing one over. The property under test is
+/// that the loop survives it and goes on serving.
+#[derive(Clone, Copy, Debug)]
+pub struct InjectedAcceptFault {
+    /// How many connections the loop must already have accepted before this
+    /// fault fires. `1` fires the fault in the gap between the first and the
+    /// second handshake. A fault whose count is already past fires at the next
+    /// poll, so it can never be stranded behind the connections it named.
+    pub after_accepted_connections: usize,
+    /// The error the synthetic `accept()` poll reports.
+    pub kind: std::io::ErrorKind,
+}
+
+/// How many `accept()` failures in a row retire the scripted server's accept
+/// loop.
+///
+/// No `accept()` error is treated as fatal on its own. Classifying one as fatal
+/// is what produced FIG-1267: a loop that exits on a single error stops
+/// answering handshakes for the rest of the test, and the failure then surfaces
+/// as a client-side transport error on a later turn, saying nothing about the
+/// harness. An allowlist of survivable errors does not fix that, it just moves
+/// the trap — `accept(2)` reports pending-connection errnos (`EPROTO`,
+/// `ENETDOWN`, `ENETUNREACH`, `EHOSTUNREACH`) that Rust maps to an
+/// uncategorised `ErrorKind`, so any allowlist re-creates the same silent death
+/// for them.
+///
+/// A count instead of a classification: only a listener that fails this many
+/// times with no successful accept in between is treated as broken, and giving
+/// up is recorded and panicked on so the failure names the harness. At the 1ms
+/// retry pause this bounds the give-up at roughly 100ms — far inside the 5s
+/// request timeout every consumer of this harness sets, so a genuinely dead
+/// listener still fails the test promptly rather than hanging it.
+pub const MAX_CONSECUTIVE_ACCEPT_FAILURES: u32 = 100;
+
+/// Pause between accept retries, so a listener failing without blocking cannot
+/// spin the runtime.
+pub const ACCEPT_RETRY_PAUSE: Duration = Duration::from_millis(1);
+
 /// Handle to a running scripted server. Dropping it aborts the accept loop.
 pub struct ScriptedWsServer {
     /// `ws://…` URL to point [`crate::codex::CodexProvider::with_endpoint_urls`] at.
@@ -135,6 +180,7 @@ pub struct ScriptedWsServer {
     captured_raw: Arc<Mutex<Vec<Vec<u8>>>>,
     handshakes: CapturedHandshakes,
     close_frames: Arc<Mutex<u32>>,
+    accept_failure: Arc<Mutex<Option<String>>>,
     task: JoinHandle<()>,
 }
 
@@ -158,6 +204,17 @@ impl ScriptedWsServer {
     pub fn close_frame_count(&self) -> u32 {
         *self.close_frames.lock_recover()
     }
+
+    /// Why the accept loop gave up, if it did.
+    ///
+    /// `Some` means the server stopped listening after
+    /// [`MAX_CONSECUTIVE_ACCEPT_FAILURES`] failures in a row, and every
+    /// client-side failure after that point is a consequence of the dead
+    /// harness rather than of the code under test. Assert on this before
+    /// diagnosing a provider-side transport error.
+    pub fn accept_failure(&self) -> Option<String> {
+        self.accept_failure.lock_recover().clone()
+    }
 }
 
 impl Drop for ScriptedWsServer {
@@ -169,6 +226,21 @@ impl Drop for ScriptedWsServer {
 /// Bind a local WebSocket server that answers successive requests with
 /// `actions`, capturing every request payload and handshake headers.
 pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> ScriptedWsServer {
+    spawn_scripted_websocket_with_injected_accept_faults(actions, Vec::new()).await
+}
+
+/// [`spawn_scripted_websocket`], with synthetic `accept()` failures injected into
+/// the accept loop.
+///
+/// **For the accept-loop tests only.** Faults fire in the order given,
+/// each at the point named by its
+/// [`after_accepted_connections`](InjectedAcceptFault::after_accepted_connections);
+/// pass an empty vec and the loop behaves exactly as
+/// [`spawn_scripted_websocket`] does, which is what every other caller gets.
+pub async fn spawn_scripted_websocket_with_injected_accept_faults(
+    actions: Vec<ScriptedWsAction>,
+    injected_accept_faults: Vec<InjectedAcceptFault>,
+) -> ScriptedWsServer {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind ws");
     let addr = listener.local_addr().expect("ws addr");
     let actions = Arc::new(Mutex::new(VecDeque::from(actions)));
@@ -176,16 +248,45 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
     let captured_raw = Arc::new(Mutex::new(Vec::new()));
     let handshakes = Arc::new(Mutex::new(Vec::new()));
     let close_frames = Arc::new(Mutex::new(0u32));
+    let accept_failure = Arc::new(Mutex::new(None));
+    let task_accept_failure = Arc::clone(&accept_failure);
     let task_actions = Arc::clone(&actions);
     let task_captured = Arc::clone(&captured);
     let task_captured_raw = Arc::clone(&captured_raw);
     let task_handshakes = Arc::clone(&handshakes);
     let task_close_frames = Arc::clone(&close_frames);
     let task = tokio::spawn(async move {
+        let mut injected = VecDeque::from(injected_accept_faults);
+        let mut accepted_connections = 0usize;
+        let mut consecutive_failures = 0u32;
         loop {
-            let Ok((stream, _)) = listener.accept().await else {
-                break;
+            let due_fault = injected
+                .front()
+                .is_some_and(|fault| fault.after_accepted_connections <= accepted_connections)
+                .then(|| injected.pop_front().expect("due fault"));
+            let outcome = match due_fault {
+                Some(fault) => Err(std::io::Error::from(fault.kind)),
+                None => listener.accept().await,
             };
+            let stream = match outcome {
+                Ok((stream, _)) => stream,
+                Err(error) => {
+                    consecutive_failures += 1;
+                    if consecutive_failures >= MAX_CONSECUTIVE_ACCEPT_FAILURES {
+                        let reason = format!(
+                            "scripted websocket server stopped listening: {consecutive_failures} \
+                             consecutive accept failures, last was {error:?}. Any client failure \
+                             after this point is the harness, not the code under test."
+                        );
+                        *task_accept_failure.lock_recover() = Some(reason.clone());
+                        panic!("{reason}");
+                    }
+                    tokio::time::sleep(ACCEPT_RETRY_PAUSE).await;
+                    continue;
+                }
+            };
+            consecutive_failures = 0;
+            accepted_connections += 1;
             let actions = Arc::clone(&task_actions);
             let captured = Arc::clone(&task_captured);
             let captured_raw = Arc::clone(&task_captured_raw);
@@ -373,6 +474,7 @@ pub async fn spawn_scripted_websocket(actions: Vec<ScriptedWsAction>) -> Scripte
         captured_raw,
         handshakes,
         close_frames,
+        accept_failure,
         task,
     }
 }
