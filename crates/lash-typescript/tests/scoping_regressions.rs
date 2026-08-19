@@ -314,3 +314,67 @@ fn named_function_expressions_bind_their_own_name() {
         lash_typescript::DiagnosticCode::ReservedIdentifier
     );
 }
+
+#[test]
+fn sibling_scopes_do_not_share_async_helper_facts() {
+    // A dead sibling `f` that happened to be async must not make a later,
+    // ordinary `f` look like an async helper and demand `await`.
+    assert_eq!(
+        finished("{ const f = async () => 1; } { const f = (): number => 2; finish(f()); }"),
+        Value::Number(2.0)
+    );
+}
+
+#[test]
+fn sibling_scopes_do_not_share_exotic_iterable_facts() {
+    // A dead sibling `m` that was a Map must not route a later array `m` down
+    // the exotic-iterable path, where `forEach` stops being the array method.
+    assert_eq!(
+        finished(
+            "{ const m = new Map(); } { const m = [1, 2, 3]; const out: number[] = []; m.forEach((value: number) => { out.push(value * 2); }); finish(out.length); }"
+        ),
+        Value::Number(3.0)
+    );
+}
+
+#[test]
+fn dead_process_handle_names_do_not_change_await_lowering() {
+    // A process handle whose scope has closed must not lend its name to an
+    // unrelated later binding, turning `await` on a settled value into a
+    // process await.
+    let source = r#"
+        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        { const handle = start(worker); }
+        { const handle = 5; finish(await handle); }
+    "#;
+    assert_eq!(
+        lash_typescript::parse(source)
+            .expect_err("awaiting a settled value must reject")
+            .code,
+        lash_typescript::DiagnosticCode::AwaitUnsupported
+    );
+}
+
+#[test]
+fn start_resolves_its_target_through_the_scope_stack() {
+    // `start` resolves its argument like every other read: a parameter that
+    // shadows the process binding is not the process.
+    let shadowed = r#"
+        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const f = (worker: number) => start(worker);
+        finish(f(1));
+    "#;
+    assert_eq!(
+        lash_typescript::parse(shadowed)
+            .expect_err("a shadowing parameter is not a process definition")
+            .code,
+        lash_typescript::DiagnosticCode::ProcessTargetStaticRequired
+    );
+    // The unshadowed target still resolves.
+    let visible = r#"
+        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const handle = start(worker);
+        finish(1);
+    "#;
+    lash_typescript::parse(visible).expect("a top-level process binding starts");
+}

@@ -453,7 +453,7 @@ impl Lowerer {
             {
                 let exotic = match object.as_ref() {
                     Expr::New { constructor, .. }
-                        if matches!(constructor.as_str(), "Map" | "Set" | "URLSearchParams") =>
+                        if IterableKind::from_constructor(constructor).is_some() =>
                     {
                         true
                     }
@@ -461,11 +461,9 @@ impl Lowerer {
                         property: MemberProperty::Field(field),
                         ..
                     } if field == "searchParams" => true,
-                    Expr::Ident(name) => self
-                        .binding(name)
-                        .ok()
-                        .and_then(|binding| self.iterable_kinds.get(&binding.internal))
-                        .is_some(),
+                    Expr::Ident(name) => self.binding(name).is_ok_and(|binding| {
+                        matches!(binding.role, BindingRole::ExoticIterable(_))
+                    }),
                     _ => false,
                 };
                 let receiver = self.temporary("iterator_receiver");
@@ -684,15 +682,11 @@ impl Lowerer {
             let receiver_is_callback_exotic = method == "forEach"
                 && match object.as_ref() {
                     Expr::New { constructor, .. } => {
-                        matches!(constructor.as_str(), "Map" | "Set" | "URLSearchParams")
+                        IterableKind::from_constructor(constructor).is_some()
                     }
-                    Expr::Ident(name) => self
-                        .binding(name)
-                        .ok()
-                        .and_then(|binding| self.iterable_kinds.get(&binding.internal))
-                        .is_some_and(|kind| {
-                            matches!(kind.as_str(), "Map" | "Set" | "URLSearchParams")
-                        }),
+                    Expr::Ident(name) => self.binding(name).is_ok_and(|binding| {
+                        matches!(binding.role, BindingRole::ExoticIterable(_))
+                    }),
                     _ => false,
                 };
             if !receiver_is_module_authority
@@ -814,12 +808,9 @@ impl Lowerer {
             });
         }
         if let Expr::Ident(name) = callee
-            && let Some(binding) = self
-                .scopes
-                .iter()
-                .rev()
-                .find_map(|scope| scope.bindings.get(name))
-            && self.async_bindings.contains(&binding.internal)
+            && self
+                .binding(name)
+                .is_ok_and(|binding| binding.role == BindingRole::AsyncHelper)
             && self.await_depth == 0
         {
             return Err(Diagnostic::new(
@@ -841,12 +832,18 @@ impl Lowerer {
         target: &str,
         entries: &[ObjectProperty],
     ) -> Result<LashExpr, Diagnostic> {
-        let Some(process) = self.process_bindings.get(target).cloned() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ProcessTargetStaticRequired,
-                format!("`{target}` is not a top-level defineProcess binding"),
-                None,
-            ));
+        // `start` resolves its target through the scope stack like every other
+        // read, so a nearer binding of the same name — a parameter, a block
+        // local — is what the author wrote, and it is not the process.
+        let process = match self.binding(target).map(|binding| &binding.role) {
+            Ok(BindingRole::ProcessDefinition(process)) => process.clone(),
+            _ => {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::ProcessTargetStaticRequired,
+                    format!("`{target}` is not a top-level defineProcess binding"),
+                    None,
+                ));
+            }
         };
         Ok(LashExpr::StartProcess(ProcessStartExpr {
             process: process.into(),

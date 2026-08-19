@@ -127,6 +127,7 @@ impl Lowerer {
                 kind: BindingKind::Var,
                 initialized: true,
                 owner_function: 0,
+                role: BindingRole::Plain,
             },
         );
         if nested_function {

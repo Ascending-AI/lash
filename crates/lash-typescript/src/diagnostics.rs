@@ -751,6 +751,7 @@ mod tests {
                 include_str!("adapter/prototype_chain.rs"),
             ),
             ("lower/mod.rs", include_str!("lower/mod.rs")),
+            ("lower/binding.rs", include_str!("lower/binding.rs")),
             ("lower/calls.rs", include_str!("lower/calls.rs")),
             ("lower/constructs.rs", include_str!("lower/constructs.rs")),
             ("lower/loops.rs", include_str!("lower/loops.rs")),
