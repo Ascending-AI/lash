@@ -240,6 +240,7 @@ jobs:
           python3 scripts/test_check_format_versions.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
+          python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bumps.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_transcript_diff.py
@@ -561,6 +562,14 @@ jobs:
           fi
           python3 scripts/check_version_bumps.py --base "$base"
 
+      # A service-backed suite that skips itself reports green having compared
+      # nothing. This pins both mechanisms that stop it: the LASH_REQUIRE_*
+      # flags that turn a missing service into a failure, and the
+      # --run-ignored/--include-ignored opt-in that the cross-backend
+      # differential's `#[ignore]`d tests need in order to run at all.
+      - name: Pin service gates
+        run: python3 scripts/check_service_gate_pinning.py
+
       # GitHub rejects some workflow files that plain YAML parsing accepts
       # (e.g. expressions in contexts where they are not allowed); actionlint
       # validates against the real workflow schema. The release binary is
@@ -880,7 +889,7 @@ jobs:
         run: >-
           cargo nextest run -p lash-sim
           --test cross_backend_store_differential
-          --locked -j1 --no-capture
+          --locked -j1 --no-capture --run-ignored all
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
@@ -940,7 +949,7 @@ jobs:
         run: >-
           cargo test -p lash-sim
           --test cross_backend_store_differential
-          --locked attachment_blob_store_differential_agrees -- --nocapture
+          --locked attachment_blob_store_differential_agrees -- --nocapture --include-ignored
         env:
           LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
           LASH_REQUIRE_MINIO: "1"

@@ -1412,7 +1412,7 @@ run_cross_backend_store_soak() {
     LASH_REQUIRE_POSTGRES=1 \
     LASH_CROSS_BACKEND_CASES="$cases" \
     cargo test -p lash-sim --test cross_backend_store_differential --locked \
-      generated_cross_backend_surface_differential_agrees -- --nocapture
+      generated_cross_backend_surface_differential_agrees -- --nocapture --include-ignored
 }
 
 write_generated_postgres_dynamic_replay_skipped() {

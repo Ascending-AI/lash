@@ -850,7 +850,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryAttachmentStore::raw_blobs_for_testing"]
 area = "attachments"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:2109#let memory_rows = memory.raw_blobs_for_testing();"
+usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:2111#let memory_rows = memory.raw_blobs_for_testing();"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]

@@ -1926,6 +1926,7 @@ async fn minimize_diverging_prefix(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "compares three durable backends; requires Postgres (`just cross-backend-store-soak`, or LASH_POSTGRES_DATABASE_URL with --include-ignored)"]
 async fn generated_cross_backend_surface_differential_agrees() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(value) if !value.is_empty() => value,
@@ -2038,6 +2039,7 @@ enum BlobOperation {
 }
 
 #[tokio::test]
+#[ignore = "compares file and S3 blob stores; requires MinIO (`just push-gate`, or LASH_MINIO_ENDPOINT with --include-ignored)"]
 async fn attachment_blob_store_differential_agrees() {
     let endpoint = match std::env::var("LASH_MINIO_ENDPOINT") {
         Ok(value) if !value.is_empty() => value,

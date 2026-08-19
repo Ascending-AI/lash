@@ -46,6 +46,7 @@ run_release_script_tests() {
   python3 scripts/test_check_format_versions.py
   python3 scripts/test_check_postgres_json_carrier_coverage.py
   python3 scripts/test_check_postgres_payload_shape_version.py
+  python3 scripts/test_check_service_gate_pinning.py
   python3 scripts/test_check_transcript_diff.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
@@ -162,14 +163,14 @@ run_postgres_conformance() {
       LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}" \
       cargo nextest run -p lash-sim \
         --test cross_backend_store_differential \
-        --locked -j1 --no-capture
+        --locked -j1 --no-capture --run-ignored all
   else
     LASH_POSTGRES_DATABASE_URL="$database_url" \
       LASH_REQUIRE_POSTGRES=1 \
       LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}" \
       cargo test -p lash-sim \
         --test cross_backend_store_differential \
-        --locked -- --nocapture --test-threads=1
+        --locked -- --nocapture --test-threads=1 --include-ignored
   fi
 }
 
@@ -211,7 +212,7 @@ run_minio_conformance() {
   LASH_MINIO_ENDPOINT="$endpoint" \
     LASH_REQUIRE_MINIO=1 \
     cargo test -p lash-sim --test cross_backend_store_differential --locked \
-      attachment_blob_store_differential_agrees -- --nocapture
+      attachment_blob_store_differential_agrees -- --nocapture --include-ignored
 }
 
 configure_bindgen_headers

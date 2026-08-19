@@ -313,7 +313,7 @@ runtime-persistence-soak cases='256':
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.
 cross-backend-store-soak cases='64' seed='852':
-  LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" cargo test -p lash-sim --locked --test cross_backend_store_differential generated_cross_backend_surface_differential_agrees -- --nocapture
+  LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" cargo test -p lash-sim --locked --test cross_backend_store_differential generated_cross_backend_surface_differential_agrees -- --nocapture --include-ignored
 
 # The runtime leg gates on allocation ceilings and phase inventory only;
 # wall-clock budgets print as advisories (see scripts/perf_guard_budgets.json,
