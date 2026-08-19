@@ -22,7 +22,7 @@
   <a class="skip-link" href="#content">skip to content</a>
 <section class="opener">
     <h1 class="opener__title">overview<span class="slash">/</span>map</h1>
-    <p class="opener__lede">Lash is organized around one runtime boundary. The app-facing <code>lash</code> facade lets external Host Applications such as <a href="https://github.com/SamGalanakis/lash-cli"><code>lash-cli</code></a> compose replaceable providers, protocols, tools, plugins, persistence, tracing, and presentation around a core that owns session records, effect control, process execution, and durable commits.</p>
+    <p class="opener__lede">Lash is organized around one runtime boundary. The app-facing <code>lash</code> facade lets external Host Applications compose replaceable providers, protocols, tools, plugins, persistence, tracing, and presentation around a core that owns session records, effect control, process execution, and durable commits.</p>
   </section>
 
   <main class="body" id="content">
@@ -36,7 +36,7 @@
             <div class="mermaid">
 flowchart TD
   subgraph Host["Host applications"]
-    CLI["external lash-cli<br/>TUI, setup, resume/fork, --print"]
+    CLI["external terminal host<br/>TUI, setup, resume/fork, print mode"]
     Facade["lash (facade)<br/>app-facing core/session/turn API"]
     TraceViewer["lash-trace-viewer<br/>JSONL trace browser"]
   end

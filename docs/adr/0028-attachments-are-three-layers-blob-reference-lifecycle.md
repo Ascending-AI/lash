@@ -171,10 +171,9 @@ GC collects them — correct by construction, verified for both SQLite and
 Postgres through manifest row deletion. The stated assumption is
 that the backend instance is **exclusive to this lash deployment**: a blob with
 no live ref is genuinely garbage only if every writer to that bucket/directory is
-this deployment's sessions. The reference host (lash-cli) wires the bundled
-sweeper as one post-startup background pull with a generous grace period, logging
-its report; lash-core itself gains no scheduling infrastructure — the lever plus
-one host pull is the end-state.
+this deployment's sessions. A host wires the bundled sweeper as one post-startup
+background pull with a generous grace period, logging its report; lash-core itself
+gains no scheduling infrastructure — the lever plus one host pull is the end-state.
 
 Terminal process retention owns the two internal session stores created while a
 process runs: `process-env:<id>` and `process-session-turn:<id>`. Pruning first

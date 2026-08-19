@@ -552,8 +552,22 @@ def check_quickstart_contract(errors: list[str]) -> None:
     for claim in required_claims:
         if claim not in quickstart:
             errors.append(f"docs/quickstart.html: missing scope or crate-name claim {claim!r}")
-    if "lash-cli" in quickstart.lower():
-        errors.append("docs/quickstart.html: quickstart must stay embedded and lash-cli-free")
+    # The quickstart teaches embedding, so it must never route the reader
+    # through installing or invoking a CLI host binary.
+    forbidden_cli_markers = [
+        "install_lash",
+        "cargo install",
+        "curl -fssl",
+        "~/.lash",
+        "$ lash ",
+    ]
+    lowered = quickstart.lower()
+    for marker in forbidden_cli_markers:
+        if marker in lowered:
+            errors.append(
+                "docs/quickstart.html: quickstart must stay embedded and free of CLI-host "
+                f"install or invocation steps (found {marker!r})"
+            )
 
     facade = tomllib.loads((ROOT / "crates" / "lash" / "Cargo.toml").read_text())
     if facade.get("package", {}).get("name") != "lash-runtime":

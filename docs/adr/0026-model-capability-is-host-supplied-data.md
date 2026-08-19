@@ -28,9 +28,9 @@ sees an un-clamped value. Provider crates branch only on `encoding` and `disable
 (request shapes, payload variants), never capability. `ProviderModelPolicy`,
 `StaticModelPolicy`, and `ProviderHandle::{supported_variants, validate_variant}` are gone.
 
-The reference host (lash-cli) supplies the data from an ordered pattern-rule catalog
-(`capability_catalog.rs`) alongside its models.dev context-window catalog, with the same
-builtin-override precedence; a new model is a data row, not code. Other hosts supply their
-own rows (or richer sources) the same way. The trade we accepted: hosts own the burden of
-knowing model facts — an unknown model simply has no effort controls, and an explicit effort
-on one is rejected as `effort_not_configurable` rather than guessed at.
+A host supplies the data from an ordered pattern-rule catalog alongside its
+context-window catalog, with the same builtin-override precedence; a new model is a data
+row, not code. Every host supplies its own rows (or richer sources) the same way. The trade
+we accepted: hosts own the burden of knowing model facts — an unknown model simply has no
+effort controls, and an explicit effort on one is rejected as `effort_not_configurable`
+rather than guessed at.

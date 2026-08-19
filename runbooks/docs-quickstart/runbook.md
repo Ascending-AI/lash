@@ -7,7 +7,7 @@
 **Purpose.** Prove that the rendered quickstart describes Lash's in-repo embedded Rust
 surface, that its Rust example is copied from a compiling source, and that every displayed
 Lash dependency is pinned to the latest released version. This scenario never invokes or
-drives `lash-cli`.
+drives a CLI host.
 
 **No real tokens.** The quickstart checker and compiled snippets use only repository
 sources. Do not configure a provider or run the example program.
@@ -23,7 +23,7 @@ sources. Do not configure a provider or run the example program.
    `[lib].name = "lash"`.
 3. **Keep the scope embedded and minimal.** The rendered page must frame the program as a
    minimal embedded agent using in-memory facets, identify persistence as an explicit
-   next step, and contain no `lash-cli` workflow.
+   next step, and contain no CLI-host install or invocation workflow.
 4. **The release pin is mechanical.** All exact Lash pins in the README and docs entry
    pages must equal `docs/released-version.txt`; when newer local release tags exist,
    docs lint must reject the fallback as stale.
@@ -65,7 +65,10 @@ and **Before You Start** sections render. Gate all of the following text or elem
 - persistence is linked as the step for surviving process restart;
 - streaming, RLM, tools, background work, and traces are framed as later additions.
 
-Search the rendered document text for `lash-cli` and require zero matches. Capture
+Search the rendered document text for each CLI-host install and invocation marker
+(`install_lash`, `cargo install`, `curl -fsSL`, `~/.lash`, and a `$ lash ` shell prompt) and
+require zero matches for every one of them. These are the same markers `lint_docs.py`
+enforces, so a disagreement between page and checker is itself a failure. Capture
 `01-embedded-scope.png` with the crate-name contract and scope framing visible.
 
 ## Phase 2 — Render and reconcile the install and Rust examples
@@ -90,14 +93,14 @@ Stop the static docs server and confirm the loopback port is closed.
 |------|----------------|---------|----------|
 | Repository checks | snippets compile; docs lint exits zero | | `00-docs-gates.txt` |
 | Crate identity | rendered `lash-runtime` / `use lash` agrees with facade manifest | | `00-source-contract.txt`, `01-embedded-scope.png` |
-| Embedded scope | minimal in-memory host, persistence next, no `lash-cli` | | `01-embedded-scope.png` |
+| Embedded scope | minimal in-memory host, persistence next, no CLI-host install or invocation markers | | `01-embedded-scope.png` |
 | Release pin | rendered pins, fallback file, and latest available tag agree | | `00-source-contract.txt`, `02-rendered-dependencies.txt` |
 | Snippet fidelity | rendered code equals compiled source region byte-for-byte | | `02-compiled-example.png`, checker output |
-| CLI-free execution | no Lash CLI command or process used | | command log |
+| CLI-free execution | no CLI host command or process used | | command log |
 
 **Aggregate:** did the browser page, compiled in-repo snippet, crate manifests, and
-release-pin checker all describe the same embedded Lash quickstart without relying on
-`lash-cli`?
+release-pin checker all describe the same embedded Lash quickstart without relying on a
+CLI host?
 
 ---
 

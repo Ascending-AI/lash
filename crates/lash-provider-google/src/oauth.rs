@@ -1,5 +1,5 @@
 //! Google OAuth authorize-URL / code-exchange / refresh-token flow.
-//! Public so Host Applications such as `lash-cli` can drive interactive login.
+//! Public so Host Applications can drive interactive login.
 
 use lash_provider_auth::{OAuthError, OAuthTokens, now_secs, url_form_encode};
 

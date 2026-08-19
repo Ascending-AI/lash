@@ -1,5 +1,5 @@
 //! Codex (OpenAI) device-code OAuth flow + token refresh. Public so
-//! Host applications such as `lash-cli` can drive the interactive login.
+//! Host Applications can drive the interactive login.
 
 use base64::Engine;
 
