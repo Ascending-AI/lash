@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import unittest
 
+import yaml
+
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
@@ -18,9 +20,13 @@ CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 DOCS_PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "docs-pages.yml"
+SCCACHE_ACTION_REF = "./.github/actions/setup-sccache"
+SCCACHE_ACTION = ROOT / ".github" / "actions" / "setup-sccache" / "action.yml"
+MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 RELEASE_NOTES = ROOT / "scripts" / "release_notes.py"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
+PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
 PERF_STORE_HARDENING_RS = (
@@ -413,6 +419,53 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('git merge-base "$base_ref" HEAD', check)
         self.assertIn("python3 scripts/release_notes.py check-pr", check)
         self.assertIn('--range "${merge_base}..HEAD"', check)
+
+    def test_push_gate_runs_the_gates_whose_self_tests_it_runs(self) -> None:
+        push_gate = PUSH_GATE.read_text(encoding="utf-8")
+        pre_commit = PRE_COMMIT_CONFIG.read_text(encoding="utf-8")
+        self_tests = shell_function_body(push_gate, "run_release_script_tests")
+
+        # A self-test proves the gate works; only the gate proves the tree does.
+        # This script ran `test_check_service_gate_pinning.py` and
+        # `test_check_transcript_diff.py` while running neither gate, so both
+        # CI-blocking failures were invisible until CI.
+        self.assertIn("python3 scripts/check_service_gate_pinning.py", push_gate)
+        self.assertIn("python3 scripts/check-transcript-diff.py", push_gate)
+
+        # Locally a gate may live in this script or in the prek hooks; what it
+        # may not do is exist only as a self-test. Comment lines are stripped
+        # first: the omissions block below names the CI-only gates, and a gate
+        # explained there is precisely one that does not run.
+        local = "\n".join(
+            line
+            for line in f"{push_gate}\n{pre_commit}".splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        for name in re.findall(r"scripts/(test_check_[a-z0-9_]+)\.py", self_tests):
+            stem = name[len("test_") :]
+            candidates = [
+                ROOT / "scripts" / f"{spelling}{suffix}"
+                for spelling in (stem, stem.replace("_", "-"))
+                for suffix in (".py", ".sh")
+            ]
+            gates = [path for path in candidates if path.exists()]
+            with self.subTest(self_test=name):
+                self.assertTrue(gates, f"{name} tests no discoverable gate")
+                self.assertTrue(
+                    any(f"scripts/{path.name}" in local for path in gates),
+                    f"{name} runs here but its gate runs only in CI",
+                )
+
+    def test_pre_commit_clippy_hook_matches_the_ci_clippy_invocation(self) -> None:
+        pre_commit = PRE_COMMIT_CONFIG.read_text(encoding="utf-8")
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        lint = workflow_job_block(workflow, "lint")
+
+        # Without `--locked` the hook may resolve and write a new Cargo.lock,
+        # so it lints a dependency graph the pushed tree does not have.
+        clippy = "cargo clippy --workspace --all-targets --locked"
+        self.assertIn(clippy, lint)
+        self.assertIn(f"entry: {clippy} -- -D warnings", pre_commit)
 
     def test_push_gate_serializes_live_differential_before_postgres_free_suite(
         self,
@@ -1494,6 +1547,71 @@ derive_mutation_jobs() {{
         # at the last gate before merge.
         self.assertIn("gh-readonly-queue/[^/]+/pr-(?P<number>\\d+)-[0-9a-f]+", gate)
         self.assertIn("def queried_pull_request_body_by_number(", gate)
+
+    def test_every_shared_debug_cache_reader_resolves_the_writer_rustflags(
+        self,
+    ) -> None:
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        action_source = SCCACHE_ACTION.read_text(encoding="utf-8")
+        action = yaml.safe_load(action_source)
+        action_steps = action["runs"]["steps"]
+        action_effects = yaml.safe_dump(
+            [
+                {key: step[key] for key in ("run", "env", "uses") if key in step}
+                for step in action_steps
+            ]
+        )
+
+        # RUSTFLAGS is part of cargo's per-unit fingerprint. When the flag was
+        # appended by a step, the five jobs that restore `linux-debug` without
+        # that step matched the cache key, logged "cache restored", and then
+        # cold-built the entire graph. The flag is a property of the workflow
+        # now, so nothing about a job's step list can move it.
+        self.assertEqual((workflow.get("env") or {}).get("RUSTFLAGS"), MOLD_RUSTFLAGS)
+        self.assertNotIn("RUSTFLAGS", action_effects)
+        self.assertNotIn("inputs", action)
+
+        for job_id, job in workflow["jobs"].items():
+            steps = job.get("steps") or []
+            if not any(
+                (step.get("with") or {}).get("shared-key") == "linux-debug"
+                for step in steps
+            ):
+                continue
+            with self.subTest(job=job_id):
+                # No job-scoped or step-scoped override may reintroduce the
+                # split this fixed.
+                self.assertNotIn("RUSTFLAGS", job.get("env") or {})
+                for step in steps:
+                    self.assertNotIn("RUSTFLAGS", step.get("env") or {})
+                # The flag names a linker that has to exist: a job with the
+                # fingerprint but without the binary cannot link at all.
+                self.assertTrue(
+                    any(
+                        "setup-mold" in (step.get("uses") or "")
+                        or (step.get("uses") or "") == SCCACHE_ACTION_REF
+                        for step in steps
+                    ),
+                    f"{job_id} resolves the mold RUSTFLAGS without installing mold",
+                )
+        self.assertIn("rui314/setup-mold@", action_effects)
+
+    def test_linux_release_cache_stays_mold_free_across_workflows(self) -> None:
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        perf = PERF_WORKFLOW.read_text(encoding="utf-8")
+        release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+        # perf.yml and release.yml restore `linux-release` and link with the
+        # default linker. The one job that writes that cache has to opt out of
+        # the workflow-level flag, or those two workflows rebuild everything
+        # they restore. Empty and unset are the same value to cargo.
+        self.assertEqual(
+            workflow["jobs"]["linux-release-cache"]["env"]["RUSTFLAGS"], ""
+        )
+        for name, text in (("perf.yml", perf), ("release.yml", release)):
+            with self.subTest(workflow=name):
+                self.assertNotIn("mold", text)
+                self.assertNotIn("RUSTFLAGS", text)
 
     def test_shared_debug_cache_has_one_backend(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

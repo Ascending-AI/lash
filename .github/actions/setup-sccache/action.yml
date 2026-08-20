@@ -2,19 +2,9 @@ name: Setup sccache
 description: >-
   Install sccache with the GitHub Actions cache backend and route rustc through
   it, so the heavy compile that rust-cache's read-only restorers (the Test
-  shards, cross builds) cannot save is cached across shards and runs.
-  Optionally link through mold, because sccache caches compilation but never
-  the link step.
-
-inputs:
-  link-with-mold:
-    description: >-
-      Install mold and add it to RUSTFLAGS. Leave off for any job whose cargo
-      cache is shared with a workflow that does not also use this action —
-      RUSTFLAGS is part of the build fingerprint, so a mismatch rebuilds
-      everything the cache just restored.
-    required: false
-    default: "true"
+  shards, cross builds) cannot save is cached across shards and runs. Also
+  installs the linker the calling workflow's RUSTFLAGS names, because sccache
+  caches compilation but never the link step.
 
 runs:
   using: composite
@@ -37,15 +27,16 @@ runs:
           echo "CARGO_INCREMENTAL=0"
         } >> "$GITHUB_ENV"
 
+    # This action deliberately does not *set* RUSTFLAGS. RUSTFLAGS is part of
+    # cargo's per-unit fingerprint, so a value that depends on whether a job
+    # happens to list this step splits the cache: readers that restore a cache
+    # written under a different RUSTFLAGS log "cache restored" and then rebuild
+    # everything. The linker choice therefore belongs to the workflow (ci.yml's
+    # top-level `env:`, overridden per job where a cache must stay mold-free),
+    # and this step only provides the binary that value names. It installs
+    # unconditionally: the one caller that overrides RUSTFLAGS to be mold-free
+    # (`linux-release-cache`) pays a couple of seconds for a linker it does not
+    # use, which is cheaper than making the install depend on a context a
+    # composite action does not reliably see.
     - name: Install mold
-      if: inputs.link-with-mold == 'true'
       uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
-
-    - name: Link through mold
-      if: inputs.link-with-mold == 'true'
-      shell: bash
-      run: |
-        # Linking is what sccache cannot help with: a compilation cache hit
-        # still pays full link cost, and the workspace links a lot of test
-        # binaries.
-        echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
