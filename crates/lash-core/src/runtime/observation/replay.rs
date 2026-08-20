@@ -629,15 +629,12 @@ impl InMemoryLiveReplayStore {
         self
     }
 
-    /// Reopen this in-memory store over the same preserved replay history.
+    /// Clone this store while preserving its replay incarnation and history.
     ///
-    /// The returned handle deliberately keeps both the replay incarnation and
-    /// shared event buffers. A host must use a fresh store construction instead
-    /// when it cannot prove that both survived restart.
-    ///
-    /// Integrator class (ADR 0051): **live-replay conformance implementors**.
-    #[doc(hidden)]
-    pub fn reopen_preserving_history(&self) -> Self {
+    /// This is deliberately restricted to test and conformance support; hosts
+    /// must construct a fresh store when retained history cannot be proven.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn clone_preserving_history(&self) -> Self {
         Self {
             replay_incarnation_id: self.replay_incarnation_id.clone(),
             config: self.config.clone(),
@@ -817,6 +814,14 @@ impl InMemoryLiveReplayStore {
             None
         }
     }
+
+    fn incarnation_gap_for_cursor(
+        &self,
+        cursor: &ParsedSessionCursor,
+    ) -> Option<LiveReplayGapReason> {
+        (cursor.replay_incarnation_id != self.replay_incarnation_id)
+            .then_some(LiveReplayGapReason::Unavailable)
+    }
 }
 
 impl LiveReplayStore for InMemoryLiveReplayStore {
@@ -961,8 +966,8 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
-        if parsed.replay_incarnation_id != self.replay_incarnation_id {
-            return Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable));
+        if let Some(reason) = self.incarnation_gap_for_cursor(&parsed) {
+            return Ok(LiveReplayOutcome::Gap(reason));
         }
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
@@ -992,10 +997,8 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
-        if parsed.replay_incarnation_id != self.replay_incarnation_id {
-            return Ok(LiveReplaySubscribeOutcome::Gap(
-                LiveReplayGapReason::Unavailable,
-            ));
+        if let Some(reason) = self.incarnation_gap_for_cursor(&parsed) {
+            return Ok(LiveReplaySubscribeOutcome::Gap(reason));
         }
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();

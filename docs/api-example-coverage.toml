@@ -11773,12 +11773,12 @@ reason = "Syntax-only evidence: the recorded example anchor only constructs or d
 [[api]]
 symbol = "lash::observe::InMemoryLiveReplayStore::reopen_preserving_history"
 kind = "function"
-availability = "default+all-features"
+availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::reopen_preserving_history"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3421#let preserved = original.reopen_preserving_history();"
-reason = "Relocate: move this conformance-only handle into `lash::testing` if the in-memory conformance fixture gains a testing-only wrapper type; today the public in-memory store must produce a distinct handle sharing the same private replay state so the importable law can distinguish a preserved restart from a fresh incarnation."
+usage = "crates/lash/src/tests/turn_streaming.rs:3456#let preserved = original.reopen_preserving_history();"
+reason = "Relocate: this all-features-only handle is implemented in lash_core::testing and exists solely so the importable replay law can distinguish preserved history from a fresh incarnation."
 
 [[api]]
 symbol = "lash::observe::InMemoryLiveReplayStore::with_bounds"
@@ -11805,7 +11805,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3663#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
+usage = "crates/lash/src/tests/turn_streaming.rs:3669#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
 reason = "Relocate: this all-features-only method is implemented in lash_core::testing and consumed only to pin the distinct replay-visible and pre-notification cuts in the snapshot-subscribe conformance law."
 
 [[api]]
@@ -55600,7 +55600,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3422#    crate::testing::conformance::incarnation_change_invalidates_cursor("
+usage = "crates/lash/src/tests/turn_streaming.rs:3457#    crate::testing::conformance::incarnation_change_invalidates_cursor("
 reason = "Importable live-replay law exercised by the runtime's in-memory conformance test; only test code invokes it, which is the purpose of the `testing` feature."
 
 [[api]]
