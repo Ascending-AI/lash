@@ -70580,7 +70580,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-plugin-tool-output-budget/src/lib.rs:314#return vec![ModelToolReturnPart::text(render_projected_model_value("
+usage = "crates/lash-plugin-tool-output-budget/src/lib.rs:297#return vec![ModelToolReturnPart::text(render_projected_model_value("
 
 [[api]]
 symbol = "lash_core::test_support::OpenAttachmentSourcePolicy"
@@ -75604,7 +75604,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this type is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_tool_result#`ctx: ToolResultProjectionContext,`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this type is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_tool_result#`ctx: ToolResultProjectionContext`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::ToolResultProjectionContext::args"
