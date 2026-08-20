@@ -92,7 +92,10 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
             && issue.message.contains("explicit replay keys")
     }));
     assert!(
-        !runtime.resident_session_state_valid,
+        matches!(
+            runtime.resident_session_state,
+            ResidentSessionState::Invalidated { .. }
+        ),
         "a failed post-commit hook invalidates resident plugin state"
     );
 }

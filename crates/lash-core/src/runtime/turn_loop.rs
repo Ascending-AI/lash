@@ -608,14 +608,15 @@ impl Drop for TurnDriverSessionLoan<'_, '_> {
 
 impl LashRuntime {
     pub(super) fn invalidate_resident_session_state(&mut self) {
-        if self.resident_session_state_valid {
-            self.resident_session_reload_decision_id = Some(format!(
-                "resident-session-reload:{}:{}",
-                self.state.session_id,
-                uuid::Uuid::new_v4()
-            ));
+        if matches!(self.resident_session_state, ResidentSessionState::Valid) {
+            self.resident_session_state = ResidentSessionState::Invalidated {
+                decision_id: format!(
+                    "resident-session-reload:{}:{}",
+                    self.state.session_id,
+                    uuid::Uuid::new_v4()
+                ),
+            };
         }
-        self.resident_session_state_valid = false;
         self.graph_loaded_from_store = false;
         self.last_committed_lease_continuity = None;
         self.last_committed_observation_turn = None;
@@ -624,16 +625,17 @@ impl LashRuntime {
         }
     }
 
-    pub(super) fn trace_synchronous_resident_state_refusal(&self, consumer: &'static str) {
+    pub(super) fn trace_synchronous_resident_state_refusal(
+        &self,
+        decision_id: &str,
+        consumer: &'static str,
+    ) {
         tracing::info!(
             event = "resident_session_state.sync_refusal",
-            decision_id = self
-                .resident_session_reload_decision_id
-                .as_deref()
-                .unwrap_or("resident-session-reload:missing"),
+            decision_id,
             session_id = %self.state.session_id,
             consumer,
-            consulted_validity = self.resident_session_state_valid,
+            consulted_validity = false,
             outcome = "refused",
             error_classification = RuntimeErrorCode::ResidentSessionReloadFailed.as_str(),
             "synchronous resident-state consumer refused invalidated state"
@@ -672,25 +674,23 @@ impl LashRuntime {
     pub(super) async fn reload_invalidated_resident_session_state(
         &mut self,
     ) -> Result<(), RuntimeError> {
-        if self.resident_session_state_valid {
-            self.trace_resident_session_reload_decision(
-                "resident-session-reload:not-required",
-                true,
-                "not_consulted",
-                self.state.head_revision,
-                "current_resident_state",
-                self.state.head_revision,
-                "none",
-                "not_required",
-                "none",
-            );
-            return Ok(());
-        }
-
-        let decision_id = self
-            .resident_session_reload_decision_id
-            .clone()
-            .unwrap_or_else(|| "resident-session-reload:missing".to_string());
+        let decision_id = match &self.resident_session_state {
+            ResidentSessionState::Valid => {
+                self.trace_resident_session_reload_decision(
+                    "resident-session-reload:not-required",
+                    true,
+                    "not_consulted",
+                    self.state.head_revision,
+                    "current_resident_state",
+                    self.state.head_revision,
+                    "none",
+                    "not_required",
+                    "none",
+                );
+                return Ok(());
+            }
+            ResidentSessionState::Invalidated { decision_id } => decision_id.clone(),
+        };
         let resident_head_revision = self.state.head_revision;
         let store = self
             .session
@@ -810,7 +810,7 @@ impl LashRuntime {
             self.protocol_turn_options = durable_state.effective_protocol_turn_options().clone();
             self.state = durable_state;
             self.graph_loaded_from_store = false;
-            self.resident_session_state_valid = true;
+            self.resident_session_state = ResidentSessionState::Valid;
             Ok(())
         }
         .await;

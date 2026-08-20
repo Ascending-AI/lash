@@ -50,15 +50,17 @@ impl RuntimeObservation {
             Ok(catalog) => (catalog, None),
             Err(err) => (Arc::new(Vec::new()), Some(err.to_string())),
         };
-        let tool_state_generation = runtime
-            .resident_session_state_valid
-            .then(|| {
-                runtime
-                    .session
-                    .as_ref()
-                    .map(|session| session.plugins().tool_registry().generation())
-            })
-            .flatten();
+        let tool_state_generation = matches!(
+            runtime.resident_session_state,
+            super::ResidentSessionState::Valid
+        )
+        .then(|| {
+            runtime
+                .session
+                .as_ref()
+                .map(|session| session.plugins().tool_registry().generation())
+        })
+        .flatten();
         let tool_state = match (
             tool_state_generation,
             previous.and_then(|observation| observation.tool_state.as_ref()),
