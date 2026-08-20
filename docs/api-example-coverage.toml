@@ -75357,7 +75357,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-restate/src/controller/mod.rs#`facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash-restate/src/controller/mod.rs#`facade_support::refuse_unhonored_group_membership,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::test_support::validate_tool_input"
