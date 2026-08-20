@@ -377,6 +377,22 @@ pub(crate) async fn put_checkpoint_tx(
     }
     let bytes = encode_msgpack(&manifest, "checkpoint root")?;
     let checkpoint_ref = put_blob_tx(tx, &bytes).await?;
+    let component_refs = manifest
+        .components
+        .values()
+        .map(|descriptor| descriptor.blob_ref.as_str())
+        .collect::<Vec<_>>();
+    sqlx::query(
+        "INSERT INTO lash_checkpoint_blob_refs (checkpoint_ref, blob_ref)
+         SELECT $1, component_ref
+           FROM unnest($2::text[]) AS component_ref
+         ON CONFLICT (checkpoint_ref, blob_ref) DO NOTHING",
+    )
+    .bind(checkpoint_ref.as_str())
+    .bind(component_refs)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     Ok((checkpoint_ref, manifest))
 }
 

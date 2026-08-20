@@ -45,6 +45,7 @@ mod process_registry;
 mod process_trigger_retention;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;
+mod session_delete_blob_reclaim;
 mod session_execution_lease_renewal;
 mod session_graph_append;
 mod session_graph_state_machine;
@@ -79,6 +80,7 @@ pub use process_registry::*;
 pub use process_trigger_retention::*;
 pub use runtime_persistence::*;
 pub use runtime_persistence_state_machine::*;
+pub use session_delete_blob_reclaim::*;
 pub use session_execution_lease_renewal::*;
 pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
@@ -596,6 +598,18 @@ mod tests {
         session_store_factory("in-memory", Some(Arc::new(unbound)), || {
             Arc::new(crate::InMemorySessionStoreFactory::new())
                 as Arc<dyn crate::SessionStoreFactory>
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_session_delete_blob_reclaim_conformance() {
+        session_delete_blob_reclaim_conformance("in-memory", || {
+            let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+            SessionDeleteBlobHandles {
+                factory: Arc::clone(&factory) as Arc<dyn crate::SessionStoreFactory>,
+                probe: factory as Arc<dyn SessionDeleteBlobProbe>,
+            }
         })
         .await;
     }

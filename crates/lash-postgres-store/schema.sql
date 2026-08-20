@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 53.
+-- lash-postgres-store schema, component version 57.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -32,12 +32,26 @@ CREATE TABLE IF NOT EXISTS lash_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_sessions_leaf
     ON lash_sessions(leaf_node_id);
+CREATE INDEX IF NOT EXISTS idx_lash_sessions_checkpoint_ref
+    ON lash_sessions(checkpoint_ref);
 
 CREATE TABLE IF NOT EXISTS lash_node_anchors (
     node_id TEXT PRIMARY KEY,
     checkpoint_ref TEXT NOT NULL,
     source_session_id TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_lash_node_anchors_checkpoint_ref
+    ON lash_node_anchors(checkpoint_ref);
+
+-- Indexed projection of exact checkpoint-manifest component edges. This is
+-- reference data, never a cached reference count.
+CREATE TABLE IF NOT EXISTS lash_checkpoint_blob_refs (
+    checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
+    blob_ref TEXT NOT NULL,
+    PRIMARY KEY (checkpoint_ref, blob_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_checkpoint_blob_refs_blob_ref
+    ON lash_checkpoint_blob_refs(blob_ref, checkpoint_ref);
 
 CREATE TABLE IF NOT EXISTS lash_deleted_sessions (
     session_id TEXT PRIMARY KEY
@@ -530,7 +544,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 56)
+VALUES ('lash-postgres-store', 57)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

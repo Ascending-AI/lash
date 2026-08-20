@@ -788,13 +788,22 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         .map_err(|err| err.to_string())
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        delete_session_from_catalog(&self.root, session_id).await?;
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        let report = delete_session_from_catalog(&self.root, session_id).await?;
         if let Some(process_registry_path) = self.process_registry_path.as_deref() {
             delete_wake_allocation_floors_from_process_registry(process_registry_path, session_id)
-                .await?;
+                .await
+                .map_err(|message| {
+                    lash_core::MaintenanceFailure::failed(
+                        lash_core::StoreError::Backend(message),
+                        report.clone(),
+                    )
+                })?;
         }
-        Ok(())
+        Ok(report)
     }
 
     async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
@@ -935,18 +944,26 @@ fn warn_process_registry_not_wired() {
     );
 }
 
-async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<(), String> {
+async fn delete_session_from_catalog(
+    root: &Path,
+    session_id: &str,
+) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
     let path = root.join(DURABLE_CORE_DB_FILE);
     if !path.exists() {
-        return Ok(());
+        return Ok(lash_core::SessionBlobReclaimReport::default());
     }
     let session_id = session_id.to_string();
-    let conn = SqliteConnection::open(&path)
+    let conn = SqliteConnection::open(&path).await.map_err(|err| {
+        lash_core::MaintenanceFailure::failed_before_any_work(lash_core::StoreError::Backend(
+            err.to_string(),
+        ))
+    })?;
+    ensure_schema(&conn)
         .await
-        .map_err(|err| err.to_string())?;
-    ensure_schema(&conn).await.map_err(|err| err.to_string())?;
+        .map_err(|err| lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(err)))?;
     conn.write_flow(move |tx| {
-        let outcome: Result<(), lash_core::StoreError> = (|| {
+        let mut report = lash_core::SessionBlobReclaimReport::default();
+        let outcome: Result<lash_core::SessionBlobReclaimReport, lash_core::StoreError> = (|| {
             let existed = tx
                 .query_row(
                     "SELECT 1 FROM session_meta WHERE session_id = ?1
@@ -972,15 +989,63 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
                 )
                 .map_err(sqlite_error)?;
             }
-            let leaf_node_id = tx
+            let (leaf_node_id, checkpoint_ref) = tx
                 .query_row(
-                    "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
+                    "SELECT leaf_node_id, checkpoint_ref FROM session_head WHERE session_id = ?1",
                     params![session_id],
-                    |row| row.get::<_, Option<String>>(0),
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                        ))
+                    },
                 )
                 .optional()
                 .map_err(sqlite_error)?
-                .flatten();
+                .unwrap_or((None, None));
+            let trigger_blob_ref = tx
+                .query_row(
+                    "SELECT blob_ref FROM artifact_refs
+                     WHERE namespace = ?1 AND artifact_ref = ?2",
+                    params![
+                        attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
+                        lash_core::TriggerOwnerScope::session(&session_id).namespace()
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            let mut candidates = std::collections::BTreeSet::new();
+            if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
+                candidates.insert(checkpoint_ref.to_string());
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT blob_ref FROM checkpoint_blob_refs
+                         WHERE checkpoint_ref = ?1 ORDER BY blob_ref",
+                    )
+                    .map_err(sqlite_error)?;
+                let rows = stmt
+                    .query_map(params![checkpoint_ref], |row| row.get::<_, String>(0))
+                    .map_err(sqlite_error)?;
+                candidates.extend(rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?);
+            }
+            candidates.extend(trigger_blob_ref);
+            for blob_ref in &candidates {
+                let exists = tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)",
+                        params![blob_ref],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sqlite_error)?;
+                if !exists {
+                    return Err(stored_data_corrupt(
+                        "session blob reference",
+                        format!("blob `{blob_ref}` is missing"),
+                    ));
+                }
+            }
+            report.enumerated_blob_count = candidates.len();
             tx.execute(
                 "DELETE FROM session_head WHERE session_id = ?1",
                 params![session_id],
@@ -1075,32 +1140,86 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
                 ],
             )
             .map_err(sqlite_error)?;
-            // Global artifact refs above remain roots.
-            // Session deletion used to unlink the whole per-session file; the
-            // inline sweep preserves that reclaim. Its outcome is surfaced, not
-            // discarded: a failure fails the delete (ADR 0067 §3), and the
-            // counters are traced so a delete that reclaimed nothing is
-            // distinguishable from one that never looked.
-            let report = Store::gc_unreachable_in_tx(tx)
-                .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
+            // The severed checkpoint root must go first: its outgoing manifest
+            // edges cascade away, so component predicates see only live
+            // referrers. Every predicate is an indexed NOT EXISTS over exact
+            // edges; no whole-catalog mark/sweep runs in this transaction.
+            let mut ordered_candidates = Vec::with_capacity(candidates.len());
+            if let Some(checkpoint_ref) = checkpoint_ref.as_ref()
+                && candidates.contains(checkpoint_ref)
+            {
+                ordered_candidates.push(checkpoint_ref.clone());
+            }
+            ordered_candidates.extend(
+                candidates
+                    .into_iter()
+                    .filter(|candidate| Some(candidate) != checkpoint_ref.as_ref()),
+            );
+            for blob_ref in ordered_candidates {
+                let deleted = tx
+                    .execute(
+                        "DELETE FROM blobs AS candidate
+                         WHERE candidate.hash = ?1
+                           AND NOT EXISTS (
+                               SELECT 1 FROM session_head AS head
+                               WHERE head.checkpoint_ref = candidate.hash
+                           )
+                           AND NOT EXISTS (
+                               SELECT 1 FROM node_anchors AS anchor
+                               WHERE anchor.checkpoint_ref = candidate.hash
+                           )
+                           AND NOT EXISTS (
+                               SELECT 1 FROM artifact_refs AS artifact
+                               WHERE artifact.blob_ref = candidate.hash
+                           )
+                           AND NOT EXISTS (
+                               SELECT 1 FROM checkpoint_blob_refs AS edge
+                               WHERE edge.blob_ref = candidate.hash
+                                 AND (
+                                     EXISTS (
+                                         SELECT 1 FROM session_head AS head
+                                         WHERE head.checkpoint_ref = edge.checkpoint_ref
+                                     )
+                                     OR EXISTS (
+                                         SELECT 1 FROM node_anchors AS anchor
+                                         WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                                     )
+                                 )
+                           )",
+                        params![blob_ref],
+                    )
+                    .map_err(sqlite_error)?;
+                if deleted == 0 {
+                    report.retained_blob_count += 1;
+                } else {
+                    report.deleted_blob_count += deleted;
+                }
+            }
             tracing::debug!(
                 session_id,
-                root_count = report.root_count,
+                enumerated_blob_count = report.enumerated_blob_count,
                 retained_blob_count = report.retained_blob_count,
                 deleted_blob_count = report.deleted_blob_count,
                 sweep = ?lash_core::MaintenanceReport::sweep(&report),
-                "session delete reclaimed unreachable blobs"
+                "session delete reclaimed owner-scoped blobs"
             );
-            Ok(())
-        })();
+            Ok(report.clone())
+        })(
+        );
         Ok(match outcome {
             Ok(value) => TxOutcome::Commit(Ok(value)),
-            Err(err) => TxOutcome::Rollback(Err(err)),
+            Err(err) => {
+                report.deleted_blob_count = 0;
+                TxOutcome::Rollback(Err(lash_core::MaintenanceFailure::failed(err, report)))
+            }
         })
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(|err| err.to_string())
+    .map_err(|err| {
+        lash_core::MaintenanceFailure::failed_before_any_work(lash_core::StoreError::Backend(
+            err.to_string(),
+        ))
+    })?
 }
 
 async fn delete_wake_allocation_floors_from_process_registry(

@@ -328,7 +328,10 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
         self.inner.session_was_deleted(session_id).await
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
 

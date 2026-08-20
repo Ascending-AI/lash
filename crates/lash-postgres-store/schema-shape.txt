@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 56
+version 57
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -60,6 +60,11 @@ table lash_blobs
   column content bytea not-null
   column hash text not-null
   primary-key (hash)
+table lash_checkpoint_blob_refs
+  column blob_ref text not-null
+  column checkpoint_ref text not-null
+  primary-key (checkpoint_ref, blob_ref)
+  foreign-key (checkpoint_ref) references lash_blobs (hash) on delete cascade
 table lash_deleted_sessions
   column session_id text not-null
   primary-key (session_id)

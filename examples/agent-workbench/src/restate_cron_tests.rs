@@ -863,7 +863,10 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         lash::persistence::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
     }
 }

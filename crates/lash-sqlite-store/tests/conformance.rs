@@ -31,6 +31,8 @@ use tempfile::TempDir;
 
 #[path = "conformance/pre_frame_key.rs"]
 mod pre_frame_key;
+#[path = "conformance/session_delete_blob_reclaim.rs"]
+mod session_delete_blob_reclaim;
 #[path = "conformance/trigger_occurrence_retention.rs"]
 mod trigger_occurrence_retention;
 

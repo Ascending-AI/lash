@@ -40,12 +40,27 @@ CREATE TABLE IF NOT EXISTS session_head (
 );
 CREATE INDEX IF NOT EXISTS idx_session_head_leaf
     ON session_head(leaf_node_id);
+CREATE INDEX IF NOT EXISTS idx_session_head_checkpoint_ref
+    ON session_head(checkpoint_ref);
 
 CREATE TABLE IF NOT EXISTS node_anchors (
     node_id           TEXT PRIMARY KEY,
     checkpoint_ref    TEXT NOT NULL,
     source_session_id TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_node_anchors_checkpoint_ref
+    ON node_anchors(checkpoint_ref);
+
+-- Indexed projection of the exact manifest -> component edges carried in each
+-- checkpoint blob. This is reference data, never a cached reference count.
+CREATE TABLE IF NOT EXISTS checkpoint_blob_refs (
+    checkpoint_ref TEXT NOT NULL,
+    blob_ref       TEXT NOT NULL,
+    PRIMARY KEY (checkpoint_ref, blob_ref),
+    FOREIGN KEY (checkpoint_ref) REFERENCES blobs(hash) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_checkpoint_blob_refs_blob_ref
+    ON checkpoint_blob_refs(blob_ref, checkpoint_ref);
 
 CREATE TABLE IF NOT EXISTS deleted_sessions (
     session_id TEXT PRIMARY KEY
@@ -277,6 +292,8 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
     WHERE committed_at_ms IS NULL;
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
     ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
+CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
+    ON artifact_refs(blob_ref);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -374,10 +391,14 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// Version 37 adds the attachment GC fence's per-digest condemnation table.
 /// Older databases are rejected and recreated; there is no compatibility read
 /// path.
+/// Version 38 projects checkpoint-manifest component edges into an indexed
+/// relation so owner-delete reclaim can decide blob liveness inside the
+/// severing transaction. Older catalogs have no complete edge projection and
+/// are rejected and recreated.
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a version-37 file written by an older binary self-heals into the
+/// schema, so a version-38 file written by an older binary self-heals into the
 /// newer index set on first open, and a newer file stays readable by the older
 /// binary — the two are mutually compatible on the same path. Bumping instead
 /// would reject-and-recreate live stores for a change that costs nothing to
@@ -386,7 +407,7 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 /// `idx_pending_turn_input_order`) are added under exactly this carve-out. It
 /// covers index-only additions and nothing else: any table, column, or
 /// semantic change bumps.
-pub(crate) const SCHEMA_VERSION: i32 = 37;
+pub(crate) const SCHEMA_VERSION: i32 = 38;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

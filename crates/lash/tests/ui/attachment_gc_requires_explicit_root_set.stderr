@@ -16,11 +16,11 @@ note: required by a bound in `SessionStoreFactory`
    |                                ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SessionStoreFactory`
 
 error[E0277]: the trait bound `DelegatingFactory: AttachmentRootSet` is not satisfied
-  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:41:9
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:44:9
    |
-40 |     let _ = reclaim_unreferenced_attachments(
+43 |     let _ = reclaim_unreferenced_attachments(
    |             -------------------------------- required by a bound introduced by this call
-41 |         factory,
+44 |         factory,
    |         ^^^^^^^ unsatisfied trait bound
    |
 help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
@@ -38,16 +38,16 @@ note: required by a bound in `reclaim_unreferenced_attachments`
    |        ^^^^^^^^^^^^^^^^^ required by this bound in `reclaim_unreferenced_attachments`
 
 error[E0277]: the trait bound `DelegatingFactory: AttachmentRootSet` is not satisfied
-  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:40:13
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:43:13
    |
-40 |       let _ = reclaim_unreferenced_attachments(
+43 |       let _ = reclaim_unreferenced_attachments(
    |  _____________^
-41 | |         factory,
-42 | |         &backend,
-43 | |         AttachmentReclamationPolicy {
+44 | |         factory,
+45 | |         &backend,
+46 | |         AttachmentReclamationPolicy {
 ...  |
-46 | |         },
-47 | |     );
+49 | |         },
+50 | |     );
    | |_____^ unsatisfied trait bound
    |
 help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`

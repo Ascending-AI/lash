@@ -355,7 +355,8 @@ async fn reclaim_attachment_session(
     handles
         .session_factory
         .delete_session(&session.session_id)
-        .await?;
+        .await
+        .map_err(|error| error.to_string())?;
     shape.attachment_session_reclaims += 1;
     Ok(())
 }

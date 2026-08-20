@@ -87,8 +87,11 @@ impl SessionStoreFactory for TestSessionStoreFactory {
         Ok(false)
     }
 
-    async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
+        Ok(crate::store::SessionBlobReclaimReport::default())
     }
 }
 
@@ -107,8 +110,11 @@ impl SessionStoreFactory for InlineSessionStoreFactory {
         Ok(false)
     }
 
-    async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
+        Ok(crate::store::SessionBlobReclaimReport::default())
     }
 }
 
@@ -127,8 +133,11 @@ impl SessionStoreFactory for SegmentBoundarySessionStoreFactory {
         Ok(false)
     }
 
-    async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
+        Ok(crate::store::SessionBlobReclaimReport::default())
     }
 }
 

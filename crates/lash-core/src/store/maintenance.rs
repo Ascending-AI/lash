@@ -54,6 +54,19 @@ pub struct VacuumReport {
     pub removed_pending_turn_input_tombstone_count: usize,
 }
 
+/// Blob outcomes from one session-owner delete cascade.
+///
+/// `enumerated_blob_count` is the witnessed candidate set reached from the
+/// session edges being severed. `retained_blob_count` counts candidates that
+/// still have an exact edge from a surviving head, anchor, artifact ref, or
+/// checkpoint manifest. The remainder was deleted in the owning transaction.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionBlobReclaimReport {
+    pub enumerated_blob_count: usize,
+    pub retained_blob_count: usize,
+    pub deleted_blob_count: usize,
+}
+
 /// Which arm of the success side a completed maintenance pass landed on.
 ///
 /// [`MaintenanceSweep::Swept`] means the pass reclaimed at least one item with
@@ -114,6 +127,12 @@ impl MaintenanceReport for GcReport {
 impl MaintenanceReport for VacuumReport {
     fn reclaimed_count(&self) -> usize {
         self.removed_node_count + self.removed_pending_turn_input_tombstone_count
+    }
+}
+
+impl MaintenanceReport for SessionBlobReclaimReport {
+    fn reclaimed_count(&self) -> usize {
+        self.deleted_blob_count
     }
 }
 

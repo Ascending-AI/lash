@@ -54,6 +54,21 @@ const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_conde
             phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))
         )"#;
 
+const CHECKPOINT_BLOB_REFS_DDL: &str = r#"CREATE TABLE lash_checkpoint_blob_refs (
+            checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
+            blob_ref TEXT NOT NULL,
+            PRIMARY KEY (checkpoint_ref, blob_ref)
+        )"#;
+
+const CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_checkpoint_blob_refs_blob_ref
+            ON lash_checkpoint_blob_refs(blob_ref, checkpoint_ref)"#;
+
+const SESSIONS_CHECKPOINT_REF_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_sessions_checkpoint_ref
+            ON lash_sessions(checkpoint_ref)"#;
+
+const NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_node_anchors_checkpoint_ref
+            ON lash_node_anchors(checkpoint_ref)"#;
+
 const PROCESS_PARENT_END_PLANS_DDL: &str = r#"CREATE TABLE lash_process_parent_end_plans (
             process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
             actions_json TEXT NOT NULL
@@ -188,23 +203,56 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
-    // The nullable arm records fan-out terminality. Inside the migration
-    // transaction, legacy zero-fan-out rows are armed from their durable
-    // occurrence time; rows with live fan-out stay unarmed and take the normal
-    // final-delivery transition later.
+    // Component 57 adds the indexed manifest -> component edge projection used
+    // by session-owner blob reclaim. The two root indexes make every liveness
+    // arm an indexed NOT EXISTS predicate.
+    SchemaMigration {
+        from: 56,
+        to: 57,
+        source_missing_tables: &["lash_checkpoint_blob_refs"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[
+            "lash_checkpoint_blob_refs",
+            "idx_lash_checkpoint_blob_refs_blob_ref",
+            "idx_lash_sessions_checkpoint_ref",
+            "idx_lash_node_anchors_checkpoint_ref",
+        ],
+        statements: &[
+            CHECKPOINT_BLOB_REFS_DDL,
+            CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
+            SESSIONS_CHECKPOINT_REF_INDEX_DDL,
+            NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
+            r#"UPDATE lash_schema_versions
+               SET version = 57
+             WHERE component = 'lash-postgres-store' AND version = 56"#,
+        ],
+    },
+    // A component-55 store takes both later generations at once: trigger
+    // occurrence reclaim eligibility from 56 and checkpoint edges from 57.
     SchemaMigration {
         from: 55,
-        to: 56,
-        source_missing_tables: &[],
+        to: 57,
+        source_missing_tables: &["lash_checkpoint_blob_refs"],
         source_missing_columns: &[("lash_trigger_occurrences", "reclaimable_at_ms")],
         source_missing_guards: &[],
-        introduced_relations: &["idx_lash_trigger_occurrences_reclaimable"],
+        introduced_relations: &[
+            "lash_checkpoint_blob_refs",
+            "idx_lash_checkpoint_blob_refs_blob_ref",
+            "idx_lash_sessions_checkpoint_ref",
+            "idx_lash_node_anchors_checkpoint_ref",
+            "idx_lash_trigger_occurrences_reclaimable",
+        ],
         statements: &[
+            CHECKPOINT_BLOB_REFS_DDL,
+            CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
+            SESSIONS_CHECKPOINT_REF_INDEX_DDL,
+            NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 56
+               SET version = 57
              WHERE component = 'lash-postgres-store' AND version = 55"#,
         ],
     },
@@ -214,21 +262,29 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // source shape a 54 store must present is the current one.
     SchemaMigration {
         from: 54,
-        to: 56,
-        source_missing_tables: &[],
+        to: 57,
+        source_missing_tables: &["lash_checkpoint_blob_refs"],
         source_missing_columns: &[("lash_trigger_occurrences", "reclaimable_at_ms")],
         source_missing_guards: &[],
         introduced_relations: &[
+            "lash_checkpoint_blob_refs",
+            "idx_lash_checkpoint_blob_refs_blob_ref",
+            "idx_lash_sessions_checkpoint_ref",
+            "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_runtime_effect_replay_group_unsettled",
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            CHECKPOINT_BLOB_REFS_DDL,
+            CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
+            SESSIONS_CHECKPOINT_REF_INDEX_DDL,
+            NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 56
+               SET version = 57
              WHERE component = 'lash-postgres-store' AND version = 54"#,
         ],
     },
@@ -237,8 +293,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 56,
-        source_missing_tables: &["lash_runtime_effect_group"],
+        to: 57,
+        source_missing_tables: &["lash_runtime_effect_group", "lash_checkpoint_blob_refs"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
@@ -251,9 +307,17 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "lash_checkpoint_blob_refs",
+            "idx_lash_checkpoint_blob_refs_blob_ref",
+            "idx_lash_sessions_checkpoint_ref",
+            "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            CHECKPOINT_BLOB_REFS_DDL,
+            CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
+            SESSIONS_CHECKPOINT_REF_INDEX_DDL,
+            NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL,
             RUNTIME_EFFECT_REPLAY_SETTLEMENT_SEQ_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_SEQ_INDEX_DDL,
@@ -265,14 +329,14 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 56
+               SET version = 57
              WHERE component = 'lash-postgres-store' AND version = 53"#,
         ],
     },
     SchemaMigration {
         from: 52,
-        to: 56,
-        source_missing_tables: &["lash_runtime_effect_group"],
+        to: 57,
+        source_missing_tables: &["lash_runtime_effect_group", "lash_checkpoint_blob_refs"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
@@ -287,9 +351,17 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "lash_checkpoint_blob_refs",
+            "idx_lash_checkpoint_blob_refs_blob_ref",
+            "idx_lash_sessions_checkpoint_ref",
+            "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            CHECKPOINT_BLOB_REFS_DDL,
+            CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
+            SESSIONS_CHECKPOINT_REF_INDEX_DDL,
+            NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
             QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
             PENDING_TURN_INPUT_ORDER_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL,
@@ -303,14 +375,18 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 56
+               SET version = 57
              WHERE component = 'lash-postgres-store' AND version = 52"#,
         ],
     },
     SchemaMigration {
         from: 51,
-        to: 56,
-        source_missing_tables: &["lash_attachment_condemnations", "lash_runtime_effect_group"],
+        to: 57,
+        source_missing_tables: &[
+            "lash_attachment_condemnations",
+            "lash_runtime_effect_group",
+            "lash_checkpoint_blob_refs",
+        ],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
@@ -326,9 +402,17 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "lash_checkpoint_blob_refs",
+            "idx_lash_checkpoint_blob_refs_blob_ref",
+            "idx_lash_sessions_checkpoint_ref",
+            "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            CHECKPOINT_BLOB_REFS_DDL,
+            CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
+            SESSIONS_CHECKPOINT_REF_INDEX_DDL,
+            NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
             ATTACHMENT_CONDEMNATIONS_DDL,
             QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
             PENDING_TURN_INPUT_ORDER_INDEX_DDL,
@@ -343,7 +427,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 56
+               SET version = 57
              WHERE component = 'lash-postgres-store' AND version = 51"#,
         ],
     },
@@ -351,12 +435,13 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 56,
+        to: 57,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
             "lash_tool_intent_submissions",
             "lash_runtime_effect_group",
+            "lash_checkpoint_blob_refs",
         ],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
@@ -376,9 +461,17 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "lash_checkpoint_blob_refs",
+            "idx_lash_checkpoint_blob_refs_blob_ref",
+            "idx_lash_sessions_checkpoint_ref",
+            "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            CHECKPOINT_BLOB_REFS_DDL,
+            CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
+            SESSIONS_CHECKPOINT_REF_INDEX_DDL,
+            NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
             PROCESS_PARENT_END_PLANS_DDL,
             TOOL_INTENT_SUBMISSIONS_DDL,
             TOOL_INTENT_SUBMISSIONS_INDEX_DDL,
@@ -396,7 +489,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 56
+               SET version = 57
              WHERE component = 'lash-postgres-store' AND version = 50"#,
         ],
     },
@@ -949,7 +1042,7 @@ fn record_schema_migration_denial(
 }
 
 /// Renders the remaining version-mismatch error, naming the remedy rather than
-/// only the numbers. The explicit 50 -> 51 migration has already been handled
+/// only the numbers. The explicit floor migrations have already been handled
 /// by the Lash-managed `Enforce` preflight when it is applicable.
 pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     let (found, expected) = match found {
@@ -966,7 +1059,7 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is normally a reject-and-recreate boundary. This build has \
          explicit Lash-managed migrations from the published component-50, component-51, \
-         component-52, component-53, component-54, and component-55 shapes to 56; they run only under \
+         component-52, component-53, component-54, component-55, and component-56 shapes to 57; they run only under \
          SchemaCheck::Enforce \
          after an exact \
          source-shape preflight. This mismatch \
@@ -983,7 +1076,7 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
 mod tests {
     use super::*;
 
-    /// The declared 53 -> 56 migration, which every case below perturbs.
+    /// The declared 53 -> 57 migration, which every case below perturbs.
     fn migration() -> &'static SchemaMigration {
         SCHEMA_MIGRATIONS
             .iter()
@@ -1022,7 +1115,7 @@ mod tests {
     fn report(findings: Vec<SchemaFinding>) -> SchemaReport {
         SchemaReport {
             schema: Some("public".to_string()),
-            expected_version: 56,
+            expected_version: 57,
             found_version: Some(53),
             findings,
         }
@@ -1033,11 +1126,14 @@ mod tests {
     fn published_53_findings() -> Vec<SchemaFinding> {
         vec![
             SchemaFinding::VersionMismatch {
-                expected: 56,
+                expected: 57,
                 found: Some(53),
             },
             SchemaFinding::MissingTable {
                 table: "lash_runtime_effect_group".to_string(),
+            },
+            SchemaFinding::MissingTable {
+                table: "lash_checkpoint_blob_refs".to_string(),
             },
             SchemaFinding::MissingColumn {
                 table: "lash_runtime_effect_replay".to_string(),
@@ -1096,7 +1192,7 @@ mod tests {
             ),
         ] {
             let mut findings = published_53_findings();
-            findings[2] = SchemaFinding::MissingColumn {
+            findings[3] = SchemaFinding::MissingColumn {
                 table: "lash_runtime_effect_replay".to_string(),
                 expected,
             };
@@ -1130,7 +1226,7 @@ mod tests {
             ),
         ] {
             let mut findings = published_53_findings();
-            findings[4] = SchemaFinding::MissingUniqueGuard {
+            findings[5] = SchemaFinding::MissingUniqueGuard {
                 table: "lash_runtime_effect_replay".to_string(),
                 expected,
             };
@@ -1146,7 +1242,7 @@ mod tests {
     #[test]
     fn a_declared_guard_does_not_travel_to_another_table() {
         let mut findings = published_53_findings();
-        findings[4] = SchemaFinding::MissingUniqueGuard {
+        findings[5] = SchemaFinding::MissingUniqueGuard {
             table: "lash_queued_work_batches".to_string(),
             expected: declared_guard(),
         };

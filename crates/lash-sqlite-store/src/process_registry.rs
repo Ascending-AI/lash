@@ -1396,7 +1396,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                 for session_id in facade_support::process_runtime_session_ids(&process_id) {
                     delete_session_from_catalog(root, &session_id)
                         .await
-                        .map_err(lash_core::PluginError::Session)?;
+                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
                 }
             }
         }

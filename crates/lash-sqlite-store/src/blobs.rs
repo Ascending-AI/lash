@@ -109,6 +109,19 @@ impl Store {
             &manifest,
             profile,
         )?;
+        let component_refs_json = encode_json(
+            &manifest
+                .components
+                .values()
+                .map(|descriptor| descriptor.blob_ref.as_str())
+                .collect::<Vec<_>>(),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO checkpoint_blob_refs (checkpoint_ref, blob_ref)
+             SELECT ?1, CAST(value AS TEXT) FROM json_each(?2)",
+            params![checkpoint_ref.as_str(), component_refs_json],
+        )
+        .map_err(sqlite_error)?;
         Ok(StoredSessionCheckpoint {
             checkpoint_ref,
             manifest,
