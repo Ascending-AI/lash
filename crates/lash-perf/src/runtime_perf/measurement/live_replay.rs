@@ -47,7 +47,8 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
             measure_runtime_perf_phase("live_replay.append", || {
                 let mut first_cursor = None;
                 for event_index in 0..LIVE_REPLAY_EVENTS_PER_TURN {
-                    let event = store.append(
+                    let event = publish_one(
+                        &store,
                         &session_id,
                         revision,
                         Some(&turn_id),
@@ -115,7 +116,8 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                         .context("live replay subscription closed")??;
                     buffered_count += 1;
                 }
-                store.append(
+                publish_one(
+                    &store,
                     &session_id,
                     revision,
                     Some(&turn_id),
@@ -145,7 +147,8 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                 let trim_turn_id = format!("trim-turn-{turn_index}");
                 let trim_start = trim_store.current_cursor(&trim_session_id, revision);
                 for event_index in 0..(LIVE_REPLAY_TRIM_CAPACITY * 3) {
-                    trim_store.append(
+                    publish_one(
+                        &trim_store,
                         &trim_session_id,
                         revision,
                         Some(&trim_turn_id),
@@ -326,6 +329,25 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
         turns,
         cumulative_usage: SessionUsageReport::default(),
     })
+}
+
+fn publish_one(
+    store: &impl lash_core::LiveReplayStore,
+    session_id: &str,
+    revision: SessionRevision,
+    turn_id: Option<&str>,
+    payload: SessionObservationEventPayload,
+) -> anyhow::Result<Arc<lash_core::SessionObservationEvent>> {
+    let prepared = store.prepare_publication(
+        session_id,
+        revision,
+        vec![lash_core::LiveReplayEventDraft::new(turn_id, payload)],
+    )?;
+    store
+        .publish_prepared(prepared)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("published live replay batch was empty"))
 }
 
 async fn run_once_trace_jsonl(

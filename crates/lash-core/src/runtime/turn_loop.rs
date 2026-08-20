@@ -1269,6 +1269,19 @@ impl LashRuntime {
         self.turn_phase_probe = Some(probe);
     }
 
+    #[doc(hidden)]
+    pub fn set_turn_phase_probe_if_changed(
+        &mut self,
+        probe: Arc<dyn RuntimeTurnPhaseProbe>,
+    ) -> bool {
+        let changed = self
+            .turn_phase_probe
+            .as_ref()
+            .is_none_or(|current| !Arc::ptr_eq(current, &probe));
+        self.set_turn_phase_probe(probe);
+        changed
+    }
+
     fn mark_phase_begin(&self, phase: RuntimeTurnPhase) {
         if let Some(probe) = self.turn_phase_probe.as_ref() {
             probe.begin(phase);

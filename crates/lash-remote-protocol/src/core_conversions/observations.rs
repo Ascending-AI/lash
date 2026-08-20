@@ -127,6 +127,11 @@ impl RemoteSessionObservationEvent {
             lash_core::SessionObservationEventPayload::Committed { read_view: _ } => {
                 RemoteSessionObservationEventPayload::Committed
             }
+            // Resident replacements are also signal-only; the authoritative
+            // read view remains a local handle and must be refetched by the peer.
+            lash_core::SessionObservationEventPayload::ResidentChanged { read_view: _ } => {
+                RemoteSessionObservationEventPayload::ResidentChanged
+            }
             lash_core::SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
                 RemoteSessionObservationEventPayload::AgentFrameSwitched {
                     frame_id: frame_id.clone(),

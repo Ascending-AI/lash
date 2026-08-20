@@ -83,6 +83,19 @@ function markedSource(begin, end) {
   return block;
 }
 
+test("resident replacement refetches without settling provisional rows", () => {
+  const recovery = markedSource(
+    "WORKBENCH_REMOTE_STREAM_RECOVERY",
+    "WORKBENCH_REMOTE_STREAM_RECOVERY",
+  );
+  const residentBranch = recovery.match(
+    /if \(item\.type === "resident_replacement"\) \{([\s\S]*?)\n\s*\}/,
+  )?.[1];
+  assert.ok(residentBranch, "resident replacement branch is missing");
+  assert.match(residentBranch, /recoverResidentReplacement\(\)/);
+  assert.doesNotMatch(residentBranch, /finishTransientRows\(/);
+});
+
 function dispatchTurnEvent(event) {
   const calls = [];
   const dispatchContext = {

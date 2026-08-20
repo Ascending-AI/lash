@@ -9,11 +9,12 @@ use tokio::sync::Mutex;
 use super::{LashRuntime, ProcessHandleView, ProcessRecord, ProcessRegistry};
 
 pub use replay::{
-    InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
-    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, SessionCursor, SessionCursorError, SessionObservation,
-    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
-    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
+    InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, PreparedLiveReplayPublication,
+    SessionCursor, SessionCursorError, SessionObservation, SessionObservationEvent,
+    SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
+    SessionQueueEventKind, SessionResume, SessionRevision,
 };
 
 #[derive(Clone)]
@@ -298,104 +299,148 @@ impl RuntimeHandle {
     }
 
     pub fn publish_from(&self, runtime: &LashRuntime) {
+        self.publish_from_inner(runtime, false);
+    }
+
+    /// Publish a revision-stable authoritative resident change that is not
+    /// represented in the serializable session projection.
+    pub fn publish_resident_from(&self, runtime: &LashRuntime) {
+        self.publish_from_inner(runtime, true);
+    }
+
+    fn publish_from_inner(&self, runtime: &LashRuntime, force_resident: bool) {
         let revision = SessionRevision::from_runtime(runtime);
         let previous = self.observation.load_full();
         let turn_id = (previous.revision != revision)
             .then(|| runtime.last_committed_turn_id_for_revision(revision))
             .flatten();
         let (state, read_view, usage_report) = export_observation_state(runtime);
-        if previous.persisted_state.current_frame_node_id != state.current_frame_node_id
-            && let Some(frame_id) = state.current_frame_node_id.clone()
-            && let Err(err) = self.live_replay_store.append(
-                runtime.session_id(),
-                revision,
-                None,
-                SessionObservationEventPayload::AgentFrameSwitched { frame_id },
-            )
+        let mut next = RuntimeObservation::from_runtime(
+            runtime,
+            previous.cursor.clone(),
+            Some(previous.as_ref()),
+            revision,
+            read_view.clone(),
+            state,
+            usage_report,
+        );
+        let payload = if previous.revision < revision {
+            Some(SessionObservationEventPayload::Committed {
+                read_view: read_view.clone(),
+            })
+        } else if force_resident
+            || authority_fingerprint(&previous.persisted_state)
+                != authority_fingerprint(&next.persisted_state)
         {
-            tracing::warn!(
-                session_id = %runtime.session_id(),
-                error = %err,
-                "failed to append agent-frame observation event; reconnect may require gap recovery",
-            );
+            Some(SessionObservationEventPayload::ResidentChanged {
+                read_view: read_view.clone(),
+            })
+        } else {
+            None
+        };
+        let Some(payload) = payload else {
+            return;
+        };
+
+        let mut drafts = Vec::with_capacity(2);
+        if previous.persisted_state.current_frame_node_id
+            != next.persisted_state.current_frame_node_id
+            && let Some(frame_id) = next.persisted_state.current_frame_node_id.clone()
+        {
+            drafts.push(LiveReplayEventDraft::new(
+                None::<String>,
+                SessionObservationEventPayload::AgentFrameSwitched { frame_id },
+            ));
         }
-        let cursor = match self.live_replay_store.append(
+        drafts.push(LiveReplayEventDraft::new(turn_id, payload));
+
+        let prepared = match self.live_replay_store.prepare_publication(
             runtime.session_id(),
             revision,
-            turn_id,
-            SessionObservationEventPayload::Committed {
-                read_view: read_view.clone(),
-            },
+            drafts,
         ) {
-            Ok(event) => event.cursor.clone(),
+            Ok(prepared) => prepared,
             Err(err) => {
                 tracing::warn!(
                     session_id = %runtime.session_id(),
                     error = %err,
-                    "failed to append session observation commit event; reconnect will fall back to gap recovery",
+                    "failed to reserve session observation publication; reconnect will fall back to gap recovery",
                 );
-                self.live_replay_store
-                    .current_cursor(runtime.session_id(), revision)
+                next.cursor = self
+                    .live_replay_store
+                    .current_cursor(runtime.session_id(), revision);
+                self.observation.store(Arc::new(next));
+                return;
             }
         };
-        self.observation
-            .store(Arc::new(RuntimeObservation::from_runtime(
-                runtime,
-                cursor,
-                Some(previous.as_ref()),
-                revision,
-                read_view,
-                state,
-                usage_report,
-            )));
+        next.cursor = prepared.latest_cursor().clone();
+        self.observation.store(Arc::new(next));
+        if let Err(err) = self.live_replay_store.publish_prepared(prepared) {
+            tracing::warn!(
+                session_id = %runtime.session_id(),
+                error = %err,
+                "failed to publish prepared session observation; reconnect will fall back to gap recovery",
+            );
+        }
+    }
+
+    fn publish_live_events(
+        &self,
+        session_id: &str,
+        revision: SessionRevision,
+        drafts: Vec<LiveReplayEventDraft>,
+        failure: &'static str,
+    ) {
+        let result = self
+            .live_replay_store
+            .prepare_publication(session_id, revision, drafts)
+            .and_then(|prepared| {
+                self.live_replay_store
+                    .publish_prepared(prepared)
+                    .map(|_| ())
+            });
+        if let Err(err) = result {
+            tracing::warn!(session_id = %session_id, error = %err, "{failure}");
+        }
     }
 
     pub fn record_turn_activity(&self, turn_id: Option<&str>, activity: crate::TurnActivity) {
         let observation = self.observe();
-        if let Err(err) = self.live_replay_store.append(
+        self.publish_live_events(
             observation.session_id(),
             observation.session_revision(),
-            turn_id,
-            SessionObservationEventPayload::TurnActivity(activity),
-        ) {
-            tracing::warn!(
-                session_id = %observation.session_id(),
-                error = %err,
-                "failed to append live turn activity to session observation replay; reconnect may require gap recovery",
-            );
-        }
+            vec![LiveReplayEventDraft::new(
+                turn_id,
+                SessionObservationEventPayload::TurnActivity(activity),
+            )],
+            "failed to publish live turn activity to session observation replay; reconnect may require gap recovery",
+        );
     }
 
     pub fn record_queue_changed(&self, kind: SessionQueueEventKind, batch_ids: Vec<String>) {
         let observation = self.observe();
-        if let Err(err) = self.live_replay_store.append(
+        self.publish_live_events(
             observation.session_id(),
             observation.session_revision(),
-            None,
-            SessionObservationEventPayload::QueueChanged { kind, batch_ids },
-        ) {
-            tracing::warn!(
-                session_id = %observation.session_id(),
-                error = %err,
-                "failed to append queue observation event; reconnect may require gap recovery",
-            );
-        }
+            vec![LiveReplayEventDraft::new(
+                None::<String>,
+                SessionObservationEventPayload::QueueChanged { kind, batch_ids },
+            )],
+            "failed to publish queue observation event; reconnect may require gap recovery",
+        );
     }
 
     pub fn record_process_changed(&self, kind: SessionProcessEventKind, process_ids: Vec<String>) {
         let observation = self.observe();
-        if let Err(err) = self.live_replay_store.append(
+        self.publish_live_events(
             observation.session_id(),
             observation.session_revision(),
-            None,
-            SessionObservationEventPayload::ProcessChanged { kind, process_ids },
-        ) {
-            tracing::warn!(
-                session_id = %observation.session_id(),
-                error = %err,
-                "failed to append process observation event; reconnect may require gap recovery",
-            );
-        }
+            vec![LiveReplayEventDraft::new(
+                None::<String>,
+                SessionObservationEventPayload::ProcessChanged { kind, process_ids },
+            )],
+            "failed to publish process observation event; reconnect may require gap recovery",
+        );
     }
 
     pub fn current_session_observation(&self) -> SessionObservation {
@@ -766,6 +811,18 @@ impl RuntimeHandle {
     }
 }
 
+fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
+    let mut persisted_node_ids = state.persisted_node_ids.iter().collect::<Vec<_>>();
+    persisted_node_ids.sort_unstable();
+    serde_json::to_vec(&(
+        state,
+        &state.checkpoint_components,
+        state.head_revision,
+        persisted_node_ids,
+    ))
+    .expect("runtime observation authority must serialize")
+}
+
 impl LashRuntime {
     fn last_committed_turn_id_for_revision(&self, revision: SessionRevision) -> Option<&str> {
         self.last_committed_observation_turn
@@ -796,19 +853,30 @@ mod tests {
     }
 
     impl LiveReplayStore for FailCommittedLiveReplayStore {
-        fn append(
+        fn prepare_publication(
             &self,
             session_id: &str,
             revision: SessionRevision,
-            turn_id: Option<&str>,
-            payload: SessionObservationEventPayload,
-        ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
-            if matches!(&payload, SessionObservationEventPayload::Committed { .. }) {
+            events: Vec<LiveReplayEventDraft>,
+        ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
+            if events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    SessionObservationEventPayload::Committed { .. }
+                )
+            }) {
                 return Err(LiveReplayStoreError::Store(
                     "injected committed-event append failure".to_string(),
                 ));
             }
-            self.inner.append(session_id, revision, turn_id, payload)
+            self.inner.prepare_publication(session_id, revision, events)
+        }
+
+        fn publish_prepared(
+            &self,
+            prepared: PreparedLiveReplayPublication,
+        ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
+            self.inner.publish_prepared(prepared)
         }
 
         fn replay_after_cursor(
@@ -835,14 +903,20 @@ mod tests {
     }
 
     impl LiveReplayStore for PanicLiveReplayStore {
-        fn append(
+        fn prepare_publication(
             &self,
             _session_id: &str,
             _revision: SessionRevision,
-            _turn_id: Option<&str>,
-            _payload: SessionObservationEventPayload,
-        ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
-            panic!("append should not be called by cursor rejection tests")
+            _events: Vec<LiveReplayEventDraft>,
+        ) -> Result<PreparedLiveReplayPublication, LiveReplayStoreError> {
+            panic!("prepare should not be called by cursor rejection tests")
+        }
+
+        fn publish_prepared(
+            &self,
+            _prepared: PreparedLiveReplayPublication,
+        ) -> Result<Vec<Arc<SessionObservationEvent>>, LiveReplayStoreError> {
+            panic!("publish should not be called by cursor rejection tests")
         }
 
         fn replay_after_cursor(
@@ -1005,7 +1079,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publish_keeps_frame_switch_immediately_before_commit() {
+    async fn publish_keeps_frame_switch_immediately_before_resident_change() {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1045,13 +1119,13 @@ mod tests {
         assert_eq!(events[0].turn_id, None);
         assert!(matches!(
             events[1].payload,
-            SessionObservationEventPayload::Committed { .. }
+            SessionObservationEventPayload::ResidentChanged { .. }
         ));
         assert_eq!(events[1].turn_id, None);
     }
 
     #[tokio::test]
-    async fn auxiliary_event_does_not_reconcile_commit() {
+    async fn failed_authoritative_batch_does_not_publish_auxiliary_event() {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1086,15 +1160,10 @@ mod tests {
         else {
             panic!("the retained auxiliary event should remain positionally replayable");
         };
-        assert!(matches!(
-            events.as_slice(),
-            [event]
-                if event.revision == SessionRevision::new(1)
-                    && matches!(
-                        &event.payload,
-                        SessionObservationEventPayload::AgentFrameSwitched { .. }
-                    )
-        ));
+        assert!(
+            events.is_empty(),
+            "an atomic authoritative batch must not expose its frame switch when reservation fails"
+        );
 
         assert!(matches!(
             handle

@@ -4589,6 +4589,12 @@
         finishTransientRows(item.event?.turn_id);
         recoverTerminalReplacement();
       }
+      if (item.type === "resident_replacement") {
+        projectionState.observationCursor =
+          item.cursor || item.event?.cursor || projectionState.observationCursor;
+        handleObservation(item.event);
+        recoverResidentReplacement();
+      }
     }
 
     function handleObservation(event) {
@@ -4638,6 +4644,12 @@
     async function recoverTerminalReplacement() {
       await recoverFromState(
         "the turn settled; reload to restore the final transcript"
+      );
+    }
+
+    async function recoverResidentReplacement() {
+      await recoverFromState(
+        "resident state changed; reload to refresh the conversation"
       );
     }
     // END WORKBENCH_REMOTE_STREAM_RECOVERY

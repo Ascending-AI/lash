@@ -1223,6 +1223,8 @@ async fn forward_session_observations(
     cursor: SessionCursor,
     tx: mpsc::Sender<ObservationStreamItem>,
 ) {
+    use lash::recoverable_chat::RecoverableChatUpdate;
+
     if tx
         .send(ObservationStreamItem::Cursor {
             cursor: cursor.to_string(),
@@ -1236,7 +1238,7 @@ async fn forward_session_observations(
     let mut sequence = 0;
     while let Some(item) = stream.next().await {
         match item {
-            Ok(lash::recoverable_chat::RecoverableChatUpdate::Event { event, .. }) => {
+            Ok(RecoverableChatUpdate::Event { event, .. }) => {
                 let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
                     Ok(event) => event,
                     Err(err) => {
@@ -1255,11 +1257,7 @@ async fn forward_session_observations(
                     break;
                 }
             }
-            Ok(lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
-                event,
-                snapshot,
-                ..
-            }) => {
+            Ok(RecoverableChatUpdate::TerminalReplacement { event, snapshot, .. }) => {
                 let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
                     Ok(event) => event,
                     Err(err) => {
@@ -1279,7 +1277,27 @@ async fn forward_session_observations(
                     break;
                 }
             }
-            Ok(lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {
+            Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {
+                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
+                    Ok(event) => event,
+                    Err(err) => {
+                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
+                        break;
+                    }
+                };
+                sequence = sequence.saturating_add(1);
+                if tx
+                    .send(ObservationStreamItem::ResidentReplacement {
+                        cursor: snapshot.cursor.to_string(),
+                        event: Box::new(event),
+                    })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {
                 let observation =
                     RemoteSessionObservation::from_core(lash::observe::SessionObservation {
                         read_view: snapshot.read_view,

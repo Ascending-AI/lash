@@ -117,6 +117,13 @@ pub enum RecoverableChatUpdate {
         event: std::sync::Arc<SessionObservationEvent>,
         snapshot: RecoverableChatSnapshot,
     },
+    /// A revision-stable authoritative replacement. Refresh the resident
+    /// projection without settling provisional transcript rows.
+    ResidentReplacement {
+        id: RecoverableChatEventId,
+        event: std::sync::Arc<SessionObservationEvent>,
+        snapshot: RecoverableChatSnapshot,
+    },
 }
 
 /// Recoverable Lash observation stream for chat hosts.
@@ -191,6 +198,18 @@ impl Stream for RecoverableChatSubscription {
                         self.applied.clear();
                         self.applied.insert(id.clone());
                         return Poll::Ready(Some(Ok(RecoverableChatUpdate::TerminalReplacement {
+                            id,
+                            snapshot: RecoverableChatSnapshot {
+                                read_view: read_view.clone(),
+                                cursor: event.cursor.clone(),
+                            },
+                            event,
+                        })));
+                    }
+                    if let SessionObservationEventPayload::ResidentChanged { read_view } =
+                        &event.payload
+                    {
+                        return Poll::Ready(Some(Ok(RecoverableChatUpdate::ResidentReplacement {
                             id,
                             snapshot: RecoverableChatSnapshot {
                                 read_view: read_view.clone(),

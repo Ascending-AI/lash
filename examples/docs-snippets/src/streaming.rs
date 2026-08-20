@@ -129,6 +129,9 @@ async fn fold_session_event(event: Arc<SessionObservationEvent>) -> anyhow::Resu
         SessionObservationEventPayload::Committed { read_view } => {
             append_committed_view(read_view).await?;
         }
+        SessionObservationEventPayload::ResidentChanged { read_view } => {
+            replace_from_read_view(read_view).await?;
+        }
         SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
             update_frame(frame_id).await?;
         }

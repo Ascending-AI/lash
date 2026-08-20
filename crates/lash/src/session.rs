@@ -885,8 +885,10 @@ impl LashSession {
     ) {
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        runtime.set_turn_phase_probe(Arc::clone(&probe));
-        self.runtime.publish_from(&runtime);
+        let changed = runtime.set_turn_phase_probe_if_changed(Arc::clone(&probe));
+        if changed {
+            self.runtime.publish_resident_from(&runtime);
+        }
         if let Some(slot) = &self.process_phase_probe_slot {
             let observation = self.runtime.observe();
             slot.set_for_session(observation.session_id(), Arc::clone(&probe));
@@ -1342,22 +1344,19 @@ mod reconcile_tests {
                 text: "world".into(),
             },
         };
-        let _ = store
-            .append(
-                "session-seq-test",
-                lash_core::SessionRevision::new(1),
-                Some("turn-1"),
-                lash_core::SessionObservationEventPayload::TurnActivity(activity1),
-            )
-            .expect("append 1");
-        let _ = store
-            .append(
-                "session-seq-test",
-                lash_core::SessionRevision::new(2),
-                Some("turn-1"),
-                lash_core::SessionObservationEventPayload::TurnActivity(activity2),
-            )
-            .expect("append 2");
+        for (revision, activity) in [(1, activity1), (2, activity2)] {
+            let prepared = store
+                .prepare_publication(
+                    "session-seq-test",
+                    lash_core::SessionRevision::new(revision),
+                    vec![lash_core::LiveReplayEventDraft::new(
+                        Some("turn-1"),
+                        lash_core::SessionObservationEventPayload::TurnActivity(activity),
+                    )],
+                )
+                .expect("prepare event");
+            store.publish_prepared(prepared).expect("publish event");
+        }
 
         let subscription = store.subscribe_after_cursor(&cursor).expect("subscribe");
         let lash_core::LiveReplaySubscribeOutcome::Subscribed(sub) = subscription else {

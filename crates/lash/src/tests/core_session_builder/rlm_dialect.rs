@@ -382,6 +382,51 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
     Ok(())
 }
 
+/// A staged RLM fact changes resident authority without advancing the durable
+/// revision, so it can never be published as `Committed`.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn staged_rlm_fact_set_emits_resident_changed_at_the_same_revision() -> Result<()> {
+    use crate::rlm::RlmSessionExt as _;
+
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = stating_dialect(core.session("rlm-resident-publication"), RlmDialect::Typescript)
+        .open()
+        .await?;
+    let before = session.observe().current_observation();
+
+    session
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new()
+                .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
+        )
+        .await
+        .expect("set staged RLM fact");
+
+    let lash_core::facade_support::SessionResume::Replayed { events } =
+        session.observe().resume_from_cursor(&before.cursor)?
+    else {
+        panic!("staged fact publication must remain replayable");
+    };
+    assert!(matches!(
+        events.as_slice(),
+        [event]
+            if event.revision == lash_core::SessionRevision::new(0)
+                && matches!(
+                    event.payload,
+                    lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+                )
+    ));
+    assert!(events.iter().all(|event| !matches!(
+        event.payload,
+        lash_core::SessionObservationEventPayload::Committed { .. }
+    )));
+    Ok(())
+}
+
 /// A guarded write that disagrees with a recorded fact is refused as a typed
 /// value carrying both sides — no host ever has to read the prose to tell a pin
 /// conflict from an unrelated failure.

@@ -11,13 +11,13 @@ use crate::{PersistedTurnState, SessionSnapshot};
 
 use super::usage::TokenLedgerEntry;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 enum CheckpointComponentCompleteness {
     Complete,
     Unproven,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 enum ExecutionStateBodyResidency {
     /// Bodies are present or their absence has not been authorized in process.
     Resident,
@@ -27,7 +27,7 @@ enum ExecutionStateBodyResidency {
     CommitResultMismatch,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 enum ResidentCheckpointComponentBody {
     ToolState {
         snapshot: Option<crate::ToolState>,
@@ -38,7 +38,7 @@ enum ResidentCheckpointComponentBody {
     Opaque(Option<Vec<u8>>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 struct ResidentCheckpointComponent {
     descriptor: Option<crate::CheckpointComponentDescriptor>,
     body: ResidentCheckpointComponentBody,
@@ -60,7 +60,7 @@ struct ResidentCheckpointComponent {
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**
 /// encounter this invariant through runtime commits and must preserve the full
 /// keyed set rather than merging it with a previous checkpoint root.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct RuntimeCheckpointComponents {
     completeness: CheckpointComponentCompleteness,
     entries: std::collections::BTreeMap<String, ResidentCheckpointComponent>,

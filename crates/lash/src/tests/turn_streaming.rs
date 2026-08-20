@@ -3162,10 +3162,28 @@ async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replace
 #[derive(Debug)]
 struct PausedCommitReplayStore {
     inner: lash_core::facade_support::InMemoryLiveReplayStore,
+    boundary: PublicationBoundary,
     commit_appended: std::sync::atomic::AtomicBool,
     release_commit: std::sync::atomic::AtomicBool,
     pause_lock: StdMutex<()>,
     pause_changed: std::sync::Condvar,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PublicationBoundary {
+    BeforeReservation,
+    AfterReservation,
+    AfterInstall,
+    BeforeNotification,
+}
+
+#[derive(Debug)]
+struct NoopTurnPhaseProbe;
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for NoopTurnPhaseProbe {
+    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 }
 
 #[derive(Debug)]
@@ -3182,17 +3200,28 @@ impl FailingAppendReplayStore {
 }
 
 impl lash_core::LiveReplayStore for FailingAppendReplayStore {
-    fn append(
+    fn prepare_publication(
         &self,
         _session_id: &str,
         _revision: lash_core::SessionRevision,
-        _turn_id: Option<&str>,
-        _payload: lash_core::SessionObservationEventPayload,
-    ) -> std::result::Result<Arc<lash_core::SessionObservationEvent>, lash_core::LiveReplayStoreError>
-    {
+        _events: Vec<lash_core::LiveReplayEventDraft>,
+    ) -> std::result::Result<
+        lash_core::PreparedLiveReplayPublication,
+        lash_core::LiveReplayStoreError,
+    > {
         Err(lash_core::LiveReplayStoreError::Store(
             "injected live-replay append failure".to_string(),
         ))
+    }
+
+    fn publish_prepared(
+        &self,
+        _prepared: lash_core::PreparedLiveReplayPublication,
+    ) -> std::result::Result<
+        Vec<Arc<lash_core::SessionObservationEvent>>,
+        lash_core::LiveReplayStoreError,
+    > {
+        unreachable!("failed preparations cannot be published")
     }
 
     fn replay_after_cursor(
@@ -3317,10 +3346,73 @@ async fn idle_session_reconnect_after_failed_append_yields_gap_without_another_c
     Ok(())
 }
 
-#[tokio::test]
-#[ignore = "FIG-1660 must add cursor reservation and prepared publication before every race boundary can be stated"]
-async fn snapshot_subscribe_has_only_two_histories() {
-    unreachable!("documented conformance-law placeholder")
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
+    for boundary in [
+        PublicationBoundary::BeforeReservation,
+        PublicationBoundary::AfterReservation,
+        PublicationBoundary::AfterInstall,
+        PublicationBoundary::BeforeNotification,
+    ] {
+        let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
+        let core =
+            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+                .provider(mock_provider())
+                .model(mock_model_spec())
+                .live_replay_store(replay_store.clone())
+                .build(crate::testing::runtime_lease_owner())?;
+        let session_id = format!("two-histories-{boundary:?}");
+        let session = core.session(session_id).open().await?;
+        let turn_session = session.clone();
+        let turn = tokio::spawn(async move {
+            turn_session
+                .turn(TurnInput::text("exactly once across the cut"))
+                .run()
+                .await
+        });
+
+        replay_store.wait_for_commit_append().await;
+        let snapshot = session.observe().recoverable_chat_snapshot();
+        let snapshot_is_new =
+            snapshot.read_view.messages().iter().any(|message| {
+                crate::message_text(message).contains("exactly once across the cut")
+            });
+        let mut stream = session
+            .observe()
+            .subscribe_recoverable_chat(snapshot.cursor);
+        replay_store.release_commit_install();
+        turn.await.expect("join publishing turn")?;
+
+        if snapshot_is_new {
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), stream.next())
+                    .await
+                    .is_err(),
+                "{boundary:?}: a new snapshot must not redeliver its reserved publication"
+            );
+        } else {
+            let mut replacements = 0;
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while let Some(update) = stream.next().await {
+                    if matches!(
+                        update?,
+                        crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { .. }
+                    ) {
+                        replacements += 1;
+                        break;
+                    }
+                }
+                Ok::<_, crate::EmbedError>(())
+            })
+            .await
+            .expect("old snapshot did not receive its complete publication")?;
+            assert_eq!(
+                replacements, 1,
+                "{boundary:?}: an old snapshot must receive the batch exactly once"
+            );
+        }
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -3330,7 +3422,6 @@ async fn incarnation_change_invalidates_cursor() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-1660: fails today — Committed append/broadcast precedes projection install"]
 async fn notification_observes_installed_projection() -> Result<()> {
     let replay_store = Arc::new(PausedCommitReplayStore::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -3357,6 +3448,25 @@ async fn notification_observes_installed_projection() -> Result<()> {
             .await
     });
     replay_store.wait_for_commit_append().await;
+    let installed_before_notification = session.observe().current_observation();
+    let committed_escaped = tokio::time::timeout(std::time::Duration::from_millis(25), async {
+        loop {
+            let event = subscription
+                .next()
+                .await
+                .expect("notification subscription remains open")
+                .expect("notification before committed publication");
+            if matches!(
+                event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+            ) {
+                return;
+            }
+        }
+    })
+    .await
+    .is_ok();
+    replay_store.release_commit_install();
     let notification = loop {
         let event = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next())
             .await
@@ -3371,31 +3481,168 @@ async fn notification_observes_installed_projection() -> Result<()> {
         }
     };
     let projection_at_notification = session.observe().current_observation();
-
-    replay_store.release_commit_install();
     turn.await.expect("join publishing turn")?;
 
+    assert_eq!(installed_before_notification.read_view.turn_index(), 1);
+    assert!(
+        installed_before_notification
+            .read_view
+            .messages()
+            .iter()
+            .any(|message| crate::message_text(message).contains("projection before notification")),
+        "the authoritative projection must be installed before publication enters notify"
+    );
+    assert!(
+        !committed_escaped,
+        "no committed notification may escape while publish_prepared is gated"
+    );
     assert_eq!(
         projection_at_notification.cursor, notification.cursor,
         "a Committed notification must not be observable before its authoritative projection is installed"
+    );
+
+    replay_store.arm_pause();
+    let resident_cursor = projection_at_notification.cursor.clone();
+    let SessionObservationSubscription::Subscribed(mut resident_subscription) =
+        session.observe().subscribe_from_cursor(&resident_cursor)?
+    else {
+        panic!("the committed cursor must remain subscribable");
+    };
+    let resident_session = session.clone();
+    let resident = tokio::spawn(async move {
+        resident_session
+            .set_turn_phase_probe(Arc::new(NoopTurnPhaseProbe))
+            .await;
+    });
+    replay_store.wait_for_commit_append().await;
+    let installed_resident = session.observe().current_observation();
+    assert_eq!(
+        installed_resident.read_view.turn_index(),
+        projection_at_notification.read_view.turn_index(),
+        "resident publication must not claim a durable revision transition"
+    );
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(25),
+            resident_subscription.next(),
+        )
+        .await
+        .is_err(),
+        "no resident notification may escape before its projection is installed"
+    );
+    replay_store.release_commit_install();
+    let resident_event = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        resident_subscription.next(),
+    )
+    .await
+    .expect("resident notification timeout")
+    .expect("resident subscription stays open")
+    .expect("resident notification");
+    resident.await.expect("join resident publication");
+    assert!(matches!(
+        resident_event.payload,
+        lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+    ));
+    assert_eq!(
+        session.observe().current_observation().cursor,
+        resident_event.cursor,
+        "a resident notification must observe its installed projection"
     );
     Ok(())
 }
 
 #[tokio::test]
-#[ignore = "FIG-1660 must add ResidentChanged and revision-stable/no-op publication taxonomy"]
-async fn payload_authority_matches_revision_transition() {
-    unreachable!("documented conformance-law placeholder")
+async fn payload_authority_matches_revision_transition() -> Result<()> {
+    let core = standard_core();
+    let session = core.session("payload-authority-transition").open().await?;
+    let initial = session.observe().current_observation();
+
+    session
+        .turn(TurnInput::text("durable transition"))
+        .run()
+        .await?;
+    let committed = session.observe().resume_from_cursor(&initial.cursor)?;
+    let SessionResume::Replayed { events } = committed else {
+        panic!("durable transition must replay its committed evidence");
+    };
+    let committed = events
+        .iter()
+        .find(|event| {
+            matches!(
+                event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+            )
+        })
+        .expect("durable transition emitted Committed");
+    assert_eq!(committed.revision, lash_core::SessionRevision::new(1));
+    let lash_core::SessionObservationEventPayload::Committed { read_view } = &committed.payload
+    else {
+        unreachable!()
+    };
+    assert_eq!(read_view.turn_index(), 1);
+
+    let committed_cursor = committed.cursor.clone();
+    let probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe> = Arc::new(NoopTurnPhaseProbe);
+    session.set_turn_phase_probe(Arc::clone(&probe)).await;
+    let SessionResume::Replayed { events } =
+        session.observe().resume_from_cursor(&committed_cursor)?
+    else {
+        panic!("resident transition must remain replayable");
+    };
+    assert!(matches!(
+        events.as_slice(),
+        [event]
+            if event.revision == lash_core::SessionRevision::new(1)
+                && matches!(
+                    event.payload,
+                    lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+                )
+    ));
+
+    let resident_cursor = events[0].cursor.clone();
+    session.set_turn_phase_probe(probe).await;
+    let SessionResume::Replayed { events } =
+        session.observe().resume_from_cursor(&resident_cursor)?
+    else {
+        panic!("a no-op publication must preserve clean continuity");
+    };
+    assert!(events.is_empty(), "a no-op publication must emit no event");
+    Ok(())
 }
 
 impl PausedCommitReplayStore {
     fn new() -> Self {
+        Self::at(PublicationBoundary::AfterInstall)
+    }
+
+    fn at(boundary: PublicationBoundary) -> Self {
         Self {
             inner: lash_core::facade_support::InMemoryLiveReplayStore::default(),
+            boundary,
             commit_appended: std::sync::atomic::AtomicBool::new(false),
             release_commit: std::sync::atomic::AtomicBool::new(false),
             pause_lock: StdMutex::new(()),
             pause_changed: std::sync::Condvar::new(),
+        }
+    }
+
+    fn arm_pause(&self) {
+        self.release_commit
+            .store(false, std::sync::atomic::Ordering::Release);
+        self.commit_appended
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    fn pause(&self) {
+        self.commit_appended
+            .store(true, std::sync::atomic::Ordering::Release);
+        let mut guard = self.pause_lock.lock_recover();
+        while !self
+            .release_commit
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            guard = self.pause_changed.wait(guard).recover();
         }
     }
 
@@ -3420,33 +3667,57 @@ impl PausedCommitReplayStore {
 }
 
 impl lash_core::LiveReplayStore for PausedCommitReplayStore {
-    fn append(
+    fn prepare_publication(
         &self,
         session_id: &str,
         revision: lash_core::SessionRevision,
-        turn_id: Option<&str>,
-        payload: lash_core::SessionObservationEventPayload,
-    ) -> std::result::Result<Arc<lash_core::SessionObservationEvent>, lash_core::LiveReplayStoreError>
-    {
-        let pause = matches!(
-            payload,
-            lash_core::SessionObservationEventPayload::Committed { .. }
-        );
-        let event = self.inner.append(session_id, revision, turn_id, payload)?;
-        if pause
-            && !self
-                .commit_appended
-                .swap(true, std::sync::atomic::Ordering::AcqRel)
-        {
-            let mut guard = self.pause_lock.lock_recover();
-            while !self
-                .release_commit
-                .load(std::sync::atomic::Ordering::Acquire)
-            {
-                guard = self.pause_changed.wait(guard).recover();
-            }
+        events: Vec<lash_core::LiveReplayEventDraft>,
+    ) -> std::result::Result<
+        lash_core::PreparedLiveReplayPublication,
+        lash_core::LiveReplayStoreError,
+    > {
+        let authoritative = events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+                    | lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+            )
+        });
+        if authoritative && self.boundary == PublicationBoundary::BeforeReservation {
+            self.pause();
         }
-        Ok(event)
+        let prepared = self
+            .inner
+            .prepare_publication(session_id, revision, events)?;
+        if authoritative && self.boundary == PublicationBoundary::AfterReservation {
+            self.pause();
+        }
+        Ok(prepared)
+    }
+
+    fn publish_prepared(
+        &self,
+        prepared: lash_core::PreparedLiveReplayPublication,
+    ) -> std::result::Result<
+        Vec<Arc<lash_core::SessionObservationEvent>>,
+        lash_core::LiveReplayStoreError,
+    > {
+        let pause = prepared.events().iter().any(|event| {
+            matches!(
+                &event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+                    | lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+            )
+        });
+        if pause
+            && matches!(
+                self.boundary,
+                PublicationBoundary::AfterInstall | PublicationBoundary::BeforeNotification
+            )
+        {
+            self.pause();
+        }
+        self.inner.publish_prepared(prepared)
     }
 
     fn replay_after_cursor(
@@ -3480,69 +3751,6 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn snapshot_subscribe_has_only_two_histories_at_append_install_boundary() -> Result<()> {
-    let replay_store = Arc::new(PausedCommitReplayStore::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(replay_store.clone())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("recoverable-chat-atomic-handoff")
-        .open()
-        .await?;
-    let turn_session = session.clone();
-    let turn = tokio::spawn(async move {
-        turn_session
-            .turn(TurnInput::text("atomic terminal handoff"))
-            .turn_id("recoverable-atomic-handoff-turn")
-            .run()
-            .await
-    });
-
-    replay_store.wait_for_commit_append().await;
-    let snapshot = session.observe().recoverable_chat_snapshot();
-    replay_store.release_commit_install();
-    turn.await.expect("join publishing turn")?;
-
-    let already_captured = snapshot
-        .read_view
-        .messages()
-        .iter()
-        .any(|message| crate::message_text(message).contains("atomic terminal handoff"));
-    let delivered_after_snapshot = if already_captured {
-        false
-    } else {
-        let mut stream = session
-            .observe()
-            .subscribe_recoverable_chat(snapshot.cursor);
-        tokio::time::timeout(std::time::Duration::from_millis(500), async {
-            loop {
-                let update = stream.next().await.expect("handoff stream remains open")?;
-                if let crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
-                    snapshot,
-                    ..
-                } = update
-                    && snapshot.read_view.messages().iter().any(|message| {
-                        crate::message_text(message).contains("atomic terminal handoff")
-                    })
-                {
-                    break Ok::<_, crate::EmbedError>(true);
-                }
-            }
-        })
-        .await
-        .unwrap_or(Ok(false))?
-    };
-
-    assert!(
-        already_captured || delivered_after_snapshot,
-        "a terminal commit concurrent with snapshot capture must be present in the snapshot or replayed after its cursor"
-    );
-    Ok(())
-}
-
 #[tokio::test]
 async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Result<()> {
     let core = standard_core();
@@ -3557,7 +3765,8 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
     let mut first_delivery = session.observe().subscribe_recoverable_chat(cursor.clone());
     let first_id = match first_delivery.next().await.expect("first replay event")? {
         crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
-        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. } => id,
+        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. }
+        | crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement { id, .. } => id,
         crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
             panic!("fresh cursor unexpectedly gapped")
         }
@@ -3569,7 +3778,8 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
         .with_applied_event_ids([first_id.clone()]);
     let next_id = match redelivery.next().await.expect("next replay event")? {
         crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
-        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. } => id,
+        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. }
+        | crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement { id, .. } => id,
         crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
             panic!("fresh cursor unexpectedly gapped")
         }
@@ -3746,6 +3956,10 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
                 | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
                     snapshot,
                     ..
+                }
+                | crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement {
+                    snapshot,
+                    ..
                 } => break Ok::<_, crate::EmbedError>(snapshot.read_view),
                 crate::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
             }
@@ -3833,7 +4047,7 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
 }
 
 #[tokio::test]
-#[ignore = "FIG-1660: the current public store surface couples broadcast capacity to retention, so a lagged receiver cannot retain its whole missed suffix"]
+#[ignore = "the reservation surface still couples broadcast capacity to replay retention, so an independently retained missed suffix is not constructible"]
 async fn subscriber_lag_recovers_from_last_delivered_cursor() {
     unreachable!("documented conformance-law placeholder")
 }

@@ -85,6 +85,7 @@ async fn next_terminal_replacement(
                     });
                 }
                 lash::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
+                lash::recoverable_chat::RecoverableChatUpdate::ResidentReplacement { .. } => {}
                 lash::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
                     panic!("live recoverable chat must not gap")
                 }

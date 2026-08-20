@@ -139,6 +139,7 @@ pub enum RemoteSessionObservationEventPayload {
         activity: Box<RemoteTurnActivity>,
     },
     Committed,
+    ResidentChanged,
     AgentFrameSwitched {
         frame_id: String,
     },

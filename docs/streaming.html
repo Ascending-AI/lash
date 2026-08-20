@@ -130,7 +130,7 @@ async fn reconnect_session(
     </aside>
     <aside class="contract">
       <strong>Recoverable chat</strong>
-      <p><code>subscribe_recoverable_chat</code> assigns every event the restart-safe <code>RecoverableChatEventId { session_id, replay_incarnation_id, cursor }</code>, forwards a trimmed or unavailable window as <code>ReplayGap</code>, and upgrades a commit into <code>TerminalReplacement</code> carrying the authoritative read view. Hosts may persist already-applied identities to suppress at-least-once redelivery: every replay-store construction receives a fresh incarnation, so a cursor reused after restart cannot collide with an older identity. The subscription keeps its applied-identity window bounded. A replay gap still clears that window because the gap snapshot becomes authoritative. Dropping this stream disconnects observation only; cancellation is a separate <code>TurnWorkDriver</code> request.</p>
+      <p><code>subscribe_recoverable_chat</code> assigns every event the restart-safe <code>RecoverableChatEventId { session_id, replay_incarnation_id, cursor }</code>, forwards a trimmed or unavailable window as <code>ReplayGap</code>, upgrades a durable commit into <code>TerminalReplacement</code>, and maps revision-stable authority to <code>ResidentReplacement</code>. Both replacements carry the authoritative read view, but only the terminal form settles provisional transcript rows. Hosts may persist already-applied identities to suppress at-least-once redelivery: every replay-store construction receives a fresh incarnation, so a cursor reused after restart cannot collide with an older identity. The subscription keeps its applied-identity window bounded. A replay gap still clears that window because the gap snapshot becomes authoritative. Dropping this stream disconnects observation only; cancellation is a separate <code>TurnWorkDriver</code> request.</p>
     </aside>
   </div>
 
@@ -145,6 +145,9 @@ async fn reconnect_session(
     }
     SessionObservationEventPayload::Committed { read_view } =&gt; {
         append_committed_view(read_view).await?;
+    }
+    SessionObservationEventPayload::ResidentChanged { read_view } =&gt; {
+        replace_from_read_view(read_view).await?;
     }
     SessionObservationEventPayload::AgentFrameSwitched { frame_id } =&gt; {
         update_frame(frame_id).await?;
@@ -175,6 +178,10 @@ async fn reconnect_session(
       <div class="listing__row">
         <div class="listing__label">committed</div>
         <div class="listing__body"><p><code>Committed</code> means live assumptions are now settled. Refresh or reconcile from the read view instead of treating prior live deltas as authoritative durable history.</p></div>
+      </div>
+      <div class="listing__row">
+        <div class="listing__label">resident changed</div>
+        <div class="listing__body"><p><code>ResidentChanged</code> means authoritative in-process state changed without advancing the durable revision. Refetch the read view while preserving provisional transcript rows.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">process and queue</div>

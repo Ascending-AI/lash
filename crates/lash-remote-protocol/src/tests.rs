@@ -1191,9 +1191,39 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     assert_eq!(decoded, process);
 }
 
+/// A version 41 peer has no resident-replacement signal. Exact negotiation
+/// rejects it before decode, and its frozen strict enum cannot reinterpret the
+/// new signal as `committed`.
+#[test]
+fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback() {
+    let resident = serde_json::to_value(RemoteSessionObservationEventPayload::ResidentChanged)
+        .expect("serialize version 42 resident signal");
+    assert_eq!(resident, serde_json::json!({ "type": "resident_changed" }));
+    assert!(matches!(
+        ensure_protocol_version(41),
+        Err(RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 41,
+            expected: 42,
+        })
+    ));
+    let error = serde_json::from_value::<Protocol41ObservationSignal>(resident)
+        .expect_err("a version 41 peer cannot name resident_changed");
+    assert!(error.to_string().contains("unknown variant"), "{error}");
+    serde_json::from_value::<Protocol41ObservationSignal>(serde_json::json!({
+        "type": "committed"
+    }))
+    .expect("a version 41 peer still decodes its committed signal exactly");
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Protocol41ObservationSignal {
+    Committed,
+}
+
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 41, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 42, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1602,7 +1632,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 41,
+            expected: 42,
         })
     ));
 }
@@ -1642,7 +1672,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             ensure_protocol_version(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1678,7 +1708,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             ensure_protocol_version(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1734,7 +1764,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             ensure_protocol_version(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1766,7 +1796,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             ensure_protocol_version(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"

@@ -649,7 +649,8 @@ finish "observed through live replay"
                     }
                 }
                 ObservationStreamItem::ReplayGap { .. }
-                | ObservationStreamItem::TerminalReplacement { .. } => {}
+                | ObservationStreamItem::TerminalReplacement { .. }
+                | ObservationStreamItem::ResidentReplacement { .. } => {}
             }
             if saw_cursor && saw_final_value_observation {
                 break;
