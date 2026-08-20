@@ -1854,18 +1854,22 @@ pub fn scheduler_controlled_delivery(events: &[DeliveredBoundary]) -> OracleVerd
     )
 }
 
+pub const SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS: &[BoundaryKind] = &[
+    BoundaryKind::Provider,
+    BoundaryKind::Cancellation,
+    BoundaryKind::BackendFailure,
+    BoundaryKind::ProviderMutation,
+    BoundaryKind::Tool,
+    BoundaryKind::ExecCode,
+    BoundaryKind::DurableEffect,
+    BoundaryKind::Worker,
+    BoundaryKind::ProcessWake,
+    BoundaryKind::Observer,
+];
+
 pub fn scheduler_owned_runtime_completions(events: &[DeliveredBoundary]) -> OracleVerdict {
     let mut missing = Vec::new();
-    for kind in [
-        BoundaryKind::Provider,
-        BoundaryKind::Cancellation,
-        BoundaryKind::BackendFailure,
-        BoundaryKind::ProviderMutation,
-        BoundaryKind::Tool,
-        BoundaryKind::ExecCode,
-        BoundaryKind::DurableEffect,
-        BoundaryKind::Worker,
-    ] {
+    for &kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
         let mut saw_kind = false;
         for event in events
             .iter()
@@ -1935,7 +1939,7 @@ pub fn scheduler_owned_runtime_completions(events: &[DeliveredBoundary]) -> Orac
     }
     OracleVerdict::passed(
         SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
-        "provider chunks/retries, cancellation, tool returns, exec results, durable completions, provider mutations, and worker completions were registered as pending runtime boundaries and delivered by the scheduler",
+        "provider chunks/retries, cancellation, tool returns, exec results, durable completions, provider mutations, worker completions, process wakes, and observer reconnects were registered as pending runtime boundaries and delivered by the scheduler",
     )
 }
 
@@ -8429,6 +8433,173 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_owned_runtime_completion_kinds_match_runner_completion_kinds() {
+        let runner_kinds: BTreeSet<BoundaryKind> =
+            crate::runner::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS
+                .iter()
+                .copied()
+                .collect();
+        let oracle_kinds: BTreeSet<BoundaryKind> = SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS
+            .iter()
+            .copied()
+            .collect();
+        assert_eq!(
+            runner_kinds, oracle_kinds,
+            "runner scheduler-owned runtime completion kinds and oracle verification kinds must match exactly"
+        );
+        assert_eq!(
+            crate::runner::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS,
+            SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS,
+            "runner and oracle lists must match in exact sequence"
+        );
+    }
+
+    #[test]
+    fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_process_wake_and_observer()
+     {
+        for kind in [BoundaryKind::ProcessWake, BoundaryKind::Observer] {
+            let verdict = scheduler_owned_runtime_completions(&[delivered_with_payload(
+                0,
+                "session-001:boundary:001",
+                "session-001",
+                kind,
+                json!({}),
+                json!({}),
+            )]);
+
+            assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
+            assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
+            assert!(
+                verdict
+                    .message
+                    .contains("delivered without pending runtime boundary evidence"),
+                "for {kind:?}: {}",
+                verdict.message
+            );
+        }
+    }
+
+    #[test]
+    fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present() {
+        let events = vec![
+            delivered_with_payload(
+                0,
+                "session-001:provider:001",
+                "session-001",
+                BoundaryKind::Provider,
+                json!({"runtime_completion": runtime_completion("provider_turn_completion", 0)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                1,
+                "session-001:cancellation:001",
+                "session-001",
+                BoundaryKind::Cancellation,
+                json!({"runtime_completion": runtime_completion("queued_input_cancellation", 1)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                2,
+                "session-001:backend-failure:001",
+                "session-001",
+                BoundaryKind::BackendFailure,
+                json!({"runtime_completion": runtime_completion("backend_retry_or_failure", 2)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                3,
+                "session-001:provider-mutation:001",
+                "session-001",
+                BoundaryKind::ProviderMutation,
+                json!({"runtime_completion": runtime_completion("provider_script_mutation", 3)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                4,
+                "session-001:tool:001",
+                "session-001",
+                BoundaryKind::Tool,
+                json!({"runtime_completion": runtime_completion("tool_return", 4)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                5,
+                "session-001:exec-code:001",
+                "session-001",
+                BoundaryKind::ExecCode,
+                json!({"runtime_completion": runtime_completion("exec_result", 5)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                6,
+                "session-001:durable:001",
+                "session-001",
+                BoundaryKind::DurableEffect,
+                json!({"runtime_completion": runtime_completion("durable_effect_completion", 6)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                7,
+                "worker-001:worker:001",
+                "worker-001",
+                BoundaryKind::Worker,
+                json!({"runtime_completion": runtime_completion("worker_lease_completion", 7)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                8,
+                "session-001:process-wake:001",
+                "session-001",
+                BoundaryKind::ProcessWake,
+                json!({"runtime_completion": runtime_completion("process_wake", 8)}),
+                json!({}),
+            ),
+            delivered_with_payload(
+                9,
+                "session-001:observer:001",
+                "session-001",
+                BoundaryKind::Observer,
+                json!({"runtime_completion": runtime_completion("observer_snapshot", 9)}),
+                json!({}),
+            ),
+        ];
+
+        let verdict = scheduler_owned_runtime_completions(&events);
+        assert_eq!(verdict.status, crate::trace::OracleStatus::Passed);
+        assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
+    }
+
+    #[test]
+    fn scheduler_owned_runtime_completion_oracle_fails_when_kind_is_missing() {
+        for missing_kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
+            let mut events = Vec::new();
+            let mut seq = 0u64;
+            for &kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
+                if kind == *missing_kind {
+                    continue;
+                }
+                events.push(delivered_with_payload(
+                    seq as usize,
+                    &format!("boundary:{seq}"),
+                    "session-001",
+                    kind,
+                    json!({"runtime_completion": runtime_completion("some_family", seq)}),
+                    json!({}),
+                ));
+                seq += 1;
+            }
+            let verdict = scheduler_owned_runtime_completions(&events);
+            assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
+            assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
+            assert!(
+                verdict.message.contains(&format!("{missing_kind:?}")),
+                "expected message to name missing {missing_kind:?}, got: {}",
+                verdict.message
+            );
+        }
+    }
+
+    #[test]
     fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         let parser_matrix = delivered_with_payload(
             2,
@@ -9048,7 +9219,7 @@ mod tests {
                 "session-001:observer:reconnect:001",
                 "session-001",
                 BoundaryKind::Observer,
-                json!({}),
+                json!({"runtime_completion": runtime_completion("observer_snapshot", 3)}),
                 json!({"reconnected": true, "turn_index": 2}),
             ),
             delivered_with_payload(
@@ -9110,7 +9281,11 @@ mod tests {
                 "session-001:process-wake:001",
                 "session-001",
                 BoundaryKind::ProcessWake,
-                json!({"process_id": "process-001", "sequence": 1}),
+                json!({
+                    "process_id": "process-001",
+                    "sequence": 1,
+                    "runtime_completion": runtime_completion("process_wake", 7),
+                }),
                 json!({
                     "claimed_once": true,
                     "runtime_process_wake": {
@@ -9135,7 +9310,11 @@ mod tests {
                 "session-001:process-wake:002",
                 "session-001",
                 BoundaryKind::ProcessWake,
-                json!({"process_id": "process-001", "sequence": 1}),
+                json!({
+                    "process_id": "process-001",
+                    "sequence": 1,
+                    "runtime_completion": runtime_completion("process_wake", 8),
+                }),
                 json!({
                     "claimed_once": false,
                     "runtime_process_wake": {

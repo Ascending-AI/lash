@@ -1,5 +1,18 @@
 use super::*;
 
+pub const SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS: &[BoundaryKind] = &[
+    BoundaryKind::Provider,
+    BoundaryKind::Cancellation,
+    BoundaryKind::BackendFailure,
+    BoundaryKind::ProviderMutation,
+    BoundaryKind::Tool,
+    BoundaryKind::ExecCode,
+    BoundaryKind::DurableEffect,
+    BoundaryKind::Worker,
+    BoundaryKind::ProcessWake,
+    BoundaryKind::Observer,
+];
+
 #[derive(Default)]
 pub(super) struct RuntimeCompletionState {
     pub(super) opened_sessions: BTreeSet<String>,
@@ -61,7 +74,18 @@ impl RuntimeCompletionState {
                     self.durable_first_completions.insert(durable_key);
                 }
             }
-            _ => {}
+            BoundaryKind::ProviderEvent
+            | BoundaryKind::Tool
+            | BoundaryKind::ExecCode
+            | BoundaryKind::ProcessWake
+            | BoundaryKind::ProcessLifecycle
+            | BoundaryKind::Worker
+            | BoundaryKind::Observer
+            | BoundaryKind::Cancellation
+            | BoundaryKind::Trigger
+            | BoundaryKind::BackendFailure
+            | BoundaryKind::ProviderMutation
+            | BoundaryKind::LeaseTime => {}
         }
     }
 
@@ -133,20 +157,25 @@ pub(super) fn split_runtime_completion_boundaries(
     (initial, RuntimeCompletionQueue::new(completions))
 }
 
-fn is_scheduler_owned_runtime_completion(kind: BoundaryKind) -> bool {
-    matches!(
-        kind,
+pub(crate) fn is_scheduler_owned_runtime_completion(kind: BoundaryKind) -> bool {
+    match kind {
         BoundaryKind::Provider
-            | BoundaryKind::Cancellation
-            | BoundaryKind::BackendFailure
-            | BoundaryKind::ProviderMutation
-            | BoundaryKind::Tool
-            | BoundaryKind::ExecCode
-            | BoundaryKind::DurableEffect
-            | BoundaryKind::Worker
-            | BoundaryKind::ProcessWake
-            | BoundaryKind::Observer
-    )
+        | BoundaryKind::Cancellation
+        | BoundaryKind::BackendFailure
+        | BoundaryKind::ProviderMutation
+        | BoundaryKind::Tool
+        | BoundaryKind::ExecCode
+        | BoundaryKind::DurableEffect
+        | BoundaryKind::Worker
+        | BoundaryKind::ProcessWake
+        | BoundaryKind::Observer => true,
+        BoundaryKind::Ingress
+        | BoundaryKind::QueuedIngress
+        | BoundaryKind::ProviderEvent
+        | BoundaryKind::ProcessLifecycle
+        | BoundaryKind::Trigger
+        | BoundaryKind::LeaseTime => false,
+    }
 }
 
 pub(super) async fn register_ready_runtime_completions(
@@ -235,7 +264,12 @@ pub(super) fn runtime_completion_ready(
             let session = completion_session_alias(event);
             state.session_opened(&session) && !state.provider_active(&session)
         }
-        _ => false,
+        BoundaryKind::Ingress
+        | BoundaryKind::QueuedIngress
+        | BoundaryKind::ProviderEvent
+        | BoundaryKind::ProcessLifecycle
+        | BoundaryKind::Trigger
+        | BoundaryKind::LeaseTime => false,
     }
 }
 
@@ -248,7 +282,7 @@ fn completion_session_alias(event: &BoundaryEvent) -> String {
         .to_string()
 }
 
-fn runtime_completion_family(event: &BoundaryEvent) -> &'static str {
+pub(super) fn runtime_completion_family(event: &BoundaryEvent) -> &'static str {
     match event.kind {
         BoundaryKind::Provider => "provider_turn_completion",
         BoundaryKind::Cancellation => "queued_input_cancellation",
@@ -260,7 +294,12 @@ fn runtime_completion_family(event: &BoundaryEvent) -> &'static str {
         BoundaryKind::Worker => "worker_lease_completion",
         BoundaryKind::ProcessWake => "process_wake",
         BoundaryKind::Observer => "observer_snapshot",
-        _ => "runtime_completion",
+        BoundaryKind::Ingress
+        | BoundaryKind::QueuedIngress
+        | BoundaryKind::ProviderEvent
+        | BoundaryKind::ProcessLifecycle
+        | BoundaryKind::Trigger
+        | BoundaryKind::LeaseTime => "runtime_completion",
     }
 }
 
@@ -325,7 +364,13 @@ pub(super) fn runtime_completion_units(
         BoundaryKind::Worker => "runtime:worker_stale_completion",
         BoundaryKind::ProcessWake => "runtime:process_wake_delivery",
         BoundaryKind::Observer => "runtime:observer_snapshot",
-        _ => "runtime:completion",
+        BoundaryKind::Provider
+        | BoundaryKind::Ingress
+        | BoundaryKind::QueuedIngress
+        | BoundaryKind::ProviderEvent
+        | BoundaryKind::ProcessLifecycle
+        | BoundaryKind::Trigger
+        | BoundaryKind::LeaseTime => "runtime:completion",
     };
     Ok(vec![RuntimeCompletionUnit::new(unit, event.at)])
 }

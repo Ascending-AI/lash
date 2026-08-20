@@ -222,6 +222,7 @@ pub use generated_profiles::{
     SimRunMode, SimRunModeError, SimSeedSource, WEEKLY_REGRESSION_CORPUS,
     run_generated_sim_profile, run_generated_sim_profile_for_seeds,
 };
+pub use runtime_completion::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS;
 
 use agent_contracts::*;
 use contract_support::*;
