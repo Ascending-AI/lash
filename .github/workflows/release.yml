@@ -140,6 +140,7 @@ jobs:
 
     steps:
       - name: Check out repository
+        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
         env:
           CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
@@ -204,6 +205,7 @@ jobs:
 
     steps:
       - name: Check out repository
+        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
         env:
           CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
           CHECKOUT_TOKEN: ${{ github.token }}
@@ -299,6 +301,7 @@ jobs:
       - name: Check out repository
         # Full history + tags: release_notes.py walks previous-tag..tag to
         # assemble the curated release body.
+        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
         env:
           CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
           CHECKOUT_TOKEN: ${{ github.token }}

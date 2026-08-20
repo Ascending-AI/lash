@@ -585,6 +585,8 @@ jobs:
 
     steps:
       - name: Check out repository
+        # Full branch and tag fetches preserve actions/checkout's fetch-depth: 0
+        # contract for the merge-base and release-note checks below.
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
