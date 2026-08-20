@@ -43,9 +43,9 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
         let turn_id = format!("turn-{turn_index}");
         let start_cursor = store.current_cursor(&session_id, revision);
 
-        let (first_cursor, append_phase) =
+        let ((first_cursor, replay_incarnation_id), append_phase) =
             measure_runtime_perf_phase("live_replay.append", || {
-                let mut first_cursor = None;
+                let mut first_event_identity = None;
                 for event_index in 0..LIVE_REPLAY_EVENTS_PER_TURN {
                     let event = publish_one(
                         &store,
@@ -54,11 +54,15 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                         Some(&turn_id),
                         live_replay_text_payload(format!("turn-{turn_index}-event-{event_index}")),
                     )?;
-                    if first_cursor.is_none() {
-                        first_cursor = Some(event.cursor.clone());
+                    if first_event_identity.is_none() {
+                        first_event_identity = Some((
+                            event.cursor.clone(),
+                            event.replay_incarnation_id.clone(),
+                        ));
                     }
                 }
-                first_cursor.ok_or_else(|| anyhow::anyhow!("live replay append produced no cursor"))
+                first_event_identity
+                    .ok_or_else(|| anyhow::anyhow!("live replay append produced no cursor"))
             })?;
         appended_events += LIVE_REPLAY_EVENTS_PER_TURN;
         phase_profile.insert(append_phase.0, append_phase.1);
@@ -174,8 +178,9 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
             measure_runtime_perf_phase("live_replay.gap_handling", || {
                 let ahead_cursor: lash_core::SessionCursor =
                     serde_json::from_value(serde_json::json!(format!(
-                        "lashsc1:{}:999999:{}",
-                        revision.as_u64(),
+                        "lashsc2:{}:{}:999999:{}",
+                        replay_incarnation_id,
+                        SessionRevision::as_u64(revision),
                         session_id
                     )))?;
                 let mut gaps = 0usize;

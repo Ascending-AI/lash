@@ -11771,6 +11771,16 @@ usage = "examples/agent-workbench/src/main_sections/tests.rs:703#.live_replay_st
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::observe::InMemoryLiveReplayStore::reopen_preserving_history"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::reopen_preserving_history"]
+area = "observation-admin"
+disposition = "internal-test-only"
+usage = "crates/lash/src/tests/turn_streaming.rs:3421#let preserved = original.reopen_preserving_history();"
+reason = "Relocate: move this conformance-only handle into `lash::testing` if the in-memory conformance fixture gains a testing-only wrapper type; today the public in-memory store must produce a distinct handle sharing the same private replay state so the importable law can distinguish a preserved restart from a fresh incarnation."
+
+[[api]]
 symbol = "lash::observe::InMemoryLiveReplayStore::with_bounds"
 kind = "function"
 availability = "default+all-features"
@@ -11897,7 +11907,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplayGapReason::Trimmed"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:160#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Trimmed) => Ok(1usize),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:164#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Trimmed) => Ok(1usize),"
 
 [[api]]
 symbol = "lash::observe::LiveReplayGapReason::Unavailable"
@@ -11906,7 +11916,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplayGapReason::Unavailable"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:183#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:188#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,"
 
 [[api]]
 symbol = "lash::observe::LiveReplayStore"
@@ -12153,7 +12163,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplaySubscribeOutcome::Gap::0"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:104#LiveReplaySubscribeOutcome::Gap(reason) => {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:108#LiveReplaySubscribeOutcome::Gap(reason) => {"
 
 [[api]]
 symbol = "lash::observe::LiveReplaySubscribeOutcome::Subscribed"
@@ -12162,7 +12172,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplaySubscribeOutcome::Subscribed"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:103#LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:107#LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,"
 
 [[api]]
 symbol = "lash::observe::LiveReplaySubscribeOutcome::Subscribed::0"
@@ -12171,7 +12181,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplaySubscribeOutcome::Subscribed::0"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:103#LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:107#LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,"
 
 [[api]]
 symbol = "lash::observe::RemoteSessionObservationEventStream"
@@ -12561,7 +12571,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::TurnActivity::0"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:565#SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent("
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:570#SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent("
 
 [[api]]
 symbol = "lash::observe::SessionObservationStream"
@@ -12821,7 +12831,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionRevision::as_u64"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:178#revision.as_u64(),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:183#SessionRevision::as_u64(revision),"
 
 [[api]]
 symbol = "lash::observe::SessionRevision::new"
@@ -55585,6 +55595,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: conformance-suite embedders (ADR 0051). This executable law proves every RuntimePersistence backend and in-process double returns SessionAdmission::Created for the first admission through a fresh handle; backend conformance tests are its integrator-class home rather than a host example."
 
 [[api]]
+symbol = "lash::testing::conformance::incarnation_change_invalidates_cursor"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash/src/tests/turn_streaming.rs:3422#    crate::testing::conformance::incarnation_change_invalidates_cursor("
+reason = "Importable live-replay law exercised by the runtime's in-memory conformance test; only test code invokes it, which is the purpose of the `testing` feature."
+
+[[api]]
 symbol = "lash::testing::conformance::inactive_append_ancestor_precedes_stale_head"
 kind = "function"
 availability = "all-features"
@@ -66749,7 +66768,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:70#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:74#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
 
 [[api]]
 symbol = "lash_core::LiveReplayOutcome::Gap"
@@ -66757,7 +66776,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:75#LiveReplayOutcome::Gap(reason) => {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:79#LiveReplayOutcome::Gap(reason) => {"
 
 [[api]]
 symbol = "lash_core::LiveReplayOutcome::Gap::0"
@@ -66765,7 +66784,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:75#LiveReplayOutcome::Gap(reason) => {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:79#LiveReplayOutcome::Gap(reason) => {"
 
 [[api]]
 symbol = "lash_core::LiveReplayOutcome::Replayed"
@@ -66773,7 +66792,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:70#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:74#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
 
 [[api]]
 symbol = "lash_core::LiveReplayOutcome::Replayed::0"
@@ -66781,7 +66800,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:70#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:74#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
 
 [[api]]
 symbol = "lash_core::LiveReplaySubscription"

@@ -934,7 +934,7 @@ mod tests {
         }
 
         fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor {
-            SessionCursor::new(session_id, revision, 0)
+            SessionCursor::new("panic-replay-incarnation", session_id, revision, 0)
         }
 
         fn trim_session(&self, _session_id: &str) -> Result<(), LiveReplayStoreError> {
@@ -963,7 +963,12 @@ mod tests {
         .await
         .expect("runtime");
         let handle = RuntimeHandle::with_live_replay_store(runtime, Arc::new(PanicLiveReplayStore));
-        let wrong_session = SessionCursor::new("session-b", SessionRevision(0), 99);
+        let wrong_session = SessionCursor::new(
+            "panic-replay-incarnation",
+            "session-b",
+            SessionRevision(0),
+            99,
+        );
         let malformed = SessionCursor::from_raw_for_testing("bad");
 
         assert!(matches!(
@@ -1013,7 +1018,12 @@ mod tests {
         .await
         .expect("runtime");
         let handle = RuntimeHandle::new(runtime);
-        let ahead = SessionCursor::new("future-revision-cursor", SessionRevision::new(1), 0);
+        let ahead = SessionCursor::new(
+            "future-replay-incarnation",
+            "future-revision-cursor",
+            SessionRevision::new(1),
+            0,
+        );
 
         assert!(matches!(
             handle

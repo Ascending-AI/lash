@@ -392,6 +392,14 @@ mod tests {
             Duration::from_millis(20),
         )
         .await;
+        let original = crate::InMemoryLiveReplayStore::default();
+        let preserved = original.reopen_preserving_history();
+        incarnation_change_invalidates_cursor(
+            Arc::new(original) as Arc<dyn LiveReplayStore>,
+            Arc::new(crate::InMemoryLiveReplayStore::default()) as Arc<dyn LiveReplayStore>,
+            Arc::new(preserved) as Arc<dyn LiveReplayStore>,
+        )
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

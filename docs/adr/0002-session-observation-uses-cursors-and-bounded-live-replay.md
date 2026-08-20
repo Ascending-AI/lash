@@ -19,7 +19,7 @@ Reconnect is session-level. A host observes a `SessionObservation`: the current 
 
 Live replay is best-effort and bounded. `LiveReplayStore` is not `RuntimePersistence`, not durable history, and not required to survive process loss. The default `InMemoryLiveReplayStore` keeps at most 2048 events or 120 seconds per session. Hosts that need a deployment-specific buffer can pass a custom store through `LashCoreBuilder::live_replay_store`.
 
-`SessionCursor` is opaque outside core. Malformed cursors are invalid input. Cursors for a different session are rejected. Stale or trimmed cursors return a fresh `SessionObservation` plus `LiveReplayGap`.
+`SessionCursor` is opaque outside core and binds replay incarnation, durable revision, live position, and session identity into one token. Malformed cursors are invalid input. Cursors for a different session are rejected. A replay-incarnation mismatch returns `Gap(Unavailable)`, never clean empty, unless a host store genuinely preserved both replay history and incarnation across restart. A store that cannot prove both must present a fresh incarnation. Stale or trimmed cursors return a fresh `SessionObservation` plus `LiveReplayGap`.
 
 ## Consequences
 

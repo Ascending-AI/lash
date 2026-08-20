@@ -60,7 +60,7 @@ fn main() {
     let observation = lash::remote::observations::RemoteSessionObservation {
         protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
-        cursor: "lashsc1:0:0:session".to_string(),
+        cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
         turn_index: 0,
         usage: lash::remote::usage::RemoteUsage::default(),
     };
@@ -70,8 +70,8 @@ fn main() {
         gap: lash::remote::observations::RemoteLiveReplayGap {
             protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
             session_id: "session".to_string(),
-            requested_cursor: "lashsc1:0:0:session".to_string(),
-            latest_cursor: "lashsc1:0:0:session".to_string(),
+            requested_cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
+            latest_cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
             latest_revision: 0,
             reason: lash::remote::observations::RemoteLiveReplayGapReason::Unavailable,
         },

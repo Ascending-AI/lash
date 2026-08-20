@@ -1139,7 +1139,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     let observation = RemoteSessionObservation {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
-        cursor: "lashsc1:3:7:session".to_string(),
+        cursor: "lashsc2:replay-incarnation:3:7:session".to_string(),
         turn_index: 3,
         usage: RemoteUsage {
             input_tokens: 10,
@@ -1161,7 +1161,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
         replay_incarnation_id: "replay-incarnation".to_string(),
         turn_id: None,
         revision: 3,
-        cursor: "lashsc1:3:7:session".to_string(),
+        cursor: "lashsc2:replay-incarnation:3:7:session".to_string(),
         event: RemoteSessionObservationEventPayload::QueueChanged {
             kind: RemoteSessionQueueEventKind::Enqueued,
             batch_ids: vec!["batch-1".to_string()],
