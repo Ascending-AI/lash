@@ -293,9 +293,23 @@ impl ModuleArtifact {
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, ModuleArtifactError> {
         let raw: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
+        let known_dialect = matches!(
+            raw.get("compilation_dialect")
+                .and_then(|value| value.as_str()),
+            Some("lashlang" | "typescript")
+        );
         reject_future_shape(&raw)?;
-        let artifact: Self = serde_json::from_value(raw)
-            .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
+        let artifact: Self = serde_json::from_value(raw).map_err(|err| {
+            let message = err.to_string();
+            if known_dialect && message.contains("unknown variant") {
+                ModuleArtifactError::FutureShape {
+                    field: "artifact shape",
+                    value: "nested enum variant".to_string(),
+                }
+            } else {
+                ModuleArtifactError::Codec(message)
+            }
+        })?;
         artifact.verify()?;
         Ok(artifact)
     }
@@ -1101,6 +1115,31 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("recompile and republish"), "{message}");
         assert!(!message.contains("unknown variant"), "{message}");
+    }
+
+    #[test]
+    fn unchanged_dialect_with_unknown_nested_variant_is_a_future_shape_refusal() {
+        let mut raw: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/module-artifact-old.json"))
+                .expect("frozen fixture should be JSON");
+        raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+
+        let error = ModuleArtifact::from_store_bytes(
+            &serde_json::to_vec(&raw).expect("future fixture should encode"),
+        )
+        .expect_err("a known-dialect future variant must be refused legibly");
+        assert!(matches!(error, ModuleArtifactError::FutureShape { .. }));
+        let message = error.to_string();
+        assert!(message.contains("recompile and republish"), "{message}");
+        assert!(!message.contains("unknown variant"), "{message}");
+    }
+
+    #[test]
+    fn malformed_artifact_json_remains_an_undecodable_codec_error() {
+        let error = ModuleArtifact::from_store_bytes(br#"{"#)
+            .expect_err("malformed JSON must remain undecodable");
+        assert!(matches!(error, ModuleArtifactError::Codec(_)));
+        assert!(!matches!(error, ModuleArtifactError::FutureShape { .. }));
     }
 }
 

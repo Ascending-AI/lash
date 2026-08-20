@@ -103,7 +103,7 @@ let core = builder.build(owner)?;</code></pre>
         <h2>Reading Versions Before Wiring</h2>
         <p>The exact-match gate above answers on the first store access, which is late. Under a supervisor a refused open is a restart, and a restart is another refused open, so a mismatch that should read as one clear message reads as a crash loop instead. Two read-only surfaces let a host ask the question first and exit deliberately.</p>
       </div>
-      <p>What this build writes is published as one table. It re-exports the owning crates' constants rather than restating them, so a version reported here and a version written to disk are the same symbol and cannot drift apart.</p>
+      <p>What this build writes is published as one table. It re-exports the owning crates' constants rather than restating them, so a version reported here and a version written to disk are the same symbol and cannot drift apart. Module artifact identity uses the semantic hash <code><span data-format-version="LASHLANG_SEMANTIC_HASH_VERSION">lashlang-semantic-v2</span></code>; a host that cannot read an artifact must recompile and republish it.</p>
       <pre data-lang="rust" data-snippet="fig1556_preflight#format-manifest"><code>let mut report = String::new();
 for entry in durable_formats() {
     let row = format!(

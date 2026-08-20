@@ -221,6 +221,18 @@ CONSTANTS: tuple[Constant, ...] = (
             r"\s*:[^=\n]+=\s*\"([^\"]+)\"\s*;"
         ),
     ),
+    Constant(
+        name="LASHLANG_SEMANTIC_HASH_VERSION",
+        path="crates/lashlang/src/artifact.rs",
+        symbol="LASHLANG_SEMANTIC_HASH_VERSION",
+        manifest=True,
+        phrases=("module artifact", "semantic hash"),
+        pattern=(
+            r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+"
+            r"LASHLANG_SEMANTIC_HASH_VERSION\s*:[^=\n]+="
+            r"\s*\"([^\"]+)\"\s*;"
+        ),
+    ),
     # Not in the manifest: a reader's gate, not parked durable bytes.
     Constant(
         name="TRACE_SCHEMA_VERSION",

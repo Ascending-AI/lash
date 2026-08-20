@@ -37,6 +37,7 @@
 //! worth describing is often the one that was never provisioned, and a walk that
 //! failed on it would take the whole report down with it.
 
+use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
 use lash_core::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreError,
@@ -164,7 +165,7 @@ async fn scan_module_artifacts(
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
     let rows = sqlx::query_as::<_, (String, Vec<u8>)>(MODULE_ARTIFACT_SQL)
-        .bind("lashlang_module")
+        .bind(MODULE_ARTIFACT_NAMESPACE)
         .bind(scan.after.clone())
         .bind(row_limit(scan))
         .fetch_all(pool)
