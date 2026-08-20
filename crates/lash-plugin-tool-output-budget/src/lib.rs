@@ -67,10 +67,16 @@ impl TruncationUnit {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WindowedTruncation<'a> {
+    /// Maximum number of lines retained in the preview window.
     pub max_lines: usize,
+    /// Maximum number of bytes retained in the preview window.
     pub max_bytes: usize,
+    /// Which end of the output to keep.
     pub direction: TruncationDirection,
+    /// The unit reported in the byte-budget truncation marker.
     pub unit: TruncationUnit,
+    /// Trailing hint text appended to (Head) / prepended to (Tail) the
+    /// preview, explaining the truncation and where the full output is.
     pub hint: &'a str,
 }
 
@@ -282,14 +288,6 @@ fn project_tool_result(budget: &Budget, ctx: ToolResultProjectionContext) -> Mod
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn project_tool_result_text(
-    budget: &Budget,
-    ctx: ToolResultProjectionContext,
-) -> String {
-    render_model_return_parts(&project_tool_result(budget, ctx).parts)
-}
-
 fn project_model_parts(
     budget: &Budget,
     ctx: &ToolResultProjectionContext,
@@ -457,9 +455,6 @@ fn truncate_text_with_hint(
     }
     if budget.max_bytes == 0 {
         return format_zero_budget_marker(budget.unit, text);
-    }
-    if !needs_truncation(text, budget) {
-        return text.to_string();
     }
     truncate_windowed(
         text,
@@ -862,23 +857,6 @@ mod tests {
     }
 
     #[test]
-    fn project_tool_result_text_renders_string() {
-        let budget = Budget::from(ToolOutputBudgetConfig::default());
-        let text = project_tool_result_text(
-            &budget,
-            ToolResultProjectionContext {
-                session_id: "root".to_string(),
-                call_id: "call".to_string(),
-                tool_name: "read_file".to_string(),
-                args: json!({}),
-                output: lash_core::ToolCallOutput::success(json!("short output")),
-                duration_ms: 1,
-            },
-        );
-        assert_eq!(text, "short output");
-    }
-
-    #[test]
     fn batch_model_projection_preserves_projected_child_payloads() {
         let projected = project_tool_result(
             &Budget::from(ToolOutputBudgetConfig::default()),
@@ -1013,6 +991,14 @@ mod tests {
         let exact_text = "a".repeat(40);
         assert_eq!(project_text(&exact_text, &byte_budget, &ctx), exact_text);
         assert_eq!(project_text(&exact_text, &token_budget, &ctx), exact_text);
+
+        // A 41-byte single-line input exceeds the effective byte budget in
+        // both modes; max_lines must not be the reason either result truncates.
+        let boundary_text = "a".repeat(41);
+        let byte_boundary_projected = project_text(&boundary_text, &byte_budget, &ctx);
+        let token_boundary_projected = project_text(&boundary_text, &token_budget, &ctx);
+        assert_ne!(byte_boundary_projected, boundary_text);
+        assert_ne!(token_boundary_projected, boundary_text);
 
         // Text exceeding budget (100 bytes): preview portion must be identical
         let long_text = "a".repeat(100);

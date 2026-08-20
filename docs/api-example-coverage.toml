@@ -70644,7 +70644,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-plugin-tool-output-budget/src/lib.rs:299#return vec![ModelToolReturnPart::text(render_projected_model_value("
+usage = "crates/lash-plugin-tool-output-budget/src/lib.rs:297#return vec![ModelToolReturnPart::text(render_projected_model_value("
 
 [[api]]
 symbol = "lash_core::test_support::OpenAttachmentSourcePolicy"
