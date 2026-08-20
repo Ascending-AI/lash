@@ -1516,7 +1516,6 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     }
 }
 
-/// Runtime session orchestration over host-supplied services and policy.
 /// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ResidentSessionState {
@@ -1526,6 +1525,7 @@ pub(crate) enum ResidentSessionState {
     Invalidated { decision_id: String },
 }
 
+/// Runtime session orchestration over host-supplied services and policy.
 pub struct LashRuntime {
     pub(in crate::runtime) session: Option<Session>,
     pub(in crate::runtime) policy: SessionPolicy,

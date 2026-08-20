@@ -625,17 +625,17 @@ impl LashRuntime {
         }
     }
 
-    pub(super) fn trace_synchronous_resident_state_refusal(&self, consumer: &'static str) {
-        let decision_id = match &self.resident_session_state {
-            ResidentSessionState::Invalidated { decision_id } => decision_id.as_str(),
-            ResidentSessionState::Valid => "resident-session-reload:not-required",
-        };
+    pub(super) fn trace_synchronous_resident_state_refusal(
+        &self,
+        decision_id: &str,
+        consumer: &'static str,
+    ) {
         tracing::info!(
             event = "resident_session_state.sync_refusal",
             decision_id,
             session_id = %self.state.session_id,
             consumer,
-            consulted_validity = matches!(self.resident_session_state, ResidentSessionState::Valid),
+            consulted_validity = false,
             outcome = "refused",
             error_classification = RuntimeErrorCode::ResidentSessionReloadFailed.as_str(),
             "synchronous resident-state consumer refused invalidated state"

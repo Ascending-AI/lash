@@ -25,8 +25,11 @@ impl LashRuntime {
         &self,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         match &self.resident_session_state {
-            ResidentSessionState::Invalidated { .. } => {
-                self.trace_synchronous_resident_state_refusal("active_tool_catalog_shared");
+            ResidentSessionState::Invalidated { decision_id } => {
+                self.trace_synchronous_resident_state_refusal(
+                    decision_id,
+                    "active_tool_catalog_shared",
+                );
                 return Err(crate::PluginError::Session(
                     "resident session state is invalidated; durable reload is required".to_string(),
                 ));
@@ -41,8 +44,8 @@ impl LashRuntime {
 
     pub fn tool_state(&self) -> Result<crate::ToolState, SessionError> {
         match &self.resident_session_state {
-            ResidentSessionState::Invalidated { .. } => {
-                self.trace_synchronous_resident_state_refusal("tool_state");
+            ResidentSessionState::Invalidated { decision_id } => {
+                self.trace_synchronous_resident_state_refusal(decision_id, "tool_state");
                 return Err(SessionError::Protocol(
                     "resident session state is invalidated; durable reload is required".to_string(),
                 ));
@@ -91,8 +94,11 @@ impl LashRuntime {
         is_root_session: bool,
     ) -> Result<(), crate::PluginError> {
         match &self.resident_session_state {
-            ResidentSessionState::Invalidated { .. } => {
-                self.trace_synchronous_resident_state_refusal("configure_protocol_on_materialize");
+            ResidentSessionState::Invalidated { decision_id } => {
+                self.trace_synchronous_resident_state_refusal(
+                    decision_id,
+                    "configure_protocol_on_materialize",
+                );
                 return Err(crate::PluginError::Session(
                     "resident session state is invalidated; durable reload is required".to_string(),
                 ));
@@ -264,8 +270,11 @@ impl LashRuntime {
         &self,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         match &self.resident_session_state {
-            ResidentSessionState::Invalidated { .. } => {
-                self.trace_synchronous_resident_state_refusal("runtime_session_services");
+            ResidentSessionState::Invalidated { decision_id } => {
+                self.trace_synchronous_resident_state_refusal(
+                    decision_id,
+                    "runtime_session_services",
+                );
                 return Err(PluginOperationInvokeError::Unknown(
                     "resident session state is invalidated; durable reload is required".to_string(),
                 ));
@@ -376,8 +385,8 @@ impl LashRuntime {
     /// The plugin session bound to the currently active runtime session, if any.
     pub fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
         match &self.resident_session_state {
-            ResidentSessionState::Invalidated { .. } => {
-                self.trace_synchronous_resident_state_refusal("plugin_session");
+            ResidentSessionState::Invalidated { decision_id } => {
+                self.trace_synchronous_resident_state_refusal(decision_id, "plugin_session");
                 return None;
             }
             ResidentSessionState::Valid => {}
