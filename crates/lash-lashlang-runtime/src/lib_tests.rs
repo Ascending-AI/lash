@@ -425,6 +425,26 @@ fn dotted_operation_names_are_rejected() {
 }
 
 #[test]
+fn empty_operation_names_render_as_empty_invalid_identifiers() {
+    let tool = lash_core::ToolDefinition::raw(
+        "tool:test/empty_operation",
+        "empty_operation",
+        "an operation with an empty name",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::Value::Null,
+    )
+    .with_tool_binding(ToolBinding::new(["tools"], ""));
+
+    let err = required_tool_lashlang_executable(&tool.manifest)
+        .expect_err("an empty operation name cannot compile as a Lashlang operation");
+
+    assert_eq!(
+        err.to_string(),
+        "tool `empty_operation` has invalid tool-binding operation name `<empty>`"
+    );
+}
+
+#[test]
 fn manifest_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
     let mut manifest = lash_core::ToolDefinition::raw(
         "tool:test/read_file",

@@ -46,19 +46,19 @@ impl ToolBinding {
 }
 
 pub trait ToolDefinitionBindingExt {
-    fn with_tool_binding(self, lashlang_binding: ToolBinding) -> Self;
+    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
 }
 
 #[cfg(feature = "lashlang")]
 impl ToolDefinitionBindingExt for ToolDefinition {
-    fn with_tool_binding(self, lashlang_binding: ToolBinding) -> Self {
-        lash_lashlang_runtime::ToolDefinitionBindingExt::with_tool_binding(self, lashlang_binding)
+    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self {
+        lash_lashlang_runtime::ToolDefinitionBindingExt::with_tool_binding(self, tool_binding)
     }
 }
 
 #[cfg(not(feature = "lashlang"))]
 impl ToolDefinitionBindingExt for ToolDefinition {
-    fn with_tool_binding(self, _lashlang_binding: ToolBinding) -> Self {
+    fn with_tool_binding(self, _tool_binding: ToolBinding) -> Self {
         self
     }
 }

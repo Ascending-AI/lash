@@ -103,13 +103,12 @@ impl ToolBinding {
         for segment in &self.module_path {
             validate_lashlang_identifier(tool_name, "module path segment", segment)?;
         }
-        let operation = self
-            .operation
-            .as_deref()
-            .filter(|operation| !operation.trim().is_empty())
-            .ok_or_else(|| ToolBindingError::MissingOperation {
-                tool: tool_name.to_string(),
-            })?;
+        let operation =
+            self.operation
+                .as_deref()
+                .ok_or_else(|| ToolBindingError::MissingOperation {
+                    tool: tool_name.to_string(),
+                })?;
         validate_lashlang_identifier(tool_name, "operation name", operation)?;
         let authority_type = self
             .authority_type
@@ -181,7 +180,7 @@ fn validate_lashlang_identifier(
         return Err(ToolBindingError::InvalidIdentifier {
             tool: tool_name.to_string(),
             part: label,
-            value: value.to_string(),
+            value: "<empty>".to_string(),
         });
     };
     if !(first == '_' || first.is_ascii_alphabetic()) {
@@ -201,28 +200,14 @@ fn validate_lashlang_identifier(
     Ok(())
 }
 
-pub fn tool_lashlang_binding(
-    manifest: &lash_core::ToolManifest,
-) -> Result<Option<ToolBinding>, ToolBindingError> {
-    manifest
-        .bindings
-        .get(LASHLANG_TOOL_BINDING_KEY)
-        .cloned()
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|source| ToolBindingError::MalformedPayload {
-            tool: manifest.name.clone(),
-            binding_key: LASHLANG_TOOL_BINDING_KEY,
-            source,
-        })
-}
-
 pub fn required_tool_lashlang_binding(
     manifest: &lash_core::ToolManifest,
 ) -> Result<ToolBinding, ToolBindingError> {
-    tool_lashlang_binding(manifest)?.ok_or_else(|| ToolBindingError::MissingBinding {
-        tool: manifest.name.clone(),
-        binding_key: LASHLANG_TOOL_BINDING_KEY,
+    ToolManifestBindingExt::tool_binding(manifest)?.ok_or_else(|| {
+        ToolBindingError::MissingBinding {
+            tool: manifest.name.clone(),
+            binding_key: LASHLANG_TOOL_BINDING_KEY,
+        }
     })
 }
 
@@ -254,29 +239,39 @@ pub fn required_tool_typescript_executable(
 }
 
 pub trait ToolManifestBindingExt {
+    /// Read the binding stored under the `lashlang.tool` wire key.
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError>;
 }
 
 impl ToolManifestBindingExt for lash_core::ToolManifest {
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
-        tool_lashlang_binding(self)
+        self.bindings
+            .get(LASHLANG_TOOL_BINDING_KEY)
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|source| ToolBindingError::MalformedPayload {
+                tool: self.name.clone(),
+                binding_key: LASHLANG_TOOL_BINDING_KEY,
+                source,
+            })
     }
 }
 
 pub trait ToolDefinitionBindingExt {
-    fn with_tool_binding(self, lashlang_binding: ToolBinding) -> Self;
+    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
 }
 
 impl ToolDefinitionBindingExt for lash_core::ToolDefinition {
-    fn with_tool_binding(mut self, lashlang_binding: ToolBinding) -> Self {
-        let value = serde_json::to_value(&lashlang_binding)
-            .expect("lashlang tool binding must serialize to JSON");
+    fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
+        let value =
+            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
         self.manifest
             .bindings
             .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
         self.manifest.bindings.insert(
             TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(lashlang_binding)
+            serde_json::to_value(tool_binding)
                 .expect("typescript tool binding must serialize to JSON"),
         );
         self
@@ -284,19 +279,19 @@ impl ToolDefinitionBindingExt for lash_core::ToolDefinition {
 }
 
 pub trait RemoteToolGrantBindingExt {
-    fn with_tool_binding(self, lashlang_binding: ToolBinding) -> Self;
+    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError>;
 }
 
 impl RemoteToolGrantBindingExt for lash_remote_protocol::RemoteToolGrant {
-    fn with_tool_binding(mut self, lashlang_binding: ToolBinding) -> Self {
-        let value = serde_json::to_value(&lashlang_binding)
-            .expect("lashlang tool binding must serialize to JSON");
+    fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
+        let value =
+            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
         self.bindings
             .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
         self.bindings.insert(
             TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(lashlang_binding)
+            serde_json::to_value(tool_binding)
                 .expect("typescript tool binding must serialize to JSON"),
         );
         self

@@ -17,8 +17,6 @@ use lash_core::{
     facade_support::DirectJsonSchema, facade_support::DirectRequest,
     facade_support::empty_trigger_source_key,
 };
-#[cfg(test)]
-use lash_lashlang_runtime::tool_lashlang_binding;
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::scenarios::RuntimePerfScenario;
@@ -1914,6 +1912,7 @@ fn empty_request() -> LlmRequest {
 mod tests {
     use super::*;
     use lash_core::{facade_support::build_tool_catalog, test_support::ToolCatalogBuildInput};
+    use lash_lashlang_runtime::ToolManifestBindingExt;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1922,7 +1921,9 @@ mod tests {
         let defs = BenchmarkLargeToolCatalog::build_tool_definitions();
         assert_eq!(defs.len(), 63);
         assert!(defs.iter().all(|def| {
-            let binding = tool_lashlang_binding(&def.manifest)
+            let binding = def
+                .manifest
+                .tool_binding()
                 .expect("valid lashlang binding")
                 .expect("benchmark tool has lashlang binding");
             binding.module_path == vec!["gmail".to_string()]
@@ -1994,7 +1995,9 @@ mod tests {
         let bindings = definitions
             .iter()
             .map(|definition| {
-                let binding = tool_lashlang_binding(&definition.manifest)
+                let binding = definition
+                    .manifest
+                    .tool_binding()
                     .expect("valid lashlang binding")
                     .expect("oblique fixture tool has lashlang binding");
                 (
