@@ -23,9 +23,9 @@ pub enum RuntimeErrorCode {
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
     StoreCommitContended,
-    /// The final runtime commit contains more graph nodes than the shared
-    /// transaction budget permits. The same turn will fail identically until
-    /// the host produces a smaller turn.
+    /// The final runtime commit writes more graph and attachment-adoption rows
+    /// than the shared node budget permits. The same turn will fail identically
+    /// until the host produces a smaller turn.
     StoreCommitNodeBudgetExceeded,
     /// The final runtime commit contains more persisted payload bytes than the
     /// shared transaction budget permits. The same turn will fail identically

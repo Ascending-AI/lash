@@ -129,6 +129,7 @@
     },
     "completed_queue_claims": [],
     "completed_turn_input_claims": [],
+    "adopted_intent_rows": 0,
     "committed_attachment_ids": []
   },
   "legacy_commit_retry": {
@@ -466,6 +467,7 @@
     },
     "completed_queue_claims": [],
     "completed_turn_input_claims": [],
+    "adopted_intent_rows": 1,
     "committed_attachment_ids": [
       "durable-read-attachment"
     ]

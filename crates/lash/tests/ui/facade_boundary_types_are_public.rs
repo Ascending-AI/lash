@@ -367,6 +367,7 @@ fn persistence_types_are_nameable(
         current_frame_node_id: None,
         graph,
         checkpoint: Default::default(),
+        adopted_intent_rows: 0,
         usage_deltas: ledger
             .into_iter()
             .enumerate()

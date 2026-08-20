@@ -127,6 +127,12 @@ impl crate::Clock for TestClock {
 /// Production-equivalent logical payload accounting for one runtime commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimeCommitBudgetMeasurement {
+    /// Graph-node rows written by the commit.
+    pub graph_rows: usize,
+    /// Attachment-manifest rows stamped as adopted by the commit.
+    pub adopted_intent_rows: usize,
+    /// Saturating sum of graph and attachment-adoption rows.
+    pub total_rows: usize,
     /// Persisted JSON encoding of the session configuration, including prompt.
     pub session_config_bytes: usize,
     /// Sum of the persisted JSON encoding of each graph node.
@@ -146,6 +152,9 @@ pub fn measure_runtime_commit_budget(
 ) -> Result<RuntimeCommitBudgetMeasurement, crate::StoreError> {
     let measurement = commit.measure_budget()?;
     Ok(RuntimeCommitBudgetMeasurement {
+        graph_rows: measurement.graph_rows,
+        adopted_intent_rows: measurement.adopted_intent_rows,
+        total_rows: measurement.total_rows,
         session_config_bytes: measurement.session_config_bytes,
         graph_delta_bytes: measurement.graph_delta_bytes,
         checkpoint_bytes: measurement.checkpoint_bytes,

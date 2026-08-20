@@ -474,6 +474,7 @@ impl RuntimeCommit {
             completed_turn_input_claims,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
+            adopted_intent_rows,
             committed_attachment_ids,
         } = self;
         debug_assert!(turn_commit.request_identity_hash.is_some());
@@ -482,6 +483,7 @@ impl RuntimeCommit {
                 && completed_turn_input_claims.is_empty()
                 && enqueued_queue_batches.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
+                && *adopted_intent_rows == 0
                 && committed_attachment_ids.is_empty(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
@@ -649,6 +651,7 @@ impl RuntimeCommit {
             completed_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         })
     }
@@ -742,6 +745,11 @@ impl RuntimeCommit {
         attachment_ids: impl IntoIterator<Item = crate::AttachmentId>,
     ) -> Self {
         self.committed_attachment_ids = attachment_ids.into_iter().collect();
+        self.adopted_intent_rows = self
+            .committed_attachment_ids
+            .len()
+            .try_into()
+            .unwrap_or(u64::MAX);
         self
     }
 }

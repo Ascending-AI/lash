@@ -2247,6 +2247,7 @@ name = "lash-postgres-store"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "fastrand",
  "hmac",
  "lash-core",
  "lash-lashlang-runtime",

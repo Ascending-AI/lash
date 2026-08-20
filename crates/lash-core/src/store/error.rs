@@ -43,7 +43,7 @@ pub enum StoreError {
     #[error("store commit is contended; retry the identical commit unchanged")]
     Contended,
     #[error(
-        "runtime commit has {node_count} graph nodes, exceeding the {max_nodes}-node transaction budget"
+        "runtime commit writes {node_count} rows, exceeding the configured {max_nodes}-row node budget; the node budget covers all rows written, including attachment-intent adoption"
     )]
     CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
     #[error(
