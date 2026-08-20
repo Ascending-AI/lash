@@ -942,6 +942,10 @@ pub(crate) use runtime::default_queued_drain_policy;
 #[doc(hidden)]
 pub use runtime::drive_with_event_pump;
 
+// This block includes the effect / process-control types consumed by external
+// effect hosts (e.g. lash-restate's workflows) and their integration tests —
+// they are deliberately public; the rest of the runtime module stays
+// crate-internal.
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AssistantResponseHookEvents, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef, CheckpointClaimSet,
