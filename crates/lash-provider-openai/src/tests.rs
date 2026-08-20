@@ -19,6 +19,7 @@ mod error_classification_tests;
 mod generation_tests;
 mod output_started_tests;
 mod replay_provenance_tests;
+mod responses_text_slot_tests;
 
 /// The cross-provider conformance law is feature-gated. This crate's self
 /// dev-dependency keeps `testing` on for every test build, so a bare
@@ -1882,49 +1883,6 @@ fn stream_parser_captures_text_reasoning_tool_and_phase() {
             ..
         } if replay.item_id.as_deref() == Some("fc_1") && input_json == "{\"x\":1}"
     ));
-}
-
-#[test]
-fn responses_final_answer_phase_hides_commentary_from_visible_text() {
-    let mut state = ResponsesStreamState::default();
-    for event in [
-        r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_commentary","phase":"commentary"}}"#,
-        r#"{"type":"response.output_text.delta","output_index":0,"item_id":"msg_commentary","delta":"Working notes."}"#,
-        r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_commentary","status":"completed","phase":"commentary","content":[{"type":"output_text","text":"Working notes."}]}}"#,
-        r#"{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_final","phase":"final_answer"}}"#,
-        r#"{"type":"response.output_text.delta","output_index":1,"item_id":"msg_final","delta":"Final answer."}"#,
-        r#"{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"msg_final","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"Final answer."}]}}"#,
-        r#"{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_commentary","status":"completed","phase":"commentary","content":[{"type":"output_text","text":"Working notes."}]},{"type":"message","id":"msg_final","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"Final answer."}]}]}}"#,
-    ] {
-        OpenAiCompatibleProvider::process_sse_event(event, &mut state, None).unwrap();
-    }
-
-    let parts = state.response_parts();
-    assert_eq!(state.full_text, "Final answer.");
-    assert_eq!(
-        parts
-            .iter()
-            .filter(|part| matches!(part, LlmOutputPart::Text { .. }))
-            .count(),
-        2
-    );
-    let response = LlmResponse {
-        full_text: state.full_text.clone(),
-        parts,
-        response_metadata: Default::default(),
-        ..LlmResponse::default()
-    };
-    let visible = lash_core::facade_support::normalized_response_parts(&response);
-    assert_eq!(
-        visible
-            .iter()
-            .filter_map(|part| match part {
-                LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<String>(),
-        "Final answer."
-    );
 }
 
 #[test]
