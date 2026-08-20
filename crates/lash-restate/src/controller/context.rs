@@ -325,6 +325,14 @@ where
         tracked: None,
     }
 }
+/// The future every turn-cancel race returns across this seam.
+///
+/// `T` is what the guarded wait produces when it wins: `()` for a timer, a
+/// `Resolution` for an await-event, the process output for a process await.
+type TurnCancelRaceFuture<'run, T> = Pin<
+    Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,
+>;
+
 #[doc(hidden)]
 pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn sleep_send<'run>(
@@ -346,13 +354,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<RestateTurnCancelRaceOutcome<()>, TerminalError>>
-                + Send
-                + 'run,
-        >,
-    >
+    ) -> TurnCancelRaceFuture<'run, ()>
     where
         'ctx: 'run,
     {
@@ -419,13 +421,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         request: RestateDurableWaitAwaitRequest,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<RestateTurnCancelRaceOutcome<Resolution>, TerminalError>>
-                + Send
-                + 'run,
-        >,
-    >
+    ) -> TurnCancelRaceFuture<'run, Resolution>
     where
         'ctx: 'run,
     {
@@ -473,17 +469,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         process_id: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        RestateTurnCancelRaceOutcome<Box<ProcessAwaitOutput>>,
-                        TerminalError,
-                    >,
-                > + Send
-                + 'run,
-        >,
-    >
+    ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
         'ctx: 'run,
     {
@@ -542,14 +528,7 @@ macro_rules! impl_restate_controller_context {
                     duration: Duration,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     cancellation: tokio_util::sync::CancellationToken,
-                ) -> Pin<
-                    Box<
-                        dyn Future<
-                                Output = Result<RestateTurnCancelRaceOutcome<()>, TerminalError>,
-                            > + Send
-                            + 'run,
-                    >,
-                >
+                ) -> TurnCancelRaceFuture<'run, ()>
                 where
                     'ctx: 'run,
                 {
@@ -808,17 +787,7 @@ macro_rules! impl_restate_controller_context {
                     request: RestateDurableWaitAwaitRequest,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     cancellation: tokio_util::sync::CancellationToken,
-                ) -> Pin<
-                    Box<
-                        dyn Future<
-                                Output = Result<
-                                    RestateTurnCancelRaceOutcome<Resolution>,
-                                    TerminalError,
-                                >,
-                            > + Send
-                            + 'run,
-                    >,
-                >
+                ) -> TurnCancelRaceFuture<'run, Resolution>
                 where
                     'ctx: 'run,
                 {
@@ -974,17 +943,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     process_id: String,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
-                ) -> Pin<
-                    Box<
-                        dyn Future<
-                                Output = Result<
-                                    RestateTurnCancelRaceOutcome<Box<ProcessAwaitOutput>>,
-                                    TerminalError,
-                                >,
-                            > + Send
-                            + 'run,
-                    >,
-                >
+                ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
                 where
                     'ctx: 'run,
                 {
