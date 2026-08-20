@@ -81,9 +81,9 @@ pub(super) async fn scan_durable(
             };
             path
         }
-        DurableSurface::SessionCheckpoint | DurableSurface::SessionExecutionState => {
-            preflight.durable_core.as_path()
-        }
+        DurableSurface::ModuleArtifact
+        | DurableSurface::SessionCheckpoint
+        | DurableSurface::SessionExecutionState => preflight.durable_core.as_path(),
         // `DurableSurface` is `#[non_exhaustive]`: a surface added upstream
         // before this backend learns to walk it must report that nobody looked,
         // never an empty page that reads as "nothing parked here".
@@ -157,6 +157,7 @@ fn read_page(
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
     match surface {
+        DurableSurface::ModuleArtifact => read_module_artifacts(conn, after, limit),
         DurableSurface::ParkedSegment => read_parked_segments(conn, after, limit),
         DurableSurface::PendingWake => read_pending_wakes(conn, after, limit),
         DurableSurface::SessionCheckpoint => read_session_checkpoints(conn, after, limit),
@@ -167,6 +168,60 @@ fn read_page(
         // probe whose job is to survive the deployments that are already broken.
         _ => Ok((Vec::new(), None)),
     }
+}
+
+/// One persisted JSON module artifact per module reference.
+///
+/// The pointer row is left-joined to its content-addressed blob so a dangling
+/// artifact reference remains visible as a named item. The blob envelope is
+/// storage bookkeeping; `logical_json_payload` removes it before the shared
+/// preflight extractor verifies the module identity.
+const MODULE_ARTIFACTS_SQL: &str = "\
+SELECT refs.artifact_ref, refs.blob_ref, blobs.content
+FROM artifact_refs AS refs
+LEFT JOIN blobs ON blobs.hash = refs.blob_ref
+WHERE refs.namespace = ?1
+  AND (?2 IS NULL OR refs.artifact_ref > ?2)
+ORDER BY refs.artifact_ref
+LIMIT ?3";
+
+fn read_module_artifacts(
+    conn: &Connection,
+    after: Option<&str>,
+    limit: usize,
+) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
+    let mut statement = conn.prepare(MODULE_ARTIFACTS_SQL)?;
+    let rows = statement.query_map(
+        params![
+            crate::attachments::MODULE_ARTIFACT_NAMESPACE,
+            after,
+            limit_binding(limit)
+        ],
+        |row| {
+            let artifact_ref: String = row.get(0)?;
+            let blob_ref: String = row.get(1)?;
+            let stored: Option<Vec<u8>> = row.get(2)?;
+            let payload = match stored {
+                Some(stored) => logical_json_payload(stored),
+                None => DurablePayload::Missing {
+                    reason: format!(
+                        "module artifact `{artifact_ref}` points at blob `{blob_ref}`, \
+                         which has no row in the blobs table"
+                    ),
+                },
+            };
+            Ok(DurableItem {
+                surface: DurableSurface::ModuleArtifact,
+                cursor: artifact_ref,
+                process_id: None,
+                session_id: None,
+                status: None,
+                owner_record: None,
+                payload,
+            })
+        },
+    )?;
+    collect_page(rows, limit)
 }
 
 /// A `LIMIT` SQLite will accept, without a panicking conversion.
@@ -473,6 +528,18 @@ fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u
 fn logical_payload(stored: Vec<u8>) -> DurablePayload {
     match logical_bytes(stored) {
         Ok(logical) => DurablePayload::MessagePack(logical),
+        Err(reason) => DurablePayload::Missing { reason },
+    }
+}
+
+fn logical_json_payload(stored: Vec<u8>) -> DurablePayload {
+    match logical_bytes(stored) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(text) => DurablePayload::Json(text),
+            Err(error) => DurablePayload::Missing {
+                reason: format!("module artifact blob is not UTF-8 JSON: {error}"),
+            },
+        },
         Err(reason) => DurablePayload::Missing { reason },
     }
 }

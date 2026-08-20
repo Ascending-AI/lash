@@ -36,7 +36,7 @@ lash-plugin-tool-output-budget = { workspace = true }
 lash-rlm-types = { workspace = true, optional = true }
 lash-trace = { workspace = true }
 uuid = { workspace = true }
-lashlang = { workspace = true, optional = true }
+lashlang = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -50,7 +50,6 @@ rlm = [
     "dep:lash-lashlang-runtime",
     "dep:lash-protocol-rlm",
     "dep:lash-rlm-types",
-    "dep:lashlang",
     "lash-protocol-standard/lashlang",
 ]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.

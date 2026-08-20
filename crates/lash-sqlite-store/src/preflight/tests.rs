@@ -273,7 +273,8 @@ mod walk {
     use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, Store};
 
-    const EVERY_SURFACE: [DurableSurface; 4] = [
+    const EVERY_SURFACE: [DurableSurface; 5] = [
+        DurableSurface::ModuleArtifact,
         DurableSurface::ParkedSegment,
         DurableSurface::PendingWake,
         DurableSurface::SessionCheckpoint,
@@ -362,6 +363,36 @@ mod walk {
             !registry.exists(),
             "the walk must not create the process registry"
         );
+    }
+
+    #[tokio::test]
+    async fn module_artifact_surface_reads_the_persisted_json() {
+        use lashlang::LashlangArtifactStore;
+
+        let root = super::temp_root();
+        let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
+        let store = Store::open(&core).await.expect("provision durable core");
+        let artifact = lashlang::ModuleArtifact::from_store_bytes(include_bytes!(
+            "../../../lashlang/tests/fixtures/module-artifact-old.json"
+        ))
+        .expect("decode frozen artifact");
+        store
+            .put_module_artifact(&artifact)
+            .await
+            .expect("persist module artifact");
+        drop(store);
+
+        let page = SqliteStorePreflight::for_session_store_root(root.path())
+            .scan_durable(&DurableScan::first(DurableSurface::ModuleArtifact, 10))
+            .await
+            .expect("walk module artifacts");
+        assert_eq!(page.coverage, ScanCoverage::Scanned);
+        assert_eq!(page.items.len(), 1, "{page:?}");
+        assert_eq!(page.items[0].cursor, artifact.module_ref.as_str());
+        match &page.items[0].payload {
+            DurablePayload::Json(json) => assert!(json.contains("compilation_dialect"), "{json}"),
+            other => panic!("expected module artifact JSON, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -292,6 +292,44 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
         component(&report, DurableFormat::SessionCheckpointManifest).verdict,
         ComponentVerdict::AllReadable
     );
+    assert_eq!(
+        component(&report, DurableFormat::ModuleArtifact).verdict,
+        ComponentVerdict::Empty
+    );
+}
+
+#[tokio::test]
+async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
+    let mut raw: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../lashlang/tests/fixtures/module-artifact-old.json"
+    ))
+    .expect("frozen fixture should be JSON");
+    raw["compilation_dialect"] = serde_json::json!("future_dialect");
+    raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+    let item = DurableItem {
+        surface: DurableSurface::ModuleArtifact,
+        cursor: "lashlang:v1:sha256:future".to_string(),
+        process_id: None,
+        session_id: None,
+        status: None,
+        owner_record: None,
+        payload: DurablePayload::Json(
+            serde_json::to_string(&raw).expect("future fixture should encode"),
+        ),
+    };
+    let report = probe_store(
+        &FakeStore::default().with_items(DurableSurface::ModuleArtifact, vec![item]),
+        PreflightOptions::summary(),
+    )
+    .await
+    .expect("the probe reads the store");
+    assert_eq!(report.outcome, PreflightOutcome::Refused);
+    assert_eq!(
+        component(&report, DurableFormat::ModuleArtifact).verdict,
+        ComponentVerdict::Refused
+    );
+    let message = report.refusal_message().expect("a refusal has a message");
+    assert!(message.contains("recompile and republish"), "{message}");
 }
 
 #[tokio::test]

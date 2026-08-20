@@ -33,11 +33,12 @@
 //!
 //! # Feature gating is honest, not incidental
 //!
-//! The Lashlang and RLM formats exist only when the `rlm` feature is on,
+//! The Lashlang VM and RLM formats exist only when the `rlm` feature is on,
 //! because the crates that define them are optional dependencies. A build
-//! without `rlm` writes none of them, so [`durable_formats`] does not list
-//! them, and a preflight report over such a build says so rather than
-//! reporting them as absent from the store.
+//! without `rlm` writes none of those formats, so [`durable_formats`] does not
+//! list them. Module artifacts are different: the artifact store is a
+//! non-optional durable dependency, and its identity-verified JSON is listed in
+//! every build.
 
 pub use lash_core::store::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
@@ -48,6 +49,7 @@ pub use lash_core::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, SESSION_NODE_BODY_SCHE
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::RLM_SNAPSHOT_VERSION;
+pub use lashlang::LASHLANG_SEMANTIC_HASH_VERSION;
 #[cfg(feature = "rlm")]
 pub use lashlang::{
     BYTECODE_FORMAT_VERSION, HEAP_SIZE_SCHEDULE_VERSION, LASHLANG_SNAPSHOT_VERSION,
@@ -59,6 +61,8 @@ pub use lashlang::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum DurableFormat {
+    /// The identity-verified persisted Lashlang/TypeScript module artifact.
+    ModuleArtifact,
     /// The session checkpoint manifest: the keyed set of components a
     /// checkpoint root names.
     SessionCheckpointManifest,
@@ -96,6 +100,7 @@ impl DurableFormat {
     /// The operator-facing name used in preflight reports.
     pub fn name(self) -> &'static str {
         match self {
+            DurableFormat::ModuleArtifact => "module artifact",
             DurableFormat::SessionCheckpointManifest => "session checkpoint manifest",
             DurableFormat::CheckpointComponentEncoding => "checkpoint component encoding",
             DurableFormat::SessionHeadMeta => "session head meta",
@@ -187,6 +192,13 @@ pub struct DurableFormatEntry {
 /// report reads outward from the store.
 pub fn durable_formats() -> &'static [DurableFormatEntry] {
     &[
+        DurableFormatEntry {
+            format: DurableFormat::ModuleArtifact,
+            version: FormatVersion::Identity(LASHLANG_SEMANTIC_HASH_VERSION),
+            owning_crate: "lashlang",
+            constant: "LASHLANG_SEMANTIC_HASH_VERSION",
+            probe: FormatProbe::IdentityOnly,
+        },
         DurableFormatEntry {
             format: DurableFormat::SessionCheckpointManifest,
             version: FormatVersion::Counter(SESSION_CHECKPOINT_SCHEMA_VERSION),
@@ -324,6 +336,7 @@ mod tests {
 
     #[test]
     fn the_store_owned_formats_are_present_without_any_optional_feature() {
+        assert!(durable_format(DurableFormat::ModuleArtifact).is_some());
         for format in [
             DurableFormat::SessionCheckpointManifest,
             DurableFormat::CheckpointComponentEncoding,

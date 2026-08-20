@@ -748,6 +748,33 @@ kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/workflow_graph/facets.rs"]
 must_cover = ["WorkflowNodeTypeFacets"]
 
+[[surface]]
+constant = "LASHLANG_SEMANTIC_HASH_VERSION"
+constant_path = "crates/lashlang/src/artifact.rs"
+version_regex = '\bLASHLANG_SEMANTIC_HASH_VERSION\b\s*:\s*&str\s*=\s*"lashlang-semantic-v([0-9]+)"'
+description = "identity-verified Lashlang and TypeScript module-artifact identity"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/artifact_dialect.rs"]
+symbols = ["module_ref"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/artifact.rs"]
+symbols = [
+  "host_requirements_ref",
+  "process_component_hash",
+  "write_exports",
+  "write_host_requirements",
+  "write_program",
+  "write_declaration",
+  "write_function",
+  "write_process",
+  "write_type",
+  "write_expr",
+]
+
 # Sweep exclusions: APP_VERSION and LASHLANG_COMPILER_VERSION mirror package
 # versions; MCP_PROTOCOL_VERSION, ANTHROPIC_VERSION, and CODE_ASSIST_API_VERSION
 # pin upstream protocols; DURABLE_READ_FIXTURE_SCHEMA_VERSION and GENERATOR_VERSION
