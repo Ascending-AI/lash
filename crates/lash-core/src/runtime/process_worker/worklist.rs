@@ -17,7 +17,7 @@ impl DurableProcessWorker {
             // declared disposition decides this, not whether some earlier pass
             // already queued it — a second pass over the same row must not
             // relabel it as `Busy`.
-            let externally_owned = record.disposition == RecoveryDisposition::ExternallyOwned;
+            let externally_owned = record.disposition == RecoveryContract::ExternallyOwned;
             if state.scheduled.insert(record.id.clone()) {
                 // The inline worker still queues it, because a pending Abandon
                 // Request on such a row is reconciled there — but it reports
@@ -25,7 +25,7 @@ impl DurableProcessWorker {
                 if externally_owned {
                     report.deferred.push(ProcessAdmissionDeferred {
                         process_id: record.id.clone(),
-                        disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+                        disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
                     });
                 } else {
                     report.admitted.push(record.id.clone());
@@ -37,9 +37,9 @@ impl DurableProcessWorker {
                 report.deferred.push(ProcessAdmissionDeferred {
                     process_id: record.id.clone(),
                     disposition: if externally_owned {
-                        ProcessRecoveryAttemptDisposition::ExternallyOwned
+                        ProcessRecoveryAttemptOutcome::ExternallyOwned
                     } else {
-                        ProcessRecoveryAttemptDisposition::Busy
+                        ProcessRecoveryAttemptOutcome::Busy
                     },
                 });
                 // Coalesce a newer host-driven pass instead of dropping it.

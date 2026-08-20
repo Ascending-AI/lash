@@ -3,7 +3,7 @@ use serde_json::json;
 use super::super::model::{
     ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessIdentity, ProcessInput,
     ProcessListFilter, ProcessListMode, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessStatus, RecoveryDisposition, WaitKind, WaitState,
+    ProcessStatus, RecoveryContract, WaitKind, WaitState,
 };
 
 #[test]
@@ -107,7 +107,7 @@ fn engine_entry(
                     "label": process_name,
                 }),
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
         )
         .with_identity(

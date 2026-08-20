@@ -75,7 +75,7 @@ struct SnapshotStore {
     runtime_turn_commits: std::sync::Mutex<
         std::collections::HashMap<
             (String, String),
-            (String, lash_core::store::RuntimeCommitResult),
+            (String, lash_core::store::RuntimeCommitReceipt),
         >,
     >,
     usage_delta_identities:
@@ -229,7 +229,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
     async fn commit_runtime_state(
         &self,
         commit: lash_core::store::RuntimeCommit,
-    ) -> std::result::Result<lash_core::store::RuntimeCommitResult, lash_core::store::StoreError>
+    ) -> std::result::Result<lash_core::store::RuntimeCommitReceipt, lash_core::store::StoreError>
     {
         let turn_commit_hash = commit.turn_commit_hash()?;
         let session_id = commit.session_id.clone();
@@ -327,7 +327,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             checkpoint: Some(commit.checkpoint),
             token_ledger,
         });
-        let result = lash_core::store::RuntimeCommitResult {
+        let result = lash_core::store::RuntimeCommitReceipt {
             head_revision: 8,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
@@ -685,7 +685,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
         _session_id: &str,
         _targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> std::result::Result<
-        Vec<lash_core::PendingTurnInputCancelResult>,
+        Vec<lash_core::PendingTurnInputCancelReceipt>,
         lash_core::store::StoreError,
     > {
         unreachable!("SnapshotStore does not serve pending turn input")
@@ -873,7 +873,7 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
     async fn commit_runtime_state(
         &self,
         _commit: lash_core::store::RuntimeCommit,
-    ) -> std::result::Result<lash_core::store::RuntimeCommitResult, lash_core::store::StoreError>
+    ) -> std::result::Result<lash_core::store::RuntimeCommitReceipt, lash_core::store::StoreError>
     {
         unreachable!("test should fail before committing to the reused child store")
     }
@@ -969,7 +969,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _session_id: &str,
         _targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> std::result::Result<
-        Vec<lash_core::PendingTurnInputCancelResult>,
+        Vec<lash_core::PendingTurnInputCancelReceipt>,
         lash_core::store::StoreError,
     > {
         unreachable!("BoundSessionStore does not serve pending turn input")
@@ -1346,8 +1346,8 @@ impl ToolProvider for AppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-        lash_core::ToolResult::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
     }
 }
 
@@ -1365,8 +1365,8 @@ impl ToolProvider for FailingAppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-        lash_core::ToolResult::err_fmt("lookup failed but Lashlang recovered")
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::err_fmt("lookup failed but Lashlang recovered")
     }
 }
 
@@ -1396,16 +1396,16 @@ impl ToolProvider for PendingAppTools {
         tool_id == app_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         assert_eq!(call.name, "app_lookup");
         let key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(err) => return lash_core::ToolResult::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
         };
         if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(key);
         }
-        lash_core::ToolResult::pending(lash_core::PendingCompletion::new())
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
     }
 }
 
@@ -1430,11 +1430,11 @@ impl ToolProvider for RetryingDirectTools {
         (name == "retrying_direct").then(|| Arc::new(retrying_direct_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         assert_eq!(call.name, "retrying_direct");
         let model = match call.context.sessions().model().await {
             Ok(model) => model,
-            Err(err) => return lash_core::ToolResult::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
         };
         let completion = match call
             .context
@@ -1452,17 +1452,17 @@ impl ToolProvider for RetryingDirectTools {
             .await
         {
             Ok(completion) => completion,
-            Err(err) => return lash_core::ToolResult::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
         };
         if call.context.attempt_number() == 1 {
-            return lash_core::ToolResult::failure(lash_core::ToolFailure::safe_retry(
+            return lash_core::ToolOutcome::failure(lash_core::ToolFailure::safe_retry(
                 lash_core::ToolFailureClass::Execution,
                 "retrying_direct_first_attempt",
                 "retry the complete atomic attempt",
                 Some(0),
             ));
         }
-        lash_core::ToolResult::ok(serde_json::json!(completion.text))
+        lash_core::ToolOutcome::ok(serde_json::json!(completion.text))
     }
 }
 
@@ -1520,7 +1520,7 @@ impl ToolProvider for DurableInputTools {
         tool_id == durable_input_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         assert_eq!(call.name, "mock_input_request");
         let question = call
             .args
@@ -1532,7 +1532,7 @@ impl ToolProvider for DurableInputTools {
             Ok(key) => key,
             Err(err) => {
                 self.send_key_result(Err(err.to_string()));
-                return lash_core::ToolResult::err_fmt(err);
+                return lash_core::ToolOutcome::err_fmt(err);
             }
         };
         self.attempt_count.fetch_add(1, Ordering::SeqCst);
@@ -1549,7 +1549,9 @@ impl ToolProvider for DurableInputTools {
             "mock-input-request:request-1",
         );
         self.send_key_result(Ok(key));
-        lash_core::ToolResult::pending(lash_core::PendingCompletion::new().announcing(announcement))
+        lash_core::ToolOutcome::pending(
+            lash_core::PendingCompletion::new().announcing(announcement),
+        )
     }
 }
 
@@ -1594,7 +1596,7 @@ impl ToolProvider for AgentFrameSwitchTools {
         (name == "switch_frame").then(|| Arc::new(agent_frame_switch_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         assert_eq!(call.name, "switch_frame");
         let task = call
             .args
@@ -1602,7 +1604,7 @@ impl ToolProvider for AgentFrameSwitchTools {
             .and_then(serde_json::Value::as_str)
             .expect("task arg")
             .to_string();
-        lash_core::ToolResult::ok(serde_json::json!({ "ok": true })).with_control(
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).with_control(
             lash_core::ToolControl::SwitchAgentFrame {
                 frame_key: lash_core::FrameKey::from_caller_material("durable-follow-frame")
                     .expect("non-empty caller material"),
@@ -1659,8 +1661,8 @@ impl ToolProvider for LongTextTools {
         (name == "app_lookup").then(|| Arc::new(long_text_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-        lash_core::ToolResult::ok(serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789"))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789"))
     }
 }
 
@@ -2305,7 +2307,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
         ))
         .await

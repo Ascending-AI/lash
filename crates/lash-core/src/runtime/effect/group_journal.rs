@@ -60,7 +60,7 @@
 //! children in one transaction means no partially-retired group ever exists for
 //! rank to be computed over.
 
-use super::group::{GroupWakePolicy, LoserDisposition, RuntimeEffectGroup};
+use super::group::{GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 
 /// The durable group record a substrate writes before any of its children
 /// claim.
@@ -85,7 +85,7 @@ pub struct EffectGroupRecord {
     pub wake: GroupWakePolicy,
     /// The disposition declared at open, which a crash-drain of this group
     /// applies rather than inventing one.
-    pub loser_disposition: LoserDisposition,
+    pub loser_disposition: LoserPolicy,
     /// How many children the group has. Persisted so a drain knows the group's
     /// membership without reconstructing the caller's envelopes.
     pub children: usize,
@@ -176,7 +176,7 @@ impl EffectGroupColumn for GroupWakePolicy {
     }
 }
 
-impl EffectGroupColumn for LoserDisposition {
+impl EffectGroupColumn for LoserPolicy {
     fn column(self) -> &'static str {
         match self {
             Self::RunToCompletion => "run_to_completion",
@@ -300,11 +300,7 @@ mod tests {
     };
     use super::*;
 
-    fn group_of(
-        children: usize,
-        wake: GroupWakePolicy,
-        loser: LoserDisposition,
-    ) -> RuntimeEffectGroup {
+    fn group_of(children: usize, wake: GroupWakePolicy, loser: LoserPolicy) -> RuntimeEffectGroup {
         // Siblings carry distinct replay keys, because one replay key is one
         // journaled child and a group of duplicates is refused at construction.
         let invocation = |replay_key: String| {
@@ -340,7 +336,7 @@ mod tests {
     /// wake rule or disposition disagreeing with what the children hashed.
     #[test]
     fn a_record_derives_every_group_fact_from_the_group() {
-        let group = group_of(3, GroupWakePolicy::FirstSuccess, LoserDisposition::Cancel);
+        let group = group_of(3, GroupWakePolicy::FirstSuccess, LoserPolicy::Cancel);
         let record = EffectGroupRecord::from_group(
             &group,
             "scope-journal-key",
@@ -362,21 +358,21 @@ mod tests {
     #[test]
     fn a_records_journaled_facts_track_the_group_they_came_from() {
         let first = EffectGroupRecord::from_group(
-            &group_of(1, GroupWakePolicy::First, LoserDisposition::RunToCompletion),
+            &group_of(1, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
             "scope",
             None,
             0,
         );
         let second = EffectGroupRecord::from_group(
-            &group_of(2, GroupWakePolicy::All, LoserDisposition::Cancel),
+            &group_of(2, GroupWakePolicy::All, LoserPolicy::Cancel),
             "scope",
             None,
             0,
         );
         assert_eq!(first.wake, GroupWakePolicy::First);
         assert_eq!(second.wake, GroupWakePolicy::All);
-        assert_eq!(first.loser_disposition, LoserDisposition::RunToCompletion);
-        assert_eq!(second.loser_disposition, LoserDisposition::Cancel);
+        assert_eq!(first.loser_disposition, LoserPolicy::RunToCompletion);
+        assert_eq!(second.loser_disposition, LoserPolicy::Cancel);
         assert_eq!(first.children, 1);
         assert_eq!(second.children, 2);
         assert!(
@@ -396,9 +392,9 @@ mod tests {
         ] {
             assert_eq!(GroupWakePolicy::from_column(wake.column()), Some(wake));
         }
-        for disposition in [LoserDisposition::RunToCompletion, LoserDisposition::Cancel] {
+        for disposition in [LoserPolicy::RunToCompletion, LoserPolicy::Cancel] {
             assert_eq!(
-                LoserDisposition::from_column(disposition.column()),
+                LoserPolicy::from_column(disposition.column()),
                 Some(disposition)
             );
         }
@@ -408,7 +404,7 @@ mod tests {
             "a value no version of this runtime wrote must be refused, not \
              defaulted"
         );
-        assert_eq!(LoserDisposition::from_column(""), None);
+        assert_eq!(LoserPolicy::from_column(""), None);
     }
 
     #[test]
@@ -420,11 +416,8 @@ mod tests {
 
     #[test]
     fn loser_disposition_columns_are_the_persisted_journal_bytes() {
-        assert_eq!(
-            LoserDisposition::RunToCompletion.column(),
-            "run_to_completion"
-        );
-        assert_eq!(LoserDisposition::Cancel.column(), "cancel");
+        assert_eq!(LoserPolicy::RunToCompletion.column(), "run_to_completion");
+        assert_eq!(LoserPolicy::Cancel.column(), "cancel");
     }
 
     /// The column strings are the serde representation, so a future `serde`
@@ -442,7 +435,7 @@ mod tests {
                 format!("\"{}\"", wake.column())
             );
         }
-        for disposition in [LoserDisposition::RunToCompletion, LoserDisposition::Cancel] {
+        for disposition in [LoserPolicy::RunToCompletion, LoserPolicy::Cancel] {
             assert_eq!(
                 serde_json::to_string(&disposition).expect("dispositions serialize"),
                 format!("\"{}\"", disposition.column())

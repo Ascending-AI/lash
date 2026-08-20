@@ -1,6 +1,6 @@
 use crate::{
-    PreparedToolCall, ToolCallOutcome, ToolContext, ToolManifest, ToolResult, ToolRetryDisposition,
-    ToolRetryPolicy,
+    PreparedToolCall, ToolCallOutcome, ToolContext, ToolManifest, ToolOutcome, ToolRetryPolicy,
+    ToolRetryStatus,
 };
 use futures_util::FutureExt as _;
 use lash_sansio::core_support::*;
@@ -14,7 +14,7 @@ pub(super) async fn execute_leaf_tool_attempt<'run>(
     tool_context: ToolContext<'run>,
     attempt: u32,
     max_attempts: u32,
-) -> crate::ToolAttemptResult {
+) -> crate::ToolAttemptOutcome {
     let tool_name = manifest.name.as_str();
     execute_once(
         context,
@@ -31,7 +31,7 @@ pub(super) async fn execute_granted_leaf_tool_attempt<'run>(
     tool_context: ToolContext<'run>,
     attempt: u32,
     max_attempts: u32,
-) -> crate::ToolAttemptResult {
+) -> crate::ToolAttemptOutcome {
     let tool_name = grant.manifest.name.as_str();
     execute_granted_once(
         context,
@@ -46,7 +46,7 @@ pub(crate) async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
-) -> crate::ToolAttemptResult {
+) -> crate::ToolAttemptOutcome {
     let mut attempt_result = execute_with_attempt_context(context, prepared, &tool_context).await;
     normalize_attempt_result_attachments(context, &prepared.tool_name, &mut attempt_result).await;
     attempt_result
@@ -57,7 +57,7 @@ async fn execute_granted_once<'run>(
     grant: &crate::ToolExecutionGrant,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
-) -> crate::ToolAttemptResult {
+) -> crate::ToolAttemptOutcome {
     let mut attempt_result = match build_attempt_context(context, prepared, &tool_context).await {
         Ok(attempt_context) => std::panic::AssertUnwindSafe(context.tools.execute_granted_attempt(
             grant,
@@ -67,9 +67,9 @@ async fn execute_granted_once<'run>(
         .catch_unwind()
         .await
         .unwrap_or_else(|payload| {
-            crate::ToolAttemptResult::from_tool_result(tool_panicked(payload))
+            crate::ToolAttemptOutcome::from_tool_result(tool_panicked(payload))
         }),
-        Err(result) => crate::ToolAttemptResult::from_tool_result(result),
+        Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
     };
     normalize_attempt_result_attachments(context, &grant.manifest.name, &mut attempt_result).await;
     attempt_result
@@ -79,10 +79,10 @@ async fn execute_with_attempt_context(
     context: &ToolDispatchContext<'_>,
     prepared: &PreparedToolCall,
     tool_context: &ToolContext<'_>,
-) -> crate::ToolAttemptResult {
+) -> crate::ToolAttemptOutcome {
     let attempt_context = match build_attempt_context(context, prepared, tool_context).await {
         Ok(context) => context,
-        Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
+        Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
     };
     std::panic::AssertUnwindSafe(context.tools.execute_attempt_by_id(
         &prepared.tool_id,
@@ -91,14 +91,14 @@ async fn execute_with_attempt_context(
     ))
     .catch_unwind()
     .await
-    .unwrap_or_else(|payload| crate::ToolAttemptResult::from_tool_result(tool_panicked(payload)))
+    .unwrap_or_else(|payload| crate::ToolAttemptOutcome::from_tool_result(tool_panicked(payload)))
 }
 
 async fn build_attempt_context<'run>(
     context: &ToolDispatchContext<'_>,
     prepared: &PreparedToolCall,
     tool_context: &ToolContext<'run>,
-) -> Result<crate::AttemptContext<'run>, ToolResult> {
+) -> Result<crate::AttemptContext<'run>, ToolOutcome> {
     let scoped = tool_context.effect_controller.scoped();
     let completion_key = tool_context.completion.load();
     // The key is reserved before the body runs, and only for a declared
@@ -120,14 +120,14 @@ async fn build_attempt_context<'run>(
     ))
 }
 
-fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolResult {
+fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolOutcome {
     let message = crate::panic_containment::payload_message(payload.as_ref());
-    let failure = ToolResult::failure(crate::ToolFailure {
+    let failure = ToolOutcome::failure(crate::ToolFailure {
         class: crate::ToolFailureClass::Internal,
         code: "tool_panicked".to_string(),
         message,
         source: crate::ToolFailureSource::Runtime,
-        retry: crate::ToolRetryDisposition::Never,
+        retry: crate::ToolRetryStatus::Never,
         raw: None,
     });
     crate::panic_containment::enforce_loudness(payload);
@@ -137,7 +137,7 @@ fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolResult {
 async fn normalize_tool_result_attachments(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,
-    result: &mut ToolResult,
+    result: &mut ToolOutcome,
 ) {
     let Some(output) = result.as_done_output() else {
         return;
@@ -177,7 +177,7 @@ async fn normalize_tool_result_attachments(
                 &source,
                 &crate::AttachmentSource::stored(attachment_ref),
             );
-            *result = ToolResult::from_output(output);
+            *result = ToolOutcome::from_output(output);
         }
     }
 }
@@ -185,31 +185,31 @@ async fn normalize_tool_result_attachments(
 async fn normalize_attempt_result_attachments(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,
-    result: &mut crate::ToolAttemptResult,
+    result: &mut crate::ToolAttemptOutcome,
 ) {
-    let crate::ToolAttemptResult::Done { result, .. } = result else {
+    let crate::ToolAttemptOutcome::Done { result, .. } = result else {
         return;
     };
-    let mut tool_result = ToolResult::from_output(result.clone().into_output());
+    let mut tool_result = ToolOutcome::from_output(result.clone().into_output());
     normalize_tool_result_attachments(context, tool_name, &mut tool_result).await;
-    if let ToolResult::Done(output) = tool_result {
-        *result = crate::ToolResultDone::from_output(*output);
+    if let ToolOutcome::Done(output) = tool_result {
+        *result = crate::ToolOutcomeDone::from_output(*output);
     }
 }
 
-fn attachment_failure(code: &str, error: impl std::fmt::Display) -> ToolResult {
-    ToolResult::failure(crate::ToolFailure {
+fn attachment_failure(code: &str, error: impl std::fmt::Display) -> ToolOutcome {
+    ToolOutcome::failure(crate::ToolFailure {
         class: crate::ToolFailureClass::Execution,
         code: code.to_string(),
         message: error.to_string(),
         source: crate::ToolFailureSource::Runtime,
-        retry: crate::ToolRetryDisposition::Never,
+        retry: crate::ToolRetryStatus::Never,
         raw: None,
     })
 }
 
 pub(crate) fn retry_after_ms(
-    result: &ToolResult,
+    result: &ToolOutcome,
     retry_policy: ToolRetryPolicy,
     retry_index: u32,
 ) -> Option<u64> {
@@ -220,21 +220,21 @@ pub(crate) fn retry_after_ms(
     let ToolCallOutcome::Failure(failure) = &output.outcome else {
         return None;
     };
-    let ToolRetryDisposition::Safe { after_ms } = &failure.retry else {
+    let ToolRetryStatus::Safe { after_ms } = &failure.retry else {
         return None;
     };
     Some(retry_policy.delay_ms_for_retry(retry_index, *after_ms))
 }
 
-pub(crate) fn mark_retry_exhausted(result: ToolResult, attempts: u32) -> ToolResult {
+pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOutcome {
     let mut output = match result.into_done_output() {
         Ok(output) => output,
-        Err(pending) => return ToolResult::pending(pending),
+        Err(pending) => return ToolOutcome::pending(pending),
     };
     if let ToolCallOutcome::Failure(failure) = &mut output.outcome {
-        failure.retry = ToolRetryDisposition::Exhausted { attempts };
+        failure.retry = ToolRetryStatus::Exhausted { attempts };
     }
-    ToolResult::from_output(output)
+    ToolOutcome::from_output(output)
 }
 
 #[cfg(test)]

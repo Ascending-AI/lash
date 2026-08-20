@@ -1,11 +1,11 @@
 use crate::plugin::{PluginDirective, PluginOwned, emit_plugin_runtime_events};
-use crate::{ToolFailure, ToolFailureClass, ToolResult};
+use crate::{ToolFailure, ToolFailureClass, ToolOutcome};
 
 use super::context::ToolDispatchContext;
 
 pub(super) struct BeforeToolDirectiveOutcome {
     pub args: serde_json::Value,
-    pub short_circuit: Option<ToolResult>,
+    pub short_circuit: Option<ToolOutcome>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,7 +28,7 @@ impl ToolTerminalKind {
 struct ToolTerminal {
     plugin_id: String,
     kind: ToolTerminalKind,
-    result: ToolResult,
+    result: ToolOutcome,
 }
 
 #[derive(Clone, Copy)]
@@ -65,7 +65,7 @@ impl BeforeToolDirectiveFold {
                             ToolTerminal {
                                 plugin_id,
                                 kind: ToolTerminalKind::DeniedShortCircuit,
-                                result: ToolResult::err_fmt(err.to_string()),
+                                result: ToolOutcome::err_fmt(err.to_string()),
                             },
                         )
                         .await;
@@ -85,7 +85,7 @@ impl BeforeToolDirectiveFold {
                         ToolTerminal {
                             plugin_id,
                             kind,
-                            result: ToolResult::from_output(output),
+                            result: ToolOutcome::from_output(output),
                         },
                     )
                     .await;
@@ -96,7 +96,7 @@ impl BeforeToolDirectiveFold {
                         ToolTerminal {
                             plugin_id,
                             kind: ToolTerminalKind::AbortTurn,
-                            result: ToolResult::err_fmt(message),
+                            result: ToolOutcome::err_fmt(message),
                         },
                     )
                     .await;
@@ -117,7 +117,7 @@ impl BeforeToolDirectiveFold {
                             ToolTerminal {
                                 plugin_id,
                                 kind: ToolTerminalKind::DeniedShortCircuit,
-                                result: ToolResult::err_fmt(err),
+                                result: ToolOutcome::err_fmt(err),
                             },
                         )
                         .await;
@@ -129,7 +129,7 @@ impl BeforeToolDirectiveFold {
                         ToolTerminal {
                             plugin_id,
                             kind: ToolTerminalKind::DeniedShortCircuit,
-                            result: ToolResult::err_fmt(
+                            result: ToolOutcome::err_fmt(
                                 "before_tool_call does not support message injection",
                             ),
                         },
@@ -212,9 +212,9 @@ async fn emit_terminal_conflict(
 
 pub(super) async fn apply_after_tool_directives(
     context: &ToolDispatchContext<'_>,
-    result: ToolResult,
+    result: ToolOutcome,
     directives: Vec<PluginOwned<PluginDirective>>,
-) -> ToolResult {
+) -> ToolOutcome {
     let mut terminal = None;
     for emitted in directives {
         let plugin_id = emitted.plugin_id;
@@ -227,7 +227,7 @@ pub(super) async fn apply_after_tool_directives(
                         ToolTerminal {
                             plugin_id,
                             kind: ToolTerminalKind::DeniedShortCircuit,
-                            result: ToolResult::failure(ToolFailure::runtime(
+                            result: ToolOutcome::failure(ToolFailure::runtime(
                                 ToolFailureClass::Internal,
                                 "plugin_session_create_failed",
                                 err.to_string(),
@@ -249,7 +249,7 @@ pub(super) async fn apply_after_tool_directives(
                     ToolTerminal {
                         plugin_id,
                         kind,
-                        result: ToolResult::from_output(output),
+                        result: ToolOutcome::from_output(output),
                     },
                 )
                 .await;
@@ -261,7 +261,7 @@ pub(super) async fn apply_after_tool_directives(
                     ToolTerminal {
                         plugin_id,
                         kind: ToolTerminalKind::AbortTurn,
-                        result: ToolResult::err_fmt(message),
+                        result: ToolOutcome::err_fmt(message),
                     },
                 )
                 .await;
@@ -283,7 +283,7 @@ pub(super) async fn apply_after_tool_directives(
                         ToolTerminal {
                             plugin_id,
                             kind: ToolTerminalKind::DeniedShortCircuit,
-                            result: ToolResult::err_fmt(err),
+                            result: ToolOutcome::err_fmt(err),
                         },
                     )
                     .await;
@@ -299,7 +299,7 @@ pub(super) async fn apply_after_tool_directives(
                     ToolTerminal {
                         plugin_id,
                         kind: ToolTerminalKind::DeniedShortCircuit,
-                        result: ToolResult::err_fmt(
+                        result: ToolOutcome::err_fmt(
                             "after_tool_call only supports abort, short-circuit, session creation, events, and message injection",
                         ),
                     },

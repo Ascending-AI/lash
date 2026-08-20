@@ -74,7 +74,7 @@ thinking does, Messages and Responses have no seed field, and Codex sends none o
 Erroring instead would make a session-wide default unusable on any mixed-model session — a
 host would need every model's capability before setting one — but silence is how a
 repeatability request goes unhonored without anyone noticing. **Omission stays silent and
-becomes observable**: `GenerationDisposition` records, per option, whether the caller
+becomes observable**: `GenerationReceipt` records, per option, whether the caller
 requested it and whether the assembled body carries it, with the reason when it does not.
 Adapters derive it from the body they just built, except for the protocol-ownership carve-out
 below. It rides the response, the per-attempt ledger of ADR 0032, the durable effect journal,

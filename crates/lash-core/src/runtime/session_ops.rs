@@ -59,7 +59,7 @@ impl LashRuntime {
     pub async fn append_session_nodes(
         &mut self,
         request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesResult, SessionError> {
+    ) -> Result<crate::AppendSessionNodesOutcome, SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
         if request.operation_id.trim().is_empty() {
@@ -79,7 +79,7 @@ impl LashRuntime {
                 .session_graph
                 .active_path_contains(required_node_id)
         {
-            return Ok(crate::AppendSessionNodesResult::StaleBranch {
+            return Ok(crate::AppendSessionNodesOutcome::StaleBranch {
                 required_node_id: required_node_id.to_string(),
             });
         }
@@ -180,7 +180,7 @@ impl LashRuntime {
                             "append requires inactive ancestor `{required_node_id}`; failed to restore pre-append protocol session: {rollback_err}"
                         )));
                     }
-                    return Ok(crate::AppendSessionNodesResult::StaleBranch { required_node_id });
+                    return Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id });
                 }
                 Err(err) => {
                     if let Err(rollback_err) = self
@@ -253,12 +253,12 @@ impl LashRuntime {
                 self.state.apply_persisted_commit_result(result);
                 self.state.mark_node_ids_persisted(persisted_node_ids);
             }
-            return Ok(crate::AppendSessionNodesResult::Appended {
+            return Ok(crate::AppendSessionNodesOutcome::Appended {
                 node_ids,
                 leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
             });
         }
-        Ok(crate::AppendSessionNodesResult::Appended {
+        Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
             leaf_node_id: self
                 .state

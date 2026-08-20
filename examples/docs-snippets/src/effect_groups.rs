@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use lash::CancellationToken;
 use lash::runtime::{
     EffectGroupHandle, EffectGroupMembership, GroupExecutors, GroupSettlement, GroupWakePolicy,
-    LoserDisposition, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    LoserPolicy, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeErrorCode, RuntimeInvocation, RuntimeScope,
 };
@@ -67,7 +67,7 @@ fn child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
 fn two_arm_group(
     group_key: &str,
     wake: GroupWakePolicy,
-    losers: LoserDisposition,
+    losers: LoserPolicy,
 ) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
         RuntimeInvocation::effect(
@@ -196,12 +196,12 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
     let group = two_arm_group(
         "docs:race:0",
         GroupWakePolicy::First,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
 
     assert_eq!(group.group_key(), "docs:race:0");
     assert_eq!(group.wake(), GroupWakePolicy::First);
-    assert_eq!(group.loser_disposition(), LoserDisposition::RunToCompletion);
+    assert_eq!(group.loser_disposition(), LoserPolicy::RunToCompletion);
     assert_eq!(group.children().len(), 2);
     // The group's own invocation is its durable identity; the children derive
     // their replay keys beside it.
@@ -214,7 +214,7 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
     assert_eq!(second.group_key, "docs:race:0");
     assert_eq!(second.position, 1, "a child's position is its index");
     assert_eq!(second.wake, GroupWakePolicy::First);
-    assert_eq!(second.loser_disposition, LoserDisposition::RunToCompletion);
+    assert_eq!(second.loser_disposition, LoserPolicy::RunToCompletion);
 
     // Stamping by hand is checked rather than trusted: a child that claims a
     // position it does not hold is refused, because settlement rank assumes
@@ -223,7 +223,7 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
         "docs:race:0",
         7,
         GroupWakePolicy::First,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
     let refused = RuntimeEffectGroup::try_new(
         RuntimeInvocation::effect(
@@ -235,7 +235,7 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
         "docs:race:0",
         vec![mispositioned],
         GroupWakePolicy::First,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     )
     .expect_err("a child that disagrees with its group is refused");
     assert_eq!(refused.code, RuntimeErrorCode::RuntimeEffectGroupShape);
@@ -247,9 +247,9 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
 
     // Every wake rule and disposition a caller can declare is recorded on the
     // group, because both are journaled identity rather than local intent.
-    let all = two_arm_group("docs:all:1", GroupWakePolicy::All, LoserDisposition::Cancel);
+    let all = two_arm_group("docs:all:1", GroupWakePolicy::All, LoserPolicy::Cancel);
     assert_eq!(all.wake(), GroupWakePolicy::All);
-    assert_eq!(all.loser_disposition(), LoserDisposition::Cancel);
+    assert_eq!(all.loser_disposition(), LoserPolicy::Cancel);
 
     // Where a child's runner comes from is not part of the group: a group is
     // envelopes. A host with no registered resolver does not do groups at all —
@@ -289,7 +289,7 @@ async fn a_race_resumes_on_the_first_settlement_and_leaves_the_loser_running() {
     let group = two_arm_group(
         group_key,
         GroupWakePolicy::First,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
     let mut handle = controller
         .open_effect_group(executors.stage(group, vec![slow, settles_now()]))
@@ -326,7 +326,7 @@ async fn a_race_resumes_on_the_first_settlement_and_leaves_the_loser_running() {
     // running under host ownership: a losing promise's side effects still
     // happen, exactly as they would in Node.
     controller
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect("close releases the caller's interest");
     release_loser.send(()).expect("release the losing arm");
@@ -346,7 +346,7 @@ async fn a_restored_cursor_re_reads_the_same_settlement() {
     let group = two_arm_group(
         group_key,
         GroupWakePolicy::All,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
     let mut handle = controller
         .open_effect_group(executors.stage(group, vec![settles_now(), settles_now()]))
@@ -407,7 +407,7 @@ async fn a_cancelled_await_leaves_the_rank_owed() {
     let group = two_arm_group(
         group_key,
         GroupWakePolicy::First,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
     let mut handle = controller
         .open_effect_group(executors.stage(group, vec![slow, settles_now()]))
@@ -445,7 +445,7 @@ async fn a_deadline_arm_cancels_its_losers_and_journals_the_cancellation() {
     let (controller, executors) = inline_host();
     let group_key = "docs:deadline:0";
     let (slow, release, loser_completions) = gated();
-    let group = two_arm_group(group_key, GroupWakePolicy::First, LoserDisposition::Cancel);
+    let group = two_arm_group(group_key, GroupWakePolicy::First, LoserPolicy::Cancel);
     let mut handle = controller
         .open_effect_group(executors.stage(group, vec![slow, settles_now()]))
         .await
@@ -456,7 +456,7 @@ async fn a_deadline_arm_cancels_its_losers_and_journals_the_cancellation() {
         .expect("the deadline arm settles first");
 
     controller
-        .close_effect_group(handle, LoserDisposition::Cancel)
+        .close_effect_group(handle, LoserPolicy::Cancel)
         .await
         .expect("closing under the declared disposition cancels the losers");
     release.send(()).ok();
@@ -468,11 +468,11 @@ async fn a_deadline_arm_cancels_its_losers_and_journals_the_cancellation() {
     // Close may narrow — `RunToCompletion` to `Cancel` — and may never widen,
     // because a crash-drain of the same group applies the declared disposition
     // and the losers' fate must not depend on whether the close was reached.
-    let run = LoserDisposition::RunToCompletion;
-    let cancel = LoserDisposition::Cancel;
-    assert!(LoserDisposition::resolve_close(run, cancel).is_ok());
-    assert!(LoserDisposition::resolve_close(cancel, run).is_err());
-    let widened = LoserDisposition::resolve_close(cancel, run)
+    let run = LoserPolicy::RunToCompletion;
+    let cancel = LoserPolicy::Cancel;
+    assert!(LoserPolicy::resolve_close(run, cancel).is_ok());
+    assert!(LoserPolicy::resolve_close(cancel, run).is_err());
+    let widened = LoserPolicy::resolve_close(cancel, run)
         .expect_err("a declared Cancel may not be closed as RunToCompletion");
     assert_eq!(widened.code, RuntimeErrorCode::RuntimeEffectGroupShape);
 }
@@ -493,7 +493,7 @@ async fn a_first_success_group_still_reports_the_failures_before_it() {
     let group = two_arm_group(
         group_key,
         GroupWakePolicy::FirstSuccess,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
     assert_eq!(group.wake(), GroupWakePolicy::FirstSuccess);
     let mut handle = controller
@@ -564,7 +564,7 @@ struct MinimalGroupHost {
     /// because the paths that need it run where no caller is in scope.
     executors: Arc<dyn GroupExecutors>,
     settled: std::sync::Mutex<Vec<GroupSettlement>>,
-    declared: std::sync::Mutex<Option<LoserDisposition>>,
+    declared: std::sync::Mutex<Option<LoserPolicy>>,
 }
 
 impl MinimalGroupHost {
@@ -656,14 +656,14 @@ impl RuntimeEffectController for MinimalGroupHost {
     async fn close_effect_group(
         &self,
         _handle: EffectGroupHandle,
-        disposition: LoserDisposition,
+        disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         let declared = self
             .declared
             .lock()
             .expect("declared disposition")
             .unwrap_or(disposition);
-        LoserDisposition::resolve_close(declared, disposition)?;
+        LoserPolicy::resolve_close(declared, disposition)?;
         Ok(())
     }
 }
@@ -681,7 +681,7 @@ async fn a_host_either_implements_groups_or_refuses_them_by_name() {
     let group = two_arm_group(
         "docs:unsupported:0",
         GroupWakePolicy::All,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
     let mut handle = EffectGroupHandle::new(&group);
     let refused = refusing
@@ -701,7 +701,7 @@ async fn a_host_either_implements_groups_or_refuses_them_by_name() {
     assert_eq!(refused_await.code, RuntimeErrorCode::EffectGroupUnsupported);
     assert_eq!(handle.consumed(), 0);
     let refused_close = refusing
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect_err("closing on a host without groups fails closed too");
     assert_eq!(refused_close.code, RuntimeErrorCode::EffectGroupUnsupported);
@@ -711,7 +711,7 @@ async fn a_host_either_implements_groups_or_refuses_them_by_name() {
     let group = two_arm_group(
         "docs:minimal:0",
         GroupWakePolicy::All,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
     );
     let mut handle = implementing
         .open_effect_group(executors.stage(group, vec![settles_now(), settles_now()]))
@@ -733,7 +733,7 @@ async fn a_host_either_implements_groups_or_refuses_them_by_name() {
     );
     assert!(handle.is_exhausted());
     implementing
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect("the minimal host closes under its declared disposition");
 }

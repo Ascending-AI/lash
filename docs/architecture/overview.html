@@ -139,7 +139,7 @@ flowchart TD
             <li>
               <div>
                 <h3>AgentFrame switches are runtime continuations.</h3>
-                <p>A turn can finish as <code>TurnOutcome::AgentFrameSwitch { frame_key, task }</code>, which transparently activates an RLM AgentFrame with a fresh window. App hosts that use <code>TurnBuilder::stream_to</code>, <code>run</code>, or pull-style <code>stream</code> get the final <code>TurnResult</code>; lower-level runtime hosts can still inspect the underlying AgentFrame chain.</p>
+                <p>A turn can finish as <code>TurnOutcome::AgentFrameSwitch { frame_key, task }</code>, which transparently activates an RLM AgentFrame with a fresh window. App hosts that use <code>TurnBuilder::stream_to</code>, <code>run</code>, or pull-style <code>stream</code> get the final <code>TurnReport</code>; lower-level runtime hosts can still inspect the underlying AgentFrame chain.</p>
               </div>
             </li>
             <li>

@@ -276,12 +276,12 @@ impl lash::tools::ToolProvider for ToneTools {
     async fn prepare_tool_call(
         &amp;self,
         call: lash::tools::ToolPrepareCall&lt;'_&gt;,
-    ) -&gt; Result&lt;lash::tools::PreparedToolCall, lash::tools::ToolResult&gt; {
+    ) -&gt; Result&lt;lash::tools::PreparedToolCall, lash::tools::ToolOutcome&gt; {
         let Some(input) = call.context.plugin_input::&lt;ToneTurnInput&gt;(TonePlugin::ID) else {
-            return Err(lash::tools::ToolResult::err_fmt("missing tone input"));
+            return Err(lash::tools::ToolOutcome::err_fmt("missing tone input"));
         };
         let prepared_payload = serde_json::to_value(input).map_err(|err| {
-            lash::tools::ToolResult::err_fmt(format!("invalid tone input: {err}"))
+            lash::tools::ToolOutcome::err_fmt(format!("invalid tone input: {err}"))
         })?;
         Ok(lash::tools::PreparedToolCall::from_parts(
             call.pending.call_id,
@@ -293,11 +293,11 @@ impl lash::tools::ToolProvider for ToneTools {
         ))
     }
 
-    async fn execute(&amp;self, call: lash::tools::ToolCall&lt;'_&gt;) -&gt; lash::tools::ToolResult {
+    async fn execute(&amp;self, call: lash::tools::ToolCall&lt;'_&gt;) -&gt; lash::tools::ToolOutcome {
         let input = match call.context.decode_prepared_payload::&lt;ToneTurnInput&gt;() {
             Ok(input) =&gt; input,
             Err(err) =&gt; {
-                return lash::tools::ToolResult::err_fmt(format!("missing tone input: {err}"));
+                return lash::tools::ToolOutcome::err_fmt(format!("missing tone input: {err}"));
             }
         };
         run_tone_tool(call.name, call.args, &amp;input.tone)

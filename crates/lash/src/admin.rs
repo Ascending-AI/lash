@@ -577,7 +577,7 @@ impl SessionAdmin {
         &self,
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::ProcessHandleSummary> {
+    ) -> Result<lash_core::ProcessHandleView> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
         let session_id = runtime.session_id().to_string();
@@ -607,7 +607,7 @@ impl SessionAdmin {
         &self,
         process_id: &str,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::ProcessCancelSummary> {
+    ) -> Result<lash_core::ProcessCancelReceipt> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
         let session_id = runtime.session_id().to_string();
@@ -616,7 +616,7 @@ impl SessionAdmin {
         let summary = processes
             .cancel_visible(&session_id, process_id, scope)
             .await
-            .map(lash_core::ProcessCancelSummary::from_record)
+            .map(lash_core::ProcessCancelReceipt::from_record)
             .map_err(EmbedError::Plugin)?;
         self.runtime.record_process_changed(
             SessionProcessEventKind::Cancelled,
@@ -628,7 +628,7 @@ impl SessionAdmin {
     async fn cancel_visible_processes(
         &self,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<Vec<lash_core::ProcessCancelSummary>> {
+    ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
         let session_id = runtime.session_id().to_string();
@@ -1069,7 +1069,7 @@ pub struct SessionProcessAdmin {
 /// process path the global surface uses. It speaks the same
 /// [`ObservedProcess`](lash_core::facade_support::ObservedProcess) vocabulary as
 /// [`Processes`](crate::process::Processes); [`start`](Self::start) returns the
-/// model-facing handle summary ([`lash_core::ProcessHandleSummary`]), the one row
+/// model-facing handle summary ([`lash_core::ProcessHandleView`]), the one row
 /// type retained for the model/handle contract.
 impl SessionProcessAdmin {
     pub(crate) fn new(control: SessionAdmin) -> Self {
@@ -1098,7 +1098,7 @@ impl SessionProcessAdmin {
         &self,
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::ProcessHandleSummary> {
+    ) -> Result<lash_core::ProcessHandleView> {
         self.control
             .start_process(request, scoped_effect_controller)
             .await
@@ -1175,7 +1175,7 @@ impl SessionProcessAdmin {
         &self,
         process_id: &str,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::ProcessCancelSummary> {
+    ) -> Result<lash_core::ProcessCancelReceipt> {
         self.control
             .cancel_process(process_id, scoped_effect_controller)
             .await
@@ -1184,7 +1184,7 @@ impl SessionProcessAdmin {
     pub async fn cancel_all(
         &self,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<Vec<lash_core::ProcessCancelSummary>> {
+    ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         self.control
             .cancel_visible_processes(scoped_effect_controller)
             .await

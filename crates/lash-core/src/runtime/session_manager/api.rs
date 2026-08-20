@@ -148,7 +148,7 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         &self,
         session_id: &str,
         request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesResult, crate::PluginError> {
+    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         self.services
             .current
             .append_session_nodes(
@@ -202,7 +202,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         session_id: &str,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let env_ref = match request.env_spec.as_ref() {
             Some(env_spec) => Some(
                 crate::persist_process_execution_env(
@@ -229,7 +229,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 scope,
             )
             .await?;
-        Ok(crate::ProcessHandleSummary::from_record(record))
+        Ok(crate::ProcessHandleView::from_record(record))
     }
 
     async fn start_from_recorded_intent(
@@ -237,13 +237,13 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         session_id: &str,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let record = self
             .services
             .processes
             .start_process_from_recorded_intent(&self.services.current, session_id, request, scope)
             .await?;
-        Ok(crate::ProcessHandleSummary::from_record(record))
+        Ok(crate::ProcessHandleView::from_record(record))
     }
 
     async fn start(
@@ -562,7 +562,7 @@ impl crate::ProcessService for ModelToolSessionProcessService {
         session_id: &str,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let host = RuntimeSessionProcessService {
             services: Arc::clone(&self.services),
         };
@@ -574,7 +574,7 @@ impl crate::ProcessService for ModelToolSessionProcessService {
         session_id: &str,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let host = RuntimeSessionProcessService {
             services: Arc::clone(&self.services),
         };

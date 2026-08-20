@@ -9,7 +9,7 @@ impl CurrentSessionCapability {
         background: &ProcessCapability,
         session_id: &str,
         request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesResult, crate::PluginError> {
+    ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         if request.operation_id.trim().is_empty() {
             return Err(crate::PluginError::Session(
                 "session graph append requires a non-empty stable operation_id".to_string(),
@@ -136,7 +136,7 @@ impl CurrentSessionCapability {
         let result = match commit_result {
             Ok(result) => result,
             Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
-                return Ok(crate::AppendSessionNodesResult::StaleBranch { required_node_id });
+                return Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id });
             }
             Err(crate::StoreError::AppendOperationIdentityConflict {
                 session_id,
@@ -184,7 +184,7 @@ impl CurrentSessionCapability {
             state.apply_persisted_commit_result(result);
         }
         background.sync_needed.store(true, Ordering::Release);
-        Ok(crate::AppendSessionNodesResult::Appended {
+        Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
             leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
         })

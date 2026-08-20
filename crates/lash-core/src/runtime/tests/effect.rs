@@ -788,7 +788,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
             (name == "direct_tool").then(|| Arc::new(direct_tool_definition().contract()))
         }
 
-        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
             let completion = call
                 .context
                 .direct_completions()
@@ -798,7 +798,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
                 )
                 .await
                 .expect("tool direct completion");
-            crate::ToolResult::ok(serde_json::json!({ "text": completion.text }))
+            crate::ToolOutcome::ok(serde_json::json!({ "text": completion.text }))
         }
     }
 
@@ -1092,7 +1092,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Tr
         &self,
         _args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolResult {
+    ) -> crate::ToolOutcome {
         let source_type = crate::triggers::trigger_event_type("ui.button", "pressed");
         let source_key =
             crate::empty_trigger_source_key(&source_type).expect("empty trigger source key");
@@ -1116,7 +1116,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Tr
             .emit(request())
             .await
             .expect("redrive tool trigger occurrence");
-        crate::ToolResult::ok(serde_json::json!({ "emitted": true }))
+        crate::ToolOutcome::ok(serde_json::json!({ "emitted": true }))
     }
 }
 
@@ -1165,7 +1165,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
         &self,
         _args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolResult {
+    ) -> crate::ToolOutcome {
         let replies = context
             .call_tool_batch(vec![crate::ToolInvocation::new(
                 "trigger_tool",
@@ -1174,7 +1174,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             )])
             .await;
         assert_eq!(replies.len(), 1);
-        crate::ToolResult::ok(serde_json::json!({ "nested": replies[0].output.clone() }))
+        crate::ToolOutcome::ok(serde_json::json!({ "nested": replies[0].output.clone() }))
     }
 }
 
@@ -1453,19 +1453,19 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
             (name == "retry_once").then(|| Arc::new(retry_once_tool_definition().contract()))
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
             let attempt = self
                 .attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if attempt == 0 {
-                return crate::ToolResult::retryable_failure(
+                return crate::ToolOutcome::retryable_failure(
                     crate::ToolFailureClass::External,
                     "transient",
                     "transient failure",
                     Some(1),
                 );
             }
-            crate::ToolResult::ok(serde_json::json!({ "ok": true }))
+            crate::ToolOutcome::ok(serde_json::json!({ "ok": true }))
         }
     }
 

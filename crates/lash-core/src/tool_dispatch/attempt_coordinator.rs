@@ -1,7 +1,7 @@
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use crate::{
     PreparedToolCall, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeInvocation,
-    ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolResult, ToolRetryPolicy,
+    ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,
 };
 use lash_sansio::core_support::*;
 
@@ -337,7 +337,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                 let recorded_call_id = record.call_id.clone();
                 record.call_id = Some(call.call_id.clone());
                 let retry_after = retry_after_ms(
-                    &ToolResult::from_output(record.output.clone()),
+                    &ToolOutcome::from_output(record.output.clone()),
                     retry_policy,
                     attempt - 1,
                 );
@@ -375,7 +375,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                 };
                 if attempt >= max_attempts {
                     let exhausted =
-                        mark_retry_exhausted(ToolResult::from_output(record.output), attempt);
+                        mark_retry_exhausted(ToolOutcome::from_output(record.output), attempt);
                     record.output = exhausted.into_done_output().unwrap_or_else(|_| {
                         ToolCallOutput::failure(ToolFailure::runtime(
                             ToolFailureClass::Internal,

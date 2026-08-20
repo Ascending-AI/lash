@@ -4,7 +4,7 @@ use serde_json::json;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use lash_core::{ToolCall, ToolDefinition, ToolResult, ToolRetryPolicy};
+use lash_core::{ToolCall, ToolDefinition, ToolOutcome, ToolRetryPolicy};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execute_typed_tool_result,
@@ -61,16 +61,16 @@ struct FileAttachmentData {
 }
 
 enum ReadFileBlockingResult {
-    Tool(ToolResult),
+    Tool(ToolOutcome),
     Attachment(FileAttachmentData),
 }
 
 impl ReadFileBlockingResult {
-    fn tool(result: ToolResult) -> Self {
+    fn tool(result: ToolOutcome) -> Self {
         Self::Tool(result)
     }
 
-    async fn into_tool_result(self, context: &lash_core::AttemptContext<'_>) -> ToolResult {
+    async fn into_tool_result(self, context: &lash_core::AttemptContext<'_>) -> ToolOutcome {
         match self {
             Self::Tool(result) => result,
             Self::Attachment(attachment) => store_attachment(context, attachment).await,
@@ -80,7 +80,7 @@ impl ReadFileBlockingResult {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for ReadFile {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         execute_typed_tool_result::<ReadFileArgs, _, _>(call.args, |args| async move {
             if let Err(err) = non_empty_string(&args.path, "path") {
                 return err;
@@ -168,7 +168,7 @@ fn execute_read_file_sync(
                 ));
             }
         };
-        return ReadFileBlockingResult::tool(ToolResult::from_output(output));
+        return ReadFileBlockingResult::tool(ToolOutcome::from_output(output));
     }
 
     if let Some(media_type) = attach_as {
@@ -221,13 +221,13 @@ fn execute_read_file_sync(
         Err(err) => return ReadFileBlockingResult::tool(err),
     };
 
-    ReadFileBlockingResult::tool(ToolResult::ok(json!(render_window(
+    ReadFileBlockingResult::tool(ToolOutcome::ok(json!(render_window(
         &slice,
         WindowKind::Lines
     ))))
 }
 
-fn read_directory(path: &Path, offset: usize, limit: usize) -> ToolResult {
+fn read_directory(path: &Path, offset: usize, limit: usize) -> ToolOutcome {
     match std::fs::read_dir(path) {
         Ok(entries) => {
             let mut items: Vec<String> = Vec::new();
@@ -251,7 +251,7 @@ fn read_directory(path: &Path, offset: usize, limit: usize) -> ToolResult {
                 Ok(slice) => slice,
                 Err(err) => return err,
             };
-            ToolResult::ok(json!(render_window(&slice, WindowKind::Entries)))
+            ToolOutcome::ok(json!(render_window(&slice, WindowKind::Entries)))
         }
         Err(err) => io_failure(
             "read_directory_failed",
@@ -356,7 +356,7 @@ fn read_native_attachment(
 async fn store_attachment(
     context: &lash_core::AttemptContext<'_>,
     attachment: FileAttachmentData,
-) -> ToolResult {
+) -> ToolOutcome {
     let reference = match context
         .attachments()
         .put(
@@ -377,13 +377,13 @@ async fn store_attachment(
             );
         }
     };
-    ToolResult::from_output(lash_core::ToolCallOutput::success(
+    ToolOutcome::from_output(lash_core::ToolCallOutput::success(
         lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(reference)),
     ))
 }
 
 /// Extract text from a PDF file using the pdf-extract crate (pure Rust).
-fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolResult {
+fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolOutcome {
     let pdf_bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(err) => {
@@ -426,7 +426,7 @@ fn read_pdf(path: &Path, path_str: &str, offset: usize, limit: usize) -> ToolRes
     );
     formatted.insert_str(0, &header);
 
-    ToolResult::ok(json!(formatted))
+    ToolOutcome::ok(json!(formatted))
 }
 
 /// Extract width x height from image headers (zero deps).
@@ -518,7 +518,7 @@ fn collect_window<I, E, F>(
     limit: usize,
     mut format_item: F,
     item_label: &str,
-) -> Result<WindowSlice, ToolResult>
+) -> Result<WindowSlice, ToolOutcome>
 where
     I: IntoIterator<Item = Result<String, E>>,
     E: std::fmt::Display,
@@ -754,7 +754,7 @@ mod tests {
         assert_eq!(failure.code, "path_not_found");
         assert!(failure.message.contains(missing));
         assert_eq!(failure.source, lash_core::ToolFailureSource::Tool);
-        assert_eq!(failure.retry, lash_core::ToolRetryDisposition::Never);
+        assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     }
 
     #[tokio::test]

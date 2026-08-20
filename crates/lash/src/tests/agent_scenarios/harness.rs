@@ -148,11 +148,11 @@ fn agent_scenario_session_id(name: &str) -> String {
 
 pub(super) struct AgentScenarioRun {
     pub(super) session_id: String,
-    pub(super) turn_output: Option<TurnResult>,
+    pub(super) turn_output: Option<TurnReport>,
     pub(super) streamed_events: Vec<TurnActivity>,
     pub(super) graph_snapshots: Vec<crate::tracing::TraceLashlangGraph>,
     pub(super) prompt_captures: Vec<LlmRequest>,
-    pub(super) final_process_list: Vec<lash_core::ProcessHandleSummary>,
+    pub(super) final_process_list: Vec<lash_core::ProcessHandleView>,
     /// Runtime-checkpoint commits the session store actually accepted, in
     /// commit order. Observed at the store seam, never reconstructed.
     pub(super) checkpoint_writes:
@@ -292,7 +292,7 @@ impl AgentScenarioRuntime {
         self.prompt_captures.lock_recover().clone()
     }
 
-    async fn final_process_list(&self) -> Result<Vec<lash_core::ProcessHandleSummary>> {
+    async fn final_process_list(&self) -> Result<Vec<lash_core::ProcessHandleView>> {
         all_host_process_summaries(&self.core).await
     }
 }
@@ -388,9 +388,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     Ok(run)
 }
 
-async fn all_host_process_summaries(
-    core: &LashCore,
-) -> Result<Vec<lash_core::ProcessHandleSummary>> {
+async fn all_host_process_summaries(core: &LashCore) -> Result<Vec<lash_core::ProcessHandleView>> {
     let processes = core
         .processes()
         .list(&lash_core::ProcessListFilter {
@@ -408,8 +406,8 @@ async fn all_host_process_summaries(
 
 fn observed_process_summary(
     process: lash_core::facade_support::ObservedProcess,
-) -> lash_core::ProcessHandleSummary {
-    lash_core::ProcessHandleSummary::new(
+) -> lash_core::ProcessHandleView {
+    lash_core::ProcessHandleView::new(
         process.process_id,
         process.identity.clone(),
         process.lifecycle,
@@ -512,14 +510,14 @@ async fn assert_remote_process_dto_surface(
     }
 }
 
-fn assert_remote_process_summaries_round_trip(summaries: &[lash_core::ProcessHandleSummary]) {
+fn assert_remote_process_summaries_round_trip(summaries: &[lash_core::ProcessHandleView]) {
     for summary in summaries {
-        let remote = lash_remote_protocol::RemoteProcessSummary::from(summary.clone());
+        let remote = lash_remote_protocol::RemoteProcessHandleView::from(summary.clone());
         remote
             .validate("AgentScenarioProcessSummary")
             .expect("remote process summary should validate");
         let round_trip =
-            lash_core::ProcessHandleSummary::try_from(remote).expect("remote summary round trip");
+            lash_core::ProcessHandleView::try_from(remote).expect("remote summary round trip");
         assert_eq!(&round_trip, summary);
     }
 }
@@ -578,7 +576,7 @@ impl AgentSessionTurnProcessScenario {
                 turn_input: Box::new(TurnInput::text("run child session turn")),
                 output_contract: lash_core::ToolOutputContract::Static,
             },
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
         )
     }
@@ -747,7 +745,7 @@ finish result.answer"#,
 
     async fn assert_turn_suspended_before_resolution(
         &self,
-        turn: &mut tokio::task::JoinHandle<Result<TurnResult>>,
+        turn: &mut tokio::task::JoinHandle<Result<TurnReport>>,
         events: &RecordingEvents,
     ) {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
@@ -778,7 +776,7 @@ finish result.answer"#,
         Ok(())
     }
 
-    fn assert_turn_completed(&self, turn_output: &TurnResult, tools: &DurableInputTools) {
+    fn assert_turn_completed(&self, turn_output: &TurnReport, tools: &DurableInputTools) {
         assert!(matches!(
             turn_output.outcome,
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })

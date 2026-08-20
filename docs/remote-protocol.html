@@ -84,14 +84,14 @@ let request = RemoteTurnRequest {
 };
 
 request.validate()?;</code></pre>
-    <p>Process starts use the same rule. The optional <code>env_spec</code> is a closed Lash DTO: plugin-owned options plus runtime policy. It is not a product metadata bag. A start also carries a required <code>disposition</code> (<code>RemoteRecoveryDisposition</code>) — the declared recovery contract that mirrors <code>RecoveryDisposition</code> across the wire (ADR 0019). It has no wire default, so an envelope that omits it does not deserialize; an external placeholder like the one below declares <code>ExternallyOwned</code>.</p>
+    <p>Process starts use the same rule. The optional <code>env_spec</code> is a closed Lash DTO: plugin-owned options plus runtime policy. It is not a product metadata bag. A start also carries a required <code>disposition</code> (<code>RemoteRecoveryContract</code>) — the declared recovery contract that mirrors <code>RecoveryContract</code> across the wire (ADR 0019). It has no wire default, so an envelope that omits it does not deserialize; an external placeholder like the one below declares <code>ExternallyOwned</code>.</p>
 <pre data-lang="rust" data-snippet="remote_protocol#remote-process-start-request"><code>use std::collections::BTreeMap;
 
 use lash::remote::REMOTE_PROTOCOL_VERSION;
 use lash::remote::processes::{
     RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessInput,
     RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessOriginator,
-    RemoteProcessPluginOptions, RemoteProcessStartRequest, RemoteRecoveryDisposition,
+    RemoteProcessPluginOptions, RemoteProcessStartRequest, RemoteRecoveryContract,
     RemoteTurnBudget,
 };
 use serde_json::json;
@@ -102,7 +102,7 @@ let request = RemoteProcessStartRequest {
     input: RemoteProcessInput::External {
         metadata: json!({ "source": "scheduler" }),
     },
-    disposition: RemoteRecoveryDisposition::ExternallyOwned,
+    disposition: RemoteRecoveryContract::ExternallyOwned,
     max_attempts: None,
     env_spec: Some(RemoteProcessExecutionEnvSpec {
         plugin_options: RemoteProcessPluginOptions {
@@ -147,7 +147,7 @@ request.validate()?;</code></pre>
       </div>
       <div class="listing__row">
         <div class="listing__label">turn result</div>
-        <div class="listing__body"><p><code>RemoteTurnResult</code> carries status, <code>RemoteTurnOutcome</code>, safe/raw assistant output, complete <code>RemoteUsage</code> buckets, execution summary, tool-call summaries, issues, collected activities, and metadata.</p></div>
+        <div class="listing__body"><p><code>RemoteTurnReport</code> carries status, <code>RemoteTurnOutcome</code>, safe/raw assistant output, complete <code>RemoteUsage</code> buckets, execution summary, tool-call summaries, issues, collected activities, and metadata.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">llm transport</div>
@@ -167,7 +167,7 @@ request.validate()?;</code></pre>
       </div>
       <div class="listing__row">
         <div class="listing__label">trigger ingress</div>
-        <div class="listing__body"><p><code>RemoteTriggerOccurrenceRequest</code>, <code>RemoteTriggerOccurrenceRecord</code>, <code>RemoteTriggerEmitReport</code>, <code>RemoteTriggerSubscriptionFilter</code>, <code>RemoteTriggerRegistration</code>, and <code>RemoteTriggerTargetSummary</code> mirror trigger emission, stored occurrence replay, match reports, subscription listing, and target summaries. Subscription targets use <code>RemoteProcessDefinitionIdentity</code>, the same full module/host/process-ref/process-name identity used by process summaries and filters.</p></div>
+        <div class="listing__body"><p><code>RemoteTriggerOccurrenceRequest</code>, <code>RemoteTriggerOccurrenceRecord</code>, <code>RemoteTriggerEmitReport</code>, <code>RemoteTriggerSubscriptionFilter</code>, <code>RemoteTriggerRegistration</code>, and <code>RemoteTriggerTarget</code> mirror trigger emission, stored occurrence replay, match reports, subscription listing, and target summaries. Subscription targets use <code>RemoteProcessDefinitionIdentity</code>, the same full module/host/process-ref/process-name identity used by process summaries and filters.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">process admin</div>
@@ -226,7 +226,7 @@ request.validate()?;</code></pre>
     <div class="listing">
       <div class="listing__row">
         <div class="listing__label">turns</div>
-        <div class="listing__body"><p>Conversions cover remote-safe <code>TurnInput</code> fields and <code>RemoteTurnResult::from_core(...)</code> for completed turns plus collected activities.</p></div>
+        <div class="listing__body"><p>Conversions cover remote-safe <code>TurnInput</code> fields and <code>RemoteTurnReport::from_core(...)</code> for completed turns plus collected activities.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">llm</div>

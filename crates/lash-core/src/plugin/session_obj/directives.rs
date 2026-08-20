@@ -226,7 +226,7 @@ impl PluginSession {
             self.after_turn_with_phase_probe(
                 TurnResultHookContext {
                     session_id: session_id.clone(),
-                    turn: Arc::new(crate::plugin::TurnResultSummary::from_assembled(&turn)),
+                    turn: Arc::new(crate::plugin::TurnHookReport::from_assembled(&turn)),
                     sessions,
                 },
                 phase_probe.as_ref(),

@@ -39,11 +39,11 @@ error[E0425]: cannot find type `TriggerRegistration` in crate `lash`
 9 |     let _: Option<lash::TriggerRegistration> = None;
   |                         ^^^^^^^^^^^^^^^^^^^ not found in `lash`
 
-error[E0425]: cannot find type `ProcessHandleSummary` in crate `lash`
+error[E0425]: cannot find type `ProcessHandleView` in crate `lash`
   --> tests/ui/taxonomy_types_are_not_root.rs:10:25
    |
-10 |     let _: Option<lash::ProcessHandleSummary> = None;
-   |                         ^^^^^^^^^^^^^^^^^^^^ not found in `lash`
+10 |     let _: Option<lash::ProcessHandleView> = None;
+   |                         ^^^^^^^^^^^^^^^^^ not found in `lash`
 
 error[E0425]: cannot find type `ToolState` in crate `lash`
   --> tests/ui/taxonomy_types_are_not_root.rs:11:25

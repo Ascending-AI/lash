@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use lash::persistence::SessionStoreFactory;
 use lash::provider::{ProviderHandle, ProviderOptions};
 use lash::tracing::{TraceLevel, TraceSink};
-use lash::{LashCore, LashSession, TurnInput, TurnResult};
+use lash::{LashCore, LashSession, TurnInput, TurnReport};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 async fn service_core(
@@ -121,7 +121,7 @@ struct TurnUiState {
     assistant_prose: String,
 }
 
-fn assistant_text_for_persistence(_output: &TurnResult, _live_prose: &str) -> String {
+fn assistant_text_for_persistence(_output: &TurnReport, _live_prose: &str) -> String {
     String::new()
 }
 

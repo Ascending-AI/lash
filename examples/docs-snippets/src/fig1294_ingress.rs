@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use lash::process::ProcessRegistry as _;
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolIntentExecutionOutcome,
-    ToolProvider, ToolResult,
+    ToolOutcome, ToolProvider,
 };
 
 const SESSION: &str = "docs-ingress-session";
@@ -81,16 +81,16 @@ impl ToolProvider for AttemptIntentProvider {
         })
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         panic!("attempt-intent provider must use the sealed attempt context")
     }
 
     async fn execute_attempt(
         &self,
         call: lash::tools::ToolCall<'_>,
-    ) -> lash::tools::ToolAttemptResult {
-        lash::tools::ToolAttemptResult::done(
-            lash::tools::ToolResultDone::ok(serde_json::json!({"declared": true})),
+    ) -> lash::tools::ToolAttemptOutcome {
+        lash::tools::ToolAttemptOutcome::done(
+            lash::tools::ToolOutcomeDone::ok(serde_json::json!({"declared": true})),
             lash::tools::ToolIntents::v1(vec![event_intent(call.context.session_id())]),
         )
     }
@@ -110,7 +110,7 @@ async fn attempt_provider_returns_a_behaviorally_checked_intent_batch() {
         },
     )
     .await;
-    let lash::tools::ToolAttemptResult::Done { result, intents } = result else {
+    let lash::tools::ToolAttemptOutcome::Done { result, intents } = result else {
         panic!("the provider must complete atomically")
     };
     assert!(result.into_output().is_success());
@@ -130,7 +130,7 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
                 lash::process::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash::process::ProcessEventType {
@@ -273,7 +273,7 @@ async fn ingress_start_retains_and_settles_default_parent_end() -> anyhow::Resul
                 lash::process::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
             ),
             &[SESSION.to_string()],
@@ -323,11 +323,11 @@ struct InternalProbe;
 
 #[async_trait]
 impl StaticToolExecute for InternalProbe {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        ToolResult::ok(serde_json::json!({"fallback": call.name}))
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::ok(serde_json::json!({"fallback": call.name}))
     }
 
-    async fn execute_internal(&self, call: lash_core::InternalProcessToolCall<'_>) -> ToolResult {
+    async fn execute_internal(&self, call: lash_core::InternalProcessToolCall<'_>) -> ToolOutcome {
         let lash_core::InternalProcessToolCall {
             name,
             args,
@@ -359,7 +359,7 @@ impl StaticToolExecute for InternalProbe {
             )
             .await;
         let _events = context.process_events();
-        ToolResult::ok(serde_json::json!({
+        ToolOutcome::ok(serde_json::json!({
             "name": name,
             "args": args,
             "session_id": context.session_id(),
@@ -449,7 +449,7 @@ async fn ingress_core_with_effect_host(
                 lash::process::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash::process::ProcessEventType {

@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 use super::model::{ProcessExecutionEnvRef, ProcessRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessLiveReferenceSummary {
+pub struct ProcessLiveReferenceView {
     pub definition: Option<serde_json::Value>,
     pub env_ref: Option<ProcessExecutionEnvRef>,
     pub process_count: usize,
 }
 
-impl ProcessLiveReferenceSummary {
-    /// Builds a `ProcessLiveReferenceSummary` from records data for store and durable-substrate
+impl ProcessLiveReferenceView {
+    /// Builds a `ProcessLiveReferenceView` from records data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_records<'record>(
         records: impl IntoIterator<Item = &'record ProcessRecord>,
@@ -38,7 +38,7 @@ impl ProcessLiveReferenceSummary {
     }
 }
 
-fn live_reference_sort_key(summary: &ProcessLiveReferenceSummary) -> (String, String) {
+fn live_reference_sort_key(summary: &ProcessLiveReferenceView) -> (String, String) {
     let definition = summary
         .definition
         .as_ref()

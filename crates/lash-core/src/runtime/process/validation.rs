@@ -9,7 +9,7 @@ use super::events::{
 };
 use super::materialization::materialize_process_event_semantics;
 use super::model::{
-    ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus, RecoveryDisposition,
+    ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus, RecoveryContract,
 };
 use super::time::{epoch_ms_from_system_time, system_time_from_epoch_ms};
 
@@ -95,7 +95,7 @@ pub fn prepare_process_start(
             record.id
         )));
     }
-    if record.disposition == RecoveryDisposition::ExternallyOwned {
+    if record.disposition == RecoveryContract::ExternallyOwned {
         return Err(PluginError::Session(format!(
             "externally-owned process `{}` cannot start an execution attempt",
             record.id
@@ -113,7 +113,7 @@ pub fn prepare_process_start(
     let expected_attempt = match record.first_started.as_deref() {
         None => 1,
         Some(existing)
-            if record.disposition == RecoveryDisposition::OwnerBound
+            if record.disposition == RecoveryContract::OwnerBound
                 && !authority.permits_owner_bound_resume(existing) =>
         {
             return Ok(ProcessStartPlan::AlreadyStarted {
@@ -165,7 +165,7 @@ pub fn apply_process_status_projection(
 /// * a waiting row can never reach it, because waiting is an execution state
 ///   an externally-owned row never enters.
 pub(super) fn apply_caller_departure(record: &mut ProcessRecord) -> Result<(), PluginError> {
-    if record.disposition != crate::RecoveryDisposition::ExternallyOwned {
+    if record.disposition != crate::RecoveryContract::ExternallyOwned {
         return Err(PluginError::Session(format!(
             "process `{}` is not externally-owned and cannot record a caller departure",
             record.id
@@ -217,7 +217,7 @@ pub fn apply_process_event_projection(
                 None => record.first_started = Some(Box::new(started)),
                 Some(existing) if existing.same_execution(&started) => {}
                 Some(existing)
-                    if (record.disposition == RecoveryDisposition::Rerunnable
+                    if (record.disposition == RecoveryContract::Rerunnable
                         || resumed_from_handover)
                         && started.attempt == existing.attempt.saturating_add(1) =>
                 {
@@ -706,9 +706,9 @@ fn process_registration_fingerprint_preimage(
         }
     }
     fingerprint.tag(match disposition {
-        super::model::RecoveryDisposition::Rerunnable => 1,
-        super::model::RecoveryDisposition::OwnerBound => 2,
-        super::model::RecoveryDisposition::ExternallyOwned => 3,
+        super::model::RecoveryContract::Rerunnable => 1,
+        super::model::RecoveryContract::OwnerBound => 2,
+        super::model::RecoveryContract::ExternallyOwned => 3,
     });
     fingerprint.optional(*max_attempts, crate::stable_identity::IdentityEncoder::u32);
 

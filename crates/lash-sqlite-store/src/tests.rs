@@ -172,7 +172,7 @@ fn registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryDisposition::ExternallyOwned,
+        lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
     )
 }

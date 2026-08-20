@@ -624,7 +624,7 @@ async fn advertised_url_elicitation_routes_its_completion_notification() {
     factory.shutdown().await.expect("shutdown MCP factory");
 }
 
-async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolResult {
+async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
     McpToolProvider::new(Arc::clone(factory.pool()))
         .execute(lash_core::ToolCall {
             name: "mcp__depth__exercise_client_depth",

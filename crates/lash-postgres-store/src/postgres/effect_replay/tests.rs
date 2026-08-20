@@ -81,7 +81,7 @@ impl GroupFixture {
             scope_id: self.scope_id.clone(),
             session_id: Some(self.session_id.clone()),
             wake: lash_core::GroupWakePolicy::All,
-            loser_disposition: lash_core::LoserDisposition::RunToCompletion,
+            loser_disposition: lash_core::LoserPolicy::RunToCompletion,
             children: 2,
             created_at_ms: 1_000,
         }
@@ -408,7 +408,7 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
 
     let mut shrunk = recorded.clone();
     shrunk.children = 1;
-    shrunk.loser_disposition = lash_core::LoserDisposition::Cancel;
+    shrunk.loser_disposition = lash_core::LoserPolicy::Cancel;
     shrunk.created_at_ms = 9_999;
     let reopened = fixture
         .store

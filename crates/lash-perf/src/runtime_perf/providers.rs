@@ -12,8 +12,8 @@ use lash_core::llm::types::{
 };
 use lash_core::testing::TestProvider;
 use lash_core::{
-    Resolution, ToolAttemptResult, ToolContract, ToolDefinition, ToolManifest, ToolOutputContract,
-    ToolProvider, ToolResult, ToolResultDone, TriggerOccurrenceRequest,
+    Resolution, ToolAttemptOutcome, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
+    ToolOutcomeDone, ToolOutputContract, ToolProvider, TriggerOccurrenceRequest,
     facade_support::DirectJsonSchema, facade_support::DirectRequest,
     facade_support::empty_trigger_source_key,
 };
@@ -238,14 +238,14 @@ impl ToolProvider for BenchmarkEchoTool {
         tool_id == benchmark_async_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
         match call.name {
             "benchmark_echo" => execute_benchmark_echo(call).await,
             "benchmark_slow" => execute_benchmark_slow(call).await,
             "benchmark_async" => {
                 execute_benchmark_async(Arc::clone(&self.completion_resolver), call).await
             }
-            _ => ToolResult::err_fmt(format_args!("Unknown benchmark tool: {}", call.name)),
+            _ => ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name)),
         }
     }
 }
@@ -264,12 +264,12 @@ impl ToolProvider for BenchmarkObliqueTools {
             .map(|definition| Arc::new(definition.contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
         match call.name {
             "oblique_search" => execute_oblique_search(call).await,
             "oblique_judge_candidates" => execute_oblique_judge_candidates(call).await,
             "oblique_list_async_handles" => execute_oblique_list_async_handles(call).await,
-            _ => ToolResult::err_fmt(format_args!(
+            _ => ToolOutcome::err_fmt(format_args!(
                 "Unknown benchmark oblique tool: {}",
                 call.name
             )),
@@ -290,28 +290,28 @@ impl ToolProvider for BenchmarkWorkbenchMailTool {
         benchmark_mail_tool_definition_for(name).map(|definition| Arc::new(definition.contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
         let Some((account, operation)) = benchmark_mail_route(call.name) else {
-            return ToolResult::err_fmt(format_args!(
+            return ToolOutcome::err_fmt(format_args!(
                 "Unknown benchmark workbench mail tool: {}",
                 call.name
             ));
         };
         match operation {
-            "send" => ToolResult::err_fmt(
+            "send" => ToolOutcome::err_fmt(
                 "benchmark mail send requires the leaf attempt signature that declares its emission",
             ),
-            "list" => ToolResult::ok(serde_json::json!({
+            "list" => ToolOutcome::ok(serde_json::json!({
                 "account": account,
                 "messages": [],
             })),
-            _ => ToolResult::err_fmt(format_args!("unsupported mail operation `{operation}`")),
+            _ => ToolOutcome::err_fmt(format_args!("unsupported mail operation `{operation}`")),
         }
     }
 
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
         let Some((account, operation)) = benchmark_mail_route(call.name) else {
-            return done_without_intents(ToolResult::err_fmt(format_args!(
+            return done_without_intents(ToolOutcome::err_fmt(format_args!(
                 "Unknown benchmark workbench mail tool: {}",
                 call.name
             )));
@@ -323,12 +323,12 @@ impl ToolProvider for BenchmarkWorkbenchMailTool {
     }
 }
 
-fn done_without_intents(result: ToolResult) -> ToolAttemptResult {
+fn done_without_intents(result: ToolOutcome) -> ToolAttemptOutcome {
     match result {
-        ToolResult::Done(output) => {
-            ToolAttemptResult::done_without_intents(ToolResultDone::from_output(*output))
+        ToolOutcome::Done(output) => {
+            ToolAttemptOutcome::done_without_intents(ToolOutcomeDone::from_output(*output))
         }
-        ToolResult::Pending(pending) => ToolAttemptResult::pending(pending),
+        ToolOutcome::Pending(pending) => ToolAttemptOutcome::pending(pending),
     }
 }
 
@@ -341,7 +341,7 @@ fn done_without_intents(result: ToolResult) -> ToolAttemptResult {
 fn execute_benchmark_mail_send(
     call: lash_core::ToolCall<'_>,
     account: &'static str,
-) -> ToolAttemptResult {
+) -> ToolAttemptOutcome {
     let title = call
         .args
         .get("title")
@@ -353,13 +353,13 @@ fn execute_benchmark_mail_send(
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
     let Some(replay_key) = call.context.replay_key() else {
-        return done_without_intents(ToolResult::err_fmt(
+        return done_without_intents(ToolOutcome::err_fmt(
             "benchmark mail send requires a replay key",
         ));
     };
     let source_key = match empty_trigger_source_key(BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE) {
         Ok(source_key) => source_key,
-        Err(err) => return done_without_intents(ToolResult::err_fmt(err.to_string())),
+        Err(err) => return done_without_intents(ToolOutcome::err_fmt(err.to_string())),
     };
     let message_id = format!("{account}-{replay_key}");
     let payload = serde_json::json!({
@@ -379,8 +379,8 @@ fn execute_benchmark_mail_send(
         )
         .with_source(serde_json::json!({})),
     });
-    ToolAttemptResult::done(
-        ToolResultDone::ok(serde_json::json!({
+    ToolAttemptOutcome::done(
+        ToolOutcomeDone::ok(serde_json::json!({
             "account": account,
             "id": message_id,
         })),
@@ -477,15 +477,15 @@ fn benchmark_mail_tool_definition(account: &str, operation: &str) -> ToolDefinit
     )
 }
 
-async fn execute_benchmark_echo(call: lash_core::ToolCall<'_>) -> ToolResult {
+async fn execute_benchmark_echo(call: lash_core::ToolCall<'_>) -> ToolOutcome {
     tokio::task::yield_now().await;
-    ToolResult::ok(serde_json::json!({
+    ToolOutcome::ok(serde_json::json!({
         "value": call.args.get("value").cloned().unwrap_or(serde_json::Value::Null),
         "ordinal": call.args.get("ordinal").cloned().unwrap_or(serde_json::Value::Null),
     }))
 }
 
-async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolResult {
+async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolOutcome {
     let delay_ms = call
         .args
         .get("delay_ms")
@@ -494,12 +494,12 @@ async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolResult {
     if let Some(cancel) = call.context.cancellation_token().cloned() {
         tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {}
-            _ = cancel.cancelled() => return ToolResult::cancelled("benchmark_slow cancelled"),
+            _ = cancel.cancelled() => return ToolOutcome::cancelled("benchmark_slow cancelled"),
         }
     } else {
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
     }
-    ToolResult::ok(serde_json::json!({
+    ToolOutcome::ok(serde_json::json!({
         "value": call.args.get("value").cloned().unwrap_or(serde_json::Value::Null),
         "delay_ms": delay_ms,
     }))
@@ -508,10 +508,10 @@ async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolResult {
 async fn execute_benchmark_async(
     completion_resolver: Arc<dyn lash_core::EffectHost>,
     call: lash_core::ToolCall<'_>,
-) -> ToolResult {
+) -> ToolOutcome {
     let key = match call.context.completion_key() {
         Ok(key) => key,
-        Err(err) => return ToolResult::err_fmt(err),
+        Err(err) => return ToolOutcome::err_fmt(err),
     };
     let delay_ms = call
         .args
@@ -538,7 +538,7 @@ async fn execute_benchmark_async(
             )
             .await;
     });
-    ToolResult::pending(lash_core::PendingCompletion::new())
+    ToolOutcome::pending(lash_core::PendingCompletion::new())
 }
 
 fn benchmark_echo_tool_definition() -> ToolDefinition {
@@ -768,7 +768,7 @@ fn oblique_search_output_schema() -> serde_json::Value {
     })
 }
 
-async fn execute_oblique_search(call: lash_core::ToolCall<'_>) -> ToolResult {
+async fn execute_oblique_search(call: lash_core::ToolCall<'_>) -> ToolOutcome {
     tokio::task::yield_now().await;
     let limit = call
         .args
@@ -810,10 +810,10 @@ async fn execute_oblique_search(call: lash_core::ToolCall<'_>) -> ToolResult {
             })
         })
         .collect::<Vec<_>>();
-    ToolResult::ok(serde_json::json!({ "matches": matches }))
+    ToolOutcome::ok(serde_json::json!({ "matches": matches }))
 }
 
-async fn execute_oblique_judge_candidates(call: lash_core::ToolCall<'_>) -> ToolResult {
+async fn execute_oblique_judge_candidates(call: lash_core::ToolCall<'_>) -> ToolOutcome {
     let candidate_ids = call
         .args
         .get("candidate_doc_ids")
@@ -827,7 +827,7 @@ async fn execute_oblique_judge_candidates(call: lash_core::ToolCall<'_>) -> Tool
         })
         .unwrap_or_default();
     if candidate_ids.is_empty() {
-        return ToolResult::err_fmt("oblique_judge_candidates requires candidate_doc_ids");
+        return ToolOutcome::err_fmt("oblique_judge_candidates requires candidate_doc_ids");
     }
     let completion = match call
         .context
@@ -839,7 +839,7 @@ async fn execute_oblique_judge_candidates(call: lash_core::ToolCall<'_>) -> Tool
         .await
     {
         Ok(completion) => completion,
-        Err(err) => return ToolResult::err_fmt(err.to_string()),
+        Err(err) => return ToolOutcome::err_fmt(err.to_string()),
     };
     let direct_completion = serde_json::from_str(&completion.text).unwrap_or_else(|_| {
         serde_json::json!({
@@ -853,16 +853,16 @@ async fn execute_oblique_judge_candidates(call: lash_core::ToolCall<'_>) -> Tool
         .take(8)
         .cloned()
         .collect::<Vec<_>>();
-    ToolResult::ok(serde_json::json!({
+    ToolOutcome::ok(serde_json::json!({
         "ranked_doc_ids": ranked_doc_ids,
         "positive_doc_ids": positive_doc_ids,
         "direct_completion": direct_completion,
     }))
 }
 
-async fn execute_oblique_list_async_handles(_call: lash_core::ToolCall<'_>) -> ToolResult {
+async fn execute_oblique_list_async_handles(_call: lash_core::ToolCall<'_>) -> ToolOutcome {
     tokio::task::yield_now().await;
-    ToolResult::ok(serde_json::json!({
+    ToolOutcome::ok(serde_json::json!({
         "monitor": { "rerank": { "__handle__": "monitor", "id": "rerank-monitor" } },
         "subagent": { "explore": { "__handle__": "subagent", "id": "explore-subagent" } },
         "tool": { "search": { "__handle__": "tool", "id": "search-tool" } }
@@ -916,12 +916,12 @@ impl ToolProvider for BenchmarkLargeToolCatalog {
         self.cache.contracts.get(name).cloned()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
         if !GMAIL_LIKE_TOOL_NAMES.contains(&call.name) {
-            return ToolResult::err_fmt(format_args!("Unknown benchmark tool: {}", call.name));
+            return ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name));
         }
         tokio::task::yield_now().await;
-        ToolResult::ok(serde_json::json!({
+        ToolOutcome::ok(serde_json::json!({
             "tool": call.name,
             "ok": true,
             "echo": call.args,

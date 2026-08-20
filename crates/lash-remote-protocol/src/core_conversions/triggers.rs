@@ -161,9 +161,9 @@ impl From<RemoteTriggerDeliveryEmitOutcome> for lash_core::facade_support::Trigg
     }
 }
 
-impl From<lash_core::facade_support::TriggerDeliveryEmitReport> for RemoteTriggerDeliveryEmitReport {
-    fn from(value: lash_core::facade_support::TriggerDeliveryEmitReport) -> Self {
-        let lash_core::facade_support::TriggerDeliveryEmitReport {
+impl From<lash_core::facade_support::TriggerDeliveryEmitReceipt> for RemoteTriggerDeliveryEmitReceipt {
+    fn from(value: lash_core::facade_support::TriggerDeliveryEmitReceipt) -> Self {
+        let lash_core::facade_support::TriggerDeliveryEmitReceipt {
             occurrence_id,
             subscription_id,
             process_id,
@@ -178,9 +178,9 @@ impl From<lash_core::facade_support::TriggerDeliveryEmitReport> for RemoteTrigge
     }
 }
 
-impl From<RemoteTriggerDeliveryEmitReport> for lash_core::facade_support::TriggerDeliveryEmitReport {
-    fn from(value: RemoteTriggerDeliveryEmitReport) -> Self {
-        let RemoteTriggerDeliveryEmitReport {
+impl From<RemoteTriggerDeliveryEmitReceipt> for lash_core::facade_support::TriggerDeliveryEmitReceipt {
+    fn from(value: RemoteTriggerDeliveryEmitReceipt) -> Self {
+        let RemoteTriggerDeliveryEmitReceipt {
             occurrence_id,
             subscription_id,
             process_id,
@@ -265,7 +265,7 @@ impl From<lash_core::facade_support::TriggerRegistration> for RemoteTriggerRegis
             target,
             enabled,
         } = value;
-        let lash_core::facade_support::TriggerTargetSummary {
+        let lash_core::facade_support::TriggerTarget {
             label,
             identity,
             input,
@@ -291,7 +291,7 @@ impl From<lash_core::facade_support::TriggerRegistration> for RemoteTriggerRegis
             name,
             source_type: source_type.to_string(),
             source,
-            target: RemoteTriggerTargetSummary {
+            target: RemoteTriggerTarget {
                 label,
                 identity: identity.into(),
                 input: input.try_into().expect("core process input serializes remotely"),
@@ -319,7 +319,7 @@ impl TryFrom<RemoteTriggerRegistration> for lash_core::facade_support::TriggerRe
             target,
             enabled,
         } = value;
-        let RemoteTriggerTargetSummary {
+        let RemoteTriggerTarget {
             label,
             identity,
             input,
@@ -345,7 +345,7 @@ impl TryFrom<RemoteTriggerRegistration> for lash_core::facade_support::TriggerRe
             name,
             source_type: lash_core::facade_support::TriggerEventType::new(source_type),
             source,
-            target: lash_core::facade_support::TriggerTargetSummary {
+            target: lash_core::facade_support::TriggerTarget {
                 label,
                 identity: identity.into(),
                 input: input.try_into()?,
@@ -633,7 +633,7 @@ impl TryFrom<RemoteTriggerRegisterSubscriptionRequest> for lash_core::TriggerSub
     }
 }
 
-impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerRegisterSubscriptionResult {
+impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerRegisterSubscriptionReceipt {
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::TriggerSubscriptionRecord) -> Result<Self, Self::Error> {
@@ -644,12 +644,12 @@ impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerRegisterSubs
     }
 }
 
-impl TryFrom<RemoteTriggerRegisterSubscriptionResult> for lash_core::TriggerSubscriptionRecord {
+impl TryFrom<RemoteTriggerRegisterSubscriptionReceipt> for lash_core::TriggerSubscriptionRecord {
     type Error = RemoteProtocolError;
 
-    fn try_from(value: RemoteTriggerRegisterSubscriptionResult) -> Result<Self, Self::Error> {
+    fn try_from(value: RemoteTriggerRegisterSubscriptionReceipt) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteTriggerRegisterSubscriptionResult {
+        let RemoteTriggerRegisterSubscriptionReceipt {
             protocol_version: _,
             record,
         } = value;

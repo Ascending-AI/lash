@@ -247,12 +247,12 @@ pub enum LiveReplayStoreError {
 }
 
 #[derive(Clone, Debug)]
-pub enum LiveReplayResult {
+pub enum LiveReplayOutcome {
     Replayed(Vec<Arc<SessionObservationEvent>>),
     Gap(LiveReplayGapReason),
 }
 
-pub enum LiveReplaySubscribeResult {
+pub enum LiveReplaySubscribeOutcome {
     Subscribed(LiveReplaySubscription),
     Gap(LiveReplayGapReason),
 }
@@ -372,7 +372,7 @@ pub trait LiveReplayStore: Send + Sync {
     fn replay_after_cursor(
         &self,
         cursor: &SessionCursor,
-    ) -> Result<LiveReplayResult, LiveReplayStoreError>;
+    ) -> Result<LiveReplayOutcome, LiveReplayStoreError>;
 
     /// Subscribe after `cursor`, replaying buffered events before live events.
     ///
@@ -380,7 +380,7 @@ pub trait LiveReplayStore: Send + Sync {
     fn subscribe_after_cursor(
         &self,
         cursor: &SessionCursor,
-    ) -> Result<LiveReplaySubscribeResult, LiveReplayStoreError>;
+    ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>;
 
     /// Return the latest cursor known locally for a session without skipping
     /// buffered events newer than `revision`.
@@ -574,7 +574,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     fn replay_after_cursor(
         &self,
         cursor: &SessionCursor,
-    ) -> Result<LiveReplayResult, LiveReplayStoreError> {
+    ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
         let now = self.clock.now();
@@ -584,7 +584,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         }
         let buffer = sessions.get(&parsed.session_id);
         if let Some(reason) = Self::gap_reason_for_cursor(buffer, parsed.live_position) {
-            return Ok(LiveReplayResult::Gap(reason));
+            return Ok(LiveReplayOutcome::Gap(reason));
         }
         let events = buffer
             .map(|buffer| {
@@ -596,13 +596,13 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(LiveReplayResult::Replayed(events))
+        Ok(LiveReplayOutcome::Replayed(events))
     }
 
     fn subscribe_after_cursor(
         &self,
         cursor: &SessionCursor,
-    ) -> Result<LiveReplaySubscribeResult, LiveReplayStoreError> {
+    ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
         let now = self.clock.now();
@@ -612,7 +612,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             .or_insert_with(LiveReplaySessionBuffer::new);
         Self::trim_locked(&self.config, buffer, now);
         if let Some(reason) = Self::gap_reason_for_cursor(Some(buffer), parsed.live_position) {
-            return Ok(LiveReplaySubscribeResult::Gap(reason));
+            return Ok(LiveReplaySubscribeOutcome::Gap(reason));
         }
         let replay = buffer
             .events
@@ -621,7 +621,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             .map(|event| clone_event(&event.event))
             .collect();
         let receiver = buffer.subscribe(self.config.max_events_per_session);
-        Ok(LiveReplaySubscribeResult::Subscribed(
+        Ok(LiveReplaySubscribeOutcome::Subscribed(
             LiveReplaySubscription::new(replay, receiver),
         ))
     }
@@ -726,7 +726,8 @@ mod tests {
         store
             .append("s", SessionRevision(0), None, activity("b"))
             .expect("append b");
-        let LiveReplayResult::Replayed(events) = store.replay_after_cursor(&start).expect("replay")
+        let LiveReplayOutcome::Replayed(events) =
+            store.replay_after_cursor(&start).expect("replay")
         else {
             panic!("expected replay");
         };
@@ -751,7 +752,7 @@ mod tests {
         // worker publishes revision 2. Its initial cursor must not skip that
         // newer event merely because the live-replay tail already advanced.
         let stale_snapshot_cursor = store.current_cursor("s", SessionRevision(1));
-        let LiveReplayResult::Replayed(events) = store
+        let LiveReplayOutcome::Replayed(events) = store
             .replay_after_cursor(&stale_snapshot_cursor)
             .expect("replay from stale snapshot")
         else {
@@ -773,7 +774,7 @@ mod tests {
             .expect("append b");
         assert!(matches!(
             store.replay_after_cursor(&start).expect("gap"),
-            LiveReplayResult::Gap(LiveReplayGapReason::Trimmed)
+            LiveReplayOutcome::Gap(LiveReplayGapReason::Trimmed)
         ));
     }
 
@@ -787,7 +788,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(5));
         assert!(matches!(
             store.replay_after_cursor(&start).expect("gap"),
-            LiveReplayResult::Gap(LiveReplayGapReason::Trimmed)
+            LiveReplayOutcome::Gap(LiveReplayGapReason::Trimmed)
         ));
     }
 
@@ -797,7 +798,7 @@ mod tests {
         let ahead = SessionCursor::new("s", SessionRevision(0), 99);
         assert!(matches!(
             store.replay_after_cursor(&ahead).expect("gap"),
-            LiveReplayResult::Gap(LiveReplayGapReason::Unavailable)
+            LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable)
         ));
     }
 
@@ -808,7 +809,7 @@ mod tests {
         store
             .append("s", SessionRevision(0), None, activity("a"))
             .expect("append a");
-        let LiveReplaySubscribeResult::Subscribed(mut subscription) =
+        let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
             store.subscribe_after_cursor(&start).expect("subscribe")
         else {
             panic!("expected subscription");
@@ -840,7 +841,7 @@ mod tests {
         const TOKENS: usize = 1_000;
         let store = InMemoryLiveReplayStore::with_bounds(TOKENS + 1, Duration::from_secs(120));
         let mut cursor = store.current_cursor("perf-session", SessionRevision(7));
-        let LiveReplaySubscribeResult::Subscribed(mut subscription) = store
+        let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
             .subscribe_after_cursor(&cursor)
             .expect("subscribe for allocation measurement")
         else {
@@ -864,7 +865,7 @@ mod tests {
                 .expect("subscription open")
                 .expect("receive live event");
             assert_eq!(live.cursor, event.cursor);
-            let LiveReplayResult::Replayed(replayed) = store
+            let LiveReplayOutcome::Replayed(replayed) = store
                 .replay_after_cursor(&cursor)
                 .expect("replay token event")
             else {
@@ -895,7 +896,7 @@ mod tests {
             let sessions = store.sessions.lock_recover();
             assert!(sessions.get("s").expect("buffer").sender.is_none());
         }
-        let LiveReplaySubscribeResult::Subscribed(subscription) =
+        let LiveReplaySubscribeOutcome::Subscribed(subscription) =
             store.subscribe_after_cursor(&start).expect("subscribe")
         else {
             panic!("expected subscription");
@@ -924,7 +925,7 @@ mod tests {
             .expect("append b");
         assert!(matches!(
             store.subscribe_after_cursor(&start).expect("subscribe"),
-            LiveReplaySubscribeResult::Gap(LiveReplayGapReason::Trimmed)
+            LiveReplaySubscribeOutcome::Gap(LiveReplayGapReason::Trimmed)
         ));
     }
 
@@ -938,7 +939,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(5));
         assert!(matches!(
             store.subscribe_after_cursor(&start).expect("subscribe"),
-            LiveReplaySubscribeResult::Gap(LiveReplayGapReason::Trimmed)
+            LiveReplaySubscribeOutcome::Gap(LiveReplayGapReason::Trimmed)
         ));
     }
 }

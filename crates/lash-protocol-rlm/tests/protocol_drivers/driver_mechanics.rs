@@ -148,8 +148,8 @@ fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
                 provider_finish_reason: Some("stop_sequence".to_string()),
                 ..Default::default()
             }),
-            generation_disposition: Some(lash_core::GenerationDisposition {
-                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+            generation_disposition: Some(lash_core::GenerationReceipt {
+                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
                 ..Default::default()
             }),
             ..LlmResponse::default()
@@ -316,8 +316,8 @@ fn illustrative_prose_with_an_unclosed_cell_retries_without_execution() {
             full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
-            generation_disposition: Some(lash_core::GenerationDisposition {
-                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+            generation_disposition: Some(lash_core::GenerationReceipt {
+                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
                 ..Default::default()
             }),
             ..LlmResponse::default()
@@ -351,8 +351,8 @@ fn natural_end_turn_with_a_partial_program_retries_without_execution() {
             full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
-            generation_disposition: Some(lash_core::GenerationDisposition {
-                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+            generation_disposition: Some(lash_core::GenerationReceipt {
+                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
                 ..Default::default()
             }),
             ..LlmResponse::default()
@@ -527,8 +527,8 @@ fn output_limit_prose_cut_at_a_close_tag_mention_retries() {
             full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
-            generation_disposition: Some(lash_core::GenerationDisposition {
-                stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+            generation_disposition: Some(lash_core::GenerationReceipt {
+                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
                 ..Default::default()
             }),
             ..LlmResponse::default()

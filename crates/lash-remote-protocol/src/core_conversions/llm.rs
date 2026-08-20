@@ -375,9 +375,9 @@ impl From<RemoteLlmResponse> for core_llm::LlmResponse {
     }
 }
 
-impl From<core_llm::GenerationDisposition> for RemoteGenerationDisposition {
-    fn from(value: core_llm::GenerationDisposition) -> Self {
-        let core_llm::GenerationDisposition {
+impl From<core_llm::GenerationReceipt> for RemoteGenerationReceipt {
+    fn from(value: core_llm::GenerationReceipt) -> Self {
+        let core_llm::GenerationReceipt {
             output_token_cap,
             temperature,
             seed,
@@ -394,9 +394,9 @@ impl From<core_llm::GenerationDisposition> for RemoteGenerationDisposition {
     }
 }
 
-impl From<RemoteGenerationDisposition> for core_llm::GenerationDisposition {
-    fn from(value: RemoteGenerationDisposition) -> Self {
-        let RemoteGenerationDisposition {
+impl From<RemoteGenerationReceipt> for core_llm::GenerationReceipt {
+    fn from(value: RemoteGenerationReceipt) -> Self {
+        let RemoteGenerationReceipt {
             output_token_cap,
             temperature,
             seed,
@@ -413,36 +413,36 @@ impl From<RemoteGenerationDisposition> for core_llm::GenerationDisposition {
     }
 }
 
-impl From<core_llm::GenerationOptionDisposition> for RemoteGenerationOptionDisposition {
-    fn from(value: core_llm::GenerationOptionDisposition) -> Self {
+impl From<core_llm::GenerationOptionOutcome> for RemoteGenerationOptionOutcome {
+    fn from(value: core_llm::GenerationOptionOutcome) -> Self {
         match value {
-            core_llm::GenerationOptionDisposition::NotRequested => Self::NotRequested,
-            core_llm::GenerationOptionDisposition::Applied => Self::Applied,
-            core_llm::GenerationOptionDisposition::SuppressedProtocolOwned => {
+            core_llm::GenerationOptionOutcome::NotRequested => Self::NotRequested,
+            core_llm::GenerationOptionOutcome::Applied => Self::Applied,
+            core_llm::GenerationOptionOutcome::SuppressedProtocolOwned => {
                 Self::SuppressedProtocolOwned
             }
-            core_llm::GenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
-            core_llm::GenerationOptionDisposition::OmittedSamplingPinned => {
+            core_llm::GenerationOptionOutcome::OmittedUnsupported => Self::OmittedUnsupported,
+            core_llm::GenerationOptionOutcome::OmittedSamplingPinned => {
                 Self::OmittedSamplingPinned
             }
-            core_llm::GenerationOptionDisposition::ClampedToCapacity => Self::ClampedToCapacity,
+            core_llm::GenerationOptionOutcome::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
 }
 
-impl From<RemoteGenerationOptionDisposition> for core_llm::GenerationOptionDisposition {
-    fn from(value: RemoteGenerationOptionDisposition) -> Self {
+impl From<RemoteGenerationOptionOutcome> for core_llm::GenerationOptionOutcome {
+    fn from(value: RemoteGenerationOptionOutcome) -> Self {
         match value {
-            RemoteGenerationOptionDisposition::NotRequested => Self::NotRequested,
-            RemoteGenerationOptionDisposition::Applied => Self::Applied,
-            RemoteGenerationOptionDisposition::SuppressedProtocolOwned => {
+            RemoteGenerationOptionOutcome::NotRequested => Self::NotRequested,
+            RemoteGenerationOptionOutcome::Applied => Self::Applied,
+            RemoteGenerationOptionOutcome::SuppressedProtocolOwned => {
                 Self::SuppressedProtocolOwned
             }
-            RemoteGenerationOptionDisposition::OmittedUnsupported => Self::OmittedUnsupported,
-            RemoteGenerationOptionDisposition::OmittedSamplingPinned => {
+            RemoteGenerationOptionOutcome::OmittedUnsupported => Self::OmittedUnsupported,
+            RemoteGenerationOptionOutcome::OmittedSamplingPinned => {
                 Self::OmittedSamplingPinned
             }
-            RemoteGenerationOptionDisposition::ClampedToCapacity => Self::ClampedToCapacity,
+            RemoteGenerationOptionOutcome::ClampedToCapacity => Self::ClampedToCapacity,
         }
     }
 }

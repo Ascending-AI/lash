@@ -41,7 +41,7 @@ fn remote_process_start_request() -> anyhow::Result<()> {
     use lash::remote::processes::{
         RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessInput,
         RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessOriginator,
-        RemoteProcessPluginOptions, RemoteProcessStartRequest, RemoteRecoveryDisposition,
+        RemoteProcessPluginOptions, RemoteProcessStartRequest, RemoteRecoveryContract,
         RemoteTurnBudget,
     };
     use serde_json::json;
@@ -52,7 +52,7 @@ fn remote_process_start_request() -> anyhow::Result<()> {
         input: RemoteProcessInput::External {
             metadata: json!({ "source": "scheduler" }),
         },
-        disposition: RemoteRecoveryDisposition::ExternallyOwned,
+        disposition: RemoteRecoveryContract::ExternallyOwned,
         max_attempts: None,
         env_spec: Some(RemoteProcessExecutionEnvSpec {
             plugin_options: RemoteProcessPluginOptions {
@@ -94,21 +94,21 @@ mod asserted_process_examples {
     use lash::remote::REMOTE_PROTOCOL_VERSION;
     use lash::remote::processes::{
         RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter, RemoteObservedProcess,
-        RemoteObservedProcessEvent, RemotePersistProcessEnvRequest, RemotePersistProcessEnvResult,
-        RemoteProcessAwaitOutput, RemoteProcessAwaitRequest, RemoteProcessAwaitResult,
-        RemoteProcessCancelRequest, RemoteProcessCancelResult, RemoteProcessDefinitionIdentity,
+        RemoteObservedProcessEvent, RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
+        RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
+        RemoteProcessCancelReceipt, RemoteProcessCancelRequest, RemoteProcessDefinitionIdentity,
         RemoteProcessEvent, RemoteProcessEventSemantics, RemoteProcessEventSemanticsSpec,
         RemoteProcessEventType, RemoteProcessEventsRequest, RemoteProcessEventsResponse,
         RemoteProcessExecutionEnvRef, RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy,
-        RemoteProcessExternalRef, RemoteProcessInput, RemoteProcessListFilter,
-        RemoteProcessListResponse, RemoteProcessModelLimits, RemoteProcessModelSpec,
-        RemoteProcessOriginator, RemoteProcessPluginOptions, RemoteProcessProvenance,
-        RemoteProcessSignalRequest, RemoteProcessSignalResult, RemoteProcessStartRequest,
-        RemoteProcessStartResult, RemoteProcessStarted, RemoteProcessStatus,
-        RemoteProcessStatusFilter, RemoteProcessSummary, RemoteProcessTerminalSemantics,
+        RemoteProcessExternalRef, RemoteProcessHandleView, RemoteProcessInput,
+        RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
+        RemoteProcessModelSpec, RemoteProcessOriginator, RemoteProcessPluginOptions,
+        RemoteProcessProvenance, RemoteProcessSignalReceipt, RemoteProcessSignalRequest,
+        RemoteProcessStartReceipt, RemoteProcessStartRequest, RemoteProcessStarted,
+        RemoteProcessStatus, RemoteProcessStatusFilter, RemoteProcessTerminalSemantics,
         RemoteProcessTerminalSpec, RemoteProcessValueSelector, RemoteProcessWaitKind,
         RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-        RemoteProcessWorkSnapshot, RemoteRecoveryDisposition, RemoteRuntimeEffectKind,
+        RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeEffectKind,
         RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
         RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
     };
@@ -142,7 +142,7 @@ mod asserted_process_examples {
                 kind: "report-export".to_string(),
                 payload: json!({ "format": "csv", "rows": 12 }),
             },
-            disposition: RemoteRecoveryDisposition::Rerunnable,
+            disposition: RemoteRecoveryContract::Rerunnable,
             max_attempts: Some(3),
             identity: process_identity(),
             event_types: vec![progress_event_type()],
@@ -278,7 +278,7 @@ mod asserted_process_examples {
             lifecycle: RemoteProcessStatus::Waiting,
             status_label: "waiting".to_string(),
             terminal: false,
-            disposition: RemoteRecoveryDisposition::Rerunnable,
+            disposition: RemoteRecoveryContract::Rerunnable,
             error: None,
             created_at_ms: 1_720_000_000_000,
             updated_at_ms: 1_720_000_000_100,
@@ -369,7 +369,7 @@ mod asserted_process_examples {
                 kind: "report-export".to_string(),
                 payload: json!({ "format": "csv", "rows": 12 }),
             },
-            disposition: RemoteRecoveryDisposition::Rerunnable,
+            disposition: RemoteRecoveryContract::Rerunnable,
             max_attempts: Some(3),
             env_spec: Some(env_spec.clone()),
             originator: RemoteProcessOriginator::Session {
@@ -465,18 +465,18 @@ mod asserted_process_examples {
         };
         RemotePersistProcessEnvRequest::validate(&persist)
             .expect("valid environment persist request");
-        let persisted = RemotePersistProcessEnvResult {
+        let persisted = RemotePersistProcessEnvReceipt {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             env_ref: env_ref.clone(),
         };
-        RemotePersistProcessEnvResult::validate(&persisted)
+        RemotePersistProcessEnvReceipt::validate(&persisted)
             .expect("valid environment persist result");
         assert_eq!(persisted.env_ref, env_ref);
 
-        let start_result = RemoteProcessStartResult {
+        let start_result = RemoteProcessStartReceipt {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             record: running_record(),
-            summary: Some(RemoteProcessSummary {
+            summary: Some(RemoteProcessHandleView {
                 handle_type: "process".to_string(),
                 id: "invoice-export".to_string(),
                 process_id: "invoice-export".to_string(),
@@ -488,10 +488,10 @@ mod asserted_process_examples {
                 status: RemoteProcessStatus::Waiting,
             }),
         };
-        RemoteProcessStartResult::validate(&start_result).expect("valid process start result");
-        RemoteProcessSummary::validate(
+        RemoteProcessStartReceipt::validate(&start_result).expect("valid process start result");
+        RemoteProcessHandleView::validate(
             start_result.summary.as_ref().expect("start summary"),
-            "RemoteProcessSummary",
+            "RemoteProcessHandleView",
         )
         .expect("valid process handle summary");
         RemoteProcessDefinitionIdentity::validate(
@@ -623,7 +623,7 @@ mod asserted_process_examples {
             signal.replay_key.as_deref(),
             Some("invoice-export:signal:approval:1")
         );
-        let signal_result = RemoteProcessSignalResult {
+        let signal_result = RemoteProcessSignalReceipt {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             event: signal_event(),
         };
@@ -673,7 +673,7 @@ mod asserted_process_examples {
         .expect("valid projected event semantics");
         RemoteProcessEvent::validate(&signal_result.event, "RemoteProcessEvent")
             .expect("valid signal event");
-        RemoteProcessSignalResult::validate(&signal_result).expect("valid signal result");
+        RemoteProcessSignalReceipt::validate(&signal_result).expect("valid signal result");
         let signal_json = serde_json::to_value(&signal_result).expect("signal result serializes");
         assert_eq!(signal_json["event"]["sequence"], 3);
         assert_eq!(signal_json["event"]["process_id"], "invoice-export");
@@ -772,7 +772,7 @@ mod asserted_process_examples {
             process_id: "invoice-export".to_string(),
         };
         RemoteProcessAwaitRequest::validate(&await_request).expect("valid process await request");
-        let await_result = RemoteProcessAwaitResult {
+        let await_result = RemoteProcessAwaitOutcome {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             process_id: "invoice-export".to_string(),
             output: RemoteProcessAwaitOutput::Success {
@@ -780,7 +780,7 @@ mod asserted_process_examples {
                 control: None,
             },
         };
-        RemoteProcessAwaitResult::validate(&await_result).expect("valid process await result");
+        RemoteProcessAwaitOutcome::validate(&await_result).expect("valid process await result");
         let await_json = serde_json::to_value(&await_result).expect("await result serializes");
         assert_eq!(await_json["output"]["type"], "success");
         assert_eq!(await_json["output"]["value"]["artifact"], "invoices.csv");
@@ -791,13 +791,13 @@ mod asserted_process_examples {
             reason: Some("operator requested cancellation".to_string()),
         };
         RemoteProcessCancelRequest::validate(&cancel_request).expect("valid cancellation request");
-        let cancel_result = RemoteProcessCancelResult {
+        let cancel_result = RemoteProcessCancelReceipt {
             protocol_version: REMOTE_PROTOCOL_VERSION,
             process_id: "invoice-export".to_string(),
             status: RemoteProcessStatus::Cancelled,
             record: None,
         };
-        RemoteProcessCancelResult::validate(&cancel_result).expect("valid cancellation result");
+        RemoteProcessCancelReceipt::validate(&cancel_result).expect("valid cancellation result");
         assert!(cancel_result.status.is_terminal());
         assert_eq!(cancel_result.process_id, "invoice-export");
 

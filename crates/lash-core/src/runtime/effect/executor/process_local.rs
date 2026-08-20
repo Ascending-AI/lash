@@ -272,7 +272,7 @@ mod tests {
                     crate::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    crate::RecoveryDisposition::ExternallyOwned,
+                    crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
                 )
                 .with_extra_event_types([crate::ProcessEventType {

@@ -110,7 +110,7 @@ mod process_work_tests {
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
-                    lash::process::RecoveryDisposition::ExternallyOwned,
+                    lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
@@ -183,7 +183,7 @@ mod process_work_tests {
                 lash::process::ProcessInput::External {
                     metadata: Value::Null,
                 },
-                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
             ))
             .await
@@ -300,7 +300,7 @@ mod process_work_tests {
                 lash::process::ProcessInput::External {
                     metadata: json!({ "test": true }),
                 },
-                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     &session_id,
                 )),
@@ -371,11 +371,11 @@ mod process_work_tests {
         use lash::process::{
             CausalRef, ProcessAwaitOutput, ProcessChangeCursor, ProcessCompletionAuthority,
             ProcessEventAppendRequest, ProcessEventType, ProcessExecutionEnvRef,
-            ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleSummary, ProcessIdentity, ProcessInput,
+            ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessInput,
             ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode, ProcessObserverBy,
             ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
             ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
-            ProjectionWatermark, RecoveryDisposition, SessionScope,
+            ProjectionWatermark, RecoveryContract, SessionScope,
         };
         let registry = lash::testing::TestLocalProcessRegistry::default();
         let process_id = "invoice-export";
@@ -445,7 +445,7 @@ mod process_work_tests {
         let registration = ProcessRegistration::new(
             process_id,
             input,
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
         )
         .with_process_provenance(provenance)
@@ -459,7 +459,7 @@ mod process_work_tests {
         }])
         .with_wake_session_id(Some("session-finance".to_string()));
         assert_eq!(registration.id, process_id);
-        assert_eq!(registration.disposition, RecoveryDisposition::Rerunnable);
+        assert_eq!(registration.disposition, RecoveryContract::Rerunnable);
         assert_eq!(registration.max_attempts, Some(3));
         assert_eq!(
             registration.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),
@@ -486,7 +486,7 @@ mod process_work_tests {
         assert_eq!(record.originator_id(), "session-finance");
         assert_eq!(record.identity.label.as_deref(), Some("Nightly invoice export"));
         assert_eq!(record.max_attempts, Some(3));
-        assert_eq!(record.disposition, RecoveryDisposition::Rerunnable);
+        assert_eq!(record.disposition, RecoveryContract::Rerunnable);
         assert_eq!(record.input.engine_specific_kind(), Some("report-export"));
         assert_eq!(record.provenance.originator, ProcessOriginator::Session {
             session_id: "session-finance".to_string(),
@@ -759,7 +759,7 @@ mod process_work_tests {
             "operator cancelled"
         );
 
-        let handle = ProcessHandleSummary::from_record(completed.clone())
+        let handle = ProcessHandleView::from_record(completed.clone())
             .with_definition(Some(json!({ "workflow": "invoice-export", "revision": 7 })));
         assert_eq!(handle.handle_type, "process");
         assert_eq!(handle.id, process_id);
@@ -768,7 +768,7 @@ mod process_work_tests {
         assert_eq!(handle.label.as_deref(), Some("Nightly invoice export"));
         assert_eq!(handle.definition.as_ref().unwrap()["revision"], 7);
         assert_eq!(handle.status, ProcessStatus::Completed);
-        let cancel_summary = lash::process::ProcessCancelSummary::from_record(completed.clone());
+        let cancel_summary = lash::process::ProcessCancelReceipt::from_record(completed.clone());
         assert_eq!(cancel_summary.process_id, process_id);
         assert_eq!(cancel_summary.status, ProcessStatus::Completed);
 
@@ -804,7 +804,7 @@ mod process_work_tests {
                 ProcessInput::External {
                     metadata: json!({ "backend": "batch-service" }),
                 },
-                RecoveryDisposition::ExternallyOwned,
+                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::new(ProcessOriginator::host_scoped("batch-service")),
             ))
             .await
@@ -893,7 +893,7 @@ mod process_work_tests {
     async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         use lash::process::{
             ProcessCompletionAuthority, ProcessInput, ProcessProvenance, ProcessRegistration,
-            RecoveryDisposition, SessionScope,
+            RecoveryContract, SessionScope,
         };
         let data_dir = std::env::temp_dir().join(format!(
             "agent-workbench-session-delete-retention-{}",
@@ -986,7 +986,7 @@ mod process_work_tests {
                     ProcessInput::External {
                         metadata: json!({ "trigger_delivery": originator.is_some() }),
                     },
-                    RecoveryDisposition::ExternallyOwned,
+                    RecoveryContract::ExternallyOwned,
                     match &originator {
                         Some(session_id) => {
                             ProcessProvenance::session(SessionScope::new(session_id))

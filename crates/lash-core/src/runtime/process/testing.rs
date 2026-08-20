@@ -9,8 +9,8 @@ use tokio::sync::Mutex;
 use crate::plugin::PluginError;
 
 use super::events::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult, terminal_append_request,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, terminal_append_request,
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
@@ -19,7 +19,7 @@ use super::model::{
     ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
     ProcessTombstone, SessionId, WaitState,
 };
-use super::references::ProcessLiveReferenceSummary;
+use super::references::ProcessLiveReferenceView;
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
 use super::registry_transitions;
 use super::validation::{
@@ -50,7 +50,7 @@ impl TestLocalProcessRegistry {
         &self,
         record: &mut ManagedProcessRecord,
         request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendResult, PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
         let replay_lookup = request
             .replay
             .as_ref()
@@ -96,7 +96,7 @@ impl TestLocalProcessRegistry {
                     record.record = repaired;
                     record.change_seq = self.next_change_seq().await;
                 }
-                Ok(ProcessEventAppendResult {
+                Ok(ProcessEventAppendReceipt {
                     event,
                     wake_delivery,
                 })
@@ -121,7 +121,7 @@ impl TestLocalProcessRegistry {
                 if let Some(replay) = event.invocation.replay.clone() {
                     record.keyed_events.insert(replay.key, event.clone());
                 }
-                Ok(ProcessEventAppendResult {
+                Ok(ProcessEventAppendReceipt {
                     event,
                     wake_delivery,
                 })
@@ -494,7 +494,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         process_id: &str,
         request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendResult, PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
         super::validate_generic_process_event_append(&request)?;
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
@@ -509,7 +509,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendResult, PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(process_id) else {
@@ -1336,11 +1336,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         worklist::list_non_terminal_page(self, limit, continuation).await
     }
 
-    async fn live_reference_summary(
-        &self,
-    ) -> Result<Vec<ProcessLiveReferenceSummary>, PluginError> {
+    async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
         let managed = self.managed.lock().await;
-        Ok(ProcessLiveReferenceSummary::from_records(
+        Ok(ProcessLiveReferenceView::from_records(
             managed.values().map(|record| &record.record),
         ))
     }

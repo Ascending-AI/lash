@@ -37,10 +37,10 @@ pub(super) async fn assert_process_count_conservation(
         })
         .await
         .map_err(|error| error.to_string())?;
-    let canonical = ProcessLiveReferenceSummary::from_records(&retained);
+    let canonical = ProcessLiveReferenceView::from_records(&retained);
     if summaries != canonical {
         return Err(format!(
-            "process live-reference summary diverged from ProcessLiveReferenceSummary::from_records: actual={summaries:?} canonical={canonical:?}"
+            "process live-reference summary diverged from ProcessLiveReferenceView::from_records: actual={summaries:?} canonical={canonical:?}"
         ));
     }
 
@@ -92,7 +92,7 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
                         kind: "reference-test".to_string(),
                         payload: serde_json::Value::Null,
                     },
-                    RecoveryDisposition::Rerunnable,
+                    RecoveryContract::Rerunnable,
                     ProcessProvenance::host(),
                 )
                 .with_identity(
@@ -168,9 +168,7 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
     );
 }
 
-fn reference_counts(
-    summaries: Vec<ProcessLiveReferenceSummary>,
-) -> BTreeMap<(String, String), usize> {
+fn reference_counts(summaries: Vec<ProcessLiveReferenceView>) -> BTreeMap<(String, String), usize> {
     summaries
         .into_iter()
         .map(|summary| {

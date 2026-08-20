@@ -167,12 +167,12 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                             ..Default::default()
                         }),
                         generation_disposition: Some(
-                            lash::remote::llm::RemoteGenerationDisposition {
-                                output_token_cap: lash::remote::llm::RemoteGenerationOptionDisposition::ClampedToCapacity,
-                                temperature: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
-                                seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
-                                stop_sequences: lash::remote::llm::RemoteGenerationOptionDisposition::SuppressedProtocolOwned,
-                                cache: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
+                            lash::remote::llm::RemoteGenerationReceipt {
+                                output_token_cap: lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity,
+                                temperature: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedSamplingPinned,
+                                seed: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
+                                stop_sequences: lash::remote::llm::RemoteGenerationOptionOutcome::SuppressedProtocolOwned,
+                                cache: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
                             },
                         ),
                         usage: Some(lash::remote::usage::RemoteUsage {
@@ -233,7 +233,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
         .expect("generation disposition");
     assert_eq!(
         generation.output_token_cap,
-        lash::remote::llm::RemoteGenerationOptionDisposition::ClampedToCapacity
+        lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity
     );
     assert_eq!(
         aborted.usage.as_ref().expect("attempt usage").output_tokens,

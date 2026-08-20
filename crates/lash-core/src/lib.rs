@@ -211,7 +211,7 @@ pub mod facade_support {
     pub use crate::direct::DirectJsonSchema;
     pub use crate::direct::DirectLlmClient;
     pub use crate::direct::DirectLlmError;
-    pub use crate::direct::DirectLlmResult;
+    pub use crate::direct::DirectLlmOutcome;
     pub use crate::direct::DirectMessage;
     pub use crate::direct::DirectOutputSpec;
     pub use crate::direct::DirectPart;
@@ -263,8 +263,8 @@ pub mod facade_support {
     pub use crate::plugin::ToolResultProjector;
     pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
+    pub use crate::plugin::TurnHookReport;
     pub use crate::plugin::TurnResultHookContext;
-    pub use crate::plugin::TurnResultSummary;
     pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
     pub use crate::plugin_stack::PluginStack;
@@ -290,7 +290,6 @@ pub mod facade_support {
     pub use crate::runtime::DurableProcessWorkerConfig;
     pub use crate::runtime::EmbeddedRuntimeHost;
     pub use crate::runtime::EventSink;
-    pub use crate::runtime::ExecutionSummary;
     pub use crate::runtime::InMemoryLiveReplayStore;
     pub use crate::runtime::InMemoryLiveReplayStoreConfig;
     pub use crate::runtime::InMemoryProcessExecutionEnvStore;
@@ -321,7 +320,7 @@ pub mod facade_support {
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;
     pub use crate::runtime::ProcessExecutionConcurrencyError;
-    pub use crate::runtime::ProcessRecoveryAttemptDisposition;
+    pub use crate::runtime::ProcessRecoveryAttemptOutcome;
     pub use crate::runtime::ProcessRecoveryOperation;
     pub use crate::runtime::ProcessRunHandle;
     pub use crate::runtime::ProcessRuntimeHost;
@@ -352,8 +351,8 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkRunRequest;
     pub use crate::runtime::QueuedWorkSlowWake;
     pub use crate::runtime::QueuedWorkWakeContended;
-    pub use crate::runtime::QueuedWorkWakeDisposition;
     pub use crate::runtime::QueuedWorkWakeFailure;
+    pub use crate::runtime::QueuedWorkWakeOutcome;
     pub use crate::runtime::RuntimeAwaitEventOptions;
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeEnvironment;
@@ -379,6 +378,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelReceipt;
     pub use crate::runtime::TurnCancelRequest;
     pub use crate::runtime::TurnCancellationEvidence;
+    pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
     pub use crate::runtime::TurnOptions;
@@ -440,14 +440,14 @@ pub mod facade_support {
     pub use crate::tool_registry::facade_ops::{ToolRegistryFacadeOps, ToolStateFacadeOps};
     pub use crate::triggers::InMemoryTriggerStore;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
-    pub use crate::triggers::TriggerDeliveryEmitReport;
+    pub use crate::triggers::TriggerDeliveryEmitReceipt;
     pub use crate::triggers::TriggerEmitReport;
     pub use crate::triggers::TriggerEvent;
     pub use crate::triggers::TriggerEventType;
     pub use crate::triggers::TriggerManifestMembership;
     pub use crate::triggers::TriggerRegistration;
     pub use crate::triggers::TriggerRouter;
-    pub use crate::triggers::TriggerTargetSummary;
+    pub use crate::triggers::TriggerTarget;
     pub use crate::triggers::default_trigger_source_key;
     pub use crate::triggers::derived_trigger_subscription_key;
     pub use crate::triggers::deterministic_delivery_process_id;
@@ -514,7 +514,7 @@ pub(crate) use crate::attachments::{
     AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
 };
 pub(crate) use crate::plugin::{
-    RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessResult,
+    RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
 };
 pub(crate) use crate::runtime::UnavailableProcessService;
 pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
@@ -564,12 +564,12 @@ pub use attachments::{
 };
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence,
-    ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, GenerationDisposition,
-    GenerationOptionDisposition, GenerationOptions, LlmCallId, LlmCallRecord, LlmOutputPart,
-    LlmRequest, LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTerminalReason,
-    NonNegativeFiniteF64, NormalizedError, ProtocolPosition, ProviderEndpointError,
-    ProviderFileScope, ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind,
-    ProviderRouteIdentity, RetryDecision,
+    ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, GenerationOptionOutcome,
+    GenerationOptions, GenerationReceipt, LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest,
+    LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64,
+    NormalizedError, ProtocolPosition, ProviderEndpointError, ProviderFileScope,
+    ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
+    RetryDecision,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,
@@ -585,7 +585,7 @@ pub use lash_sansio::{
     ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome,
     ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd, ToolIntentParentEndAction,
     ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest, ToolOutputContract,
-    ToolRetryDisposition, ToolRetryPolicy, ToolValue, TurnCause,
+    ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -631,12 +631,12 @@ pub fn turn_outcome_from_tool_control(
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_registry::{ToolRegistry, ToolState};
 pub use tool_result::{
-    CancelHint, PendingAnnouncement, PendingCompletion, TimeoutBehavior, ToolResult,
+    CancelHint, PendingAnnouncement, PendingCompletion, TimeoutBehavior, ToolOutcome,
 };
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
-    TriggerDeliveryReservationStatus, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
-    TriggerEventCatalog, TriggerIngressResult, TriggerInputBinding, TriggerMutationDisposition,
+    TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
+    TriggerEventCatalog, TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome,
     TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceRecord,
     TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
@@ -917,7 +917,7 @@ pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord,
-    AppendSessionNodesRequest, AppendSessionNodesResult, PluginError, PluginExtensions,
+    AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginError, PluginExtensions,
     PluginOptions, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
     PluginSnapshotMeta, ProcessEngineContributionContext, ProtocolBeforeLlmCallContext,
     ProtocolLlmCallAction, SessionContextOverlay, SessionCreateRequest, SessionGraphService,
@@ -948,20 +948,20 @@ pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AwaitEventKey, AwaitEventResolver,
     AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock, DeliveryPolicy, DrainMode,
     DrainModePolicy, EffectHost, EffectJournalRetirement, ExecutionScope, ForkPoint,
-    ForkSessionRequest, ForkSessionResult, InputItem, LiveReplayGapReason, LiveReplayResult,
-    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult, LiveReplaySubscription,
+    ForkSessionReceipt, ForkSessionRequest, InputItem, LiveReplayGapReason, LiveReplayOutcome,
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
     ObserverInheritance, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelResult,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
     PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessAwaitOutput,
-    ProcessCancelSummary, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
     ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine, ProcessEngineRunContext,
-    ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
+    ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInfraError,
+    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessInfraError,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessListMode, ProcessLiveReferenceSummary, ProcessObserverBy,
+    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
     ProcessOpScope, ProcessOriginator, ProcessOutcome, ProcessParentEndPlan, ProcessProvenance,
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome,
     ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
@@ -971,17 +971,17 @@ pub use runtime::{
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
     ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
     QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy,
-    QueuedWorkKind, RecoveryDisposition, Resolution, ResolveOutcome, RuntimeError,
-    RuntimeErrorCause, RuntimeErrorCode, ScopedEffectController, SegmentHandover, SegmentProgress,
-    SessionCursor, SessionCursorError, SessionId, SessionObservationEvent,
-    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRevision, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
-    TokenLedgerEntry, ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelOriginHint,
-    TurnContext, TurnEvent, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputState, WaitKind, WaitState, WakeDelivery,
-    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    QueuedWorkKind, RecoveryContract, Resolution, ResolveOutcome, RuntimeError, RuntimeErrorCause,
+    RuntimeErrorCode, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCursor,
+    SessionCursorError, SessionId, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRevision, SessionScope,
+    SessionStoreCreateRequest, SessionStoreFactory, TokenLedgerEntry, ToolCallLaunch, TurnActivity,
+    TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent, TurnInput, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -1009,11 +1009,11 @@ pub use store::{TurnId, WorkClaim, WorkCompletion};
 pub use runtime::{
     AssistantResponseHookEvents, CheckpointClaimSet, ChildDrainOutcome, DrainedChild,
     EffectGroupDrain, EffectGroupHandle, EffectGroupMembership, GroupDrainReport, GroupExecutors,
-    GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserDisposition, ProcessCommand,
+    GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserPolicy, ProcessCommand,
     ProcessEffectOutcome, ProcessEventSemanticsSpec, ProcessOutcomeObserver,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchSummary,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
     RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState,
     ToolAttemptLaunch,
 };
@@ -1051,15 +1051,15 @@ pub use store::{
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
-    GraphAppend, PersistedSessionRead, RuntimeCommitResult, SessionCheckpoint, SessionHeadMeta,
+    GraphAppend, PersistedSessionRead, RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta,
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
 pub use tool_intent::{
     CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent, ProcessParentEndPolicy,
     SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
-    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptResult,
+    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptOutcome,
     ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
-    ToolResultDone, derive_tool_intent_identity,
+    ToolOutcomeDone, derive_tool_intent_identity,
 };
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,

@@ -967,7 +967,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
     async fn commit_runtime_state(
         &self,
         commit: crate::store::RuntimeCommit,
-    ) -> Result<crate::store::RuntimeCommitResult, crate::store::StoreError> {
+    ) -> Result<crate::store::RuntimeCommitReceipt, crate::store::StoreError> {
         let planner = crate::store::RuntimeCommitPlanner::prepare(commit)?;
         let commit = planner.commit();
         let session_id = commit.session_id.clone();

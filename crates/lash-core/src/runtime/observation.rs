@@ -6,11 +6,11 @@ use arc_swap::ArcSwap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use super::{LashRuntime, ProcessHandleSummary, ProcessRecord, ProcessRegistry};
+use super::{LashRuntime, ProcessHandleView, ProcessRecord, ProcessRegistry};
 
 pub use replay::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
-    LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeResult,
+    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
     LiveReplaySubscription, SessionCursor, SessionCursorError, SessionObservation,
     SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
     SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
@@ -179,7 +179,7 @@ impl RuntimeObservation {
             .await
     }
 
-    pub async fn list_process_handles(&self) -> Vec<ProcessHandleSummary> {
+    pub async fn list_process_handles(&self) -> Vec<ProcessHandleView> {
         let Some(executor) = self.process_registry.as_ref() else {
             return Vec::new();
         };
@@ -187,7 +187,7 @@ impl RuntimeObservation {
             .await
     }
 
-    pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleSummary> {
+    pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleView> {
         let Some(executor) = self.process_registry.as_ref() else {
             return Vec::new();
         };
@@ -199,7 +199,7 @@ impl RuntimeObservation {
         &self,
         executor: &Arc<dyn crate::ProcessRegistry>,
         mode: crate::ProcessListMode,
-    ) -> Vec<ProcessHandleSummary> {
+    ) -> Vec<ProcessHandleView> {
         let root_scope = self.process_scope();
         let mut entries = list_scope_process_handles(executor, &root_scope, mode).await;
         if let Some(agent_frame_id) = self.persisted_state.current_frame_node_id.as_deref() {
@@ -213,7 +213,7 @@ impl RuntimeObservation {
         }
         entries
             .into_iter()
-            .map(ProcessHandleSummary::from_record)
+            .map(ProcessHandleView::from_record)
             .collect()
     }
 }
@@ -407,8 +407,8 @@ impl RuntimeHandle {
         let observation = self.observe();
         cursor.parse_for_session(observation.session_id())?;
         match self.live_replay_store.replay_after_cursor(cursor)? {
-            LiveReplayResult::Replayed(events) => Ok(SessionResume::Replayed { events }),
-            LiveReplayResult::Gap(reason) => Ok(SessionResume::Gap {
+            LiveReplayOutcome::Replayed(events) => Ok(SessionResume::Replayed { events }),
+            LiveReplayOutcome::Gap(reason) => Ok(SessionResume::Gap {
                 gap: self.live_replay_gap(cursor, reason, observation.as_ref()),
                 observation: observation.session_observation(),
             }),
@@ -422,10 +422,10 @@ impl RuntimeHandle {
         let observation = self.observe();
         cursor.parse_for_session(observation.session_id())?;
         match self.live_replay_store.subscribe_after_cursor(cursor)? {
-            LiveReplaySubscribeResult::Subscribed(subscription) => {
+            LiveReplaySubscribeOutcome::Subscribed(subscription) => {
                 Ok(SessionObservationSubscription::Subscribed(subscription))
             }
-            LiveReplaySubscribeResult::Gap(reason) => Ok(SessionObservationSubscription::Gap {
+            LiveReplaySubscribeOutcome::Gap(reason) => Ok(SessionObservationSubscription::Gap {
                 gap: self.live_replay_gap(cursor, reason, observation.as_ref()),
                 observation: observation.session_observation(),
             }),
@@ -513,7 +513,7 @@ impl RuntimeHandle {
         &self,
         session_id: &str,
         targets: &[crate::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<crate::PendingTurnInputCancelResult>, crate::RuntimeError> {
+    ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, crate::RuntimeError> {
         let observation = self.observe();
         let store = observation
             .queue_store
@@ -723,14 +723,14 @@ mod tests {
         fn replay_after_cursor(
             &self,
             _cursor: &SessionCursor,
-        ) -> Result<LiveReplayResult, LiveReplayStoreError> {
+        ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
             panic!("replay_after_cursor should not be called for rejected cursors")
         }
 
         fn subscribe_after_cursor(
             &self,
             _cursor: &SessionCursor,
-        ) -> Result<LiveReplaySubscribeResult, LiveReplayStoreError> {
+        ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
             panic!("subscribe_after_cursor should not be called for rejected cursors")
         }
 

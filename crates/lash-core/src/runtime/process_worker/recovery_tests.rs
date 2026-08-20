@@ -129,7 +129,7 @@ fn engine_registration(
             kind: kind.to_string(),
             payload,
         },
-        RecoveryDisposition::Rerunnable,
+        RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
     )
     .with_execution_env_ref(Some(env_ref))
@@ -296,7 +296,7 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
 /// verdict without standing up execution infrastructure.
 fn registration_with_disposition(
     id: &str,
-    disposition: crate::RecoveryDisposition,
+    disposition: crate::RecoveryContract,
 ) -> ProcessRegistration {
     ProcessRegistration::new(
         id,
@@ -654,7 +654,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
         &self,
         _args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolResult {
+    ) -> crate::ToolOutcome {
         assert!(
             PROCESS_EXECUTION_PERMIT.try_with(|_| ()).is_ok(),
             "production child turn must inherit the outer process execution permit"
@@ -666,23 +666,23 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
                 kind: "nested-process-test".to_string(),
                 payload: serde_json::Value::Null,
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             crate::ProcessOriginator::host(),
         );
         if let Err(err) = context.start_process(request).await {
-            return crate::ToolResult::err_fmt(format_args!(
+            return crate::ToolOutcome::err_fmt(format_args!(
                 "failed to start nested process: {err}"
             ));
         }
         match context.await_process(process_id).await {
             Ok(ProcessAwaitOutput::Success { .. }) => {
-                crate::ToolResult::ok(serde_json::json!({ "nested": "done" }))
+                crate::ToolOutcome::ok(serde_json::json!({ "nested": "done" }))
             }
-            Ok(other) => crate::ToolResult::err_fmt(format_args!(
+            Ok(other) => crate::ToolOutcome::err_fmt(format_args!(
                 "nested process returned non-success output: {other:?}"
             )),
             Err(err) => {
-                crate::ToolResult::err_fmt(format_args!("failed to await nested process: {err}"))
+                crate::ToolOutcome::err_fmt(format_args!("failed to await nested process: {err}"))
             }
         }
     }
@@ -753,7 +753,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
                             "nested_wait_task": nested_wait_task,
                         }),
                     },
-                    RecoveryDisposition::Rerunnable,
+                    RecoveryContract::Rerunnable,
                 );
                 let reply = runtime
                     .start_child_process(registration, "test-chain", None)
@@ -819,7 +819,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
                         "nested_wait_task": nested_wait_task,
                     }),
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
             );
             let reply = runtime
                 .start_child_process(registration, "test-chain", None)
@@ -1079,7 +1079,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
                 turn_input: Box::new(crate::TurnInput::text("await nested process")),
                 output_contract: crate::ToolOutputContract::Static,
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
         ))
         .await
@@ -1145,7 +1145,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
                     kind: "boundary-test".to_string(),
                     payload: serde_json::json!({}),
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
             )
             .with_execution_env_ref(Some(env_ref)),
@@ -1484,7 +1484,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
     assert!(matches!(
         replayed_registration,
         crate::TriggerCommandOutcome::Mutation { receipt }
-            if receipt.disposition == crate::TriggerMutationDisposition::Created
+            if receipt.disposition == crate::TriggerMutationOutcome::Created
     ));
 
     let _ = worker
@@ -1509,7 +1509,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
             ProcessInput::External {
                 metadata: serde_json::json!({ "already": "registered" }),
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
         ))
         .await
@@ -1546,7 +1546,7 @@ async fn sweep_never_claims_externally_owned_rows() {
     registry
         .register_process(registration_with_disposition(
             "proc-ext",
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
         ))
         .await
         .expect("register");
@@ -1566,7 +1566,7 @@ async fn sweep_never_claims_externally_owned_rows() {
         report.deferred,
         vec![ProcessAdmissionDeferred {
             process_id: "proc-ext".to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+            disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
         }]
     );
     // A second pass before the dispatcher drains the row must say the same
@@ -1580,7 +1580,7 @@ async fn sweep_never_claims_externally_owned_rows() {
         second.deferred,
         vec![ProcessAdmissionDeferred {
             process_id: "proc-ext".to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+            disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
         }]
     );
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1611,11 +1611,8 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     registry
         .register_process(
-            registration_with_disposition(
-                "proc-attempts-exhausted",
-                RecoveryDisposition::Rerunnable,
-            )
-            .with_max_attempts(Some(1)),
+            registration_with_disposition("proc-attempts-exhausted", RecoveryContract::Rerunnable)
+                .with_max_attempts(Some(1)),
         )
         .await
         .expect("register attempt-exhausted process");
@@ -1660,7 +1657,7 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
     registry
         .register_process(registration_with_disposition(
             "proc-ext-abandon",
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
         ))
         .await
         .expect("register");
@@ -1702,7 +1699,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
     registry
         .register_process(registration_with_disposition(
             "proc-ob-silent",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register");
@@ -1760,7 +1757,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
     registry
         .register_process(registration_with_disposition(
             "proc-ob-lapse",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register");
@@ -1818,7 +1815,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     registry
         .register_process(registration_with_disposition(
             "proc-ob-unstarted",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register");
@@ -2029,7 +2026,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     registry
         .register_process(registration_with_disposition(
             "mine-started",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register mine-started");
@@ -2050,7 +2047,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     registry
         .register_process(registration_with_disposition(
             "theirs-started",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register theirs-started");
@@ -2071,7 +2068,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     registry
         .register_process(registration_with_disposition(
             "mine-unstarted",
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register mine-unstarted");
@@ -2081,7 +2078,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     registry
         .register_process(registration_with_disposition(
             "rerunnable",
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
         ))
         .await
         .expect("register rerunnable");
@@ -2139,7 +2136,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
         env_ref,
         serde_json::Value::Null,
     );
-    registration.disposition = RecoveryDisposition::OwnerBound;
+    registration.disposition = RecoveryContract::OwnerBound;
     registry
         .register_process(registration)
         .await
@@ -2193,7 +2190,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
     registry
         .register_process(registration_with_disposition(
             process_id,
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
         ))
         .await
         .expect("register owner-bound row");
@@ -2227,7 +2224,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         report.deferred,
         vec![ProcessDrainDeferred {
             process_id: process_id.to_string(),
-            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+            disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::WriteTerminal,
                 error: "plugin session error: injected terminal-write failure".to_string(),
             },

@@ -44,16 +44,16 @@ use lash_core::store::queued_work::{
     select_leading_session_command, select_turn_work_claim_prefix,
 };
 use lash_core::store::{
-    HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit, RuntimeCommitResult,
+    HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt,
     SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, AwaitEventResolver, BlobRef, DeliveryPolicy, EffectHost, ExecutionScope,
     GcReport, LeaseOwnerIdentity, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
-    ProcessLeaseCompletion, ProcessLiveReferenceSummary, ProcessObserverBy, ProcessPruneReport,
+    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease,
+    ProcessLeaseCompletion, ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport,
     ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
     QueuedWorkStore, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,

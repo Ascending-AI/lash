@@ -403,7 +403,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         &self,
         process_id: &str,
         request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendResult, lash_core::PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, lash_core::PluginError> {
         facade_support::validate_generic_process_event_append(&request)?;
         let process_id = process_id.to_string();
         let occurred_at_ms = self.clock.timestamp_ms();
@@ -432,7 +432,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendResult, lash_core::PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, lash_core::PluginError> {
         let process_id = process_id.to_string();
         let authority = authority.clone();
         let occurred_at_ms = self.clock.timestamp_ms();
@@ -1307,9 +1307,9 @@ impl ProcessRegistry for SqliteProcessRegistry {
 
     async fn live_reference_summary(
         &self,
-    ) -> Result<Vec<ProcessLiveReferenceSummary>, lash_core::PluginError> {
+    ) -> Result<Vec<ProcessLiveReferenceView>, lash_core::PluginError> {
         let records = worklist::collect_non_terminal_records(self).await?;
-        Ok(ProcessLiveReferenceSummary::from_records(records.iter()))
+        Ok(ProcessLiveReferenceView::from_records(records.iter()))
     }
 
     async fn count_non_terminal_processes(&self) -> Result<usize, lash_core::PluginError> {

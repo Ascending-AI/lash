@@ -696,7 +696,7 @@ finish {
 
 #[cfg(feature = "rlm")]
 fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
-    processes: &[lash_core::ProcessHandleSummary],
+    processes: &[lash_core::ProcessHandleView],
     expected_labels: [&str; N],
 ) {
     let mut ids = BTreeSet::new();

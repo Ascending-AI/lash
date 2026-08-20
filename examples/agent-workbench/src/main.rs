@@ -34,7 +34,7 @@ use lash::prompt::PromptContribution;
 use lash::provider::{ProviderHandle, ProviderOptions};
 use lash::triggers::TriggerEvent;
 use lash::{
-    LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent, TurnResult,
+    LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent, TurnReport,
     tracing::{
         JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,
         TraceLashlangGraph, TraceLashlangGraphStore, TraceLevel, TraceRecord, TraceSink,

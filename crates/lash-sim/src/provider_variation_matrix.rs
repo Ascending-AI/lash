@@ -807,7 +807,7 @@ fn assert_unsupported_stop_disposition(
         .unwrap_or_else(|| panic!("{dialect} omitted generation disposition"));
     assert_eq!(
         disposition.stop_sequences,
-        lash_core::GenerationOptionDisposition::OmittedUnsupported,
+        lash_core::GenerationOptionOutcome::OmittedUnsupported,
         "{dialect} must report its unsupported wire-stop field"
     );
     assert_eq!(

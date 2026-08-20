@@ -3,7 +3,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{ProcessId, ProcessObserverBy, ProcessStatus, RecoveryDisposition};
+use super::model::{ProcessId, ProcessObserverBy, ProcessStatus, RecoveryContract};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {
@@ -98,7 +98,7 @@ pub struct AbandonEvidence {
 /// this type is instead **explicitness + a single validation choke point per
 /// backend + audit evidence** on the terminal write. Every backend calls
 /// [`validate`](Self::validate) against the row's declared
-/// [`RecoveryDisposition`] inside its completion operation, and records the
+/// [`RecoveryContract`] inside its completion operation, and records the
 /// authority on the durable terminal event (see [`terminal_append_request`]).
 ///
 /// There is deliberately no `Default`: a caller must name its authority, the
@@ -106,7 +106,7 @@ pub struct AbandonEvidence {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "authority", rename_all = "snake_case")]
 pub enum ProcessCompletionAuthority {
-    /// An external actor closes an [`RecoveryDisposition::ExternallyOwned`] row
+    /// An external actor closes an [`RecoveryContract::ExternallyOwned`] row
     /// it observes (the `shell.start` detach path, ADR 0019).
     /// Rejected on any lash-executed disposition: those have a lease-fenced
     /// single writer.
@@ -115,13 +115,13 @@ pub enum ProcessCompletionAuthority {
     /// completes a row it ran itself. Its single-writer discipline is the
     /// engine's per-key coalescing, not a Lash lease; `workflow_key` records the
     /// key that served as that discipline. Valid for the lash-executed
-    /// dispositions ([`RecoveryDisposition::Rerunnable`] and
-    /// [`RecoveryDisposition::OwnerBound`], which Restate runs), and rejected on
-    /// [`RecoveryDisposition::ExternallyOwned`] rows — a substrate never runs
+    /// dispositions ([`RecoveryContract::Rerunnable`] and
+    /// [`RecoveryContract::OwnerBound`], which Restate runs), and rejected on
+    /// [`RecoveryContract::ExternallyOwned`] rows — a substrate never runs
     /// one, so it may not close one.
     WorkflowKey { workflow_key: String },
     /// The sweep reconciled a durable Abandon Request on an
-    /// [`RecoveryDisposition::ExternallyOwned`] row (whose lease had lapsed, or
+    /// [`RecoveryContract::ExternallyOwned`] row (whose lease had lapsed, or
     /// which Lash never leased) into an
     /// [`ProcessStatus::Abandoned`] terminal. Carries no owner: the
     /// closure is authorized by the recorded request, not a live writer. Only
@@ -161,7 +161,7 @@ impl ProcessCompletionAuthority {
     pub fn validate(
         &self,
         process_id: &str,
-        disposition: RecoveryDisposition,
+        disposition: RecoveryContract,
         await_output: &ProcessAwaitOutput,
     ) -> Result<(), crate::PluginError> {
         let reject = |reason: &str| {
@@ -172,7 +172,7 @@ impl ProcessCompletionAuthority {
         };
         match self {
             Self::ExternalOwner => {
-                if disposition != RecoveryDisposition::ExternallyOwned {
+                if disposition != RecoveryContract::ExternallyOwned {
                     return reject(
                         "only externally-owned rows may be completed by an external owner; a \
                          lash-executed row has a lease-fenced single writer",
@@ -180,7 +180,7 @@ impl ProcessCompletionAuthority {
                 }
             }
             Self::WorkflowKey { .. } => {
-                if disposition == RecoveryDisposition::ExternallyOwned {
+                if disposition == RecoveryContract::ExternallyOwned {
                     return reject(
                         "externally-owned rows are never executed by a workflow substrate; they \
                          close through their external owner or a reconciled abandon request",
@@ -188,7 +188,7 @@ impl ProcessCompletionAuthority {
                 }
             }
             Self::ReconciledAbandon => {
-                if disposition != RecoveryDisposition::ExternallyOwned {
+                if disposition != RecoveryContract::ExternallyOwned {
                     return reject(
                         "reconciled-abandon closes only externally-owned rows; a lash-executed \
                          row is abandoned under its lease",
@@ -454,7 +454,7 @@ pub struct ProcessEvent {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ProcessEventAppendResult {
+pub struct ProcessEventAppendReceipt {
     pub event: ProcessEvent,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_delivery: Option<ProcessWakeDelivery>,

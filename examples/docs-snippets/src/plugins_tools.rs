@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use lash::plugins::PluginFactory;
-use lash::tools::{ToolCall, ToolResult};
+use lash::tools::{ToolCall, ToolOutcome};
 
 // docs:start:enable-native-batch
 fn enable_native_batch(builder: lash::LashCoreBuilder) -> lash::LashCoreBuilder {
@@ -21,10 +21,10 @@ fn enable_native_batch(builder: lash::LashCoreBuilder) -> lash::LashCoreBuilder 
 // docs:start:direct-completion-tool
 use lash::direct::{DirectOutputSpec, DirectRequest};
 
-async fn rank(call: ToolCall<'_>) -> ToolResult {
+async fn rank(call: ToolCall<'_>) -> ToolOutcome {
     let model = match call.context.sessions().model().await {
         Ok(model) => model,
-        Err(err) => return ToolResult::err_fmt(format_args!("{err}")),
+        Err(err) => return ToolOutcome::err_fmt(format_args!("{err}")),
     };
 
     let request = DirectRequest {
@@ -47,13 +47,13 @@ async fn rank(call: ToolCall<'_>) -> ToolResult {
         .complete(request, "my_tool")
         .await
     {
-        Ok(completion) => ToolResult::ok(serde_json::json!({ "text": completion.text })),
-        Err(err) => ToolResult::err_fmt(format_args!("{err}")),
+        Ok(completion) => ToolOutcome::ok(serde_json::json!({ "text": completion.text })),
+        Err(err) => ToolOutcome::err_fmt(format_args!("{err}")),
     }
 }
 // docs:end:direct-completion-tool
 
-async fn await_external_completion(call: ToolCall<'_>) -> ToolResult {
+async fn await_external_completion(call: ToolCall<'_>) -> ToolOutcome {
     // docs:start:detached-tool
     use lash::tools::{PendingAnnouncement, PendingCompletion};
 
@@ -62,7 +62,7 @@ async fn await_external_completion(call: ToolCall<'_>) -> ToolResult {
     // The key exists only for a tool that declares `attempt_may_defer`.
     let key = match call.context.completion_key() {
         Ok(key) => key,
-        Err(err) => return ToolResult::err_fmt(format_args!("{err}")),
+        Err(err) => return ToolOutcome::err_fmt(format_args!("{err}")),
     };
     enqueue_external_work(key);
 
@@ -83,7 +83,7 @@ async fn await_external_completion(call: ToolCall<'_>) -> ToolResult {
 
     // Returning Pending without first taking the key fails the call with
     // `pending_tool_missing_completion_key`.
-    ToolResult::pending(pending)
+    ToolOutcome::pending(pending)
     // docs:end:detached-tool
 }
 
@@ -395,17 +395,17 @@ mod asserted_examples {
 
         use lash::tools::{
             CancelHint, PendingAnnouncement, PendingCompletion, TimeoutBehavior, ToolCallOutput,
-            ToolFailure, ToolFailureClass, ToolFailureSource, ToolResult, ToolValue,
+            ToolFailure, ToolFailureClass, ToolFailureSource, ToolOutcome, ToolValue,
         };
 
-        let success: ToolResult = ToolResult::ok(serde_json::json!({ "saved": true }));
-        assert!(ToolResult::is_success(&success));
-        assert!(!ToolResult::is_pending(&success));
+        let success: ToolOutcome = ToolOutcome::ok(serde_json::json!({ "saved": true }));
+        assert!(ToolOutcome::is_success(&success));
+        assert!(!ToolOutcome::is_pending(&success));
         assert_eq!(
-            ToolResult::value_for_projection(&success),
+            ToolOutcome::value_for_projection(&success),
             serde_json::json!({ "saved": true })
         );
-        let output = ToolResult::as_done_output(&success).expect("success must be complete");
+        let output = ToolOutcome::as_done_output(&success).expect("success must be complete");
         assert_eq!(
             serde_json::to_value(ToolCallOutput::status(output))
                 .expect("tool status must serialize"),
@@ -421,33 +421,33 @@ mod asserted_examples {
             serde_json::to_value(&output.outcome).expect("tool outcome must serialize")["status"],
             "success"
         );
-        let ToolResult::Done(done) = success.clone() else {
+        let ToolOutcome::Done(done) = success.clone() else {
             panic!("an inline success must use the completed result mode");
         };
         assert_eq!(
             serde_json::to_value(done.status()).expect("tool status must serialize"),
             serde_json::json!("success")
         );
-        let consumed = ToolResult::into_done_output(success).expect("success must unwrap");
+        let consumed = ToolOutcome::into_done_output(success).expect("success must unwrap");
         assert_eq!(
             ToolCallOutput::into_value_for_projection(consumed),
             serde_json::json!({ "saved": true })
         );
 
         let direct_output = ToolCallOutput::success(serde_json::json!({ "generation": 7 }));
-        let wrapped = ToolResult::from_output(direct_output);
+        let wrapped = ToolOutcome::from_output(direct_output);
         assert_eq!(
-            ToolResult::as_output(&wrapped).value_for_projection(),
+            ToolOutcome::as_output(&wrapped).value_for_projection(),
             serde_json::json!({ "generation": 7 })
         );
-        let json_error = ToolResult::err(serde_json::json!({ "path": "missing.md" }));
+        let json_error = ToolOutcome::err(serde_json::json!({ "path": "missing.md" }));
         assert_eq!(
-            ToolResult::value_for_projection(&json_error),
+            ToolOutcome::value_for_projection(&json_error),
             serde_json::json!({ "path": "missing.md" })
         );
-        let formatted_error = ToolResult::err_fmt("provider unavailable");
+        let formatted_error = ToolOutcome::err_fmt("provider unavailable");
         assert_eq!(
-            ToolResult::value_for_projection(&formatted_error),
+            ToolOutcome::value_for_projection(&formatted_error),
             serde_json::json!("provider unavailable")
         );
 
@@ -465,9 +465,9 @@ mod asserted_examples {
             Some(serde_json::json!({ "path": "../secret" }))
         );
         assert_eq!(ToolFailure::to_json_value(&tool_failure)["source"], "tool");
-        let failed = ToolResult::failure(tool_failure.clone());
+        let failed = ToolOutcome::failure(tool_failure.clone());
         assert_eq!(
-            serde_json::to_value(ToolResult::as_output(&failed).status())
+            serde_json::to_value(ToolOutcome::as_output(&failed).status())
                 .expect("tool status must serialize"),
             serde_json::json!("failure")
         );
@@ -486,29 +486,29 @@ mod asserted_examples {
             ToolFailure::to_json_value(&runtime_failure)["source"],
             "runtime"
         );
-        let retryable = ToolResult::retryable_failure(
+        let retryable = ToolOutcome::retryable_failure(
             ToolFailureClass::Unavailable,
             "service_busy",
             "try again",
             Some(250),
         );
         assert_eq!(
-            ToolResult::as_output(&retryable).value_for_projection()["retry"]["after_ms"],
+            ToolOutcome::as_output(&retryable).value_for_projection()["retry"]["after_ms"],
             250
         );
 
-        let cancelled = ToolResult::cancelled("operator stopped the tool");
+        let cancelled = ToolOutcome::cancelled("operator stopped the tool");
         assert_eq!(
-            serde_json::to_value(ToolResult::as_output(&cancelled).status())
+            serde_json::to_value(ToolOutcome::as_output(&cancelled).status())
                 .expect("tool status must serialize"),
             serde_json::json!("cancelled")
         );
-        let cancelled_with_raw = ToolResult::cancelled_with_raw(
+        let cancelled_with_raw = ToolOutcome::cancelled_with_raw(
             "operator stopped the tool",
             serde_json::json!({ "checkpoint": 4 }),
         );
         assert_eq!(
-            ToolResult::value_for_projection(&cancelled_with_raw),
+            ToolOutcome::value_for_projection(&cancelled_with_raw),
             serde_json::json!({ "checkpoint": 4 })
         );
         let default_pending = PendingCompletion::new();
@@ -543,14 +543,14 @@ mod asserted_examples {
         let announcing_spec =
             PendingCompletion::announcing(pending_spec.clone(), announcement.clone());
         assert_eq!(announcing_spec.announcement, Some(announcement));
-        let pending = ToolResult::pending(pending_spec.clone());
-        assert!(ToolResult::is_pending(&pending));
-        let ToolResult::Pending(observed_pending) = pending.clone() else {
+        let pending = ToolOutcome::pending(pending_spec.clone());
+        assert!(ToolOutcome::is_pending(&pending));
+        let ToolOutcome::Pending(observed_pending) = pending.clone() else {
             panic!("a deferred completion must use the pending result mode");
         };
         assert_eq!(observed_pending, pending_spec);
         assert_eq!(
-            ToolResult::into_done_output(pending).expect_err("pending must not unwrap"),
+            ToolOutcome::into_done_output(pending).expect_err("pending must not unwrap"),
             pending_spec
         );
 
@@ -707,12 +707,12 @@ mod asserted_examples {
         let invalid = ToolFailure::invalid_request("invalid_glob", "bad pattern");
         assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);
         assert_eq!(invalid.code, "invalid_glob");
-        assert_eq!(invalid.retry, lash::tools::ToolRetryDisposition::Never);
+        assert_eq!(invalid.retry, lash::tools::ToolRetryStatus::Never);
 
         let io = ToolFailure::io("read_failed", "could not read config.toml");
         assert_eq!(io.class, ToolFailureClass::Io);
         assert_eq!(io.code, "read_failed");
-        assert_eq!(io.retry, lash::tools::ToolRetryDisposition::Never);
+        assert_eq!(io.retry, lash::tools::ToolRetryStatus::Never);
         assert_eq!(serde_json::to_value(ToolFailureClass::Io).unwrap(), "io");
     }
 
@@ -748,8 +748,8 @@ mod asserted_examples {
             })
         }
 
-        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-            lash_core::ToolResult::ok(serde_json::json!({ "unreachable": true }))
+        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+            lash_core::ToolOutcome::ok(serde_json::json!({ "unreachable": true }))
         }
     }
 

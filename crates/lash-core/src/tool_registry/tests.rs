@@ -164,8 +164,8 @@ mod tests {
             )
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(serde_json::json!("ok"))
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(serde_json::json!("ok"))
         }
     }
 
@@ -179,8 +179,8 @@ mod tests {
             contract_from(vec![test_tool("batch", "leaf batch")], name)
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(serde_json::json!("unreachable"))
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(serde_json::json!("unreachable"))
         }
     }
 
@@ -202,8 +202,8 @@ mod tests {
             contract_from(vec![test_tool("batch", "lazy leaf batch")], name)
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(json!("leaf"))
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("leaf"))
         }
     }
 
@@ -242,8 +242,8 @@ mod tests {
             _tool: &str,
             _args: &serde_json::Value,
             _context: &crate::AttemptContext<'_>,
-        ) -> ToolResult {
-            ToolResult::err_fmt("orchestrating source cannot execute through the leaf route")
+        ) -> ToolOutcome {
+            ToolOutcome::err_fmt("orchestrating source cannot execute through the leaf route")
         }
     }
 
@@ -263,8 +263,8 @@ mod tests {
             &self,
             _args: &serde_json::Value,
             context: &crate::facade_support::OrchestrationContext<'_>,
-        ) -> ToolResult {
-            ToolResult::ok(json!({ "session_id": context.session_id() }))
+        ) -> ToolOutcome {
+            ToolOutcome::ok(json!({ "session_id": context.session_id() }))
         }
     }
 
@@ -444,8 +444,8 @@ mod tests {
             )
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(serde_json::json!("ok"))
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(serde_json::json!("ok"))
         }
     }
 
@@ -469,8 +469,8 @@ mod tests {
             )
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(serde_json::json!("ok"))
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(serde_json::json!("ok"))
         }
     }
 
@@ -522,8 +522,8 @@ mod tests {
             tool: &str,
             args: &serde_json::Value,
             _context: &crate::AttemptContext<'_>,
-        ) -> ToolResult {
-            ToolResult::ok(json!({
+        ) -> ToolOutcome {
+            ToolOutcome::ok(json!({
                 "tool": tool,
                 "args": args
             }))
@@ -591,14 +591,14 @@ mod tests {
             tool: &str,
             _args: &serde_json::Value,
             context: &crate::AttemptContext<'_>,
-        ) -> ToolResult {
+        ) -> ToolOutcome {
             self.executions.fetch_add(1, Ordering::SeqCst);
             if let Some(bindings) = &self.observed_execution_bindings {
                 bindings
                     .lock_recover()
                     .push(context.tool_execution_binding().clone());
             }
-            ToolResult::ok(json!(tool))
+            ToolOutcome::ok(json!(tool))
         }
     }
 
@@ -641,8 +641,8 @@ mod tests {
             tool: &str,
             _args: &serde_json::Value,
             _context: &crate::AttemptContext<'_>,
-        ) -> ToolResult {
-            ToolResult::ok(json!(tool))
+        ) -> ToolOutcome {
+            ToolOutcome::ok(json!(tool))
         }
     }
 
@@ -664,8 +664,8 @@ mod tests {
                 .then(|| Arc::new(dynamic_definition(name).contract()))
         }
 
-        async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(json!(call.name))
+        async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!(call.name))
         }
     }
 
@@ -682,14 +682,14 @@ mod tests {
             )
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
             self.entered.add_permits(1);
             self.release
                 .acquire()
                 .await
                 .expect("release blocking live tool")
                 .forget();
-            ToolResult::ok(json!("completed from captured registry"))
+            ToolOutcome::ok(json!("completed from captured registry"))
         }
     }
 
@@ -775,8 +775,8 @@ mod tests {
                     .then(|| Arc::new(Self::definition().contract()))
             }
 
-            async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-                ToolResult::ok(json!("ok"))
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+                ToolOutcome::ok(json!("ok"))
             }
         }
 
@@ -817,8 +817,8 @@ mod tests {
                     .map(|definition| Arc::new(definition.contract()))
             }
 
-            async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-                ToolResult::ok(json!("ok"))
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+                ToolOutcome::ok(json!("ok"))
             }
         }
 
@@ -1420,8 +1420,8 @@ mod tests {
                 None
             }
 
-            async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-                ToolResult::ok(json!(self.result))
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+                ToolOutcome::ok(json!(self.result))
             }
         }
 
@@ -1724,8 +1724,8 @@ mod tests {
                 contract_from(vec![test_tool("mock_tool", "live manifest")], name)
             }
 
-            async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-                ToolResult::ok(json!("updated"))
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+                ToolOutcome::ok(json!("updated"))
             }
         }
 
@@ -1840,8 +1840,8 @@ mod tests {
             fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
                 None
             }
-            async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-                ToolResult::ok(json!("ok"))
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+                ToolOutcome::ok(json!("ok"))
             }
         }
 

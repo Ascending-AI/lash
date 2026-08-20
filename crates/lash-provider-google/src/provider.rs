@@ -18,14 +18,14 @@ impl GoogleOAuthProvider {
     /// `generationConfig` expresses every supported generation control:
     /// `maxOutputTokens` is always written, while sampling controls and stop
     /// sequences are written whenever the caller sets them.
-    pub(crate) fn generation_disposition(req: &LlmRequest) -> GenerationDisposition {
-        GenerationDisposition {
-            output_token_cap: GenerationOptionDisposition::applied(
+    pub(crate) fn generation_disposition(req: &LlmRequest) -> GenerationReceipt {
+        GenerationReceipt {
+            output_token_cap: GenerationOptionOutcome::applied(
                 req.generation.output_token_cap.is_some(),
             ),
-            temperature: GenerationOptionDisposition::applied(req.generation.temperature.is_some()),
-            seed: GenerationOptionDisposition::applied(req.generation.seed.is_some()),
-            stop_sequences: GenerationOptionDisposition::applied(
+            temperature: GenerationOptionOutcome::applied(req.generation.temperature.is_some()),
+            seed: GenerationOptionOutcome::applied(req.generation.seed.is_some()),
+            stop_sequences: GenerationOptionOutcome::applied(
                 !req.generation.stop_sequences.is_empty(),
             ),
             cache: lash_llm_transport::cache_intent_disposition(req, None),
@@ -39,7 +39,7 @@ impl GoogleOAuthProvider {
         stream_events: Option<lash_core::llm::types::LlmEventSender>,
         provider_trace: Option<lash_core::llm::types::LlmProviderTraceSender>,
         stream_termination: StreamTermination,
-        generation_disposition: Option<GenerationDisposition>,
+        generation_disposition: Option<GenerationReceipt>,
     ) -> Result<LlmResponse, LlmTransportError> {
         let request_body_bytes = serde_json::to_vec(&request).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Cloud Code body: {err}"))

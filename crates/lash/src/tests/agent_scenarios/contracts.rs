@@ -238,7 +238,7 @@ pub(super) fn assert_no_false_finishted_success(run: &AgentScenarioRun) {
     );
 }
 
-pub(super) fn assert_all_processes_terminal(processes: &[lash_core::ProcessHandleSummary]) {
+pub(super) fn assert_all_processes_terminal(processes: &[lash_core::ProcessHandleView]) {
     assert!(
         processes.iter().all(|process| process.status.is_terminal()),
         "expected all visible process handles terminal: {processes:#?}"
@@ -273,7 +273,7 @@ fn assert_foreground_exec_graph_completed(run: &AgentScenarioRun) {
 
 pub(super) fn assert_graph_lineage_connected(
     contract: &GraphContract,
-    processes: &[lash_core::ProcessHandleSummary],
+    processes: &[lash_core::ProcessHandleView],
 ) {
     let graph_keys = contract.graph_keys();
     let process_ids = processes

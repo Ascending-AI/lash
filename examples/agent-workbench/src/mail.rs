@@ -27,9 +27,9 @@ use std::{
 use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
 use lash::tools::{
-    EmitTriggerIntent, LashlangToolBinding, ToolAttemptResult, ToolCall, ToolContract,
-    ToolDefinition, ToolDefinitionLashlangExt, ToolIntent, ToolIntents, ToolManifest, ToolProvider,
-    ToolResult, ToolResultDone, ToolRetryPolicy,
+    EmitTriggerIntent, LashlangToolBinding, ToolAttemptOutcome, ToolCall, ToolContract,
+    ToolDefinition, ToolDefinitionLashlangExt, ToolIntent, ToolIntents, ToolManifest, ToolOutcome,
+    ToolOutcomeDone, ToolProvider, ToolRetryPolicy,
 };
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use serde::{Deserialize, Serialize};
@@ -474,15 +474,15 @@ impl ToolProvider for MockMailProvider {
         ))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let Some((slug, operation)) = self.route(call.name) else {
-            return ToolResult::err_fmt(format_args!("unknown inbox tool `{}`", call.name));
+            return ToolOutcome::err_fmt(format_args!("unknown inbox tool `{}`", call.name));
         };
         if operation == "send" {
             // Sending commits a durable row and owes a `mail.received`
             // emission. Only the leaf attempt signature can pair the two, so
             // this legacy route refuses rather than committing half of it.
-            return ToolResult::err_fmt(format_args!(
+            return ToolOutcome::err_fmt(format_args!(
                 "inbox tool `{}` requires the leaf AttemptContext signature",
                 call.name
             ));
@@ -493,14 +493,14 @@ impl ToolProvider for MockMailProvider {
             other => Err(format!("unsupported inbox operation `{other}`")),
         };
         match result {
-            Ok(value) => ToolResult::ok(value),
-            Err(message) => ToolResult::err_fmt(message),
+            Ok(value) => ToolOutcome::ok(value),
+            Err(message) => ToolOutcome::err_fmt(message),
         }
     }
 
-    async fn execute_attempt(&self, call: lash::tools::ToolCall<'_>) -> ToolAttemptResult {
+    async fn execute_attempt(&self, call: lash::tools::ToolCall<'_>) -> ToolAttemptOutcome {
         let Some((slug, operation)) = self.route(call.name) else {
-            return done(ToolResult::err_fmt(format_args!(
+            return done(ToolOutcome::err_fmt(format_args!(
                 "unknown inbox tool `{}`",
                 call.name
             )));
@@ -511,7 +511,7 @@ impl ToolProvider for MockMailProvider {
             return done(self.execute(call).await);
         }
         let Some(replay_key) = call.context.replay_key() else {
-            return done(ToolResult::err_fmt("mail send requires a replay key"));
+            return done(ToolOutcome::err_fmt("mail send requires a replay key"));
         };
         match self
             .world
@@ -520,20 +520,21 @@ impl ToolProvider for MockMailProvider {
             // One attempt outcome carries the committed row and the declared
             // emission. The row can no longer become durable without the
             // `mail.received` occurrence that follows it.
-            Ok((receipt, intent)) => {
-                ToolAttemptResult::done(ToolResultDone::ok(receipt), ToolIntents::v1(vec![intent]))
-            }
-            Err(message) => done(ToolResult::err_fmt(message)),
+            Ok((receipt, intent)) => ToolAttemptOutcome::done(
+                ToolOutcomeDone::ok(receipt),
+                ToolIntents::v1(vec![intent]),
+            ),
+            Err(message) => done(ToolOutcome::err_fmt(message)),
         }
     }
 }
 
-fn done(result: ToolResult) -> ToolAttemptResult {
+fn done(result: ToolOutcome) -> ToolAttemptOutcome {
     match result {
-        ToolResult::Done(output) => {
-            ToolAttemptResult::done_without_intents(ToolResultDone::from_output(*output))
+        ToolOutcome::Done(output) => {
+            ToolAttemptOutcome::done_without_intents(ToolOutcomeDone::from_output(*output))
         }
-        ToolResult::Pending(pending) => ToolAttemptResult::pending(pending),
+        ToolOutcome::Pending(pending) => ToolAttemptOutcome::pending(pending),
     }
 }
 
@@ -606,7 +607,7 @@ mod tests {
                 context: &lash_core::testing::mock_attempt_context(),
             })
             .await;
-        let ToolResult::Done(output) = refused else {
+        let ToolOutcome::Done(output) = refused else {
             panic!("the legacy route must settle")
         };
         let message = serde_json::to_string(&output).expect("serialize the refusal");

@@ -4,7 +4,7 @@
 //! predictable. It is not a security boundary: tools decide which files they
 //! should expose, while sandboxing and filesystem isolation belong to the host.
 
-use lash_core::{ToolDefinition, ToolFailure, ToolFailureClass, ToolResult};
+use lash_core::{ToolDefinition, ToolFailure, ToolFailureClass, ToolOutcome};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -151,35 +151,35 @@ pub struct TruncationMeta {
     pub omitted: usize,
 }
 
-pub fn invalid_request_failure(code: impl Into<String>, message: impl Into<String>) -> ToolResult {
-    ToolResult::failure(ToolFailure::invalid_request(code, message))
+pub fn invalid_request_failure(code: impl Into<String>, message: impl Into<String>) -> ToolOutcome {
+    ToolOutcome::failure(ToolFailure::invalid_request(code, message))
 }
 
-pub fn io_failure(code: impl Into<String>, message: impl Into<String>) -> ToolResult {
-    ToolResult::failure(ToolFailure::io(code, message))
+pub fn io_failure(code: impl Into<String>, message: impl Into<String>) -> ToolOutcome {
+    ToolOutcome::failure(ToolFailure::io(code, message))
 }
 
 pub fn retryable_io_failure(
     code: impl Into<String>,
     message: impl Into<String>,
     after_ms: Option<u64>,
-) -> ToolResult {
-    ToolResult::retryable_failure(ToolFailureClass::Io, code, message, after_ms)
+) -> ToolOutcome {
+    ToolOutcome::retryable_failure(ToolFailureClass::Io, code, message, after_ms)
 }
 
-pub fn execution_failure(code: impl Into<String>, message: impl Into<String>) -> ToolResult {
-    ToolResult::failure(ToolFailure::tool(
+pub fn execution_failure(code: impl Into<String>, message: impl Into<String>) -> ToolOutcome {
+    ToolOutcome::failure(ToolFailure::tool(
         ToolFailureClass::Execution,
         code,
         message,
     ))
 }
 
-pub fn invalid_tool_args(message: impl Into<String>) -> ToolResult {
+pub fn invalid_tool_args(message: impl Into<String>) -> ToolOutcome {
     invalid_request_failure("invalid_tool_args", message)
 }
 
-pub fn typed_tool_args<Args>(args: &serde_json::Value) -> Result<Args, ToolResult>
+pub fn typed_tool_args<Args>(args: &serde_json::Value) -> Result<Args, ToolOutcome>
 where
     Args: DeserializeOwned + JsonSchema,
 {
@@ -187,12 +187,12 @@ where
         .map_err(|err| invalid_tool_args(format!("Invalid tool arguments: {err}")))
 }
 
-pub fn typed_tool_ok<Output>(output: Output) -> ToolResult
+pub fn typed_tool_ok<Output>(output: Output) -> ToolOutcome
 where
     Output: Serialize + JsonSchema,
 {
     match serde_json::to_value(output) {
-        Ok(value) => ToolResult::ok(value),
+        Ok(value) => ToolOutcome::ok(value),
         Err(err) => execution_failure(
             "tool_result_serialization_failed",
             format!("Failed to serialize tool result: {err}"),
@@ -203,12 +203,12 @@ where
 pub async fn execute_typed_tool<Args, Output, F, Fut>(
     args: &serde_json::Value,
     execute: F,
-) -> ToolResult
+) -> ToolOutcome
 where
     Args: DeserializeOwned + JsonSchema,
     Output: Serialize + JsonSchema,
     F: FnOnce(Args) -> Fut,
-    Fut: Future<Output = Result<Output, ToolResult>>,
+    Fut: Future<Output = Result<Output, ToolOutcome>>,
 {
     let args = match typed_tool_args::<Args>(args) {
         Ok(args) => args,
@@ -223,11 +223,11 @@ where
 pub async fn execute_typed_tool_result<Args, F, Fut>(
     args: &serde_json::Value,
     execute: F,
-) -> ToolResult
+) -> ToolOutcome
 where
     Args: DeserializeOwned + JsonSchema,
     F: FnOnce(Args) -> Fut,
-    Fut: Future<Output = ToolResult>,
+    Fut: Future<Output = ToolOutcome>,
 {
     let args = match typed_tool_args::<Args>(args) {
         Ok(args) => args,
@@ -236,7 +236,7 @@ where
     execute(args).await
 }
 
-pub fn non_empty_string(value: &str, key: &str) -> Result<(), ToolResult> {
+pub fn non_empty_string(value: &str, key: &str) -> Result<(), ToolOutcome> {
     if value.is_empty() {
         Err(invalid_tool_args(format!(
             "Missing required parameter: {key}"
@@ -259,7 +259,7 @@ pub enum OptionalUsizeArg {
 }
 
 impl OptionalUsizeArg {
-    pub fn into_option(self, key: &str, min: usize) -> Result<Option<usize>, ToolResult> {
+    pub fn into_option(self, key: &str, min: usize) -> Result<Option<usize>, ToolOutcome> {
         match self {
             Self::Value(value) if value >= min => Ok(Some(value)),
             Self::Value(_) => Err(invalid_tool_args(format!(
@@ -301,7 +301,7 @@ pub fn default_glob_limit() -> OptionalUsizeArg {
 }
 
 /// Extract a required non-empty string arg, or return a structured invalid request.
-pub fn require_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, ToolResult> {
+pub fn require_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, ToolOutcome> {
     args.get(key)
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
@@ -313,7 +313,7 @@ pub fn parse_optional_bool(
     args: &serde_json::Value,
     key: &str,
     default: bool,
-) -> Result<bool, ToolResult> {
+) -> Result<bool, ToolOutcome> {
     match args.get(key) {
         None => Ok(default),
         Some(v) if v.is_null() => Ok(default),
@@ -332,7 +332,7 @@ pub fn parse_optional_usize_arg(
     default: Option<usize>,
     allow_none: bool,
     min: usize,
-) -> Result<Option<usize>, ToolResult> {
+) -> Result<Option<usize>, ToolOutcome> {
     match args.get(key) {
         None => Ok(default),
         Some(v) if v.is_null() => {
@@ -401,9 +401,9 @@ pub fn lashlang_binding(
 }
 
 /// Run blocking filesystem work off the async runtime.
-pub async fn run_blocking<F>(f: F) -> ToolResult
+pub async fn run_blocking<F>(f: F) -> ToolOutcome
 where
-    F: FnOnce() -> ToolResult + Send + 'static,
+    F: FnOnce() -> ToolOutcome + Send + 'static,
 {
     match tokio::task::spawn_blocking(f).await {
         Ok(result) => result,
@@ -415,7 +415,7 @@ where
 }
 
 /// Run blocking work off the async runtime and return a typed value.
-pub async fn run_blocking_value<F, T>(f: F) -> Result<T, ToolResult>
+pub async fn run_blocking_value<F, T>(f: F) -> Result<T, ToolOutcome>
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
@@ -434,7 +434,7 @@ pub fn rg_file_list(
     respect_ignore_files: bool,
     max_depth: Option<usize>,
     globs: &[String],
-) -> Result<Vec<PathBuf>, ToolResult> {
+) -> Result<Vec<PathBuf>, ToolOutcome> {
     if is_default_excluded_entry(base) {
         return Ok(Vec::new());
     }

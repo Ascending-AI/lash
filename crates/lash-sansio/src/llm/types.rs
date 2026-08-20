@@ -802,7 +802,7 @@ impl GenerationOptions {
     Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum GenerationOptionDisposition {
+pub enum GenerationOptionOutcome {
     /// The caller expressed no preference, so there was nothing to apply.
     #[default]
     NotRequested,
@@ -827,7 +827,7 @@ pub enum GenerationOptionDisposition {
     ClampedToCapacity,
 }
 
-impl GenerationOptionDisposition {
+impl GenerationOptionOutcome {
     /// Report an option the wire carries whenever it is requested.
     pub fn applied(requested: bool) -> Self {
         if requested {
@@ -879,21 +879,21 @@ impl GenerationOptionDisposition {
 /// [`nothing_omitted`](Self::nothing_omitted) rather than trusting that a
 /// session-wide temperature survived every model it ran against.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct GenerationDisposition {
+pub struct GenerationReceipt {
     #[serde(default)]
-    pub output_token_cap: GenerationOptionDisposition,
+    pub output_token_cap: GenerationOptionOutcome,
     #[serde(default)]
-    pub temperature: GenerationOptionDisposition,
+    pub temperature: GenerationOptionOutcome,
     #[serde(default)]
-    pub seed: GenerationOptionDisposition,
+    pub seed: GenerationOptionOutcome,
     #[serde(default)]
-    pub stop_sequences: GenerationOptionDisposition,
+    pub stop_sequences: GenerationOptionOutcome,
     /// Fate of explicit prompt-cache breakpoints in the request.
     #[serde(default)]
-    pub cache: GenerationOptionDisposition,
+    pub cache: GenerationOptionOutcome,
 }
 
-impl GenerationDisposition {
+impl GenerationReceipt {
     /// Every requested control reached the wire, though an
     /// output-token cap may have reached it reduced to the model's capacity.
     /// Use [`fully_honored`](Self::fully_honored) to reject that too.
@@ -1189,7 +1189,7 @@ pub struct LlmStreamEvidence {
     pub request_body: Option<String>,
     pub http_summary: Option<String>,
     pub execution_evidence: Option<ExecutionEvidence>,
-    pub generation_disposition: Option<GenerationDisposition>,
+    pub generation_disposition: Option<GenerationReceipt>,
     /// Allowlisted response metadata available when this evidence event was
     /// emitted. Shipped HTTP adapters publish captured response headers once
     /// response establishment succeeds.
@@ -1507,7 +1507,7 @@ pub struct AttemptRecord {
     /// Which of the caller's generation options this attempt's request
     /// carried, as reported by the adapter that built it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_disposition: Option<GenerationDisposition>,
+    pub generation_disposition: Option<GenerationReceipt>,
     /// Provider-reported usage only. Absence is not zero usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<LlmUsage>,
@@ -1544,7 +1544,7 @@ pub struct LlmResponse {
     /// request's wire. `None` means the adapter does not report, which is
     /// distinct from a report that nothing was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_disposition: Option<GenerationDisposition>,
+    pub generation_disposition: Option<GenerationReceipt>,
     /// Allowlisted wire observations captured by the provider driver
     /// (`header:<lowercased-name>` and `body:<json-pointer>` keys). Population is
     /// host-supplied endpoint configuration; empty unless explicitly requested.

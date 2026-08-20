@@ -555,7 +555,7 @@ impl SessionCommitStore for PostgresSessionStore {
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitResult, StoreError> {
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
         let planner = lash_core::store::RuntimeCommitPlanner::prepare(commit)?;
         let commit = planner.commit();
         self.bind_session_id(&commit.session_id)?;
@@ -2470,7 +2470,7 @@ impl TurnInputStore for PostgresSessionStore {
         for row in rows {
             let turn_id: String = row.get(0);
             let result_json: String = row.get(1);
-            let result: RuntimeCommitResult =
+            let result: RuntimeCommitReceipt =
                 store_decode_json(&result_json, "runtime turn commit result")?;
             commits.push((
                 result.head_revision,
@@ -2489,7 +2489,7 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
         session_id: &str,
         targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core::PendingTurnInputCancelResult>, StoreError> {
+    ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let targets = targets.to_vec();
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
@@ -2502,7 +2502,7 @@ impl TurnInputStore for PostgresSessionStore {
                     Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row, now).await?,
                     None => lash_core::PendingTurnInputCancelOutcome::NotFound,
                 };
-            results.push(lash_core::PendingTurnInputCancelResult { target, outcome });
+            results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(results)

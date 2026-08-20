@@ -517,7 +517,7 @@ impl RuntimeUsageDelta {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RuntimeCommitResult {
+pub struct RuntimeCommitReceipt {
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
     pub manifest: SessionCheckpoint,

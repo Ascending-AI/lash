@@ -32,7 +32,7 @@ unleased writer:
 
 Each backend (in-memory, SQLite, Postgres) calls
 `ProcessCompletionAuthority::validate` against the row's declared
-`RecoveryDisposition` **inside** its completion operation, before appending any
+`RecoveryContract` **inside** its completion operation, before appending any
 terminal event, so the contract is enforced once per backend rather than at each
 scattered caller. The disposition×authority matrix is:
 

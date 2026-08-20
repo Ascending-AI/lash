@@ -63,7 +63,7 @@ impl PendingAnnouncement {
     }
 }
 
-/// Configuration carried by a [`ToolResult::Pending`] result: how long the runtime
+/// Configuration carried by a [`ToolOutcome::Pending`] result: how long the runtime
 /// waits for the deferred outcome, what to do if it times out or is cancelled, and
 /// any process event the runtime announces when the call parks.
 ///
@@ -135,16 +135,16 @@ impl PendingCompletion {
 ///
 /// The variant a tool returns chooses its completion mode:
 ///
-/// - [`ToolResult::Done`] — **active await**. The result is available inline and the
-///   runtime finalizes the call immediately. Construct it with [`ToolResult::ok`],
-///   [`ToolResult::err`], [`ToolResult::failure`], and friends.
-/// - [`ToolResult::Pending`] — **deferred / callback completion**. The tool has
+/// - [`ToolOutcome::Done`] — **active await**. The result is available inline and the
+///   runtime finalizes the call immediately. Construct it with [`ToolOutcome::ok`],
+///   [`ToolOutcome::err`], [`ToolOutcome::failure`], and friends.
+/// - [`ToolOutcome::Pending`] — **deferred / callback completion**. The tool has
 ///   launched out-of-band work (a webhook, a human approval, another service) and the
 ///   real outcome is delivered later against a completion key.
 ///
 /// # The completion-key contract
 ///
-/// Before returning [`ToolResult::Pending`], a tool **must** first obtain a completion
+/// Before returning [`ToolOutcome::Pending`], a tool **must** first obtain a completion
 /// key by calling [`ToolContext::completion_key`](crate::ToolContext::completion_key)
 /// (reachable through `call.context`). That key names the durable wait the runtime parks
 /// the call on, and is what an external resolver uses to deliver the outcome. Returning
@@ -152,18 +152,18 @@ impl PendingCompletion {
 /// error `pending_tool_missing_completion_key`.
 ///
 /// ```ignore
-/// async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+/// async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
 ///     // Take the key first, then hand it to whatever completes the work out-of-band.
 ///     let key = match call.context.completion_key() {
 ///         Ok(key) => key,
-///         Err(err) => return ToolResult::err_fmt(err),
+///         Err(err) => return ToolOutcome::err_fmt(err),
 ///     };
 ///     enqueue_external_work(key);
-///     ToolResult::pending(PendingCompletion::new())
+///     ToolOutcome::pending(PendingCompletion::new())
 /// }
 /// ```
 #[derive(Clone, Debug, PartialEq)]
-pub enum ToolResult {
+pub enum ToolOutcome {
     /// Active await: the tool finished inline; this is its final output.
     Done(Box<crate::ToolCallOutput>),
     /// Deferred completion: the tool parked on a durable wait keyed by the
@@ -173,8 +173,8 @@ pub enum ToolResult {
     Pending(PendingCompletion),
 }
 
-impl ToolResult {
-    /// Builds a `ToolResult` from output data for protocol and process-engine implementors while
+impl ToolOutcome {
+    /// Builds a `ToolOutcome` from output data for protocol and process-engine implementors while
     /// preparing or executing an authorized tool call.
     pub fn from_output(output: crate::ToolCallOutput) -> Self {
         Self::Done(Box::new(output))
@@ -204,7 +204,7 @@ impl ToolResult {
             code: "tool_error".to_string(),
             message,
             source: crate::ToolFailureSource::Tool,
-            retry: crate::ToolRetryDisposition::Never,
+            retry: crate::ToolRetryStatus::Never,
             raw: Some(crate::ToolValue::from(result)),
         }))
     }
@@ -250,7 +250,7 @@ impl ToolResult {
         Self::from_output(crate::ToolCallOutput::cancelled(cancellation))
     }
 
-    /// Sets the control carried by a `ToolResult` for protocol and process-engine implementors
+    /// Sets the control carried by a `ToolOutcome` for protocol and process-engine implementors
     /// while preparing or executing an authorized tool call.
     pub fn with_control(mut self, control: crate::ToolControl) -> Self {
         if let Self::Done(output) = &mut self {
@@ -319,7 +319,7 @@ impl ToolResult {
     }
 }
 
-impl<T, E> From<Result<T, E>> for ToolResult
+impl<T, E> From<Result<T, E>> for ToolOutcome
 where
     T: serde::Serialize,
     E: std::fmt::Display,
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn tool_result_from_result_serializes_success_values() {
-        let result: ToolResult = Result::<_, std::io::Error>::Ok(vec!["alpha", "beta"]).into();
+        let result: ToolOutcome = Result::<_, std::io::Error>::Ok(vec!["alpha", "beta"]).into();
         assert!(result.is_success());
         assert_eq!(
             result.value_for_projection(),
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn tool_result_from_result_formats_errors() {
-        let result: ToolResult =
+        let result: ToolOutcome =
             Result::<serde_json::Value, _>::Err(std::io::Error::other("nope")).into();
         assert!(!result.is_success());
         assert_eq!(result.value_for_projection(), serde_json::json!("nope"));
@@ -398,7 +398,7 @@ mod tests {
             }
         }
 
-        let result: ToolResult = Result::<BrokenValue, std::io::Error>::Ok(BrokenValue).into();
+        let result: ToolOutcome = Result::<BrokenValue, std::io::Error>::Ok(BrokenValue).into();
         assert!(!result.is_success());
         assert_eq!(
             result.value_for_projection(),
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn pending_result_is_not_completed_output() {
-        let result = ToolResult::pending(PendingCompletion::new());
+        let result = ToolOutcome::pending(PendingCompletion::new());
         assert!(result.is_pending());
         assert!(result.as_done_output().is_none());
         assert!(result.into_done_output().is_err());

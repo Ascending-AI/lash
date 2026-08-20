@@ -11,7 +11,7 @@ pub struct RuntimeEffectControllerError {
     pub code: RuntimeErrorCode,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<crate::runtime::effect::RuntimeEffectReplayMismatchSummary>,
+    pub summary: Option<crate::runtime::effect::RuntimeEffectReplayMismatchReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<crate::RuntimeErrorCause>,
 }
@@ -40,7 +40,7 @@ impl RuntimeEffectControllerError {
     /// while executing or replaying a runtime effect.
     pub fn with_summary(
         mut self,
-        summary: crate::runtime::effect::RuntimeEffectReplayMismatchSummary,
+        summary: crate::runtime::effect::RuntimeEffectReplayMismatchReport,
     ) -> Self {
         self.summary = Some(summary);
         self
@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn replay_mismatch_summary_survives_runtime_error_conversion() {
-        let summary = crate::RuntimeEffectReplayMismatchSummary {
+        let summary = crate::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 2,
             first_divergent_paths: vec![
                 "command.duration_ms".to_string(),

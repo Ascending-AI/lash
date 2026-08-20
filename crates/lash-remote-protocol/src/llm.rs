@@ -181,31 +181,31 @@ pub struct RemoteLlmResponse {
     /// the wire. Absent when the adapter does not report, which is distinct
     /// from a report that nothing was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_disposition: Option<RemoteGenerationDisposition>,
+    pub generation_disposition: Option<RemoteGenerationReceipt>,
 }
 
-/// Mirror of the core `GenerationDisposition`: the adapter-reported fate of a
+/// Mirror of the core `GenerationReceipt`: the adapter-reported fate of a
 /// request's generation and prompt-cache intent, so a remote host can tell an
 /// honored repeatability request from a silently dropped one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct RemoteGenerationDisposition {
+pub struct RemoteGenerationReceipt {
     #[serde(default)]
-    pub output_token_cap: RemoteGenerationOptionDisposition,
+    pub output_token_cap: RemoteGenerationOptionOutcome,
     #[serde(default)]
-    pub temperature: RemoteGenerationOptionDisposition,
+    pub temperature: RemoteGenerationOptionOutcome,
     #[serde(default)]
-    pub seed: RemoteGenerationOptionDisposition,
+    pub seed: RemoteGenerationOptionOutcome,
     #[serde(default)]
-    pub stop_sequences: RemoteGenerationOptionDisposition,
+    pub stop_sequences: RemoteGenerationOptionOutcome,
     #[serde(default)]
-    pub cache: RemoteGenerationOptionDisposition,
+    pub cache: RemoteGenerationOptionOutcome,
 }
 
-/// Mirror of the core `GenerationOptionDisposition`.
+/// Mirror of the core `GenerationOptionOutcome`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RemoteGenerationOptionDisposition {
+pub enum RemoteGenerationOptionOutcome {
     #[default]
     NotRequested,
     Applied,
@@ -287,7 +287,7 @@ pub struct RemoteAttemptRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<RemoteExecutionEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_disposition: Option<RemoteGenerationDisposition>,
+    pub generation_disposition: Option<RemoteGenerationReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<RemoteUsage>,
 }

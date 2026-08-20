@@ -538,7 +538,7 @@ pub(crate) fn trace_llm_response(
     duration_ms: u64,
     terminal_reason: Option<crate::LlmTerminalReason>,
     parts: Option<serde_json::Value>,
-    generation_disposition: Option<crate::GenerationDisposition>,
+    generation_disposition: Option<crate::GenerationReceipt>,
 ) -> TraceLlmResponse {
     TraceLlmResponse {
         text,

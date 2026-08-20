@@ -176,7 +176,7 @@ impl ProcessInput {
 /// inherit re-execution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RecoveryDisposition {
+pub enum RecoveryContract {
     /// Another owner may re-execute the work — the contract for journaled,
     /// idempotent inputs (engine rows, session-turn rows).
     Rerunnable,
@@ -417,7 +417,7 @@ impl ProcessStartOptions {
 pub struct ProcessStartRequest {
     pub id: ProcessId,
     pub input: ProcessInput,
-    pub disposition: RecoveryDisposition,
+    pub disposition: RecoveryContract,
     /// Maximum execution attempts. `None` delegates pacing indefinitely to the
     /// engine; deterministic failures then require host cancellation or
     /// abandonment to resolve awaiters.
@@ -442,7 +442,7 @@ impl ProcessStartRequest {
     pub fn new(
         id: impl Into<ProcessId>,
         input: ProcessInput,
-        disposition: RecoveryDisposition,
+        disposition: RecoveryContract,
         originator: ProcessOriginator,
     ) -> Self {
         Self {
@@ -460,7 +460,7 @@ impl ProcessStartRequest {
     }
 
     /// External placeholder start: `ProcessInput::External` is always
-    /// [`RecoveryDisposition::ExternallyOwned`] — lash never executes it.
+    /// [`RecoveryContract::ExternallyOwned`] — lash never executes it.
     pub fn external(
         id: impl Into<ProcessId>,
         originator: ProcessOriginator,
@@ -469,7 +469,7 @@ impl ProcessStartRequest {
         Self::new(
             id,
             ProcessInput::External { metadata },
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             originator,
         )
     }
@@ -690,7 +690,7 @@ impl SessionScope {
 pub struct ProcessRegistration {
     pub id: ProcessId,
     pub input: Arc<ProcessInput>,
-    pub disposition: RecoveryDisposition,
+    pub disposition: RecoveryContract,
     /// Maximum execution attempts, or `None` for engine-paced indefinite
     /// retry. A deterministic failure with `None` can remain non-terminal
     /// indefinitely; producers with deterministic failure modes should set an
@@ -729,7 +729,7 @@ impl ProcessRegistration {
     pub fn new(
         id: impl Into<ProcessId>,
         input: ProcessInput,
-        disposition: RecoveryDisposition,
+        disposition: RecoveryContract,
         provenance: ProcessProvenance,
     ) -> Self {
         let identity = ProcessIdentity::from_process_input(&input);
@@ -750,7 +750,7 @@ impl ProcessRegistration {
     pub(crate) fn session_start_draft(
         id: impl Into<ProcessId>,
         input: ProcessInput,
-        disposition: RecoveryDisposition,
+        disposition: RecoveryContract,
     ) -> Self {
         Self::new(id, input, disposition, ProcessProvenance::host())
     }
@@ -914,7 +914,7 @@ pub struct ProcessRecord {
     /// Declared recovery contract. Required with no serde default: pre-column
     /// durable rows cannot deserialize and are handled by each store's schema
     /// version bump (reject-and-recreate), never by an API/serde default.
-    pub disposition: RecoveryDisposition,
+    pub disposition: RecoveryContract,
     /// Persisted attempt budget; `None` retains engine-paced indefinite retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
@@ -1217,7 +1217,7 @@ pub struct ProcessExternalRef {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessHandleSummary {
+pub struct ProcessHandleView {
     #[serde(rename = "__handle__")]
     pub handle_type: String,
     pub id: ProcessId,
@@ -1230,8 +1230,8 @@ pub struct ProcessHandleSummary {
     pub status: ProcessStatus,
 }
 
-impl ProcessHandleSummary {
-    /// Constructs a `ProcessHandleSummary` for store and durable-substrate implementors while
+impl ProcessHandleView {
+    /// Constructs a `ProcessHandleView` for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
     pub fn new(
         process_id: impl Into<ProcessId>,
@@ -1250,14 +1250,14 @@ impl ProcessHandleSummary {
         }
     }
 
-    /// Sets the definition carried by a `ProcessHandleSummary` for store and durable-substrate
+    /// Sets the definition carried by a `ProcessHandleView` for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn with_definition(mut self, definition: Option<serde_json::Value>) -> Self {
         self.definition = definition;
         self
     }
 
-    /// Builds a `ProcessHandleSummary` from record data for store and durable-substrate
+    /// Builds a `ProcessHandleView` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
         Self::new(record.id, record.identity, record.status)
@@ -1265,13 +1265,13 @@ impl ProcessHandleSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessCancelSummary {
+pub struct ProcessCancelReceipt {
     pub process_id: ProcessId,
     pub status: ProcessStatus,
 }
 
-impl ProcessCancelSummary {
-    /// Builds a `ProcessCancelSummary` from record data for store and durable-substrate
+impl ProcessCancelReceipt {
+    /// Builds a `ProcessCancelReceipt` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
         Self {

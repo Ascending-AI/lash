@@ -12,7 +12,7 @@ async fn claim_cannot_interleave_between_authority_validation_and_append() {
                     kind: "test".to_string(),
                     payload: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::Rerunnable,
+                crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
             )
             .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new("test-env"))),

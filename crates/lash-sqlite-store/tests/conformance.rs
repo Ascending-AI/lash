@@ -2361,7 +2361,7 @@ async fn assert_waiting_process_is_live_not_prunable(
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
         ))
         .await

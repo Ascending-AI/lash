@@ -337,7 +337,7 @@ fn measure_hardening_identity_phases(
                     "turn": turn_index,
                 }),
             },
-            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
         ))?;
     let (_, phase) =
@@ -535,7 +535,7 @@ async fn measure_process_prune(
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({"index": index}),
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             ))
             .await?;

@@ -124,7 +124,7 @@ pub enum PluginDirective {
 }
 
 impl PluginDirective {
-    pub fn short_circuit(result: ToolResult) -> Self {
+    pub fn short_circuit(result: ToolOutcome) -> Self {
         Self::ShortCircuitTool {
             output: result.into_done_output().unwrap_or_else(|_| {
                 ToolCallOutput::failure(crate::ToolFailure::runtime(

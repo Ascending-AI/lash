@@ -540,8 +540,8 @@ impl crate::ToolProvider for EmptyTools {
         None
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-        crate::ToolResult::err(serde_json::json!("Unknown tool"))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        crate::ToolOutcome::err(serde_json::json!("Unknown tool"))
     }
 }
 
@@ -721,14 +721,14 @@ impl crate::ToolProvider for EchoTool {
         (name == "echo_tool").then(|| Arc::new(echo_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         assert_eq!(call.name, "echo_tool");
         let value = call
             .args
             .get("value")
             .and_then(|value| value.as_str())
             .unwrap_or_default();
-        crate::ToolResult::ok(serde_json::json!({
+        crate::ToolOutcome::ok(serde_json::json!({
             "payload": format!("raw:{value}")
         }))
     }
@@ -753,18 +753,18 @@ impl crate::ToolProvider for TerminalControlTool {
             .map(|index| Arc::new(terminal_tool_definition(index).contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         self.result_for(call.name)
     }
 }
 
 impl TerminalControlTool {
-    fn result_for(&self, name: &str) -> crate::ToolResult {
+    fn result_for(&self, name: &str) -> crate::ToolOutcome {
         let index = name
             .strip_prefix("terminal_tool_")
             .and_then(|value| value.parse::<usize>().ok())
             .expect("known terminal test tool");
-        crate::ToolResult::ok(serde_json::json!({ "tool": name }))
+        crate::ToolOutcome::ok(serde_json::json!({ "tool": name }))
             .with_control(self.controls[index].clone())
     }
 }
@@ -796,22 +796,22 @@ impl crate::ToolProvider for SlowTool {
         (name == "slow_tool").then(|| Arc::new(slow_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         let observed = Arc::clone(&self.observed_cancel);
         if let Some(token) = call.context.cancellation_token() {
             let token = token.clone();
             tokio::select! {
                 _ = token.cancelled() => {
                     observed.store(true, Ordering::SeqCst);
-                    crate::ToolResult::cancelled("cancelled")
+                    crate::ToolOutcome::cancelled("cancelled")
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
-                    crate::ToolResult::ok(serde_json::json!({"status": "completed"}))
+                    crate::ToolOutcome::ok(serde_json::json!({"status": "completed"}))
                 }
             }
         } else {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            crate::ToolResult::ok(serde_json::json!({"status": "completed"}))
+            crate::ToolOutcome::ok(serde_json::json!({"status": "completed"}))
         }
     }
 }
@@ -838,8 +838,8 @@ impl crate::ToolProvider for MemoryProbeTool {
         (name == "memory_probe").then(|| Arc::new(memory_probe_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-        crate::ToolResult::ok(json!("ok"))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        crate::ToolOutcome::ok(json!("ok"))
     }
 }
 
@@ -886,7 +886,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Ch
         &self,
         _args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolResult {
+    ) -> crate::ToolOutcome {
         let child = match context
             .sessions()
             .create_session(
@@ -902,7 +902,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Ch
             .await
         {
             Ok(child) => child,
-            Err(err) => return crate::ToolResult::err_fmt(format_args!("{err}")),
+            Err(err) => return crate::ToolOutcome::err_fmt(format_args!("{err}")),
         };
 
         let turn = match context
@@ -923,12 +923,12 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Ch
             .await
         {
             Ok(turn) => turn,
-            Err(err) => return crate::ToolResult::err_fmt(format_args!("{err}")),
+            Err(err) => return crate::ToolOutcome::err_fmt(format_args!("{err}")),
         };
 
         let _ = context.sessions().close_session(&child.session_id).await;
         let _ = turn;
-        crate::ToolResult::ok(json!({ "status": "ok" }))
+        crate::ToolOutcome::ok(json!({ "status": "ok" }))
     }
 }
 

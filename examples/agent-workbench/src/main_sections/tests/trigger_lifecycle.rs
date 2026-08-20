@@ -338,7 +338,7 @@
         .expect("first register");
         assert_eq!(
             created.disposition,
-            lash::triggers::TriggerMutationDisposition::Created
+            lash::triggers::TriggerMutationOutcome::Created
         );
         workbench_trigger_mutation(
             trigger_store.as_ref(),
@@ -368,7 +368,7 @@
         .expect("a receipted redrive replays its recorded outcome");
         assert_eq!(
             replayed.disposition,
-            lash::triggers::TriggerMutationDisposition::Created,
+            lash::triggers::TriggerMutationOutcome::Created,
             "the retained receipt answers the redrive with the outcome the \
              handler already observed"
         );

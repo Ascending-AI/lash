@@ -446,7 +446,7 @@ impl crate::ToolProvider for AttachmentPutTool {
         (name == "attachment_put").then(|| Arc::new(attachment_put_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         let reference = call
             .context
             .attachments()
@@ -460,7 +460,7 @@ impl crate::ToolProvider for AttachmentPutTool {
             )
             .await
             .expect("tool attachment put");
-        crate::ToolResult::from_output(crate::ToolCallOutput::success(
+        crate::ToolOutcome::from_output(crate::ToolCallOutput::success(
             crate::ToolValue::Attachment(crate::AttachmentSource::stored(reference)),
         ))
     }
@@ -1563,11 +1563,11 @@ impl crate::ToolProvider for FrameRotatingDynamicTool {
             .then(|| Arc::new(rotating_tool_definition(name).contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         match call.name {
             "rotate_surface" => {
                 self.rotated.store(true, Ordering::SeqCst);
-                crate::ToolResult::ok(json!({ "rotated": true })).with_control(
+                crate::ToolOutcome::ok(json!({ "rotated": true })).with_control(
                     crate::ToolControl::SwitchAgentFrame {
                         frame_key: crate::FrameKey::from_caller_material("live-surface-frame")
                             .expect("non-empty caller material"),
@@ -1576,14 +1576,14 @@ impl crate::ToolProvider for FrameRotatingDynamicTool {
                     },
                 )
             }
-            "new_after_rotation" => crate::ToolResult::ok(json!({ "called": call.name }))
+            "new_after_rotation" => crate::ToolOutcome::ok(json!({ "called": call.name }))
                 .with_control(crate::ToolControl::Finish {
                     value: json!("new tool executed").into(),
                 }),
             "curated_before_rotation" | "hidden_after_rotation" => {
-                crate::ToolResult::ok(json!({ "called": call.name }))
+                crate::ToolOutcome::ok(json!({ "called": call.name }))
             }
-            name => crate::ToolResult::err_fmt(format_args!("unknown rotating tool `{name}`")),
+            name => crate::ToolOutcome::err_fmt(format_args!("unknown rotating tool `{name}`")),
         }
     }
 }
@@ -1859,14 +1859,14 @@ impl crate::ToolProvider for CasSurvivorIntentTools {
         (name == "cas_survivor_intent").then(|| Arc::new(cas_survivor_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         panic!("the lease/CAS survivor law must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        crate::ToolAttemptResult::done(
-            crate::ToolResultDone::ok(serde_json::json!({"intent": "committed"})),
+        crate::ToolAttemptOutcome::done(
+            crate::ToolOutcomeDone::ok(serde_json::json!({"intent": "committed"})),
             crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
                 crate::EmitProcessEventIntent {
                     session_id: call.context.session_id().to_string(),
@@ -3232,7 +3232,7 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -3325,7 +3325,7 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -3451,7 +3451,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -3638,7 +3638,7 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -5400,7 +5400,7 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
             )
@@ -6660,7 +6660,7 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             )
             .with_extra_event_types([crate::ProcessEventType {
@@ -7089,7 +7089,7 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -7446,7 +7446,7 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
             )
@@ -7649,7 +7649,7 @@ async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_histor
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -7753,7 +7753,7 @@ async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_default() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -7854,7 +7854,7 @@ async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
             )
             .with_extra_event_types([process_wake_event_type()])
@@ -8734,12 +8734,12 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
     // no seed field) stays silent so one session-wide setting works across
     // mixed models — but the turn record says what actually reached the wire,
     // so a host asserting repeatability learns it was not honored.
-    let dropped_sampling = crate::GenerationDisposition {
-        output_token_cap: crate::GenerationOptionDisposition::Applied,
-        temperature: crate::GenerationOptionDisposition::OmittedSamplingPinned,
-        seed: crate::GenerationOptionDisposition::OmittedUnsupported,
-        stop_sequences: crate::GenerationOptionDisposition::NotRequested,
-        cache: crate::GenerationOptionDisposition::NotRequested,
+    let dropped_sampling = crate::GenerationReceipt {
+        output_token_cap: crate::GenerationOptionOutcome::Applied,
+        temperature: crate::GenerationOptionOutcome::OmittedSamplingPinned,
+        seed: crate::GenerationOptionOutcome::OmittedUnsupported,
+        stop_sequences: crate::GenerationOptionOutcome::NotRequested,
+        cache: crate::GenerationOptionOutcome::NotRequested,
     };
     let provider = TestProvider::builder()
         .kind("disposition-reporting")
@@ -8836,12 +8836,12 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                     }],
                     // The adapter reports the cap it was handed as applied; it
                     // has no idea a larger one was asked for.
-                    generation_disposition: Some(crate::GenerationDisposition {
-                        output_token_cap: crate::GenerationOptionDisposition::Applied,
-                        temperature: crate::GenerationOptionDisposition::Applied,
-                        seed: crate::GenerationOptionDisposition::NotRequested,
-                        stop_sequences: crate::GenerationOptionDisposition::NotRequested,
-                        cache: crate::GenerationOptionDisposition::NotRequested,
+                    generation_disposition: Some(crate::GenerationReceipt {
+                        output_token_cap: crate::GenerationOptionOutcome::Applied,
+                        temperature: crate::GenerationOptionOutcome::Applied,
+                        seed: crate::GenerationOptionOutcome::NotRequested,
+                        stop_sequences: crate::GenerationOptionOutcome::NotRequested,
+                        cache: crate::GenerationOptionOutcome::NotRequested,
                     }),
                     ..LlmResponse::default()
                 })
@@ -8917,7 +8917,7 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
         .expect("the adapter reported what it sent");
     assert_eq!(
         reported.output_token_cap,
-        crate::GenerationOptionDisposition::ClampedToCapacity
+        crate::GenerationOptionOutcome::ClampedToCapacity
     );
     assert!(
         reported.nothing_omitted(),

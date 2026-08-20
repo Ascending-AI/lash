@@ -7,7 +7,7 @@ use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
 use lash_core::{
     InputItem, LlmOutputPart, LlmResponse, SessionAppendNode, SessionNodePayload, ToolCall,
-    ToolContract, ToolControl, ToolDefinition, ToolManifest, ToolProvider, ToolResult, TurnInput,
+    ToolContract, ToolControl, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider, TurnInput,
     facade_support::TraceRecord, facade_support::TraceSink, facade_support::TraceSinkError,
     facade_support::TurnStop,
 };
@@ -92,8 +92,8 @@ impl ToolProvider for NoTools {
         None
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-        ToolResult::err(json!("unknown tool"))
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::err(json!("unknown tool"))
     }
 }
 
@@ -107,9 +107,9 @@ impl ToolProvider for SeedSwitchTool {
         (name == "switch_frame").then(|| Arc::new(switch_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         assert_eq!(call.name, "switch_frame");
-        ToolResult::ok(json!({"switched": true})).with_control(ToolControl::SwitchAgentFrame {
+        ToolOutcome::ok(json!({"switched": true})).with_control(ToolControl::SwitchAgentFrame {
             frame_key: lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
                 .expect("non-empty caller material"),
             initial_nodes: self.initial_nodes.clone(),
@@ -482,13 +482,13 @@ impl ToolProvider for BoundedSwitchTools {
         (index < self.switch_count).then(|| Arc::new(Self::definition(index).contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let index = call
             .name
             .strip_prefix("terminal_tool_")
             .and_then(|value| value.parse::<usize>().ok())
             .expect("bounded switch tool name");
-        ToolResult::ok(json!({"switch": index})).with_control(ToolControl::SwitchAgentFrame {
+        ToolOutcome::ok(json!({"switch": index})).with_control(ToolControl::SwitchAgentFrame {
             frame_key: lash_core::FrameKey::from_caller_material(&format!("bounded-frame-{index}"))
                 .expect("non-empty caller material"),
             initial_nodes: vec![SessionAppendNode::plugin(

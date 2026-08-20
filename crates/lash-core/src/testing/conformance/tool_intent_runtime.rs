@@ -27,15 +27,15 @@ impl crate::ToolProvider for SignalIntentProvider {
         (name == "conformance_signal_intent").then(|| Arc::new(signal_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         panic!("the signal-intent conformance law must use AttemptContext")
     }
 
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptResult {
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.context.session_id(), self.session_id);
-        crate::ToolAttemptResult::done(
-            crate::ToolResultDone::ok(serde_json::json!({"signalled": true})),
+        crate::ToolAttemptOutcome::done(
+            crate::ToolOutcomeDone::ok(serde_json::json!({"signalled": true})),
             crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
                 crate::SignalProcessIntent {
                     session_id: self.session_id.clone(),
@@ -66,7 +66,7 @@ pub async fn public_signal_intent_wakes_parked_process(
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             )
             .with_extra_event_types([crate::ProcessEventType {

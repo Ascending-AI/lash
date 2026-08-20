@@ -55,7 +55,7 @@
             <h2>Atomic Leaf Tools and Durable Intents</h2>
             <p>Leaf providers opt into <code>AttemptContext</code> and return recorded declarations for durable follow-on work.</p>
           </div>
-          <p>Return <code>ToolAttemptResult::Done { result: ToolResultDone, intents: ToolIntents::v1(...) }</code>. The type deliberately makes <code>Pending</code> plus intents impossible. <code>AttemptContext</code> exposes recorded reads and local capabilities but no process-command or trigger-command client; use <code>StartProcess</code>, <code>SignalProcess</code>, <code>CancelProcess</code>, <code>EmitProcessEvent</code>, or <code>EmitTrigger</code> declarations instead.</p>
+          <p>Return <code>ToolAttemptOutcome::Done { result: ToolOutcomeDone, intents: ToolIntents::v1(...) }</code>. The type deliberately makes <code>Pending</code> plus intents impossible. <code>AttemptContext</code> exposes recorded reads and local capabilities but no process-command or trigger-command client; use <code>StartProcess</code>, <code>SignalProcess</code>, <code>CancelProcess</code>, <code>EmitProcessEvent</code>, or <code>EmitTrigger</code> declarations instead.</p>
           <p>Lash commits the final attempt before draining its declarations in source order. Each declaration receives a stable identity derived from the session, enclosing execution scope (turn id or process id), tool call id, and intent index. Realization is journal-first: command-time unknown, terminal, conflict, or replay outcomes are durable evidence, not decisions recomputed from live visibility. <code>StartProcessIntent</code> also records its complete environment/observer input and an <code>on_parent_end</code> policy of <code>Abandon</code> or <code>Cancel</code> (the default). At realization Lash replaces the request's host-chosen process id with the derived intent replay key; that derived key is the process id returned to and observed by the host. Abandon is a recorded no-op; Cancel issues one replay-keyed cancellation with a recorded typed outcome. Lash deliberately has no hard-kill primitive, so engines keep kill semantics and the v1 parent-end policy does not pretend to offer Temporal's Terminate behavior. A future hard-kill policy must arrive together with a real process primitive under reject-and-recreate versioning.</p>
           <p>Declare <code>attempt_may_defer</code> only when the leaf can actually return <code>Pending</code>; Lash reserves a process-lifetime completion key only for declared-deferable providers.</p>
         </div>
@@ -79,7 +79,7 @@
 
 use async_trait::async_trait;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -100,21 +100,21 @@ struct WeatherTools;
 
 #[async_trait]
 impl StaticToolExecute for WeatherTools {
-    async fn execute(&amp;self, call: ToolCall&lt;'_&gt;) -&gt; ToolResult {
+    async fn execute(&amp;self, call: ToolCall&lt;'_&gt;) -&gt; ToolOutcome {
         match call.name {
             "weather_lookup" =&gt; {
                 let args: WeatherArgs = match serde_json::from_value(call.args.clone()) {
                     Ok(args) =&gt; args,
-                    Err(err) =&gt; return ToolResult::err_fmt(format_args!("invalid args: {err}")),
+                    Err(err) =&gt; return ToolOutcome::err_fmt(format_args!("invalid args: {err}")),
                 };
 
                 let report = lookup_weather(args).await;
                 match serde_json::to_value(report) {
-                    Ok(value) =&gt; ToolResult::ok(value),
-                    Err(err) =&gt; ToolResult::err_fmt(format_args!("serialize output: {err}")),
+                    Ok(value) =&gt; ToolOutcome::ok(value),
+                    Err(err) =&gt; ToolOutcome::err_fmt(format_args!("serialize output: {err}")),
                 }
             }
-            other =&gt; ToolResult::err_fmt(format_args!("unknown tool: {other}")),
+            other =&gt; ToolOutcome::err_fmt(format_args!("unknown tool: {other}")),
         }
     }
 }
@@ -226,10 +226,10 @@ let settled = ingress.settle_parent_end().await?;
 assert_eq!(settled.len(), 1);</code></pre>
           <pre data-lang="rust" data-snippet="plugins_tools#direct-completion-tool"><code>use lash::direct::{DirectOutputSpec, DirectRequest};
 
-async fn rank(call: ToolCall&lt;'_&gt;) -&gt; ToolResult {
+async fn rank(call: ToolCall&lt;'_&gt;) -&gt; ToolOutcome {
     let model = match call.context.sessions().model().await {
         Ok(model) =&gt; model,
-        Err(err) =&gt; return ToolResult::err_fmt(format_args!("{err}")),
+        Err(err) =&gt; return ToolOutcome::err_fmt(format_args!("{err}")),
     };
 
     let request = DirectRequest {
@@ -252,14 +252,14 @@ async fn rank(call: ToolCall&lt;'_&gt;) -&gt; ToolResult {
         .complete(request, "my_tool")
         .await
     {
-        Ok(completion) =&gt; ToolResult::ok(serde_json::json!({ "text": completion.text })),
-        Err(err) =&gt; ToolResult::err_fmt(format_args!("{err}")),
+        Ok(completion) =&gt; ToolOutcome::ok(serde_json::json!({ "text": completion.text })),
+        Err(err) =&gt; ToolOutcome::err_fmt(format_args!("{err}")),
     }
 }</code></pre>
           <p><code>ToolContext</code> exposes no public <code>host()</code> escape hatch. Runtime host wiring stays inside <code>lash-core</code>; plugin-facing code uses explicit context capabilities. Import direct-call request/result types from <code>lash::direct</code>; plugin authors should not depend on provider internals for one-shot model calls.</p>
           <aside class="callout callout--note">
             <strong><code>llm_query</code> is the reference ordinary effectful tool</strong>
-            <p>It is registered and dispatched like any other tool, calls <code>context.direct_completions()</code>, parses its declared output schema, and returns a normal <code>ToolResult</code>. It has no workflow-engine or durability special path. A completed attempt replays without another provider call; an attempt retry or crash-before-record can invoke and bill the provider again.</p>
+            <p>It is registered and dispatched like any other tool, calls <code>context.direct_completions()</code>, parses its declared output schema, and returns a normal <code>ToolOutcome</code>. It has no workflow-engine or durability special path. A completed attempt replays without another provider call; an attempt retry or crash-before-record can invoke and bill the provider again.</p>
           </aside>
         </div>
 

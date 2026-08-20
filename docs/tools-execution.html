@@ -21,7 +21,7 @@
   <a class="skip-link" href="#content">skip to content</a>
 <section class="opener">
     <h1 class="opener__title">tool<span class="slash">/</span>execution</h1>
-    <p class="opener__lede">Concurrent batches, completion modes, atomic-attempt semantics, and output projection for tools that need more than a simple inline <code>ToolResult::ok(...)</code>.</p>
+    <p class="opener__lede">Concurrent batches, completion modes, atomic-attempt semantics, and output projection for tools that need more than a simple inline <code>ToolOutcome::ok(...)</code>.</p>
   </section>
 
   <main class="body" id="content">
@@ -55,19 +55,19 @@ ToolDefinition::raw(
         <div class="section" id="tool-completion-modes">
           <div class="section-header">
             <h2>Active vs. Deferred Completion</h2>
-            <p>A tool's <code>execute()</code> returns a <code>ToolResult</code>, and the variant it returns chooses how the call completes. Most tools finish inline; a tool that waits on out-of-band work parks the call and lets an external resolver deliver the result later.</p>
+            <p>A tool's <code>execute()</code> returns a <code>ToolOutcome</code>, and the variant it returns chooses how the call completes. Most tools finish inline; a tool that waits on out-of-band work parks the call and lets an external resolver deliver the result later.</p>
           </div>
           <div class="two-col">
             <article class="panel">
-              <h3><code>ToolResult::Done</code> (active await)</h3>
-              <p>The result is available inline and the runtime finalizes the call immediately. Build it with <code>ToolResult::ok</code>, <code>ToolResult::err</code>, <code>ToolResult::failure</code>, and friends.</p>
+              <h3><code>ToolOutcome::Done</code> (active await)</h3>
+              <p>The result is available inline and the runtime finalizes the call immediately. Build it with <code>ToolOutcome::ok</code>, <code>ToolOutcome::err</code>, <code>ToolOutcome::failure</code>, and friends.</p>
             </article>
             <article class="panel">
-              <h3><code>ToolResult::Pending</code> (deferred completion)</h3>
+              <h3><code>ToolOutcome::Pending</code> (deferred completion)</h3>
               <p>The tool has launched out-of-band work (a webhook, a human approval, another service) and the real outcome is delivered later against a completion key. The runtime parks the call on a durable wait and resumes it when the key resolves.</p>
             </article>
           </div>
-          <p>Deferred completion has one hard rule: <strong>before returning <code>ToolResult::Pending</code>, the tool must first obtain a completion key</strong> by calling <code>call.context.completion_key()</code>. That key names the durable wait and is what the external resolver later uses to deliver the result. Returning <code>Pending</code> without having taken a key fails the call with the internal error <code>pending_tool_missing_completion_key</code>.</p>
+          <p>Deferred completion has one hard rule: <strong>before returning <code>ToolOutcome::Pending</code>, the tool must first obtain a completion key</strong> by calling <code>call.context.completion_key()</code>. That key names the durable wait and is what the external resolver later uses to deliver the result. Returning <code>Pending</code> without having taken a key fails the call with the internal error <code>pending_tool_missing_completion_key</code>.</p>
           <p>The call is not asynchronous, because the attempt coordinator reserves the key before the body runs — and it only does so for a tool whose provider declares <code>ToolProvider::attempt_may_defer</code> (or <code>StaticToolExecute::attempt_may_defer</code>). A tool that parks without that declaration is refused with <code>tool_deferral_not_declared</code>, which names the missing declaration rather than blaming the host's effect controller.</p>
           <p>A recorded attempt body cannot append process events, so a tool that must announce its durable wait <em>declares</em> the event on the pending return with <code>PendingAnnouncement</code>: the runtime appends it when the call parks, so the announcement exists if and only if the park happened, and a failed append fails the call with <code>pending_tool_announcement_failed</code>. The replay key is required, because the declaration is re-made on every redrive of the attempt.</p>
           <pre data-lang="rust" data-snippet="plugins_tools#detached-tool"><code>use lash::tools::{PendingAnnouncement, PendingCompletion};
@@ -77,7 +77,7 @@ ToolDefinition::raw(
 // The key exists only for a tool that declares `attempt_may_defer`.
 let key = match call.context.completion_key() {
     Ok(key) =&gt; key,
-    Err(err) =&gt; return ToolResult::err_fmt(format_args!("{err}")),
+    Err(err) =&gt; return ToolOutcome::err_fmt(format_args!("{err}")),
 };
 enqueue_external_work(key);
 
@@ -98,7 +98,7 @@ if let Some(summary) = mirror_declared_wait(&amp;pending) {
 
 // Returning Pending without first taking the key fails the call with
 // `pending_tool_missing_completion_key`.
-ToolResult::pending(pending)</code></pre>
+ToolOutcome::pending(pending)</code></pre>
           <p><code>PendingCompletion</code> configures the wait: an optional <code>deadline</code>, an <code>on_timeout</code> behavior (<code>ErrorAsResult</code> feeds a timeout result back to the model; <code>FailTurn</code> fails the whole turn), and an <code>on_cancel</code> hint (<code>CancelExternalWork</code> by default, or <code>Ignore</code> to leave the out-of-band work running). Adjust it with <code>PendingCompletion::new().with_deadline(..)</code> and <code>.fail_turn_on_timeout()</code>. The remote protocol carries tool grants only; execute tools through a normal <code>ToolProvider</code> at the host boundary.</p>
         </div>
 
@@ -130,7 +130,7 @@ ToolResult::pending(pending)</code></pre>
             </div>
           </div>
           <h3>Choose The Durable Boundary</h3>
-          <p>Return <code>ToolResult::ok(...)</code> when all work belongs to one attempt. Use <a href="#tool-completion-modes"><code>ToolResult::Pending</code></a> when an external owner will eventually provide one final tool result. Use a Lashlang process when each operation must settle before the next begins:</p>
+          <p>Return <code>ToolOutcome::ok(...)</code> when all work belongs to one attempt. Use <a href="#tool-completion-modes"><code>ToolOutcome::Pending</code></a> when an external owner will eventually provide one final tool result. Use a Lashlang process when each operation must settle before the next begins:</p>
           <pre data-lang="text"><code>process fulfill(order: Order) {
   quoted = await tools.quote({ order: order })?
   approved = await tools.request_approval({ quote: quoted })?

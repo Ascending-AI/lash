@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -87,20 +87,20 @@ struct WorkspaceTools {
 
 #[async_trait]
 impl StaticToolExecute for WorkspaceTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match call.name {
             LIST_CHANNELS => self.list_channels().await,
             CHANNEL_HISTORY => match serde_json::from_value(call.args.clone()) {
                 Ok(args) => self.channel_history(args).await,
-                Err(error) => ToolResult::err_fmt(format_args!("invalid arguments: {error}")),
+                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
             },
-            other => ToolResult::err_fmt(format_args!("unknown tool: {other}")),
+            other => ToolOutcome::err_fmt(format_args!("unknown tool: {other}")),
         }
     }
 }
 
 impl WorkspaceTools {
-    async fn list_channels(&self) -> ToolResult {
+    async fn list_channels(&self) -> ToolOutcome {
         // One page is the whole workspace for an example-sized platform. A tool
         // that silently truncated a paginated list would teach the wrong thing,
         // so the cursor is followed to exhaustion.
@@ -113,7 +113,7 @@ impl WorkspaceTools {
                 .await
             {
                 Ok(page) => page,
-                Err(error) => return ToolResult::err_fmt(format_args!("{error}")),
+                Err(error) => return ToolOutcome::err_fmt(format_args!("{error}")),
             };
             channels.extend(page.channels.into_iter().map(|channel| ChannelSummary {
                 id: channel.id,
@@ -132,7 +132,7 @@ impl WorkspaceTools {
         into_result(&ListChannelsOutput { channels })
     }
 
-    async fn channel_history(&self, args: ChannelHistoryArgs) -> ToolResult {
+    async fn channel_history(&self, args: ChannelHistoryArgs) -> ToolOutcome {
         let limit = args.limit.unwrap_or(20).clamp(1, MAX_HISTORY);
         // Resolve the caller's spelling to the canonical `C…` id first. The
         // platform accepts a name, but reporting the id back means the model's
@@ -140,7 +140,7 @@ impl WorkspaceTools {
         // workspace does.
         let canonical = match self.resolve_channel(&args.channel).await {
             Ok(id) => id,
-            Err(error) => return ToolResult::err_fmt(format_args!("{error}")),
+            Err(error) => return ToolOutcome::err_fmt(format_args!("{error}")),
         };
         let history = match self
             .api
@@ -148,7 +148,7 @@ impl WorkspaceTools {
             .await
         {
             Ok(history) => history,
-            Err(error) => return ToolResult::err_fmt(format_args!("{error}")),
+            Err(error) => return ToolOutcome::err_fmt(format_args!("{error}")),
         };
         let mut messages: Vec<HistoryEntry> = history
             .messages
@@ -201,10 +201,10 @@ impl WorkspaceTools {
     }
 }
 
-fn into_result<T: Serialize>(output: &T) -> ToolResult {
+fn into_result<T: Serialize>(output: &T) -> ToolOutcome {
     match serde_json::to_value(output) {
-        Ok(value) => ToolResult::ok(value),
-        Err(error) => ToolResult::err_fmt(format_args!("serialize tool output: {error}")),
+        Ok(value) => ToolOutcome::ok(value),
+        Err(error) => ToolOutcome::err_fmt(format_args!("serialize tool output: {error}")),
     }
 }
 

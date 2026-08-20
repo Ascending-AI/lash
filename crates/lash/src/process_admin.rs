@@ -73,7 +73,7 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
     async fn ingest_occurrence(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
-    ) -> std::result::Result<lash_core::TriggerIngressResult, lash_core::PluginError> {
+    ) -> std::result::Result<lash_core::TriggerIngressReceipt, lash_core::PluginError> {
         self.inner.ingest_occurrence(request).await
     }
 
@@ -371,7 +371,7 @@ impl Processes {
         &self,
         process_id: &str,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::ProcessCancelSummary> {
+    ) -> Result<lash_core::ProcessCancelReceipt> {
         let command = lash_core::ProcessCommand::Cancel {
             process_id: process_id.to_string(),
             reason: Some("requested by host".to_string()),
@@ -385,7 +385,7 @@ impl Processes {
                 "process cancel returned the wrong outcome".to_string(),
             )));
         };
-        Ok(lash_core::ProcessCancelSummary::from_record(*record))
+        Ok(lash_core::ProcessCancelReceipt::from_record(*record))
     }
 
     pub async fn signal(
@@ -432,7 +432,7 @@ impl Processes {
     pub async fn cancel_all(
         &self,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<Vec<lash_core::ProcessCancelSummary>> {
+    ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         let running = self
             .list(&lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Running,

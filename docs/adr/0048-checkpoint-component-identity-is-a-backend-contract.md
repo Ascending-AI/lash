@@ -17,7 +17,7 @@ the same identity contract.
 
 When a backend stores a checkpoint component body, it must mint the
 content-addressed ref that addresses that body and return the ref in
-`RuntimeCommitResult::manifest`. A later commit carrying that ref without a
+`RuntimeCommitReceipt::manifest`. A later commit carrying that ref without a
 body means “unchanged”: the backend must resolve the body from storage when it
 hydrates the checkpoint. A ref-only commit whose body is absent is invalid and
 fails with the typed missing-component error rather than persisting partial

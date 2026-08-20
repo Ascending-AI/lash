@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use super::events::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
-    ProcessEventAppendResult,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest,
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
@@ -385,7 +385,7 @@ impl ProcessRegistry for WatchedProcessRegistry {
         &self,
         process_id: &str,
         request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendResult, PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
         let event_path = self.event_path(process_id);
         let _guard = event_path.lock().await;
         let sink_cursor = self.sink_cursor(process_id).await;
@@ -400,7 +400,7 @@ impl ProcessRegistry for WatchedProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendResult, PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
         let event_path = self.event_path(process_id);
         let _guard = event_path.lock().await;
         let sink_cursor = self.sink_cursor(process_id).await;
@@ -750,7 +750,7 @@ impl ProcessRegistry for WatchedProcessRegistry {
 
     async fn live_reference_summary(
         &self,
-    ) -> Result<Vec<super::references::ProcessLiveReferenceSummary>, PluginError> {
+    ) -> Result<Vec<super::references::ProcessLiveReferenceView>, PluginError> {
         self.inner.live_reference_summary().await
     }
 

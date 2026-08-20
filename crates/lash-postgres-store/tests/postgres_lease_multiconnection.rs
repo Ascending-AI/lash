@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::{
     LeaseOwnerIdentity, ProcessAwaitOutput, ProcessInput, ProcessLeaseClaimOutcome,
-    ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStarted, RecoveryDisposition,
+    ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStarted, RecoveryContract,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -61,7 +61,7 @@ fn registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryDisposition::Rerunnable,
+        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
     )
 }

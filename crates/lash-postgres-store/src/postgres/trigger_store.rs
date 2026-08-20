@@ -273,7 +273,7 @@ impl TriggerStore for PostgresTriggerStore {
     async fn ingest_occurrence(
         &self,
         request: TriggerOccurrenceRequest,
-    ) -> Result<lash_core::TriggerIngressResult, PluginError> {
+    ) -> Result<lash_core::TriggerIngressReceipt, PluginError> {
         lash_core::facade_support::validate_trigger_occurrence_request(&request)?;
         let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request);
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
@@ -338,7 +338,7 @@ impl TriggerStore for PostgresTriggerStore {
             postgres_delivery_snapshots(&mut tx, &occurrence).await?
         };
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core::TriggerIngressResult {
+        Ok(lash_core::TriggerIngressReceipt {
             occurrence,
             reservations,
         })
@@ -570,7 +570,7 @@ async fn reserve_postgres_deliveries(
             subscription,
             process_id,
             created_at_ms,
-            reservation_status: lash_core::TriggerDeliveryReservationStatus::Reserved,
+            reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,
         });
     }
     lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
@@ -598,7 +598,7 @@ async fn postgres_delivery_snapshots(
                 subscription: serde_json::from_str(&json).map_err(process_decode_error)?,
                 process_id: row.get(0),
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
-                reservation_status: lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
+                reservation_status: lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
             })
         })
         .collect::<Result<Vec<_>, PluginError>>()?;
@@ -634,7 +634,7 @@ async fn list_deliveries_where(
                     .map_err(process_decode_error)?,
                 process_id: row.get(0),
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
-                reservation_status: lash_core::TriggerDeliveryReservationStatus::AlreadyReserved,
+                reservation_status: lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
             })
         })
         .collect()

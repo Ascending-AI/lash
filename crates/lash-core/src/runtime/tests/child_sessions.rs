@@ -38,7 +38,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Fi
         &self,
         _args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolResult {
+    ) -> crate::ToolOutcome {
         match context
             .start_process(crate::ProcessStartRequest::external(
                 "child-first-turn-process",
@@ -47,8 +47,8 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Fi
             ))
             .await
         {
-            Ok(process) => crate::ToolResult::ok(serde_json::json!({ "process": process.id })),
-            Err(err) => crate::ToolResult::err_fmt(err),
+            Ok(process) => crate::ToolOutcome::ok(serde_json::json!({ "process": process.id })),
+            Err(err) => crate::ToolOutcome::err_fmt(err),
         }
     }
 }
@@ -102,14 +102,14 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
         &self,
         _args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolResult {
+    ) -> crate::ToolOutcome {
         let parent_id = context.session_id().to_string();
         self.parents.lock_recover().push(parent_id.clone());
         let (child_id, turn_id) = match parent_id.as_str() {
             "root" => ("nested-child", "nested-child-turn"),
             "nested-child" => ("nested-grandchild", "nested-grandchild-turn"),
             other => {
-                return crate::ToolResult::err_fmt(format_args!(
+                return crate::ToolOutcome::err_fmt(format_args!(
                     "unexpected nested child parent `{other}`"
                 ));
             }
@@ -128,7 +128,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             .await
         {
             Ok(child) => child,
-            Err(err) => return crate::ToolResult::err_fmt(format_args!("{err}")),
+            Err(err) => return crate::ToolOutcome::err_fmt(format_args!("{err}")),
         };
         let result = context
             .sessions()
@@ -140,8 +140,8 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             .await;
         let _ = context.sessions().close_session(&child.session_id).await;
         match result {
-            Ok(_) => crate::ToolResult::ok(json!({ "status": "ok" })),
-            Err(err) => crate::ToolResult::err_fmt(format_args!("{err}")),
+            Ok(_) => crate::ToolOutcome::ok(json!({ "status": "ok" })),
+            Err(err) => crate::ToolOutcome::err_fmt(format_args!("{err}")),
         }
     }
 }
@@ -167,7 +167,7 @@ impl crate::ToolProvider for AttachmentWritingTool {
             .then(|| Arc::new(attachment_writing_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         let reference = match call
             .context
             .attachments()
@@ -182,9 +182,9 @@ impl crate::ToolProvider for AttachmentWritingTool {
             .await
         {
             Ok(reference) => reference,
-            Err(err) => return crate::ToolResult::err_fmt(err),
+            Err(err) => return crate::ToolOutcome::err_fmt(err),
         };
-        crate::ToolResult::ok(json!({ "attachment_id": reference.id }))
+        crate::ToolOutcome::ok(json!({ "attachment_id": reference.id }))
     }
 }
 
@@ -1134,7 +1134,7 @@ impl crate::ToolProvider for ParkedTool {
         (name == "park_forever").then(|| Arc::new(parked_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         let _ = self.started.send(()).await;
         std::future::pending::<()>().await;
         unreachable!("the parked tool never completes")

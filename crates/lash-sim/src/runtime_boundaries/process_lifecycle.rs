@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use lash_core::sync::MutexExt as _;
 use lash_core::{
-    LeaseOwnerIdentity, ProcessAwaitOutput, ProcessRegistry, RecoveryDisposition,
+    LeaseOwnerIdentity, ProcessAwaitOutput, ProcessRegistry, RecoveryContract,
     TestProcessRegistryWriteExt,
 };
 use serde_json::{Value, json};
@@ -84,7 +84,7 @@ pub(super) fn lifecycle_worker(
 pub(super) async fn register_lifecycle_row(
     registry: &dyn ProcessRegistry,
     id: &str,
-    disposition: RecoveryDisposition,
+    disposition: RecoveryContract,
 ) -> Result<(), RuntimeBoundaryError> {
     registry
         .register_process(lash_core::ProcessRegistration::new(
@@ -113,7 +113,7 @@ pub(super) async fn register_rerunnable_lifecycle_row(
                     kind: "sim-lifecycle".to_string(),
                     payload: json!({}),
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
             )
             .with_execution_env_ref(Some(env_ref)),
@@ -153,12 +153,12 @@ pub(super) async fn lifecycle_process_fact(
     registry: &Arc<dyn ProcessRegistry>,
     awaiter: &lash_core::facade_support::ProcessAwaiter,
     id: &str,
-    disposition: RecoveryDisposition,
+    disposition: RecoveryContract,
     expected_holder: Option<&LeaseOwnerIdentity>,
     _sweep_owner: &LeaseOwnerIdentity,
 ) -> Result<Value, RuntimeBoundaryError> {
     let should_remain_non_terminal =
-        disposition == RecoveryDisposition::OwnerBound && expected_holder.is_some();
+        disposition == RecoveryContract::OwnerBound && expected_holder.is_some();
     let output = if should_remain_non_terminal {
         None
     } else {
@@ -231,11 +231,11 @@ pub(super) async fn lifecycle_process_fact(
     Ok(fact)
 }
 
-fn disposition_str(disposition: RecoveryDisposition) -> &'static str {
+fn disposition_str(disposition: RecoveryContract) -> &'static str {
     match disposition {
-        RecoveryDisposition::Rerunnable => "rerunnable",
-        RecoveryDisposition::OwnerBound => "owner_bound",
-        RecoveryDisposition::ExternallyOwned => "externally_owned",
+        RecoveryContract::Rerunnable => "rerunnable",
+        RecoveryContract::OwnerBound => "owner_bound",
+        RecoveryContract::ExternallyOwned => "externally_owned",
     }
 }
 

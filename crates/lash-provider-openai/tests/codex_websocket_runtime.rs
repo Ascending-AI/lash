@@ -12,7 +12,7 @@ use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use lash::tools::{StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolResult};
+use lash::tools::{StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolOutcome};
 use lash::{LashCore, TurnEvent, TurnInput};
 use lash_core::provider::{ProviderHandle, ProviderOptions, ProviderReliability, RequestTimeout};
 use lash_provider_openai::CodexProvider;
@@ -121,10 +121,10 @@ struct EchoProbe {
 
 #[async_trait]
 impl StaticToolExecute for EchoProbe {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         assert_eq!(call.name, "echo_probe");
         self.seen.lock_recover().push(call.args.clone());
-        ToolResult::ok(json!({ "echo": call.args }))
+        ToolOutcome::ok(json!({ "echo": call.args }))
     }
 }
 

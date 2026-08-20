@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::runtime::AssembledTurn;
 use crate::{
-    MessageRole, ProtocolTurnOptions, SessionPolicy, ToolDefinition, ToolManifest, ToolProvider,
-    ToolResult, TurnInput,
+    MessageRole, ProtocolTurnOptions, SessionPolicy, ToolDefinition, ToolManifest, ToolOutcome,
+    ToolProvider, TurnInput,
 };
 
 pub use lash_sansio::{
@@ -54,8 +54,8 @@ pub use hooks::{
     PluginLifecycleFuture, PluginSessionTask, PromptContributor, PromptHookContext,
     SessionConfigChangedContext, SessionConfigMutator, SessionStateChangedContext,
     ToolCallHookContext, ToolCatalogContributor, ToolResultHookContext,
-    ToolResultProjectionContext, ToolResultProjector, TurnHookContext, TurnResultHookContext,
-    TurnResultSummary,
+    ToolResultProjectionContext, ToolResultProjector, TurnHookContext, TurnHookReport,
+    TurnResultHookContext,
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CodeExecutorPlugin, EXECUTION_STATE_LEAF_MIN_BODY_BYTES,
@@ -77,7 +77,7 @@ pub use registry::{
     SessionReadyContext, StaticPluginFactory,
 };
 pub use runtime_host::{
-    AppendSessionNodesRequest, AppendSessionNodesResult, DirectCompletion, DirectLlmCompletion,
+    AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
     SessionGraphService, SessionLifecycleService, SessionStateService, SessionTurnInput,
     SessionTurnRequest,
 };
@@ -89,7 +89,7 @@ pub use session_obj::PluginSession;
 pub use session_types::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, OpenAgentFrameRequest,
     OpenAgentFrameResult, PluginOwned, SessionContextOverlay, SessionCreateRequest, SessionHandle,
-    SessionObservedProcessOutcome, SessionObservedProcessResult, SessionPluginSource,
+    SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionPluginSource,
     SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess, SubagentSessionContext,
 };
 pub(crate) use snapshot::{InMemorySnapshotReader, InMemorySnapshotWriter};
@@ -170,8 +170,8 @@ mod tests {
                 .map(|tool| Arc::new(tool.contract()))
         }
 
-        async fn execute(&self, call: crate::ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(call.args.clone())
+        async fn execute(&self, call: crate::ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(call.args.clone())
         }
     }
 
@@ -213,8 +213,8 @@ mod tests {
             None
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(json!("unreachable"))
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("unreachable"))
         }
     }
 

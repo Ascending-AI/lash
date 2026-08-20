@@ -59,11 +59,11 @@ fn record_clamped_output_token_cap(
     result: &mut Result<LlmResponse, LlmCallError>,
     call_record: Option<&mut crate::LlmCallRecord>,
 ) {
-    fn narrow(disposition: Option<&mut crate::GenerationDisposition>) {
+    fn narrow(disposition: Option<&mut crate::GenerationReceipt>) {
         if let Some(disposition) = disposition
-            && disposition.output_token_cap == crate::GenerationOptionDisposition::Applied
+            && disposition.output_token_cap == crate::GenerationOptionOutcome::Applied
         {
-            disposition.output_token_cap = crate::GenerationOptionDisposition::ClampedToCapacity;
+            disposition.output_token_cap = crate::GenerationOptionOutcome::ClampedToCapacity;
         }
     }
 
@@ -89,9 +89,9 @@ fn record_protocol_owned_stop_suppression(
     result: &mut Result<LlmResponse, LlmCallError>,
     call_record: Option<&mut crate::LlmCallRecord>,
 ) {
-    fn suppress(disposition: &mut Option<crate::GenerationDisposition>) {
+    fn suppress(disposition: &mut Option<crate::GenerationReceipt>) {
         disposition.get_or_insert_default().stop_sequences =
-            crate::GenerationOptionDisposition::SuppressedProtocolOwned;
+            crate::GenerationOptionOutcome::SuppressedProtocolOwned;
     }
 
     match result {
@@ -1433,19 +1433,17 @@ mod provider_host_forwarding_tests;
 mod clamp_report_tests {
     use super::*;
 
-    fn applied() -> Option<crate::GenerationDisposition> {
-        Some(crate::GenerationDisposition {
-            output_token_cap: crate::GenerationOptionDisposition::Applied,
-            temperature: crate::GenerationOptionDisposition::Applied,
-            seed: crate::GenerationOptionDisposition::NotRequested,
-            stop_sequences: crate::GenerationOptionDisposition::NotRequested,
-            cache: crate::GenerationOptionDisposition::NotRequested,
+    fn applied() -> Option<crate::GenerationReceipt> {
+        Some(crate::GenerationReceipt {
+            output_token_cap: crate::GenerationOptionOutcome::Applied,
+            temperature: crate::GenerationOptionOutcome::Applied,
+            seed: crate::GenerationOptionOutcome::NotRequested,
+            stop_sequences: crate::GenerationOptionOutcome::NotRequested,
+            cache: crate::GenerationOptionOutcome::NotRequested,
         })
     }
 
-    fn cap_of(
-        disposition: Option<crate::GenerationDisposition>,
-    ) -> crate::GenerationOptionDisposition {
+    fn cap_of(disposition: Option<crate::GenerationReceipt>) -> crate::GenerationOptionOutcome {
         disposition
             .expect("a reported disposition")
             .output_token_cap
@@ -1497,11 +1495,11 @@ mod clamp_report_tests {
             .expect("the adapter salvaged a partial");
         assert_eq!(
             cap_of(partial.generation_disposition),
-            crate::GenerationOptionDisposition::ClampedToCapacity
+            crate::GenerationOptionOutcome::ClampedToCapacity
         );
         assert_eq!(
             cap_of(call_record.attempts[0].generation_disposition),
-            crate::GenerationOptionDisposition::ClampedToCapacity
+            crate::GenerationOptionOutcome::ClampedToCapacity
         );
     }
 
@@ -1517,8 +1515,8 @@ mod clamp_report_tests {
         );
 
         let mut dropped: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
-            generation_disposition: Some(crate::GenerationDisposition {
-                output_token_cap: crate::GenerationOptionDisposition::OmittedUnsupported,
+            generation_disposition: Some(crate::GenerationReceipt {
+                output_token_cap: crate::GenerationOptionOutcome::OmittedUnsupported,
                 ..Default::default()
             }),
             ..LlmResponse::default()
@@ -1526,7 +1524,7 @@ mod clamp_report_tests {
         record_clamped_output_token_cap(&mut dropped, None);
         assert_eq!(
             cap_of(dropped.expect("ok").generation_disposition),
-            crate::GenerationOptionDisposition::OmittedUnsupported
+            crate::GenerationOptionOutcome::OmittedUnsupported
         );
     }
 
@@ -1563,14 +1561,14 @@ mod clamp_report_tests {
                 .generation_disposition
                 .expect("response disposition")
                 .stop_sequences,
-            crate::GenerationOptionDisposition::SuppressedProtocolOwned
+            crate::GenerationOptionOutcome::SuppressedProtocolOwned
         );
         assert_eq!(
             call_record.attempts[0]
                 .generation_disposition
                 .expect("attempt disposition")
                 .stop_sequences,
-            crate::GenerationOptionDisposition::SuppressedProtocolOwned
+            crate::GenerationOptionOutcome::SuppressedProtocolOwned
         );
     }
 }

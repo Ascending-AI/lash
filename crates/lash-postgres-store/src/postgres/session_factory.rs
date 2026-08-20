@@ -298,7 +298,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn fork_at(
         &self,
         request: &lash_core::ForkSessionRequest,
-    ) -> Result<lash_core::ForkSessionResult, StoreError> {
+    ) -> Result<lash_core::ForkSessionReceipt, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
             .await?;
@@ -473,7 +473,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::ForkSessionResult {
+        Ok(lash_core::ForkSessionReceipt {
             session_id: request.session_id.clone(),
             node_id: request.node_id.clone(),
             source_session_id,

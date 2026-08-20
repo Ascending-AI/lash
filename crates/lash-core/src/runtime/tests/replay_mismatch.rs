@@ -30,7 +30,7 @@ async fn controller_owned_replay_mismatch_reaches_host_with_structured_summary()
     assert!(error.code.is_replay_mismatch());
     assert_eq!(
         error.summary,
-        Some(RuntimeEffectReplayMismatchSummary {
+        Some(RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.request.model".to_string()],
         }),

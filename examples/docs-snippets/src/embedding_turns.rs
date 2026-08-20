@@ -1,7 +1,7 @@
 //! Compiled sources for the Rust snippets on `docs/embedding-turns.html`.
 
 use lash::{FrameKey, TurnFinish, TurnOutcome, TurnStop};
-use lash::{LashCore, LashSession, TurnInput, TurnResult};
+use lash::{LashCore, LashSession, TurnInput, TurnReport};
 
 fn persist_terminal(_finish: TurnFinish) -> anyhow::Result<()> {
     Ok(())
@@ -23,7 +23,7 @@ fn review_turn_bounds() {}
 
 fn record_for_diagnosis(_stop: TurnStop) {}
 
-fn outcome_match(result: TurnResult) -> anyhow::Result<()> {
+fn outcome_match(result: TurnReport) -> anyhow::Result<()> {
     // docs:start:outcome-match
     match result.outcome {
         TurnOutcome::Finished(finish) => persist_terminal(finish)?,
@@ -286,7 +286,7 @@ fn handle_other_outcome(_outcome: TurnOutcome) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn terminal_value_match(result: TurnResult) -> anyhow::Result<()> {
+fn terminal_value_match(result: TurnReport) -> anyhow::Result<()> {
     // docs:start:terminal-value-match
     match result.outcome {
         TurnOutcome::Finished(TurnFinish::FinalValue { value }) => {

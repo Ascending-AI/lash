@@ -53,7 +53,7 @@ impl ProcessAdmissionReport {
     /// Re-entrant drives (a work driver invoked from trigger-delivery
     /// reconcile, say) admit rows that belong to the outer call's report. Their
     /// rows are folded in ahead of the outer pass's own, and a deferred
-    /// [`Busy`](ProcessRecoveryAttemptDisposition::Busy) row is dropped when
+    /// [`Busy`](ProcessRecoveryAttemptOutcome::Busy) row is dropped when
     /// this same call already admitted that id — a call must never report its
     /// own admission as somebody else's contention.
     pub(super) fn absorb(&mut self, nested: Self) {
@@ -73,7 +73,7 @@ impl ProcessAdmissionReport {
     /// Record a deferral, unless this same call already admitted the row and the
     /// reason is ordinary contention with that admission.
     pub(super) fn push_deferred(&mut self, entry: ProcessAdmissionDeferred) {
-        if matches!(entry.disposition, ProcessRecoveryAttemptDisposition::Busy)
+        if matches!(entry.disposition, ProcessRecoveryAttemptOutcome::Busy)
             && self.admitted.contains(&entry.process_id)
         {
             return;
@@ -88,7 +88,7 @@ pub struct ProcessAdmissionDeferred {
     /// Durable process id deferred by this admission pass.
     pub process_id: String,
     /// Typed reason the row was not admitted by this call.
-    pub disposition: ProcessRecoveryAttemptDisposition,
+    pub disposition: ProcessRecoveryAttemptOutcome,
 }
 
 /// A worker fault that would otherwise be invisible to a host.
@@ -150,13 +150,13 @@ pub struct ProcessDrainDeferred {
     /// Durable process id deferred by this drain pass.
     pub process_id: String,
     /// Typed reason the row did not produce confirmed terminal evidence.
-    pub disposition: ProcessRecoveryAttemptDisposition,
+    pub disposition: ProcessRecoveryAttemptOutcome,
 }
 
 /// Why a process recovery or drain attempt did not act on a row.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProcessRecoveryAttemptDisposition {
+pub enum ProcessRecoveryAttemptOutcome {
     /// Another live owner holds the process lease.
     Busy,
     /// The process is no longer a non-terminal candidate after enumeration.
@@ -271,7 +271,7 @@ pub(super) enum ProcessRecoveryOutcome {
     /// re-run would violate) and it was deliberately left where it is.
     LeftToOwner,
     /// The attempt did not write a terminal, for the typed reason given.
-    Deferred(ProcessRecoveryAttemptDisposition),
+    Deferred(ProcessRecoveryAttemptOutcome),
     /// The row could not be rebuilt or executed; its lease was released so a
     /// later pass can retry.
     RunFailed(PluginError),
@@ -281,20 +281,20 @@ impl RecoveryCompletionDisposition {
     pub(super) fn into_outcome(self) -> ProcessRecoveryOutcome {
         match self {
             Self::Committed => ProcessRecoveryOutcome::Committed,
-            Self::Busy => ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Busy),
-            Self::Absent => {
-                ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::Absent)
+            Self::Busy => ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Busy),
+            Self::Absent => ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Absent),
+            Self::AlreadyApplied(terminal_status) => {
+                ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::AlreadyApplied {
+                    terminal_status,
+                })
             }
-            Self::AlreadyApplied(terminal_status) => ProcessRecoveryOutcome::Deferred(
-                ProcessRecoveryAttemptDisposition::AlreadyApplied { terminal_status },
-            ),
             Self::SettledByPeer(terminal_status) => {
-                ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::SettledByPeer {
+                ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::SettledByPeer {
                     terminal_status,
                 })
             }
             Self::LeaseLost(operation) => {
-                ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::LeaseLost {
+                ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::LeaseLost {
                     operation,
                 })
             }
@@ -304,8 +304,8 @@ impl RecoveryCompletionDisposition {
 }
 
 impl RecoveryBackendError {
-    pub(super) fn into_public(self) -> ProcessRecoveryAttemptDisposition {
-        ProcessRecoveryAttemptDisposition::BackendError {
+    pub(super) fn into_public(self) -> ProcessRecoveryAttemptOutcome {
+        ProcessRecoveryAttemptOutcome::BackendError {
             operation: self.operation,
             error: self.error.to_string(),
         }
@@ -546,14 +546,14 @@ impl DurableProcessWorker {
         match outcome {
             ProcessRecoveryOutcome::Committed | ProcessRecoveryOutcome::LeftToOwner => {}
             ProcessRecoveryOutcome::Deferred(
-                ProcessRecoveryAttemptDisposition::Busy
-                | ProcessRecoveryAttemptDisposition::Absent
-                | ProcessRecoveryAttemptDisposition::AlreadyApplied { .. }
-                | ProcessRecoveryAttemptDisposition::SettledByPeer { .. }
-                | ProcessRecoveryAttemptDisposition::LeaseLost { .. }
-                | ProcessRecoveryAttemptDisposition::ExternallyOwned,
+                ProcessRecoveryAttemptOutcome::Busy
+                | ProcessRecoveryAttemptOutcome::Absent
+                | ProcessRecoveryAttemptOutcome::AlreadyApplied { .. }
+                | ProcessRecoveryAttemptOutcome::SettledByPeer { .. }
+                | ProcessRecoveryAttemptOutcome::LeaseLost { .. }
+                | ProcessRecoveryAttemptOutcome::ExternallyOwned,
             ) => {}
-            ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptDisposition::BackendError {
+            ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::BackendError {
                 operation,
                 error,
             }) => {

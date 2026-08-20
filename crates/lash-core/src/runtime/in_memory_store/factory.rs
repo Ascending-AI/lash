@@ -317,7 +317,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
     async fn fork_at(
         &self,
         request: &crate::ForkSessionRequest,
-    ) -> Result<crate::ForkSessionResult, crate::StoreError> {
+    ) -> Result<crate::ForkSessionReceipt, crate::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
         // Keep the fork fences in the shared order: exists -> deleted ->
         // retained -> live -> frame.
@@ -461,7 +461,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         self.stores
             .lock_recover()
             .insert(request.session_id.clone(), store);
-        Ok(crate::ForkSessionResult {
+        Ok(crate::ForkSessionReceipt {
             session_id: request.session_id.clone(),
             node_id: request.node_id.clone(),
             source_session_id,

@@ -444,13 +444,13 @@ Phase-1 consumers fix the disposition at the combinator: `all` and `allSettled`
 declare `RunToCompletion`; `race` and `any` declare per the ratified race
 semantics below.
 
-`LoserDisposition::RunToCompletion` is the default for `race`/`any` because it
+`LoserPolicy::RunToCompletion` is the default for `race`/`any` because it
 is what ECMA-262 specifies: a losing promise keeps running and its side effects
 still happen. Cancel-always would be simpler — no background ownership, no
 redrive question, no unbounded loser tail — but it would be a silent divergence
 in exactly the family ADR 0062 forbids.
 
-`LoserDisposition::Cancel` survives as the *correct* semantics for a deadline
+`LoserPolicy::Cancel` survives as the *correct* semantics for a deadline
 arm, where the losing arm should not run on.
 
 Under `RunToCompletion` on the SQL tiers, ownership of unfinished children
@@ -533,7 +533,7 @@ own this natively.
 
 **Always cancel the losers.** Much simpler — no background ownership, no
 redrive question, no unbounded loser tail — and not ECMA-262. It survives as
-`LoserDisposition::Cancel` for the deadline arm, where it is correct.
+`LoserPolicy::Cancel` for the deadline arm, where it is correct.
 
 **Synthesize race from the atomic batch** by reporting the first entry of the
 settled order. The batch still waits for every leaf, so the timeout idiom never

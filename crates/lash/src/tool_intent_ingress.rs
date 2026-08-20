@@ -664,7 +664,7 @@ impl ToolIntentIngress {
         }
         let (value, parent_end) = match result {
             lash_core::ProcessEffectOutcome::Start { record } => {
-                let summary = lash_core::ProcessHandleSummary::from_record(*record);
+                let summary = lash_core::ProcessHandleView::from_record(*record);
                 let Some(policy) = parent_end_policy else {
                     return Err(RealizationFailure::Command(
                         kind,
@@ -689,7 +689,7 @@ impl ToolIntentIngress {
                 None,
             ),
             lash_core::ProcessEffectOutcome::Cancel { record } => (
-                serde_json::to_value(lash_core::ProcessCancelSummary::from_record(*record))
+                serde_json::to_value(lash_core::ProcessCancelReceipt::from_record(*record))
                     .unwrap_or(serde_json::Value::Null),
                 None,
             ),

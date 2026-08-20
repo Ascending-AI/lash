@@ -55,14 +55,14 @@
     <pre data-lang="rust" data-snippet="streaming#turn-local-stream"><code>async fn stream_one_turn(
     session: &amp;LashSession,
     sink: &amp;dyn TurnActivitySink,
-) -&gt; lash::Result&lt;lash::TurnResult&gt; {
+) -&gt; lash::Result&lt;lash::TurnReport&gt; {
     session
         .turn(TurnInput::text("Summarize the incident."))
         .stream_to(sink)
         .await
 }
 
-async fn pull_one_turn(session: &amp;LashSession) -&gt; anyhow::Result&lt;lash::TurnResult&gt; {
+async fn pull_one_turn(session: &amp;LashSession) -&gt; anyhow::Result&lt;lash::TurnReport&gt; {
     use futures_util::StreamExt as _;
 
     let mut stream = session
@@ -170,7 +170,7 @@ async fn reconnect_session(
       </div>
       <div class="listing__row">
         <div class="listing__label">normal prose</div>
-        <div class="listing__body"><p>Normal assistant text streams as <code>AssistantProseDelta</code> and has no final-message event. The settled transcript comes from <code>TurnResult</code> or the session read view after commit.</p></div>
+        <div class="listing__body"><p>Normal assistant text streams as <code>AssistantProseDelta</code> and has no final-message event. The settled transcript comes from <code>TurnReport</code> or the session read view after commit.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">committed</div>

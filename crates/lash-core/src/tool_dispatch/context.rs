@@ -8,7 +8,7 @@ use crate::plugin::{
 };
 use crate::{
     PreparedToolCall, SessionStreamEvent, ToolCallRecord, ToolCatalog, ToolFailure,
-    ToolFailureClass, ToolProvider, ToolResult,
+    ToolFailureClass, ToolOutcome, ToolProvider,
 };
 
 #[derive(Clone, Default)]
@@ -38,7 +38,7 @@ pub struct ToolTriggerEffectOutcome {
     pub idempotency_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<serde_json::Value>,
-    pub deliveries: Vec<crate::TriggerDeliveryEmitReport>,
+    pub deliveries: Vec<crate::TriggerDeliveryEmitReceipt>,
 }
 
 #[derive(Clone, Default)]
@@ -325,7 +325,7 @@ pub(super) fn completed_preparation(outcome: ToolDispatchOutcome) -> ToolPrepara
 pub(super) fn outcome(
     tool_name: String,
     args: serde_json::Value,
-    result: ToolResult,
+    result: ToolOutcome,
     duration_ms: u64,
 ) -> ToolDispatchOutcome {
     let record = ToolCallRecord {
@@ -357,6 +357,6 @@ pub(super) fn runtime_failure(
     class: ToolFailureClass,
     code: impl Into<String>,
     message: impl Into<String>,
-) -> ToolResult {
-    ToolResult::failure(ToolFailure::runtime(class, code, message))
+) -> ToolOutcome {
+    ToolOutcome::failure(ToolFailure::runtime(class, code, message))
 }

@@ -31,7 +31,7 @@ pub use engine::{
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
-    ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest, ProcessEventAppendResult,
+    ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSemantics,
     ProcessTerminalSpec, ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
     process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
@@ -40,16 +40,16 @@ pub use events::{
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
     AbandonRequest, InMemoryProcessExecutionEnvStore, ObserverInheritance,
-    PROCESS_LEASE_SCHEMA_VERSION, ProcessCancelSummary, ProcessChange, ProcessChangeCursor,
+    PROCESS_LEASE_SCHEMA_VERSION, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
     ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleSummary, ProcessId, ProcessIdentity, ProcessInput,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter,
-    ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOutcome, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance,
-    ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTombstone, RecoveryDisposition, SessionId, SessionScope,
-    SessionScopeId, WaitKind, WaitState, load_process_execution_env, persist_process_execution_env,
+    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessListMode,
+    ProcessObserverBy, ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTombstone, RecoveryContract, SessionId, SessionScope, SessionScopeId, WaitKind,
+    WaitState, load_process_execution_env, persist_process_execution_env,
     process_runtime_session_ids,
 };
 pub use observation::{
@@ -60,7 +60,7 @@ pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,
 };
 pub use op_scope::ProcessOpScope;
-pub use references::ProcessLiveReferenceSummary;
+pub use references::ProcessLiveReferenceView;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use registry::reconcile_pruned_trigger_deliveries_interleaved;
 pub use registry::{

@@ -105,7 +105,9 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
 <pre data-lang="rust" data-snippet="plugins#update-plan-plugin"><code>use std::sync::Mutex;
 
 use lash::plugins::PluginRegistrar;
-use lash::tools::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolProvider, ToolResult};
+use lash::tools::{
+    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+};
 
 const PLUGIN_ID: &amp;str = "update_plan";
 
@@ -159,9 +161,9 @@ impl ToolProvider for UpdatePlanTool {
         (name == "update_plan").then(|| Arc::new(update_plan_definition().contract()))
     }
 
-    async fn execute(&amp;self, call: ToolCall&lt;'_&gt;) -&gt; ToolResult {
+    async fn execute(&amp;self, call: ToolCall&lt;'_&gt;) -&gt; ToolOutcome {
         // Validate call.args, mutate state, then return a typed payload.
-        ToolResult::ok(serde_json::json!({ "generation": 1 }))
+        ToolOutcome::ok(serde_json::json!({ "generation": 1 }))
     }
 }
 

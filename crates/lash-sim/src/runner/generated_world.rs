@@ -27,7 +27,7 @@ pub(super) struct GeneratedRuntimeWorld {
 /// proof into the live, interleaved generated search.
 struct SuspendingTurn {
     core: lash::LashCore,
-    handle: tokio::task::JoinHandle<Result<lash::TurnResult, FixedScriptRunnerError>>,
+    handle: tokio::task::JoinHandle<Result<lash::TurnReport, FixedScriptRunnerError>>,
     events: Arc<RuntimeProofRecordingEvents>,
     key_slot: Arc<tokio::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
     suspend_kind: BoundaryKind,
@@ -766,7 +766,7 @@ impl GeneratedRuntimeWorld {
     }
 
     /// Open a suspend session and spawn its real turn. The turn calls a sim tool
-    /// that registers its await key and returns `ToolResult::pending`, so the
+    /// that registers its await key and returns `ToolOutcome::pending`, so the
     /// turn future parks mid-flight and cannot finish until the scheduler later
     /// delivers the matching completion boundary. The observed masquerades as a
     /// normal ingress for the abstract store; suspend evidence lives in a

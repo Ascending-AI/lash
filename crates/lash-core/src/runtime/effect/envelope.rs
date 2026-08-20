@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::executor::RuntimeEffectControllerError;
-use super::group::{EffectGroupMembership, GroupWakePolicy, LoserDisposition};
+use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
 
 const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 
@@ -331,7 +331,7 @@ impl RuntimeEffectEnvelope {
         group_key: impl Into<String>,
         position: usize,
         wake: GroupWakePolicy,
-        loser_disposition: LoserDisposition,
+        loser_disposition: LoserPolicy,
     ) -> Self {
         self.group = Some(Box::new(EffectGroupMembership {
             group_key: group_key.into(),

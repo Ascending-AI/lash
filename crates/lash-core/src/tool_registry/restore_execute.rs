@@ -31,9 +31,9 @@ impl ToolRegistry {
     fn resolve_execution_source(
         &self,
         tool_id: &ToolId,
-    ) -> Result<(Arc<dyn ToolSourceExecutor>, ToolManifest), ToolResult> {
+    ) -> Result<(Arc<dyn ToolSourceExecutor>, ToolManifest), ToolOutcome> {
         let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Unknown tool id: {tool_id}"
             )));
         };
@@ -48,7 +48,7 @@ impl ToolRegistry {
                 .unwrap_or(true)
         };
         if !is_member {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Tool id `{tool_id}` is unavailable"
             )));
         }
@@ -61,12 +61,12 @@ impl ToolRegistry {
         let source_key = match binding {
             Some(ToolBinding::Bound { source_key }) => source_key,
             Some(ToolBinding::Orphaned) => {
-                return Err(ToolResult::err_fmt(format_args!(
+                return Err(ToolOutcome::err_fmt(format_args!(
                     "Tool id `{tool_id}` is unavailable: it was restored from a persisted session \
                      but its source is not currently registered"
                 )));
             }
-            None => return Err(ToolResult::err_fmt(format_args!("Unknown tool id: {tool_id}"))),
+            None => return Err(ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"))),
         };
         let source = {
             self.sources
@@ -77,17 +77,17 @@ impl ToolRegistry {
         source
             .map(|source| (source, manifest))
             .ok_or_else(|| {
-                ToolResult::err_fmt(format_args!("Tool source missing for tool id `{tool_id}`"))
+                ToolOutcome::err_fmt(format_args!("Tool source missing for tool id `{tool_id}`"))
             })
     }
 
     fn resolve_granted_execution_source(
         &self,
         grant: &ToolExecutionGrant,
-    ) -> Result<Arc<dyn ToolSourceExecutor>, ToolResult> {
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ToolOutcome> {
         let tool_id = &grant.manifest.id;
         let Some(source_id) = grant.source_id.as_deref() else {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Granted tool id `{tool_id}` is missing an explicit tool source"
             )));
         };
@@ -102,25 +102,25 @@ impl ToolRegistry {
                     .map(|(_, source)| source)
                     .filter(|source| source.resolve_manifest_by_id(tool_id).is_some());
                 let Some(source) = matches.next().cloned() else {
-                    return Err(ToolResult::err_fmt(format_args!(
+                    return Err(ToolOutcome::err_fmt(format_args!(
                         "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
                     )));
                 };
                 if matches.next().is_some() {
-                    return Err(ToolResult::err_fmt(format_args!(
+                    return Err(ToolOutcome::err_fmt(format_args!(
                         "Tool source `{source_id}` is ambiguous for granted tool id `{tool_id}`"
                     )));
                 }
                 source
             }
             None => {
-                return Err(ToolResult::err_fmt(format_args!(
+                return Err(ToolOutcome::err_fmt(format_args!(
                     "Tool source `{source_id}` missing for granted tool id `{tool_id}`"
                 )));
             }
         };
         if source.resolve_manifest_by_id(tool_id).is_none() {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Tool source `{source_id}` does not resolve granted tool id `{tool_id}`"
             )));
         }
@@ -132,13 +132,13 @@ impl ToolRegistry {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let (source, _) = match self.resolve_execution_source(tool_id) {
             Ok(resolved) => resolved,
             Err(result) => return result,
         };
         if source.registration_kind() != ToolRegistrationKind::Orchestrating {
-            return ToolResult::err_fmt(format_args!(
+            return ToolOutcome::err_fmt(format_args!(
                 "Tool id `{tool_id}` is not an orchestrating registration"
             ));
         }
@@ -300,7 +300,7 @@ impl ToolProvider for ToolRegistry {
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         let (source, _) = self.resolve_execution_source(&call.tool_id)?;
         source.prepare_tool_call(call).await
     }
@@ -309,9 +309,9 @@ impl ToolProvider for ToolRegistry {
         &self,
         grant: &ToolExecutionGrant,
         call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         if call.tool_id != grant.manifest.id {
-            return Err(ToolResult::err_fmt(format_args!(
+            return Err(ToolOutcome::err_fmt(format_args!(
                 "Granted prepare id `{}` does not match call id `{}`",
                 grant.manifest.id, call.tool_id
             )));
@@ -320,9 +320,9 @@ impl ToolProvider for ToolRegistry {
         source.prepare_tool_call(call).await
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let Some(manifest) = self.resolve_manifest(call.name) else {
-            return ToolResult::err_fmt(format_args!("Unknown tool: {}", call.name));
+            return ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name));
         };
         self.execute_by_id(&manifest.id, call.args, call.context)
             .await
@@ -340,10 +340,10 @@ impl ToolProvider for ToolRegistry {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptResult {
+    ) -> crate::ToolAttemptOutcome {
         let (source, _) = match self.resolve_execution_source(tool_id) {
             Ok(resolved) => resolved,
-            Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
+            Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
         };
         source.execute_attempt_by_id(tool_id, args, context).await
     }
@@ -353,7 +353,7 @@ impl ToolProvider for ToolRegistry {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let (source, manifest) = match self.resolve_execution_source(tool_id) {
             Ok(resolved) => resolved,
             Err(result) => return result,
@@ -369,13 +369,13 @@ impl ToolProvider for ToolRegistry {
         tool_id: &ToolId,
         args: &serde_json::Value,
         context: &crate::InternalProcessContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let (source, manifest) = match self.resolve_execution_source(tool_id) {
             Ok(resolved) => resolved,
             Err(result) => return result,
         };
         if manifest.activation != crate::ToolActivation::Internal {
-            return ToolResult::err_fmt(format_args!(
+            return ToolOutcome::err_fmt(format_args!(
                 "tool id `{tool_id}` is not activated for internal execution"
             ));
         }
@@ -389,7 +389,7 @@ impl ToolProvider for ToolRegistry {
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let source = match self.resolve_granted_execution_source(grant) {
             Ok(source) => source,
             Err(result) => return result,
@@ -404,10 +404,10 @@ impl ToolProvider for ToolRegistry {
         grant: &ToolExecutionGrant,
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptResult {
+    ) -> crate::ToolAttemptOutcome {
         let source = match self.resolve_granted_execution_source(grant) {
             Ok(source) => source,
-            Err(result) => return crate::ToolAttemptResult::from_tool_result(result),
+            Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
         };
         source
             .execute_attempt_by_id(&grant.manifest.id, args, context)

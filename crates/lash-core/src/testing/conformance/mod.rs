@@ -96,8 +96,8 @@ use std::time::Duration;
 
 use crate::{
     AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, DeliveryPolicy,
-    EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayResult, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeResult, ModelSpec, PluginSessionSnapshot,
+    EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
+    LiveReplayStoreError, LiveReplaySubscribeOutcome, ModelSpec, PluginSessionSnapshot,
     ProtocolEvent, ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaimBoundary, QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
@@ -113,9 +113,9 @@ use crate::{
     CausalRef, LashSchema, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
     ProcessEventType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter,
-    ProcessLiveReferenceSummary, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    ProcessLiveReferenceView, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     ProcessStatus, ProcessStatusFilter, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    RecoveryDisposition, SessionScope, WaitKind, WaitState,
+    RecoveryContract, SessionScope, WaitKind, WaitState,
 };
 use lash_sansio::{AttachmentCreateMeta, AttachmentTypeMetadata, MediaType};
 

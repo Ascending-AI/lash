@@ -285,7 +285,7 @@ impl TurnBuilder {
         })
     }
 
-    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnResult> {
+    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
         let effect_host = Arc::clone(&self.effect_host);
         reject_controller_owned_replay_host(effect_host.as_ref(), "turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
@@ -343,7 +343,7 @@ impl TurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         effect_host: &dyn EffectHost,
-    ) -> Result<TurnResult> {
+    ) -> Result<TurnReport> {
         let turn_id = self.resolved_turn_id();
         let scoped_effect_controller = effect_host.scoped(self.turn_scope(&turn_id))?;
         self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
@@ -354,7 +354,7 @@ impl TurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
-    ) -> Result<TurnResult> {
+    ) -> Result<TurnReport> {
         let turn_id = self.resolved_turn_id();
         let scoped_effect_controller =
             ScopedEffectController::borrowed(controller, self.turn_scope(&turn_id))?;
@@ -367,7 +367,7 @@ impl TurnBuilder {
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
         trace_turn_id: Option<String>,
-    ) -> Result<TurnResult> {
+    ) -> Result<TurnReport> {
         let (runtime, input, cancel, _cancel_guard) = self.prepare(trace_turn_id)?;
         stream_prepared_turn(
             &runtime,
@@ -488,7 +488,7 @@ impl<'run> ScopedTurnBuilder<'run> {
         })
     }
 
-    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnResult> {
+    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
         self.builder
             .stream_to_with_effect_controller(events, self.controller)
             .await
@@ -543,7 +543,7 @@ impl AdvancedTurn {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<TurnResult> {
+    ) -> Result<TurnReport> {
         let trace_turn_id = trace_turn_id_for_scope(&self.builder, &scoped_effect_controller);
         self.builder
             .stream_to_with_scope(events, scoped_effect_controller, trace_turn_id)
@@ -564,7 +564,7 @@ impl AdvancedTurn {
         self,
         events: &dyn EventSink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<TurnResult> {
+    ) -> Result<TurnReport> {
         let trace_turn_id = trace_turn_id_for_scope(&self.builder, &scoped_effect_controller);
         let (runtime, input, cancel, _cancel_guard) = self.builder.prepare(trace_turn_id)?;
         stream_prepared_turn(
@@ -580,7 +580,7 @@ impl AdvancedTurn {
 
 pub struct TurnStream {
     activities: mpsc::Receiver<Result<TurnActivity>>,
-    completion: JoinHandle<Result<TurnResult>>,
+    completion: JoinHandle<Result<TurnReport>>,
 }
 
 impl TurnStream {
@@ -588,7 +588,7 @@ impl TurnStream {
         self.activities.recv().await
     }
 
-    pub async fn finish(self) -> Result<TurnResult> {
+    pub async fn finish(self) -> Result<TurnReport> {
         match self.completion.await {
             Ok(result) => result,
             Err(err) if err.is_panic() => {
@@ -694,7 +694,7 @@ impl QueuedTurnBuilder {
     pub async fn stream_to(
         self,
         events: &dyn TurnActivitySink,
-    ) -> Result<QueuedTurnDrain<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         let effect_host = Arc::clone(&self.effect_host);
         reject_controller_owned_replay_host(effect_host.as_ref(), "queued turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
@@ -713,7 +713,7 @@ impl QueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         effect_host: &dyn EffectHost,
-    ) -> Result<QueuedTurnDrain<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self
             .runtime
@@ -729,7 +729,7 @@ impl QueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
-    ) -> Result<QueuedTurnDrain<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self
             .runtime
@@ -745,7 +745,7 @@ impl QueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<QueuedTurnDrain<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         let Self {
             runtime,
             effect_host: _,
@@ -829,7 +829,7 @@ impl SelectedQueuedTurnBuilder {
     pub async fn stream_to(
         self,
         events: &dyn TurnActivitySink,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let effect_host = Arc::clone(&self.builder.effect_host);
         reject_controller_owned_replay_host(effect_host.as_ref(), "selected queued turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
@@ -854,7 +854,7 @@ impl SelectedQueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         effect_host: &dyn EffectHost,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self
             .builder
@@ -871,7 +871,7 @@ impl SelectedQueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let drain_id = self.resolved_drain_id();
         let scope = self
             .builder
@@ -888,7 +888,7 @@ impl SelectedQueuedTurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let Self { builder, batch_ids } = self;
         let QueuedTurnBuilder {
             runtime,
@@ -964,7 +964,7 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
     pub async fn stream_to(
         self,
         events: &dyn TurnActivitySink,
-    ) -> Result<QueuedTurnDrain<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         self.builder
             .stream_to_with_effect_controller(events, self.controller)
             .await
@@ -1018,7 +1018,7 @@ impl<'run> ScopedSelectedQueuedTurnBuilder<'run> {
     pub async fn stream_to(
         self,
         events: &dyn TurnActivitySink,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         self.builder
             .stream_to_with_effect_controller(events, self.controller)
             .await
@@ -1045,7 +1045,7 @@ impl AdvancedSelectedQueuedTurn {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         self.builder
             .stream_to_with_scope(events, scoped_effect_controller)
             .await
@@ -1057,7 +1057,7 @@ impl AdvancedQueuedTurn {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<QueuedTurnDrain<TurnResult>> {
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         self.builder
             .stream_to_with_scope(events, scoped_effect_controller)
             .await
@@ -1112,7 +1112,7 @@ pub(crate) async fn stream_next_queued_prepared_turn(
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
-) -> Result<QueuedTurnDrain<TurnResult>> {
+) -> Result<QueuedTurnDrain<TurnReport>> {
     let drain = Box::pin(stream_next_queued_prepared_assembled(
         runtime,
         sinks,
@@ -1121,7 +1121,7 @@ pub(crate) async fn stream_next_queued_prepared_turn(
         cancel_origin_hint,
     ))
     .await?;
-    Ok(drain.map(TurnResult::from_assembled))
+    Ok(drain.map(TurnReport::from_assembled))
 }
 
 pub(crate) async fn stream_next_queued_prepared_assembled(
@@ -1156,7 +1156,7 @@ pub(crate) async fn stream_selected_queued_prepared_turn(
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
     batch_ids: &[String],
-) -> Result<SelectedQueuedWorkDrainOutcome<TurnResult>> {
+) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
     let outcome = Box::pin(stream_selected_queued_prepared_assembled(
         runtime,
         sinks,
@@ -1167,7 +1167,7 @@ pub(crate) async fn stream_selected_queued_prepared_turn(
     ))
     .await?;
     Ok(SelectedQueuedWorkDrainOutcome {
-        turn: outcome.turn.map(TurnResult::from_assembled),
+        turn: outcome.turn.map(TurnReport::from_assembled),
         satisfied: outcome.satisfied,
     })
 }
@@ -1278,7 +1278,7 @@ pub(crate) async fn stream_prepared_turn(
     sinks: TurnSinks<'_>,
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
-) -> Result<TurnResult> {
+) -> Result<TurnReport> {
     let turn = Box::pin(stream_prepared_assembled(
         runtime,
         input,
@@ -1287,7 +1287,7 @@ pub(crate) async fn stream_prepared_turn(
         cancel,
     ))
     .await?;
-    Ok(TurnResult::from_assembled(turn))
+    Ok(TurnReport::from_assembled(turn))
 }
 
 pub(crate) async fn stream_prepared_assembled(
@@ -1347,7 +1347,7 @@ pub(crate) async fn stream_prepared_agent_frame_run(
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TurnResult {
+pub struct TurnReport {
     pub state: SessionSnapshot,
     pub outcome: TurnOutcome,
     /// Durable request evidence, present exactly when `outcome` is cancelled.
@@ -1372,11 +1372,11 @@ pub struct TurnResult {
     #[serde(default)]
     pub llm_calls: Vec<LlmCallRecord>,
     pub tool_calls: Vec<ToolCallRecord>,
-    pub execution: ExecutionSummary,
+    pub execution: TurnExecutionMetrics,
     pub errors: Vec<TurnIssue>,
 }
 
-impl TurnResult {
+impl TurnReport {
     fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
         Self {
             state: turn.state,
@@ -1416,7 +1416,7 @@ impl TurnResult {
 
     /// Wall-clock instant the runtime started this turn (claim of the
     /// session-execution lease / queued-work claim), read from the runtime
-    /// clock. Backed by [`ExecutionSummary::started_at_ms`] on
+    /// clock. Backed by [`TurnExecutionMetrics::started_at_ms`] on
     /// [`execution`](Self::execution).
     pub fn started_at(&self) -> std::time::SystemTime {
         std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.execution.started_at_ms)
@@ -1424,7 +1424,7 @@ impl TurnResult {
 
     /// Whole-turn duration — claim through final commit and post-persist
     /// hooks — measured on the runtime clock's monotonic source. Backed by
-    /// [`ExecutionSummary::duration_ms`] on [`execution`](Self::execution).
+    /// [`TurnExecutionMetrics::duration_ms`] on [`execution`](Self::execution).
     pub fn duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.execution.duration_ms)
     }
@@ -1467,7 +1467,7 @@ impl TurnResult {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TurnOutput {
-    pub result: TurnResult,
+    pub result: TurnReport,
     pub activities: Vec<TurnActivity>,
 }
 

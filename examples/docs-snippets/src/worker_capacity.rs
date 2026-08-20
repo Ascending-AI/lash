@@ -127,8 +127,7 @@ mod tests {
             .build(crate::example_process_owner())
             .expect("build core with custom worker capacity");
         use lash::process::{
-            ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-            RecoveryDisposition,
+            ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryContract,
         };
         registry
             .register_process(ProcessRegistration::new(
@@ -136,7 +135,7 @@ mod tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
             ))
             .await

@@ -2763,7 +2763,7 @@ async fn commit_runtime_state_for_test(
     store: &Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
     owner_id: &str,
-) -> Result<crate::store::RuntimeCommitResult, StoreError> {
+) -> Result<crate::store::RuntimeCommitReceipt, StoreError> {
     let session_id = commit.session_id.clone();
     let lease = claim_session_execution_lease_for_test(store, &session_id, owner_id).await;
     store

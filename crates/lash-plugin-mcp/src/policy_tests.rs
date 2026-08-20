@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core::{ToolCallOutcome, ToolFailure, ToolFailureClass, ToolResult};
+use lash_core::{ToolCallOutcome, ToolFailure, ToolFailureClass, ToolOutcome};
 use rmcp::model::{
     CancelledNotification, CancelledNotificationParam, ClientNotification, RequestId,
 };
@@ -259,7 +259,7 @@ async fn connect_mock(root: &Path, options: MockOptions) -> Arc<McpConnectionPoo
     .expect("connect policy mock")
 }
 
-async fn call(pool: &McpConnectionPool) -> ToolResult {
+async fn call(pool: &McpConnectionPool) -> ToolOutcome {
     pool.call_tool(
         "mcp__mock__work",
         &json!({}),
@@ -268,7 +268,7 @@ async fn call(pool: &McpConnectionPool) -> ToolResult {
     .await
 }
 
-fn failure(result: &ToolResult) -> &ToolFailure {
+fn failure(result: &ToolOutcome) -> &ToolFailure {
     let output = result.as_done_output().expect("completed tool result");
     let ToolCallOutcome::Failure(failure) = &output.outcome else {
         panic!("expected tool failure, got {output:?}");
@@ -505,7 +505,7 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
             .contains("reconnect attempts exhausted"),
         "terminal tool-call failure must not claim recovery is active: {terminal:?}"
     );
-    assert_eq!(failure(&terminal).retry, ToolRetryDisposition::Never);
+    assert_eq!(failure(&terminal).retry, ToolRetryStatus::Never);
     assert_eq!(starts(root.path()), 2);
     pool.shutdown_all().await;
 }

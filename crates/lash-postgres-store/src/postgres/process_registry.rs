@@ -420,7 +420,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         &self,
         process_id: &str,
         request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendResult, PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
         facade_support::validate_generic_process_event_append(&request)?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
@@ -442,7 +442,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         process_id: &str,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendResult, PluginError> {
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let now_ms = process_lease_now_epoch_ms_tx(&mut tx).await?;
@@ -1315,11 +1315,9 @@ impl ProcessRegistry for PostgresProcessRegistry {
         filter_tombstoned_process_ids(&self.pool, process_ids).await
     }
 
-    async fn live_reference_summary(
-        &self,
-    ) -> Result<Vec<ProcessLiveReferenceSummary>, PluginError> {
+    async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
         let records = worklist::collect_non_terminal_records(self).await?;
-        Ok(ProcessLiveReferenceSummary::from_records(records.iter()))
+        Ok(ProcessLiveReferenceView::from_records(records.iter()))
     }
 
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {

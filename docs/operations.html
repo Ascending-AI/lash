@@ -560,12 +560,12 @@ for p in live {
         (_, _, true) => {}
         // Rerunnable / not-yet-started OwnerBound: the sweep re-runs or claims
         // it; a lapsed lease here is just work awaiting a peer.
-        (RecoveryDisposition::Rerunnable, _, false) => {}
-        (RecoveryDisposition::OwnerBound, false, false) => {}
+        (RecoveryContract::Rerunnable, _, false) => {}
+        (RecoveryContract::OwnerBound, false, false) => {}
         // Started OwnerBound, lease lapsed. The sweep will NOT infer a
         // terminal. This is the stuck case
         // a host classifies from `lease_holder` + your own timeout budget.
-        (RecoveryDisposition::OwnerBound, true, false) => {
+        (RecoveryContract::OwnerBound, true, false) => {
             let _ = (&p.lease_holder, p.abandon_request.as_ref());
             // ...decide, per host policy, whether to authorize abandonment:
             // core.processes().request_abandon(&p.process_id, "operator", reason)
@@ -778,7 +778,7 @@ let _ = (usage.entry_count, usage.usage);</code></pre>
       <div class="listing">
         <div class="listing__row">
           <div class="listing__label">timing</div>
-          <div class="listing__body"><p><code>TurnResult::started_at</code> is the wall-clock instant the runtime claimed the turn; <code>TurnResult::duration</code> is the whole-turn window (claim through Committed Turn adoption and Post-Commit Delivery) on the runtime clock's monotonic source. Export both as request latency.</p></div>
+          <div class="listing__body"><p><code>TurnReport::started_at</code> is the wall-clock instant the runtime claimed the turn; <code>TurnReport::duration</code> is the whole-turn window (claim through Committed Turn adoption and Post-Commit Delivery) on the runtime clock's monotonic source. Export both as request latency.</p></div>
         </div>
         <div class="listing__row">
           <div class="listing__label">usage</div>

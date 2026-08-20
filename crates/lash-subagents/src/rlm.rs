@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::{
     PreparedToolCall, SessionToolAccess, SubagentSessionContext, ToolArgumentProjectionPolicy,
-    ToolCall, ToolDefinition, ToolPrepareContext, ToolResult, facade_support::SessionSpec,
+    ToolCall, ToolDefinition, ToolOutcome, ToolPrepareContext, facade_support::SessionSpec,
     sansio::PendingToolCall,
 };
 use lash_lashlang_runtime::ToolDefinitionLashlangExt;
@@ -60,7 +60,7 @@ impl RlmSubagentToolsProvider {
             },
             // Subagent session-turn rows are journaled child sessions, idempotent
             // by process id, so recovery may re-execute them (ADR 0019).
-            lash_core::RecoveryDisposition::Rerunnable,
+            lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
         )
         .with_identity(
@@ -85,24 +85,24 @@ impl RlmSubagentToolsProvider {
         context: &lash_core::ToolPrepareContext,
         tool_id: lash_core::ToolId,
         call: lash_core::sansio::PendingToolCall,
-    ) -> Result<PreparedToolCall, ToolResult> {
-        let task =
-            required_string(args, "task").map_err(|err| ToolResult::err(serde_json::json!(err)))?;
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        let task = required_string(args, "task")
+            .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         let capability_name = capability_name_from_args(args, &self.registry)
-            .map_err(|err| ToolResult::err(serde_json::json!(err)))?;
+            .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         if self.registry.get(&capability_name).is_none() {
-            return Err(ToolResult::err(serde_json::json!(
+            return Err(ToolOutcome::err(serde_json::json!(
                 unknown_capability_message(&capability_name, &self.registry)
             )));
         }
         let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))
-            .map_err(|err| ToolResult::err(serde_json::json!(err.to_string())))?;
+            .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         let seed = lash_protocol_rlm::RlmSeed::from_tool_args(args)
-            .map_err(|err| ToolResult::err(serde_json::json!(err)))?;
+            .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         let current_snapshot = context
             .session_snapshot()
             .await
-            .map_err(|err| ToolResult::err(serde_json::json!(err.to_string())))?;
+            .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         let child_session_id = format!("session:subagent:{}", call.call_id);
         let create_request = Box::new(
             build_spawn_create_request(SpawnCreateRequestInput {
@@ -123,7 +123,7 @@ impl RlmSubagentToolsProvider {
                         call_id: call_id.to_string(),
                     }),
             })
-            .map_err(|err| ToolResult::err(serde_json::json!(err)))?
+            .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?
             .with_session_id(child_session_id),
         );
         let turn_input = turn_input_for_task(render_task_prompt(&task, output_schema.as_ref()));
@@ -137,7 +137,7 @@ impl RlmSubagentToolsProvider {
             create_request,
             turn_input,
         })
-        .map_err(|err| ToolResult::err(serde_json::json!(err.to_string())))?;
+        .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         Ok(PreparedToolCall::from_parts(
             call.call_id,
             tool_id,
@@ -180,7 +180,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOr
     async fn prepare_tool_call(
         &self,
         call: lash_core::ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         let args = call.pending.args.clone();
         self.provider
             .prepare_spawn_agent(&args, call.context, call.tool_id, call.pending)
@@ -191,7 +191,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOr
         &self,
         args: &Value,
         context: &lash_core::facade_support::OrchestrationContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         finalise_tool_result(self.provider.execute_orchestration(args, context).await)
     }
 }
@@ -239,11 +239,11 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
         tool_id: &lash_core::ToolId,
         pending: PendingToolCall,
         _context: &ToolPrepareContext,
-    ) -> Result<PreparedToolCall, ToolResult> {
+    ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(tool_id.clone(), pending))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let result = match call.name {
             "submit_error" => return rlm_support::submit_error_tool_result(call.args),
             other => Err(format!("Unknown tool: {other}")),

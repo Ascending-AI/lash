@@ -225,7 +225,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
     async fn ingest_occurrence(
         &self,
         request: lash::triggers::TriggerOccurrenceRequest,
-    ) -> std::result::Result<lash::triggers::TriggerIngressResult, lash::plugins::PluginError> {
+    ) -> std::result::Result<lash::triggers::TriggerIngressReceipt, lash::plugins::PluginError> {
         self.inner.ingest_occurrence(request).await
     }
 
@@ -1221,15 +1221,15 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                     ),
                     ..Default::default()
                 }),
-                generation_disposition: Some(lash::remote::llm::RemoteGenerationDisposition {
+                generation_disposition: Some(lash::remote::llm::RemoteGenerationReceipt {
                     output_token_cap:
-                        lash::remote::llm::RemoteGenerationOptionDisposition::ClampedToCapacity,
+                        lash::remote::llm::RemoteGenerationOptionOutcome::ClampedToCapacity,
                     temperature:
-                        lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
-                    seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
+                        lash::remote::llm::RemoteGenerationOptionOutcome::OmittedSamplingPinned,
+                    seed: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
                     stop_sequences:
-                        lash::remote::llm::RemoteGenerationOptionDisposition::SuppressedProtocolOwned,
-                    cache: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
+                        lash::remote::llm::RemoteGenerationOptionOutcome::SuppressedProtocolOwned,
+                    cache: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
                 }),
                 usage: Some(lash::remote::usage::RemoteUsage {
                     input_tokens: 11,

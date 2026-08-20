@@ -102,7 +102,7 @@ pub enum RemoteTriggerDeliveryEmitOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteTriggerDeliveryEmitReport {
+pub struct RemoteTriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
     pub process_id: String,
@@ -115,7 +115,7 @@ pub struct RemoteTriggerEmitReport {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub occurrence_id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub deliveries: Vec<RemoteTriggerDeliveryEmitReport>,
+    pub deliveries: Vec<RemoteTriggerDeliveryEmitReceipt>,
 }
 
 impl RemoteTriggerEmitReport {
@@ -204,7 +204,7 @@ pub struct RemoteTriggerRegistration {
     pub source_type: String,
     #[serde(default)]
     pub source: serde_json::Value,
-    pub target: RemoteTriggerTargetSummary,
+    pub target: RemoteTriggerTarget,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -219,7 +219,7 @@ pub enum RemoteTriggerManifestMembership {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteTriggerTargetSummary {
+pub struct RemoteTriggerTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub identity: RemoteProcessIdentity,
@@ -502,16 +502,16 @@ impl RemoteTriggerRegisterSubscriptionRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteTriggerRegisterSubscriptionResult {
+pub struct RemoteTriggerRegisterSubscriptionReceipt {
     pub protocol_version: u32,
     pub record: RemoteTriggerSubscriptionRecord,
 }
 
-impl RemoteTriggerRegisterSubscriptionResult {
+impl RemoteTriggerRegisterSubscriptionReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
         self.record
-            .validate("RemoteTriggerRegisterSubscriptionResult")
+            .validate("RemoteTriggerRegisterSubscriptionReceipt")
     }
 }
 

@@ -288,7 +288,7 @@ mod tests {
         LlmEventSender, LlmMessage, LlmProviderTraceEvent, LlmProviderTraceSender, LlmRequest,
         LlmRole, LlmTerminalReason, LlmToolChoice,
     };
-    use lash_core::{GenerationOptionDisposition, GenerationOptions};
+    use lash_core::{GenerationOptionOutcome, GenerationOptions};
     use serde_json::json;
 
     use super::*;
@@ -550,7 +550,7 @@ mod tests {
                 .generation_disposition
                 .expect("generation disposition")
                 .stop_sequences,
-            GenerationOptionDisposition::SuppressedProtocolOwned
+            GenerationOptionOutcome::SuppressedProtocolOwned
         );
 
         let read_view = turn.result.state.read_view();

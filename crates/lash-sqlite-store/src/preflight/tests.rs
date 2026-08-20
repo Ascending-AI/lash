@@ -286,7 +286,7 @@ mod walk {
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
         )
         .with_wake_session_id(Some("wake-session".to_string()))

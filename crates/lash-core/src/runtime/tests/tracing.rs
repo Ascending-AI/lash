@@ -224,8 +224,8 @@ impl crate::ToolProvider for SchemaChangingTool {
         (name == "schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolResult {
-        crate::ToolResult::ok(serde_json::Value::Null)
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        crate::ToolOutcome::ok(serde_json::Value::Null)
     }
 }
 

@@ -498,7 +498,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
 
     assert!(matches!(
         result,
-        crate::AppendSessionNodesResult::StaleBranch { ref required_node_id }
+        crate::AppendSessionNodesOutcome::StaleBranch { ref required_node_id }
             if required_node_id == "not-on-active-path"
     ));
     assert!(!protocol_dirty.load(Ordering::SeqCst));
@@ -576,7 +576,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         .append_session_nodes(request.clone())
         .await
         .expect("first append");
-    let crate::AppendSessionNodesResult::Appended {
+    let crate::AppendSessionNodesOutcome::Appended {
         node_ids: first_node_ids,
         leaf_node_id: first_leaf_node_id,
     } = first
@@ -605,7 +605,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         .append_session_nodes(request)
         .await
         .expect("the lost-response retry must replay its durable receipt");
-    let crate::AppendSessionNodesResult::Appended {
+    let crate::AppendSessionNodesOutcome::Appended {
         node_ids: replayed_node_ids,
         leaf_node_id: replayed_leaf_node_id,
     } = replay

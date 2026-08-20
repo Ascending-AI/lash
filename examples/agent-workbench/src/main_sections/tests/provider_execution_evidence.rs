@@ -2,7 +2,7 @@ async fn run_provider_evidence_turn(
     state: &AppState,
     session: &lash::LashSession,
     turn_id: &str,
-) -> (lash::TurnResult, Arc<Mutex<TurnStreamState>>) {
+) -> (lash::TurnReport, Arc<Mutex<TurnStreamState>>) {
     state.track_turn(&session.session_id(), turn_id);
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session

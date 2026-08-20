@@ -3,7 +3,7 @@
 //!
 //! Layer 2.5 gave the SQL tiers a durable group host and, with it, a named
 //! bounded leak: a group closed under
-//! [`LoserDisposition::RunToCompletion`](super::group::LoserDisposition::RunToCompletion)
+//! [`LoserPolicy::RunToCompletion`](super::group::LoserPolicy::RunToCompletion)
 //! releases its caller while children keep running, and children the closing
 //! process was *not* running — because it crashed, or because another process
 //! claimed them — are left `in_progress` in the journal with nobody driving
@@ -58,7 +58,7 @@
 //!
 //! Not the disposition: it is read from the group row, which is where the
 //! opening caller declared it and which a reopen may not restate. A
-//! [`Cancel`](super::group::LoserDisposition::Cancel) group's children are
+//! [`Cancel`](super::group::LoserPolicy::Cancel) group's children are
 //! cancelled inside their own claims by the process running them, and each
 //! journals that cancellation as its own terminal at close; the drain
 //! re-executes nothing there and says so, child by child, rather than silently
@@ -79,7 +79,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::envelope::RuntimeEffectEnvelope;
 use super::executor::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor};
-use super::group::LoserDisposition;
+use super::group::LoserPolicy;
 
 /// How a host says what runs a grouped child, from that child's envelope alone.
 ///
@@ -105,7 +105,7 @@ use super::group::LoserDisposition;
 ///
 /// This is also where the ratified `'static` property lives. A grouped child
 /// must be able to outlive the caller that opened it, because
-/// [`LoserDisposition::RunToCompletion`] says a losing promise keeps running;
+/// [`LoserPolicy::RunToCompletion`] says a losing promise keeps running;
 /// the executors handed out here are `'static`, so
 /// [`supports_effect_groups`](super::RuntimeEffectController::supports_effect_groups)
 /// may answer `true` exactly where a host has registered one of these and not
@@ -198,7 +198,7 @@ pub struct GroupDrainReport {
     /// rather than assumed by the caller, because a caller that closed the group
     /// under a *narrowed* disposition still finds the declared one here — the
     /// narrowing is process-local and the journal holds what was declared.
-    pub disposition: LoserDisposition,
+    pub disposition: LoserPolicy,
     /// One entry per child that held no rank when the pass read the journal, in
     /// the order the pass handled them. A group with nothing left to settle
     /// reports none, which is what makes it reclaimable.
@@ -294,7 +294,7 @@ pub enum ChildDrainOutcome {
         /// The lease boundary the pass read, on the substrate's clock.
         expires_at_ms: u64,
     },
-    /// Left alone: the group declared [`LoserDisposition::Cancel`], whose
+    /// Left alone: the group declared [`LoserPolicy::Cancel`], whose
     /// terminals are synthesized inside each child's own claim by the process
     /// running it. There is nothing for a re-execution to add, and cancelling
     /// from here would be the drain inventing a terminal for a child it never

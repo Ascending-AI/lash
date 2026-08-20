@@ -8,7 +8,7 @@ use lash_core::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
     ProcessAwaitOutput, ProcessCompletionOutcome, ProcessInput, ProcessLeaseClaimOutcome,
-    ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryDisposition, RuntimeCommit,
+    ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryContract, RuntimeCommit,
     RuntimeSessionState, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
     TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, facade_support::SessionCommand,
 };
@@ -513,7 +513,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
         ))
         .await

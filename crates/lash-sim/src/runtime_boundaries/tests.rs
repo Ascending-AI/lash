@@ -548,7 +548,7 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
                 ProcessInput::External {
                     metadata: json!({"seed": seed, "budget": budget}),
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
             ))
             .await

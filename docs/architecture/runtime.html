@@ -98,7 +98,7 @@ flowchart TD
         <div class="section">
           <div class="section-header">
             <h2>Turn Outcomes And AgentFrames</h2>
-            <p>A turn finishes as one of three outcomes. App hosts usually call <code>session.turn(input).stream_to(&amp;sink)</code> or <code>.run()</code>; durable handlers add <code>.turn_id(...).effects(&amp;controller)</code>. Those facade calls follow AgentFrame switches and return the final <code>TurnResult</code>. Raw <code>stream_turn</code> and <code>stream_turn_with_agent_frames</code> are runtime internals for lower-level hosts.</p>
+            <p>A turn finishes as one of three outcomes. App hosts usually call <code>session.turn(input).stream_to(&amp;sink)</code> or <code>.run()</code>; durable handlers add <code>.turn_id(...).effects(&amp;controller)</code>. Those facade calls follow AgentFrame switches and return the final <code>TurnReport</code>. Raw <code>stream_turn</code> and <code>stream_turn_with_agent_frames</code> are runtime internals for lower-level hosts.</p>
           </div>
           <div class="table">
             <table>

@@ -529,7 +529,7 @@ impl SessionGraphScenario {
         if !required_is_live {
             if !matches!(
                 result,
-                crate::AppendSessionNodesResult::StaleBranch { ref required_node_id }
+                crate::AppendSessionNodesOutcome::StaleBranch { ref required_node_id }
                     if Some(required_node_id) == required.as_ref()
             ) {
                 return Err(format!(
@@ -544,7 +544,7 @@ impl SessionGraphScenario {
             return Ok(());
         }
 
-        let crate::AppendSessionNodesResult::Appended { node_ids, .. } = result else {
+        let crate::AppendSessionNodesOutcome::Appended { node_ids, .. } = result else {
             return Err("branch-liveness: active ancestor append was rejected".to_string());
         };
         if node_ids.len() != usize::from(node_count.max(1)) {
@@ -1353,7 +1353,7 @@ async fn commit_runtime_state_for_property(
     store: &Arc<dyn crate::RuntimePersistence>,
     commit: crate::RuntimeCommit,
     owner_suffix: &str,
-) -> Result<crate::RuntimeCommitResult, crate::StoreError> {
+) -> Result<crate::RuntimeCommitReceipt, crate::StoreError> {
     let session_id = commit.session_id.clone();
     let owner = crate::LeaseOwnerIdentity::opaque(
         format!("session-graph-property-{owner_suffix}"),

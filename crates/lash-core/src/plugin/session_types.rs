@@ -15,11 +15,11 @@ pub struct SessionHandle {
     pub policy: SessionPolicy,
     /// Per-id outcome for observer edges requested at session creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub observed_processes: Vec<SessionObservedProcessResult>,
+    pub observed_processes: Vec<SessionObservedProcessReceipt>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionObservedProcessResult {
+pub struct SessionObservedProcessReceipt {
     pub process_id: crate::ProcessId,
     pub outcome: SessionObservedProcessOutcome,
 }
@@ -404,7 +404,7 @@ pub enum SessionRelation {
         /// host understands it. Stores persist it as durable fork lineage
         /// and never validate it against the fork point's anchor provenance —
         /// repeated rewinds legitimately name superseded intermediate
-        /// sessions, while [`crate::ForkSessionResult::source_session_id`]
+        /// sessions, while [`crate::ForkSessionReceipt::source_session_id`]
         /// always reports the original writer.
         source_session_id: String,
         /// Host-declared source node, persisted alongside

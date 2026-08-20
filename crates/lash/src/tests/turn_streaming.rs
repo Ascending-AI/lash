@@ -192,16 +192,16 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
         &self,
         _grant: &lash_core::ToolExecutionGrant,
         call: lash_core::ToolPrepareCall<'_>,
-    ) -> std::result::Result<lash_core::PreparedToolCall, lash_core::ToolResult> {
+    ) -> std::result::Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
         Ok(lash_core::PreparedToolCall::identity(
             call.tool_id,
             call.pending,
         ))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         assert_eq!(call.name, "frame_state_probe");
-        lash_core::ToolResult::ok(serde_json::json!("recorded"))
+        lash_core::ToolOutcome::ok(serde_json::json!("recorded"))
     }
 
     async fn execute_granted(
@@ -209,7 +209,7 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
         grant: &lash_core::ToolExecutionGrant,
         args: &serde_json::Value,
         context: &lash_core::AttemptContext<'_>,
-    ) -> lash_core::ToolResult {
+    ) -> lash_core::ToolOutcome {
         self.execute_by_id(&grant.manifest.id, args, context).await
     }
 }
@@ -586,8 +586,8 @@ impl ToolProvider for ContractRecordingTools {
         Some(contract)
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-        lash_core::ToolResult::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
     }
 }
 
@@ -612,7 +612,7 @@ impl ToolProvider for BlockingAppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         assert_eq!(call.name, "app_lookup");
         if let Some(tx) = self.entered_tx.lock_recover().take() {
             let _ = tx.send(());
@@ -620,7 +620,7 @@ impl ToolProvider for BlockingAppTools {
         if let Some(rx) = self.release_rx.lock().await.take() {
             let _ = rx.await;
         }
-        lash_core::ToolResult::ok(serde_json::json!({ "answer": "ready" }))
+        lash_core::ToolOutcome::ok(serde_json::json!({ "answer": "ready" }))
     }
 }
 
@@ -663,7 +663,7 @@ impl ToolProvider for RuntimeBatchTools {
         }
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         match call.name {
             "first" | "formerly_serial" | "last" => {
                 let start = std::time::Instant::now();
@@ -677,14 +677,14 @@ impl ToolProvider for RuntimeBatchTools {
                     .lock_recover()
                     .push((call.name.to_string(), start, end));
                 match waited {
-                    Ok(_) => lash_core::ToolResult::ok(serde_json::json!(call.name)),
-                    Err(_) => lash_core::ToolResult::err_fmt(format!(
+                    Ok(_) => lash_core::ToolOutcome::ok(serde_json::json!(call.name)),
+                    Err(_) => lash_core::ToolOutcome::err_fmt(format!(
                         "{} did not overlap with the rest of the batch",
                         call.name
                     )),
                 }
             }
-            other => lash_core::ToolResult::err_fmt(format!("Unknown tool: {other}")),
+            other => lash_core::ToolOutcome::err_fmt(format!("Unknown tool: {other}")),
         }
     }
 }
@@ -709,7 +709,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for RuntimeBatch
         &self,
         args: &serde_json::Value,
         context: &lash_core::facade_support::OrchestrationContext<'_>,
-    ) -> lash_core::ToolResult {
+    ) -> lash_core::ToolOutcome {
         execute_runtime_batch_tool(context, args).await
     }
 }
@@ -770,15 +770,15 @@ fn runtime_probe_tool_definition(name: &'static str) -> lash_core::ToolDefinitio
 async fn execute_runtime_batch_tool(
     context: &lash_core::facade_support::OrchestrationContext<'_>,
     args: &serde_json::Value,
-) -> lash_core::ToolResult {
+) -> lash_core::ToolOutcome {
     let Some(raw_calls) = args.get("tool_calls").and_then(serde_json::Value::as_array) else {
-        return lash_core::ToolResult::err_fmt("Missing required parameter: tool_calls");
+        return lash_core::ToolOutcome::err_fmt("Missing required parameter: tool_calls");
     };
     let mut invocations = Vec::with_capacity(raw_calls.len());
     let mut immediate_results = Vec::new();
     for (index, item) in raw_calls.iter().enumerate() {
         let Some(tool_name) = item.get("tool").and_then(serde_json::Value::as_str) else {
-            return lash_core::ToolResult::err_fmt(format!("Invalid tool_calls[{index}].tool"));
+            return lash_core::ToolOutcome::err_fmt(format!("Invalid tool_calls[{index}].tool"));
         };
         let Some(manifest) = context.callable_tool_manifest(tool_name) else {
             immediate_results.push(serde_json::json!({
@@ -827,7 +827,7 @@ async fn execute_runtime_batch_tool(
         })
         .collect::<Vec<_>>();
     results.extend(immediate_results);
-    lash_core::ToolResult::ok(serde_json::json!({ "results": results }))
+    lash_core::ToolOutcome::ok(serde_json::json!({ "results": results }))
 }
 
 fn runtime_batch_provider() -> ProviderHandle {
@@ -3177,14 +3177,14 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
     fn replay_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
-    ) -> std::result::Result<lash_core::LiveReplayResult, lash_core::LiveReplayStoreError> {
+    ) -> std::result::Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
         self.inner.replay_after_cursor(cursor)
     }
 
     fn subscribe_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
-    ) -> std::result::Result<lash_core::LiveReplaySubscribeResult, lash_core::LiveReplayStoreError>
+    ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
     {
         self.inner.subscribe_after_cursor(cursor)
     }
@@ -5454,8 +5454,8 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
                         provider_request_id: Some("request-after-response-start".to_string()),
                         ..Default::default()
                     }),
-                    generation_disposition: Some(lash_core::GenerationDisposition {
-                        stop_sequences: lash_core::GenerationOptionDisposition::Applied,
+                    generation_disposition: Some(lash_core::GenerationReceipt {
+                        stop_sequences: lash_core::GenerationOptionOutcome::Applied,
                         ..Default::default()
                     }),
                     response_metadata: std::collections::BTreeMap::from([(
@@ -5546,7 +5546,7 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
                 .generation_disposition
                 .expect("attempt disposition")
                 .stop_sequences,
-            lash_core::GenerationOptionDisposition::SuppressedProtocolOwned
+            lash_core::GenerationOptionOutcome::SuppressedProtocolOwned
         );
         assert_eq!(
             attempt
@@ -5597,7 +5597,7 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
                 .generation_disposition
                 .expect("response disposition")
                 .stop_sequences,
-            lash_core::GenerationOptionDisposition::SuppressedProtocolOwned
+            lash_core::GenerationOptionOutcome::SuppressedProtocolOwned
         );
         assert_eq!(
             response
@@ -6716,7 +6716,7 @@ fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Result<()> {
             .await?;
         assert!(matches!(
             result,
-            lash_core::AppendSessionNodesResult::StaleBranch { ref required_node_id }
+            lash_core::AppendSessionNodesOutcome::StaleBranch { ref required_node_id }
                 if required_node_id == "inactive-ancestor"
         ));
         assert!(

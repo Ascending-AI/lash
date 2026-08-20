@@ -22,8 +22,8 @@ use lash_core::{
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, ScopedEffectController, SessionCreateRequest, SessionPluginSource,
     SessionPolicy, SessionStartPoint, ToolCall, ToolCallOutcome, ToolContract, ToolDefinition,
-    ToolFailureClass, ToolManifest, ToolProvider, ToolResult, ToolRetryDisposition,
-    TurnDriverConfig, TurnDriverPreamble, TurnInput,
+    ToolFailureClass, ToolManifest, ToolOutcome, ToolProvider, ToolRetryStatus, TurnDriverConfig,
+    TurnDriverPreamble, TurnInput,
 };
 
 fn test_runtime_owner() -> lash_core::LeaseOwnerIdentity {
@@ -252,7 +252,7 @@ impl ToolProvider for PanicTool {
         (name == "panic_tool").then(|| Arc::new(panic_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         panic!("tool payload only")
     }
 }
@@ -554,7 +554,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
     assert_eq!(failure.class, ToolFailureClass::Internal);
     assert_eq!(failure.code, "tool_panicked");
     assert_eq!(failure.message, "tool payload only");
-    assert_eq!(failure.retry, ToolRetryDisposition::Never);
+    assert_eq!(failure.retry, ToolRetryStatus::Never);
     assert_eq!(first.assistant_output.safe_text, "turn recovered");
 
     let next = runtime

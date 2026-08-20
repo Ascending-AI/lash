@@ -66,12 +66,12 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
             measure_runtime_perf_phase("live_replay.current_cursor_parse", || {
                 let cursor = store.current_cursor(&session_id, revision);
                 match store.replay_after_cursor(&cursor)? {
-                    LiveReplayResult::Replayed(events) if events.is_empty() => Ok(cursor),
-                    LiveReplayResult::Replayed(events) => anyhow::bail!(
+                    LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),
+                    LiveReplayOutcome::Replayed(events) => anyhow::bail!(
                         "current cursor replay unexpectedly returned {} events",
                         events.len()
                     ),
-                    LiveReplayResult::Gap(reason) => {
+                    LiveReplayOutcome::Gap(reason) => {
                         anyhow::bail!("current cursor replay returned gap {reason:?}")
                     }
                 }
@@ -81,8 +81,8 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
         let (replay_count, replay_phase) =
             measure_runtime_perf_phase("live_replay.replay_after_cursor", || {
                 match store.replay_after_cursor(&start_cursor)? {
-                    LiveReplayResult::Replayed(events) => Ok(events.len()),
-                    LiveReplayResult::Gap(reason) => {
+                    LiveReplayOutcome::Replayed(events) => Ok(events.len()),
+                    LiveReplayOutcome::Gap(reason) => {
                         anyhow::bail!("start cursor replay returned gap {reason:?}")
                     }
                 }
@@ -99,8 +99,8 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
         let ((buffered_count, live_count), subscribe_phase) =
             measure_runtime_perf_async_phase("live_replay.subscribe_buffered", async {
                 let mut subscription = match store.subscribe_after_cursor(&first_cursor)? {
-                    LiveReplaySubscribeResult::Subscribed(subscription) => subscription,
-                    LiveReplaySubscribeResult::Gap(reason) => {
+                    LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,
+                    LiveReplaySubscribeOutcome::Gap(reason) => {
                         anyhow::bail!("subscribe after first cursor returned gap {reason:?}")
                     }
                 };
@@ -154,11 +154,11 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                 }
                 trim_store.trim_session(&trim_session_id)?;
                 match trim_store.replay_after_cursor(&trim_start)? {
-                    LiveReplayResult::Gap(lash_core::LiveReplayGapReason::Trimmed) => Ok(1usize),
-                    LiveReplayResult::Gap(reason) => {
+                    LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Trimmed) => Ok(1usize),
+                    LiveReplayOutcome::Gap(reason) => {
                         anyhow::bail!("capacity trim returned wrong gap {reason:?}")
                     }
-                    LiveReplayResult::Replayed(events) => anyhow::bail!(
+                    LiveReplayOutcome::Replayed(events) => anyhow::bail!(
                         "capacity trim expected gap, got {} replayed events",
                         events.len()
                     ),
@@ -177,23 +177,23 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     )))?;
                 let mut gaps = 0usize;
                 match store.replay_after_cursor(&ahead_cursor)? {
-                    LiveReplayResult::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,
-                    LiveReplayResult::Gap(reason) => {
+                    LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,
+                    LiveReplayOutcome::Gap(reason) => {
                         anyhow::bail!("ahead replay returned wrong gap {reason:?}")
                     }
-                    LiveReplayResult::Replayed(events) => anyhow::bail!(
+                    LiveReplayOutcome::Replayed(events) => anyhow::bail!(
                         "ahead replay expected gap, got {} replayed events",
                         events.len()
                     ),
                 }
                 match store.subscribe_after_cursor(&ahead_cursor)? {
-                    LiveReplaySubscribeResult::Gap(lash_core::LiveReplayGapReason::Unavailable) => {
+                    LiveReplaySubscribeOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => {
                         gaps += 1
                     }
-                    LiveReplaySubscribeResult::Gap(reason) => {
+                    LiveReplaySubscribeOutcome::Gap(reason) => {
                         anyhow::bail!("ahead subscribe returned wrong gap {reason:?}")
                     }
-                    LiveReplaySubscribeResult::Subscribed(_) => {
+                    LiveReplaySubscribeOutcome::Subscribed(_) => {
                         anyhow::bail!("ahead subscribe expected gap")
                     }
                 }
@@ -203,12 +203,12 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
         phase_profile.insert(gap_phase.0, gap_phase.1);
 
         match store.replay_after_cursor(&current_cursor)? {
-            LiveReplayResult::Replayed(events) if events.len() == 1 => {}
-            LiveReplayResult::Replayed(events) => anyhow::bail!(
+            LiveReplayOutcome::Replayed(events) if events.len() == 1 => {}
+            LiveReplayOutcome::Replayed(events) => anyhow::bail!(
                 "current cursor should see only the live event after subscribe, got {}",
                 events.len()
             ),
-            LiveReplayResult::Gap(reason) => {
+            LiveReplayOutcome::Gap(reason) => {
                 anyhow::bail!("current cursor after live append returned gap {reason:?}")
             }
         }

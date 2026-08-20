@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lash::direct::{
-    AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmResult, DirectRequest, NonNegativeFiniteF64,
-    NonNegativeFiniteF64Error, GenerationDisposition, GenerationOptionDisposition,
+    AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmOutcome, DirectRequest, NonNegativeFiniteF64,
+    NonNegativeFiniteF64Error, GenerationReceipt, GenerationOptionOutcome,
     GenerationOptions, LlmEventSender, LlmOutputPart, LlmUsage,
 };
 use lash::durability::RuntimeHostConfig;
@@ -16,7 +16,7 @@ use lash::persistence::{
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
     QueuedWorkStore,
     SelectedQueuedWorkClaimOutcome,
-    RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitResult, RuntimePersistence,
+    RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
     RuntimeSessionState, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore,
     SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
@@ -69,7 +69,7 @@ impl SessionCommitStore for FacadeStore {
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitResult, StoreError> {
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
         let realized_node_timestamps = commit
             .graph
             .appended_nodes()
@@ -79,7 +79,7 @@ impl SessionCommitStore for FacadeStore {
             })
             .collect();
         let manifest: SessionCheckpoint = commit.checkpoint.manifest()?;
-        Ok(RuntimeCommitResult {
+        Ok(RuntimeCommitReceipt {
             head_revision: commit.expected_head_revision + 1,
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
@@ -183,7 +183,7 @@ impl TurnInputStore for FacadeStore {
         &self,
         _session_id: &str,
         _targets: &[lash::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash::PendingTurnInputCancelResult>, StoreError> {
+    ) -> Result<Vec<lash::PendingTurnInputCancelReceipt>, StoreError> {
         unreachable!("compile-only facade store")
     }
 
@@ -421,7 +421,7 @@ fn context_compactor_types_are_nameable() -> PluginSpec {
 async fn direct_response_type_is_nameable(
     client: &mut DirectLlmClient,
     request: DirectRequest,
-) -> Result<DirectLlmResult, DirectLlmError> {
+) -> Result<DirectLlmOutcome, DirectLlmError> {
     client.complete(request).await
 }
 
@@ -445,11 +445,11 @@ fn generation_option_types_are_nameable(
 }
 
 fn generation_disposition_is_readable(
-    response: lash::direct::DirectLlmResult,
-) -> Option<(GenerationDisposition, bool)> {
+    response: lash::direct::DirectLlmOutcome,
+) -> Option<(GenerationReceipt, bool)> {
     let disposition = response.generation_disposition?;
     let requested_temperature_survived =
-        disposition.temperature == GenerationOptionDisposition::Applied;
+        disposition.temperature == GenerationOptionOutcome::Applied;
     Some((disposition, requested_temperature_survived))
 }
 
@@ -518,7 +518,7 @@ async fn pending_turn_input_cancel_facade_is_nameable(
     session: &lash::LashSession,
     target: lash::PendingTurnInputCancelTarget,
 ) -> lash::Result<()> {
-    let _: Vec<lash::PendingTurnInputCancelResult> = session
+    let _: Vec<lash::PendingTurnInputCancelReceipt> = session
         .cancel_pending_turn_inputs(vec![target.clone()])
         .await?;
     let _: lash::PendingTurnInputSuffixCancelOutcome =
@@ -541,7 +541,7 @@ fn trigger_types_are_homed_in_triggers(
     registration: lash::triggers::TriggerRegistration,
     source_type: lash::triggers::TriggerEventType,
     filter: lash::triggers::TriggerSubscriptionFilter,
-    target: lash::triggers::TriggerTargetSummary,
+    target: lash::triggers::TriggerTarget,
 ) {
     let _ = (event, report, registration, source_type, filter, target);
     let _ = lash::triggers::empty_trigger_source_key("ui.button.pressed");
@@ -556,7 +556,7 @@ async fn persistence_load_helpers_are_nameable(
 async fn verified_commit_chokepoint_is_nameable(
     store: &dyn SessionCommitStore,
     commit: RuntimeCommit,
-) -> Result<RuntimeCommitResult, StoreError> {
+) -> Result<RuntimeCommitReceipt, StoreError> {
     commit_runtime_state_verified(store, commit).await
 }
 
@@ -575,7 +575,7 @@ fn wrapped_session_store_refusal_is_nameable(error: lash::EmbedError) -> bool {
 // has exactly one home."
 #[allow(clippy::too_many_arguments)]
 fn leaked_signature_types_are_homed(
-    execution: lash::ExecutionSummary,
+    execution: lash::TurnExecutionMetrics,
     message: lash::messages::Message,
     tool_id: lash::tools::ToolId,
     create_request: lash::SessionCreateRequest,

@@ -7,7 +7,9 @@ use lash::plugins::{
     runtime_plugin_stack,
 };
 use lash::provider::ProviderHandle;
-use lash::tools::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolProvider, ToolResult};
+use lash::tools::{
+    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+};
 use lash::{LashSession, SessionSpec, TurnActivity, TurnInput};
 
 struct AppTools;
@@ -22,8 +24,8 @@ impl ToolProvider for AppTools {
         None
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolResult {
-        ToolResult::ok(serde_json::Value::Null)
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::ok(serde_json::Value::Null)
     }
 }
 

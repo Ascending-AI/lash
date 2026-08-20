@@ -22,7 +22,7 @@ use lash_core::plugin::{
 use lash_core::runtime::ProcessEventSemanticsSpec;
 use lash_core::{
     PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest, PromptContribution,
-    SessionToolAccess, ToolCall, ToolDefinition, ToolProvider, ToolResult,
+    SessionToolAccess, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
 };
 
 use lash_tool_support::{
@@ -102,7 +102,7 @@ impl StandardShell {
     fn parse_common_command_params(
         &self,
         args: &serde_json::Value,
-    ) -> Result<CommonCommandParams, ToolResult> {
+    ) -> Result<CommonCommandParams, ToolOutcome> {
         let cmd = require_str(args, "cmd")?.to_string();
         let workdir = self.runtime.resolve_workdir(
             args.get("workdir")
@@ -130,7 +130,7 @@ impl StandardShell {
     fn parse_exec_command_params(
         &self,
         args: &serde_json::Value,
-    ) -> Result<ExecCommandParams, ToolResult> {
+    ) -> Result<ExecCommandParams, ToolOutcome> {
         let common = self.parse_common_command_params(args)?;
         let timeout_ms = parse_optional_usize_arg(args, "timeout_ms", None, false, 1)?
             .map(|value| value as u64)
@@ -149,7 +149,7 @@ impl StandardShell {
     fn parse_start_command_params(
         &self,
         args: &serde_json::Value,
-    ) -> Result<StartCommandParams, ToolResult> {
+    ) -> Result<StartCommandParams, ToolOutcome> {
         let common = self.parse_common_command_params(args)?;
         let detach = parse_optional_bool(args, "detach", false)?;
         let detached_process_id = args
@@ -172,7 +172,7 @@ impl StandardShell {
         &self,
         params: &ExecCommandParams,
         cancel: Option<CancellationToken>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let started = Instant::now();
         let handle_id = self.runtime.allocate_handle_id();
 
@@ -216,8 +216,8 @@ impl StandardShell {
                 full_output_path.as_deref(),
                 started.elapsed().as_secs_f64(),
             ),
-            Ok(PollOutcome::Cancelled) => ToolResult::cancelled("tool call cancelled"),
-            Err(failure) => ToolResult::failure(*failure),
+            Ok(PollOutcome::Cancelled) => ToolOutcome::cancelled("tool call cancelled"),
+            Err(failure) => ToolOutcome::failure(*failure),
         }
     }
 
@@ -226,7 +226,7 @@ impl StandardShell {
         params: &StartCommandParams,
         context: &lash_core::InternalProcessContext<'_>,
         cancel: Option<CancellationToken>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         if params.detach {
             return self.detach_command_process(params, context).await;
         }
@@ -262,7 +262,7 @@ impl StandardShell {
         &self,
         params: &StartCommandParams,
         context: &lash_core::InternalProcessContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let Some(_launcher_process_id) = context.process_id() else {
             return execution_failure(
                 "detached_process_runner_missing_process",
@@ -327,7 +327,7 @@ impl StandardShell {
                     )
                     .await;
                 audit.resolved();
-                return ToolResult::failure(*failure);
+                return ToolOutcome::failure(*failure);
             }
         };
         let started_at = SystemTime::now()
@@ -366,19 +366,19 @@ impl StandardShell {
         record.insert("status".to_string(), json!("detached"));
         record.insert("done".to_string(), json!(true));
         record.insert("running".to_string(), json!(false));
-        ToolResult::ok(serde_json::Value::Object(record))
+        ToolOutcome::ok(serde_json::Value::Object(record))
     }
 
     fn declare_start_command_process(
         &self,
         params: &StartCommandParams,
         context: &lash_core::AttemptContext<'_>,
-    ) -> lash_core::ToolAttemptResult {
+    ) -> lash_core::ToolAttemptOutcome {
         let identity = match context.intent_identity(0) {
             Ok(identity) => identity,
             Err(refusal) => {
-                return lash_core::ToolAttemptResult::done_without_intents(
-                    lash_core::ToolResultDone::failure(lash_core::ToolFailure::runtime(
+                return lash_core::ToolAttemptOutcome::done_without_intents(
+                    lash_core::ToolOutcomeDone::failure(lash_core::ToolFailure::runtime(
                         lash_core::ToolFailureClass::InvalidRequest,
                         refusal.code(),
                         "shell.start requires a stable tool call identity",
@@ -408,7 +408,7 @@ impl StandardShell {
             // Shell process groups are owner-bound external side effects. The
             // durable intent is idempotent; recovery must not launch a second OS
             // process after the owner has bound.
-            lash_core::RecoveryDisposition::OwnerBound,
+            lash_core::RecoveryContract::OwnerBound,
             if params.detach {
                 lash_core::ProcessOriginator::host_scoped("shell-detached-launcher")
             } else {
@@ -426,7 +426,7 @@ impl StandardShell {
                 .with_observers([context.session_id().to_string()]);
         }
         let public_process_id = detached_process_id.as_deref().unwrap_or(&process_id);
-        let result = lash_core::ToolResultDone::ok(json!({
+        let result = lash_core::ToolOutcomeDone::ok(json!({
             "__handle__": "process",
             "id": public_process_id,
             "process_id": public_process_id,
@@ -434,7 +434,7 @@ impl StandardShell {
             "done": params.detach,
             "running": !params.detach,
         }));
-        lash_core::ToolAttemptResult::done(
+        lash_core::ToolAttemptOutcome::done(
             result,
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
@@ -452,7 +452,7 @@ impl StandardShell {
         params: &StartCommandParams,
         context: &lash_core::InternalProcessContext<'_>,
         cancel: Option<CancellationToken>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let started = Instant::now();
         let handle_id = process_id.to_string();
 
@@ -463,7 +463,7 @@ impl StandardShell {
             params.login,
             &params.shell_path,
         ) {
-            return ToolResult::failure(*err);
+            return ToolOutcome::failure(*err);
         }
 
         let process_outcome = self.runtime.wait_until_exit_or_timeout(
@@ -526,11 +526,11 @@ impl StandardShell {
             }
             Ok(PollOutcome::Cancelled) => {
                 self.runtime.remove_process(&handle_id);
-                ToolResult::cancelled("tool call cancelled")
+                ToolOutcome::cancelled("tool call cancelled")
             }
             Err(failure) => {
                 self.runtime.remove_process(&handle_id);
-                ToolResult::failure(*failure)
+                ToolOutcome::failure(*failure)
             }
         }
     }
@@ -539,7 +539,7 @@ impl StandardShell {
         &self,
         args: &serde_json::Value,
         context: &lash_core::AttemptContext<'_>,
-    ) -> lash_core::ToolAttemptResult {
+    ) -> lash_core::ToolAttemptOutcome {
         let process_id = match parse_process_id(args) {
             Ok(value) => value,
             Err(err) => return tool_result_without_intents(err),
@@ -552,8 +552,8 @@ impl StandardShell {
             Ok(value) => value,
             Err(err) => return tool_result_without_intents(err),
         };
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(json!({
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(json!({
                 "process_id": process_id,
                 "status": "signalled",
             })),
@@ -572,12 +572,12 @@ impl StandardShell {
     }
 }
 
-fn tool_result_without_intents(result: ToolResult) -> lash_core::ToolAttemptResult {
+fn tool_result_without_intents(result: ToolOutcome) -> lash_core::ToolAttemptOutcome {
     match result {
-        ToolResult::Done(output) => lash_core::ToolAttemptResult::done_without_intents(
-            lash_core::ToolResultDone::from_output(*output),
+        ToolOutcome::Done(output) => lash_core::ToolAttemptOutcome::done_without_intents(
+            lash_core::ToolOutcomeDone::from_output(*output),
         ),
-        ToolResult::Pending(pending) => lash_core::ToolAttemptResult::pending(pending),
+        ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(pending),
     }
 }
 
@@ -628,13 +628,13 @@ pub fn shell_provider(shell: StandardShell) -> StaticToolProvider<StandardShell>
 
 #[async_trait::async_trait]
 impl StaticToolExecute for StandardShell {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let cancellation_token = call.context.cancellation_token().cloned();
         self.dispatch(call.name, call.args, call.context, cancellation_token)
             .await
     }
 
-    async fn execute_internal(&self, call: lash_core::InternalProcessToolCall<'_>) -> ToolResult {
+    async fn execute_internal(&self, call: lash_core::InternalProcessToolCall<'_>) -> ToolOutcome {
         if call.name != "run_start_command" {
             return self
                 .execute(ToolCall {
@@ -656,7 +656,7 @@ impl StaticToolExecute for StandardShell {
         .await
     }
 
-    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         match call.name {
             "start_command" => {
                 let params = match self.parse_start_command_params(call.args) {
@@ -815,7 +815,7 @@ finish probe.exit_code == 0"#.into(),
         args: &serde_json::Value,
         context: &lash_core::AttemptContext<'_>,
         cancel: Option<CancellationToken>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         match name {
             "exec_command" => {
                 let params = match self.parse_exec_command_params(args) {
@@ -900,7 +900,7 @@ fn shell_write_output_schema() -> serde_json::Value {
     })
 }
 
-fn parse_process_id(args: &serde_json::Value) -> Result<String, ToolResult> {
+fn parse_process_id(args: &serde_json::Value) -> Result<String, ToolOutcome> {
     require_str(args, "process_id").map(str::to_string)
 }
 

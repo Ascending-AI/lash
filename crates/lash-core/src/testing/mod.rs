@@ -27,8 +27,8 @@ use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSna
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
 use crate::{
-    AssembledTurn, AssistantOutput, ExecutionSummary, ModelSpec, OutputState, ProcessRegistry,
-    ProviderOptions, RuntimeSessionState, SessionPolicy, TokenUsage, TurnFinish, TurnOutcome,
+    AssembledTurn, AssistantOutput, ModelSpec, OutputState, ProcessRegistry, ProviderOptions,
+    RuntimeSessionState, SessionPolicy, TokenUsage, TurnExecutionMetrics, TurnFinish, TurnOutcome,
     TurnStop,
 };
 
@@ -483,8 +483,8 @@ impl crate::ToolProvider for EmptyToolProvider {
         None
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
-        crate::ToolResult::err(serde_json::json!(format!(
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        crate::ToolOutcome::err(serde_json::json!(format!(
             "test tool provider has no tool `{}`",
             call.name
         )))
@@ -997,7 +997,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         _session_id: &str,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let observers = request.observers.clone();
         let env_ref = request
             .env_spec
@@ -1012,7 +1012,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Start { record } => {
-                Ok(crate::ProcessHandleSummary::from_record(*record))
+                Ok(crate::ProcessHandleView::from_record(*record))
             }
             _ => unreachable!("start command returns start outcome"),
         }
@@ -1023,7 +1023,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         session_id: &str,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, crate::PluginError> {
+    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         self.start_from_request(session_id, request, scope).await
     }
 
@@ -1286,7 +1286,7 @@ pub fn effect_backed_process_service(
 /// the provider's `execute`. Use this for unit tests that don't need to
 /// inspect host interactions; call `mock_tool_context()` directly and
 /// construct `ToolCall` manually for more involved scenarios.
-pub async fn run_tool<P>(tool: &P, name: &str, args: &serde_json::Value) -> crate::ToolResult
+pub async fn run_tool<P>(tool: &P, name: &str, args: &serde_json::Value) -> crate::ToolOutcome
 where
     P: crate::ToolProvider + ?Sized,
 {
@@ -1317,7 +1317,7 @@ pub fn mock_assembled_turn(session_id: &str, summary: &str) -> AssembledTurn {
             raw_text: summary.to_string(),
             state: OutputState::Usable,
         },
-        execution: ExecutionSummary::default(),
+        execution: TurnExecutionMetrics::default(),
         token_usage: TokenUsage::default(),
         children_usage: Vec::new(),
         llm_calls: Vec::new(),
@@ -1483,7 +1483,7 @@ impl crate::ProcessService for MockSessionManager {
         session_id: &str,
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleSummary, PluginError> {
+    ) -> Result<crate::ProcessHandleView, PluginError> {
         let observers = request.observers.clone();
         let env_ref = request
             .env_spec
@@ -1497,7 +1497,7 @@ impl crate::ProcessService for MockSessionManager {
                 scope,
             )
             .await?;
-        Ok(crate::ProcessHandleSummary::from_record(record))
+        Ok(crate::ProcessHandleView::from_record(record))
     }
 
     async fn finish_recorded_intent_parent(
@@ -1525,7 +1525,7 @@ impl crate::ProcessService for MockSessionManager {
         // This mock stands in as the executor, so it completes the row under the
         // authority its declared disposition permits: externally-owned rows close
         // via their external owner, lash-executed rows via the workflow-key path.
-        let authority = if registration.disposition == crate::RecoveryDisposition::ExternallyOwned {
+        let authority = if registration.disposition == crate::RecoveryContract::ExternallyOwned {
             crate::ProcessCompletionAuthority::external_owner()
         } else {
             crate::ProcessCompletionAuthority::workflow_key(&id)
@@ -1928,7 +1928,7 @@ mod test_protocol_fakes {
             &self,
             args: &serde_json::Value,
             context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-        ) -> crate::ToolResult {
+        ) -> crate::ToolOutcome {
             execute_test_batch(context, args).await
         }
     }
@@ -1971,20 +1971,20 @@ mod test_protocol_fakes {
     async fn execute_test_batch(
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
         args: &serde_json::Value,
-    ) -> crate::ToolResult {
+    ) -> crate::ToolOutcome {
         const MAX: usize = 25;
         let Some(raw_calls) = args.get("tool_calls").and_then(|v| v.as_array()) else {
-            return crate::ToolResult::err_fmt("Missing required parameter: tool_calls");
+            return crate::ToolOutcome::err_fmt("Missing required parameter: tool_calls");
         };
         if raw_calls.is_empty() {
-            return crate::ToolResult::err_fmt("Invalid tool_calls: expected at least one call");
+            return crate::ToolOutcome::err_fmt("Invalid tool_calls: expected at least one call");
         }
 
         let mut results = Vec::new();
         let mut parallel_specs = Vec::new();
         for (index, item) in raw_calls.iter().enumerate().take(MAX) {
             let Some(obj) = item.as_object() else {
-                return crate::ToolResult::err_fmt(format_args!(
+                return crate::ToolOutcome::err_fmt(format_args!(
                     "Invalid tool_calls[{index}]: expected object with tool and parameters"
                 ));
             };
@@ -1994,7 +1994,7 @@ mod test_protocol_fakes {
                 .map(str::trim)
                 .filter(|t| !t.is_empty())
             else {
-                return crate::ToolResult::err_fmt(format_args!(
+                return crate::ToolOutcome::err_fmt(format_args!(
                     "Invalid tool_calls[{index}].tool: expected non-empty string"
                 ));
             };
@@ -2087,7 +2087,7 @@ mod test_protocol_fakes {
                 .and_then(|value| value.as_u64())
                 .unwrap_or(u64::MAX)
         });
-        crate::ToolResult::ok(serde_json::json!({ "results": results }))
+        crate::ToolOutcome::ok(serde_json::json!({ "results": results }))
     }
 
     struct TestProtocolDriver;

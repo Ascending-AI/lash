@@ -20,7 +20,7 @@ use crate::{TurnFinish, TurnOutcome, TurnStop};
 
 use super::usage::TokenLedgerEntry;
 use super::{
-    AssembledTurn, AssistantOutput, ExecutionSummary, OutputState, TerminationPolicy, TurnIssue,
+    AssembledTurn, AssistantOutput, OutputState, TerminationPolicy, TurnExecutionMetrics, TurnIssue,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -771,7 +771,7 @@ impl TurnAssembler {
         let children_usage = child_cumulative_entries(self.child_cumulatives);
 
         AssembledTurn {
-            execution: ExecutionSummary {
+            execution: TurnExecutionMetrics {
                 had_tool_calls: !self.tool_calls.is_empty(),
                 had_code_execution: false,
                 // Timing is stamped by the turn loop, which owns the

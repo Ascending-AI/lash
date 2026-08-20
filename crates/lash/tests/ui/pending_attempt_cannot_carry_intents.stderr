@@ -1,4 +1,4 @@
-error[E0559]: variant `ToolAttemptResult::Pending` has no field named `pending`
+error[E0559]: variant `ToolAttemptOutcome::Pending` has no field named `pending`
  --> tests/ui/pending_attempt_cannot_carry_intents.rs:5:9
   |
 5 |         pending: PendingCompletion::new(),
@@ -7,18 +7,18 @@ error[E0559]: variant `ToolAttemptResult::Pending` has no field named `pending`
  ::: $WORKSPACE/crates/lash-core/src/tool_intent.rs
   |
   |     Pending(crate::PendingCompletion),
-  |     ------- `ToolAttemptResult::Pending` defined here
+  |     ------- `ToolAttemptOutcome::Pending` defined here
   |
-help: `ToolAttemptResult::Pending` is a tuple variant, use the appropriate syntax
+help: `ToolAttemptOutcome::Pending` is a tuple variant, use the appropriate syntax
   |
-4 -     let _invalid = ToolAttemptResult::Pending {
+4 -     let _invalid = ToolAttemptOutcome::Pending {
 5 -         pending: PendingCompletion::new(),
 6 -         intents: ToolIntents::default(),
 7 -     };
-4 +     let _invalid = ToolAttemptResult::Pending(/* PendingCompletion */);
+4 +     let _invalid = ToolAttemptOutcome::Pending(/* PendingCompletion */);
   |
 
-error[E0559]: variant `ToolAttemptResult::Pending` has no field named `intents`
+error[E0559]: variant `ToolAttemptOutcome::Pending` has no field named `intents`
  --> tests/ui/pending_attempt_cannot_carry_intents.rs:6:9
   |
 6 |         intents: ToolIntents::default(),
@@ -27,13 +27,13 @@ error[E0559]: variant `ToolAttemptResult::Pending` has no field named `intents`
  ::: $WORKSPACE/crates/lash-core/src/tool_intent.rs
   |
   |     Pending(crate::PendingCompletion),
-  |     ------- `ToolAttemptResult::Pending` defined here
+  |     ------- `ToolAttemptOutcome::Pending` defined here
   |
-help: `ToolAttemptResult::Pending` is a tuple variant, use the appropriate syntax
+help: `ToolAttemptOutcome::Pending` is a tuple variant, use the appropriate syntax
   |
-4 -     let _invalid = ToolAttemptResult::Pending {
+4 -     let _invalid = ToolAttemptOutcome::Pending {
 5 -         pending: PendingCompletion::new(),
 6 -         intents: ToolIntents::default(),
 7 -     };
-4 +     let _invalid = ToolAttemptResult::Pending(/* PendingCompletion */);
+4 +     let _invalid = ToolAttemptOutcome::Pending(/* PendingCompletion */);
   |

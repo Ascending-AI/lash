@@ -718,7 +718,7 @@ pub struct ToolFailure {
     pub code: String,
     pub message: String,
     pub source: ToolFailureSource,
-    pub retry: ToolRetryDisposition,
+    pub retry: ToolRetryStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<ToolValue>,
 }
@@ -734,7 +734,7 @@ impl ToolFailure {
             code: code.into(),
             message: message.into(),
             source: ToolFailureSource::Runtime,
-            retry: ToolRetryDisposition::Never,
+            retry: ToolRetryStatus::Never,
             raw: None,
         }
     }
@@ -775,7 +775,7 @@ impl ToolFailure {
         after_ms: Option<u64>,
     ) -> Self {
         let mut failure = Self::tool(class, code, message);
-        failure.retry = ToolRetryDisposition::Safe { after_ms };
+        failure.retry = ToolRetryStatus::Safe { after_ms };
         failure
     }
 
@@ -810,7 +810,7 @@ pub enum ToolFailureSource {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolRetryDisposition {
+pub enum ToolRetryStatus {
     Never,
     Safe {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1053,7 +1053,7 @@ mod tests {
             code: "boom".into(),
             message: "boom".into(),
             source: ToolFailureSource::Tool,
-            retry: ToolRetryDisposition::Never,
+            retry: ToolRetryStatus::Never,
             raw: Some(ToolValue::Object(BTreeMap::from([(
                 "image".into(),
                 ToolValue::Attachment(attachment.clone()),
@@ -1102,12 +1102,12 @@ mod tests {
         assert_eq!(invalid.class, ToolFailureClass::InvalidRequest);
         assert_eq!(invalid.code, "invalid_glob");
         assert_eq!(invalid.source, ToolFailureSource::Tool);
-        assert_eq!(invalid.retry, ToolRetryDisposition::Never);
+        assert_eq!(invalid.retry, ToolRetryStatus::Never);
 
         let io = ToolFailure::io("read_failed", "could not read file");
         assert_eq!(io.class, ToolFailureClass::Io);
         assert_eq!(io.code, "read_failed");
         assert_eq!(io.source, ToolFailureSource::Tool);
-        assert_eq!(io.retry, ToolRetryDisposition::Never);
+        assert_eq!(io.retry, ToolRetryStatus::Never);
     }
 }

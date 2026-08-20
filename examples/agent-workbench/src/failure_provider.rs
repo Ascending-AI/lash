@@ -233,10 +233,10 @@ struct DevToolValue;
 
 #[async_trait]
 impl lash::tools::StaticToolExecute for DevToolValue {
-    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolResult {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolOutcome {
         debug_assert_eq!(call.name, "workbench_tool_value");
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        lash::tools::ToolResult::from_output(
+        lash::tools::ToolOutcome::from_output(
             lash::tools::ToolCallOutput::success(serde_json::json!({ "accepted": true }))
                 .with_control(lash::tools::ToolControl::Finish {
                     value: lash::tools::ToolValue::from(serde_json::json!({

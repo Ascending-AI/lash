@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::testing::conformance::StagedGroupExecutors;
-use crate::{EffectGroupHandle, GroupWakePolicy, LoserDisposition, RuntimeEffectGroup};
+use crate::{EffectGroupHandle, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 
 const SCOPE: &str = "fig1535-session";
 
@@ -37,7 +37,7 @@ fn group(
     key: &str,
     children: usize,
     wake: GroupWakePolicy,
-    disposition: LoserDisposition,
+    disposition: LoserPolicy,
 ) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
         RuntimeInvocation::effect(
@@ -170,12 +170,7 @@ async fn the_inline_tier_supports_groups_through_the_scoped_host_view() {
     let mut handle = scoped
         .controller()
         .open_effect_group(staged(
-            group(
-                key,
-                1,
-                GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 1, GroupWakePolicy::All, LoserPolicy::RunToCompletion),
             vec![immediate()],
         ))
         .await
@@ -188,7 +183,7 @@ async fn the_inline_tier_supports_groups_through_the_scoped_host_view() {
     assert_eq!(settlement.position, 0);
     scoped
         .controller()
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect("the scoped view closes the group");
 }
@@ -249,12 +244,7 @@ async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs() {
     let (slow, loser) = gated();
     let mut handle = controller
         .open_effect_group(staged(
-            group(
-                key,
-                2,
-                GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 2, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
             vec![slow, immediate()],
         ))
         .await
@@ -294,12 +284,7 @@ async fn settlement_n_is_stable_across_re_reads() {
     let (slow, loser) = gated();
     let mut handle = controller
         .open_effect_group(staged(
-            group(
-                key,
-                2,
-                GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 2, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
             vec![slow, immediate()],
         ))
         .await
@@ -369,7 +354,7 @@ async fn siblings_settling_together_get_distinct_sequences() {
                 key,
                 width,
                 GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             ),
             executors,
         ))
@@ -411,12 +396,7 @@ async fn awaiting_past_the_last_child_is_refused() {
     let key = "fig1535:exhausted";
     let mut handle = controller
         .open_effect_group(staged(
-            group(
-                key,
-                1,
-                GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 1, GroupWakePolicy::All, LoserPolicy::RunToCompletion),
             vec![immediate()],
         ))
         .await
@@ -447,12 +427,7 @@ async fn a_cancelled_await_leaves_the_rank_to_be_read_again() {
     let (gate, child) = gated();
     let mut handle = controller
         .open_effect_group(staged(
-            group(
-                key,
-                1,
-                GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 1, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
             vec![gate],
         ))
         .await
@@ -492,12 +467,7 @@ async fn run_to_completion_losers_settle_after_the_caller_is_gone() {
     let (slow, loser) = gated();
     let mut handle = controller
         .open_effect_group(staged(
-            group(
-                key,
-                3,
-                GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 3, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
             vec![immediate(), slow, never()],
         ))
         .await
@@ -509,7 +479,7 @@ async fn run_to_completion_losers_settle_after_the_caller_is_gone() {
     assert_eq!(winner.position, 0);
 
     controller
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect("the caller closes and moves on");
 
@@ -535,7 +505,7 @@ async fn cancel_gives_every_unsettled_child_a_cancellation_terminal() {
     let (slow, loser) = gated();
     let mut handle = controller
         .open_effect_group(staged(
-            group(key, 3, GroupWakePolicy::First, LoserDisposition::Cancel),
+            group(key, 3, GroupWakePolicy::First, LoserPolicy::Cancel),
             vec![immediate(), slow, never()],
         ))
         .await
@@ -546,7 +516,7 @@ async fn cancel_gives_every_unsettled_child_a_cancellation_terminal() {
         .expect("the winner settles");
 
     controller
-        .close_effect_group(handle, LoserDisposition::Cancel)
+        .close_effect_group(handle, LoserPolicy::Cancel)
         .await
         .expect("the caller closes under the declared disposition");
 
@@ -582,14 +552,14 @@ async fn close_may_narrow_but_never_widen() {
                 declared_cancel,
                 1,
                 GroupWakePolicy::First,
-                LoserDisposition::Cancel,
+                LoserPolicy::Cancel,
             ),
             vec![never()],
         ))
         .await
         .expect("the group opens");
     let widened = controller
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect_err("a declared Cancel may not be closed as RunToCompletion");
     assert_eq!(
@@ -616,14 +586,14 @@ async fn close_may_narrow_but_never_widen() {
                 declared_run,
                 1,
                 GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             ),
             vec![never()],
         ))
         .await
         .expect("the group opens");
     controller
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect("closing as declared releases the caller's interest");
     assert!(
@@ -636,7 +606,7 @@ async fn close_may_narrow_but_never_widen() {
 
     let replayed = EffectGroupHandle::restored(declared_run, 1, 0).expect("a handle restores");
     controller
-        .close_effect_group(replayed, LoserDisposition::Cancel)
+        .close_effect_group(replayed, LoserPolicy::Cancel)
         .await
         .expect("a caller that has learned it no longer wants the losers may narrow");
     assert_eq!(
@@ -660,18 +630,18 @@ async fn closing_twice_under_one_disposition_succeeds() {
     let key = "fig1535:idempotent-close";
     let handle = controller
         .open_effect_group(staged(
-            group(key, 2, GroupWakePolicy::First, LoserDisposition::Cancel),
+            group(key, 2, GroupWakePolicy::First, LoserPolicy::Cancel),
             vec![never(), never()],
         ))
         .await
         .expect("the group opens");
     controller
-        .close_effect_group(handle, LoserDisposition::Cancel)
+        .close_effect_group(handle, LoserPolicy::Cancel)
         .await
         .expect("the first close applies the disposition");
     let replayed = EffectGroupHandle::restored(key, 2, 0).expect("a handle restores");
     controller
-        .close_effect_group(replayed, LoserDisposition::Cancel)
+        .close_effect_group(replayed, LoserPolicy::Cancel)
         .await
         .expect("a replayed frame closing the same group again must not raise");
 }
@@ -684,18 +654,13 @@ async fn a_closed_group_serves_its_caller_no_further_settlements() {
     let key = "fig1535:closed";
     let handle = controller
         .open_effect_group(staged(
-            group(
-                key,
-                2,
-                GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 2, GroupWakePolicy::All, LoserPolicy::RunToCompletion),
             vec![immediate(), never()],
         ))
         .await
         .expect("the group opens");
     controller
-        .close_effect_group(handle, LoserDisposition::RunToCompletion)
+        .close_effect_group(handle, LoserPolicy::RunToCompletion)
         .await
         .expect("the caller closes");
 
@@ -730,12 +695,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
         .collect::<Vec<_>>();
     let handle = controller
         .open_effect_group(staged(
-            group(
-                key,
-                2,
-                GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 2, GroupWakePolicy::All, LoserPolicy::RunToCompletion),
             executors,
         ))
         .await
@@ -746,12 +706,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
 
     let narrowed = controller
         .open_effect_group(staged(
-            group(
-                key,
-                1,
-                GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 1, GroupWakePolicy::All, LoserPolicy::RunToCompletion),
             vec![immediate()],
         ))
         .await
@@ -763,12 +718,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
 
     let rewaked = controller
         .open_effect_group(staged(
-            group(
-                key,
-                2,
-                GroupWakePolicy::First,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 2, GroupWakePolicy::First, LoserPolicy::RunToCompletion),
             vec![immediate(), immediate()],
         ))
         .await
@@ -780,7 +730,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
 
     let redeclared = controller
         .open_effect_group(staged(
-            group(key, 2, GroupWakePolicy::All, LoserDisposition::Cancel),
+            group(key, 2, GroupWakePolicy::All, LoserPolicy::Cancel),
             vec![immediate(), immediate()],
         ))
         .await
@@ -792,12 +742,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice() {
 
     let reopened = controller
         .open_effect_group(staged(
-            group(
-                key,
-                2,
-                GroupWakePolicy::All,
-                LoserDisposition::RunToCompletion,
-            ),
+            group(key, 2, GroupWakePolicy::All, LoserPolicy::RunToCompletion),
             vec![immediate(), immediate()],
         ))
         .await
@@ -836,7 +781,7 @@ async fn the_wake_rule_is_identity_and_the_host_filters_nothing() {
                 key,
                 2,
                 GroupWakePolicy::FirstSuccess,
-                LoserDisposition::RunToCompletion,
+                LoserPolicy::RunToCompletion,
             ),
             vec![immediate_failure(), slow],
         ))
@@ -901,7 +846,7 @@ async fn a_close_racing_its_children_seats_one_terminal_per_child() {
             .collect::<Vec<_>>();
         let handle = controller
             .open_effect_group(staged(
-                group(&key, width, GroupWakePolicy::All, LoserDisposition::Cancel),
+                group(&key, width, GroupWakePolicy::All, LoserPolicy::Cancel),
                 executors,
             ))
             .await
@@ -913,7 +858,7 @@ async fn a_close_racing_its_children_seats_one_terminal_per_child() {
             tokio::task::yield_now().await;
         }
         controller
-            .close_effect_group(handle, LoserDisposition::Cancel)
+            .close_effect_group(handle, LoserPolicy::Cancel)
             .await
             .expect("closing under the declared disposition");
 

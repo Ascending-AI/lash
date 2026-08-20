@@ -374,7 +374,7 @@ async fn execute_one(
                 )
                 .await?;
             Ok((
-                serde_json::to_value(crate::ProcessCancelSummary::from_record(record))
+                serde_json::to_value(crate::ProcessCancelReceipt::from_record(record))
                     .unwrap_or(serde_json::Value::Null),
                 None,
             ))

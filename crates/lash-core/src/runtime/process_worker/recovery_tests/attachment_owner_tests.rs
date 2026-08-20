@@ -293,7 +293,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
                     kind: "attachment-writing-engine".to_string(),
                     payload: serde_json::Value::Null,
                 },
-                RecoveryDisposition::Rerunnable,
+                RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
             )
             .with_execution_env_ref(Some(env_ref)),

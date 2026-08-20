@@ -79,14 +79,14 @@ impl crate::ToolProvider for DynamicToolSurface {
             .map(|tool| Arc::new(tool.definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolResult {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         let Some(tool) = self.tool(call.name) else {
-            return crate::ToolResult::err_fmt(format_args!(
+            return crate::ToolOutcome::err_fmt(format_args!(
                 "dynamic tool `{}` is not live",
                 call.name
             ));
         };
-        let result = crate::ToolResult::ok(json!({
+        let result = crate::ToolOutcome::ok(json!({
             "id": tool.id,
             "name": tool.name,
             "description": tool.description,
@@ -283,7 +283,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            crate::RecoveryDisposition::ExternallyOwned,
+            crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
         );
         if process_id == "filtered-process" {
@@ -467,7 +467,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             )
             .with_extra_event_types([crate::ProcessEventType {
@@ -598,7 +598,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     crate::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    crate::RecoveryDisposition::ExternallyOwned,
+                    crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
                 ),
                 options,
@@ -632,7 +632,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             ))
             .await
@@ -680,14 +680,14 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     assert_eq!(child.observed_processes.len(), 3);
     assert_eq!(
         child.observed_processes[0],
-        crate::SessionObservedProcessResult {
+        crate::SessionObservedProcessReceipt {
             process_id: "named-process".to_string(),
             outcome: crate::SessionObservedProcessOutcome::Observed,
         }
     );
     assert_eq!(
         child.observed_processes[1],
-        crate::SessionObservedProcessResult {
+        crate::SessionObservedProcessReceipt {
             process_id: "missing-process".to_string(),
             outcome: crate::SessionObservedProcessOutcome::NotFound,
         }
@@ -1417,7 +1417,7 @@ fn payload_gated_request(
             kind: kind.to_string(),
             payload,
         },
-        crate::RecoveryDisposition::Rerunnable,
+        crate::RecoveryContract::Rerunnable,
         crate::ProcessOriginator::session(crate::SessionScope::new(session_id)),
     )
     .with_env_spec(crate::ProcessExecutionEnvSpec::new(

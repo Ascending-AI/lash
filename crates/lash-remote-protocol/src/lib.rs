@@ -69,7 +69,7 @@ pub use usage_activity::*;
 // Bumped to 28: `RemoteToolFailureClass` gained the `Io` variant (FIG-1098);
 // older peers reject the unknown variant mid-payload, so the addition needs a
 // clean version rejection.
-// Bumped to 27: `RemoteGenerationDisposition` gained an always-serialized
+// Bumped to 27: `RemoteGenerationReceipt` gained an always-serialized
 // `cache` field (FIG-1101); older peers reject the unknown field on every
 // disposition, so the shape change requires a clean version rejection.
 // Bumped to 25: residual process/trigger/effect identities use the FIG-915

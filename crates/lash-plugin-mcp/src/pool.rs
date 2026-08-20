@@ -38,7 +38,7 @@ use tokio::time::timeout;
 
 use lash_core::{
     AttachmentCreateMeta, AttemptContext, MediaType, ToolCallOutput, ToolDefinition, ToolFailure,
-    ToolFailureClass, ToolFailureSource, ToolResult, ToolRetryDisposition, ToolValue,
+    ToolFailureClass, ToolFailureSource, ToolOutcome, ToolRetryStatus, ToolValue,
 };
 use lash_tool_support::ToolDefinitionLashlangExt;
 
@@ -410,20 +410,20 @@ impl McpConnectionPool {
     }
 
     /// Route a prefixed tool call (`mcp__<server>__<tool>`) to the appropriate
-    /// server and translate its result back to `ToolResult`.
+    /// server and translate its result back to `ToolOutcome`.
     pub async fn call_tool(
         &self,
         prefixed_name: &str,
         args: &Value,
         context: &AttemptContext<'_>,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         if self.shut_down.load(Ordering::SeqCst) {
             return pool_shut_down_failure();
         }
         let (entry, original_name) = match self.lookup(prefixed_name).await {
             Some(found) => found,
             None => {
-                return ToolResult::err_fmt(format!("Unknown MCP tool: {prefixed_name}"));
+                return ToolOutcome::err_fmt(format!("Unknown MCP tool: {prefixed_name}"));
             }
         };
 
@@ -433,7 +433,7 @@ impl McpConnectionPool {
             Value::Object(map) => Some(map.clone()),
             Value::Null => None,
             other => {
-                return ToolResult::err_fmt(format!(
+                return ToolOutcome::err_fmt(format!(
                     "MCP tool `{prefixed_name}` expected an object argument, got {}",
                     other
                 ));
@@ -448,20 +448,20 @@ impl McpConnectionPool {
                 Some(service) => (service.peer.clone(), service.generation),
                 None => {
                     if entry.shutting_down.load(Ordering::SeqCst) {
-                        return ToolResult::failure(ToolFailure {
+                        return ToolOutcome::failure(ToolFailure {
                             class: ToolFailureClass::Unavailable,
                             code: "mcp_server_unavailable".into(),
                             message: format!(
                                 "MCP server `{server_name}` is unavailable because its pool entry is shutting down"
                             ),
                             source: ToolFailureSource::Plugin,
-                            retry: ToolRetryDisposition::Never,
+                            retry: ToolRetryStatus::Never,
                             raw: None,
                         });
                     }
                     if entry.reconnect_exhausted.load(Ordering::SeqCst) {
                         let last_error = entry.last_error.read_recover().clone();
-                        return ToolResult::failure(ToolFailure {
+                        return ToolOutcome::failure(ToolFailure {
                             class: ToolFailureClass::Unavailable,
                             code: "mcp_reconnect_exhausted".into(),
                             message: last_error.unwrap_or_else(|| {
@@ -470,7 +470,7 @@ impl McpConnectionPool {
                                 )
                             }),
                             source: ToolFailureSource::Plugin,
-                            retry: ToolRetryDisposition::Never,
+                            retry: ToolRetryStatus::Never,
                             raw: None,
                         });
                     }
@@ -489,7 +489,7 @@ impl McpConnectionPool {
                     };
                     *entry.last_error.write_recover() = Some(dispatch_error.clone());
                     let message = McpError::Protocol(dispatch_error);
-                    return ToolResult::retryable_failure(
+                    return ToolOutcome::retryable_failure(
                         ToolFailureClass::Unavailable,
                         "mcp_server_unavailable",
                         message.to_string(),
@@ -506,7 +506,7 @@ impl McpConnectionPool {
             let cause =
                 format!("MCP server `{server_name}` transport was closed before tool dispatch");
             entry.mark_disconnected(cause.clone(), service_generation);
-            return ToolResult::retryable_failure(
+            return ToolOutcome::retryable_failure(
                 ToolFailureClass::Unavailable,
                 "mcp_connection_lost",
                 format!("{cause}; reconnecting in the background"),
@@ -538,7 +538,7 @@ impl McpConnectionPool {
                 tool_result_from_rmcp(result, context, entry.config.binary_content_attachments())
                     .await
             }
-            Ok(_) => ToolResult::err_fmt(McpError::Protocol(
+            Ok(_) => ToolOutcome::err_fmt(McpError::Protocol(
                 ServiceError::UnexpectedResponse.to_string(),
             )),
             Err(ServiceError::Timeout { timeout }) => {
@@ -546,7 +546,7 @@ impl McpConnectionPool {
                     .handle_call_timeout(&peer, service_generation, timeout)
                     .await
             }
-            Err(ServiceError::Cancelled { reason }) => ToolResult::cancelled(format!(
+            Err(ServiceError::Cancelled { reason }) => ToolOutcome::cancelled(format!(
                 "MCP tool call on `{server_name}` was cancelled{}",
                 reason
                     .as_deref()
@@ -558,7 +558,7 @@ impl McpConnectionPool {
                     let cause = format!("MCP server `{server_name}` connection lost: {err}");
                     entry.mark_disconnected(cause.clone(), service_generation);
                     if entry.shutting_down.load(Ordering::SeqCst) {
-                        return ToolResult::failure(ToolFailure {
+                        return ToolOutcome::failure(ToolFailure {
                             class: ToolFailureClass::Unavailable,
                             code: "mcp_server_unavailable".into(),
                             message: McpError::Protocol(format!(
@@ -566,11 +566,11 @@ impl McpConnectionPool {
                             ))
                             .to_string(),
                             source: ToolFailureSource::Plugin,
-                            retry: ToolRetryDisposition::Never,
+                            retry: ToolRetryStatus::Never,
                             raw: None,
                         });
                     }
-                    return ToolResult::retryable_failure(
+                    return ToolOutcome::retryable_failure(
                         ToolFailureClass::Unavailable,
                         "mcp_connection_lost",
                         McpError::Protocol(format!("{cause}; reconnecting in the background"))
@@ -578,7 +578,7 @@ impl McpConnectionPool {
                         Some(entry.config.reconnect_initial_backoff().as_millis() as u64),
                     );
                 }
-                ToolResult::err_fmt(McpError::Protocol(err.to_string()))
+                ToolOutcome::err_fmt(McpError::Protocol(err.to_string()))
             }
         }
     }
@@ -649,13 +649,13 @@ where
     .collect()
 }
 
-fn pool_shut_down_failure() -> ToolResult {
-    ToolResult::failure(ToolFailure {
+fn pool_shut_down_failure() -> ToolOutcome {
+    ToolOutcome::failure(ToolFailure {
         class: ToolFailureClass::Unavailable,
         code: "mcp_pool_shut_down".into(),
         message: "MCP connection pool has shut down".to_string(),
         source: ToolFailureSource::Plugin,
-        retry: ToolRetryDisposition::Never,
+        retry: ToolRetryStatus::Never,
         raw: None,
     })
 }
@@ -813,10 +813,10 @@ impl McpEntry {
         peer: &Peer<RoleClient>,
         observed_generation: u64,
         expired_timeout: Duration,
-    ) -> ToolResult {
+    ) -> ToolOutcome {
         let server_name = self.server_name.clone();
         let timeout_failure = |code| {
-            ToolResult::retryable_failure(
+            ToolOutcome::retryable_failure(
                 ToolFailureClass::Timeout,
                 code,
                 McpError::CallTimeout {
@@ -853,7 +853,7 @@ impl McpEntry {
                     if !self.mark_disconnected(cause.clone(), observed_generation) {
                         return timeout_failure();
                     }
-                    ToolResult::retryable_failure(
+                    ToolOutcome::retryable_failure(
                         ToolFailureClass::Unavailable,
                         "mcp_connection_lost",
                         format!("{cause}; reconnecting in the background"),
@@ -876,7 +876,7 @@ impl McpEntry {
                 let Ok(Some(cause)) = result.await else {
                     return timeout_failure();
                 };
-                ToolResult::retryable_failure(
+                ToolOutcome::retryable_failure(
                     ToolFailureClass::Unavailable,
                     "mcp_connection_lost",
                     format!("{cause}; reconnecting in the background"),
@@ -1067,7 +1067,7 @@ async fn tool_result_from_rmcp(
     result: rmcp::model::CallToolResult,
     context: &AttemptContext<'_>,
     binary_content_attachments: bool,
-) -> ToolResult {
+) -> ToolOutcome {
     let is_error = result.is_error.unwrap_or(false);
 
     let mut text_parts = Vec::new();
@@ -1115,7 +1115,7 @@ async fn tool_result_from_rmcp(
                         ..
                     } => {
                         let Some(mime_type) = mime_type else {
-                            return ToolResult::err_fmt(
+                            return ToolOutcome::err_fmt(
                                 "MCP binary resource attachment is missing its MIME type",
                             );
                         };
@@ -1171,7 +1171,7 @@ async fn tool_result_from_rmcp(
         ToolValue::Array(content_items)
     };
     if is_error {
-        ToolResult::from_output(ToolCallOutput::failure(ToolFailure {
+        ToolOutcome::from_output(ToolCallOutput::failure(ToolFailure {
             class: ToolFailureClass::Execution,
             code: "mcp_tool_error".into(),
             message: if text_parts.is_empty() {
@@ -1180,11 +1180,11 @@ async fn tool_result_from_rmcp(
                 text_parts.join("\n\n")
             },
             source: ToolFailureSource::Tool,
-            retry: ToolRetryDisposition::Never,
+            retry: ToolRetryStatus::Never,
             raw: Some(value),
         }))
     } else {
-        ToolResult::from_output(ToolCallOutput::success(value))
+        ToolOutcome::from_output(ToolCallOutput::success(value))
     }
 }
 
@@ -1193,12 +1193,12 @@ async fn store_mcp_attachment(
     encoded: &str,
     mime_type: &str,
     label: &str,
-) -> Result<lash_core::AttachmentRef, ToolResult> {
+) -> Result<lash_core::AttachmentRef, ToolOutcome> {
     let data = base64::engine::general_purpose::STANDARD
         .decode(encoded)
-        .map_err(|err| ToolResult::err_fmt(McpError::Decode(err)))?;
+        .map_err(|err| ToolOutcome::err_fmt(McpError::Decode(err)))?;
     let media_type = MediaType::parse(mime_type)
-        .map_err(|err| ToolResult::err_fmt(format_args!("Invalid MCP attachment MIME: {err}")))?;
+        .map_err(|err| ToolOutcome::err_fmt(format_args!("Invalid MCP attachment MIME: {err}")))?;
     context
         .attachments()
         .put(
@@ -1206,7 +1206,7 @@ async fn store_mcp_attachment(
             AttachmentCreateMeta::new(media_type, None, Some(label.to_string())),
         )
         .await
-        .map_err(|err| ToolResult::err_fmt(format_args!("Failed to store MCP attachment: {err}")))
+        .map_err(|err| ToolOutcome::err_fmt(format_args!("Failed to store MCP attachment: {err}")))
 }
 
 impl Drop for McpConnectionPool {

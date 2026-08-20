@@ -140,7 +140,7 @@ pub enum DirectLlmError {
     #[error("invalid response: {message}")]
     InvalidResponse {
         message: String,
-        result: Box<DirectLlmResult>,
+        result: Box<DirectLlmOutcome>,
     },
     #[error("transport error: {0}")]
     Transport(#[from] Box<LlmTransportError>),
@@ -149,12 +149,12 @@ pub enum DirectLlmError {
 /// Successful single-shot direct LLM result with the sealed provider-attempt
 /// history that produced it.
 #[derive(Clone, Debug)]
-pub struct DirectLlmResult {
+pub struct DirectLlmOutcome {
     pub response: LlmResponse,
     pub llm_call: crate::LlmCallRecord,
 }
 
-impl std::ops::Deref for DirectLlmResult {
+impl std::ops::Deref for DirectLlmOutcome {
     type Target = LlmResponse;
 
     fn deref(&self) -> &Self::Target {
@@ -162,7 +162,7 @@ impl std::ops::Deref for DirectLlmResult {
     }
 }
 
-impl DirectLlmResult {
+impl DirectLlmOutcome {
     pub fn into_response(self) -> LlmResponse {
         self.response
     }
@@ -227,7 +227,7 @@ impl DirectLlmClient {
     pub async fn complete(
         &mut self,
         mut request: DirectRequest,
-    ) -> Result<DirectLlmResult, DirectLlmError> {
+    ) -> Result<DirectLlmOutcome, DirectLlmError> {
         // Validate the requested effort against the capability that travels
         // with the request, and write the resolved (alias-normalized) effort
         // back so the provider never sees an un-clamped value.
@@ -259,7 +259,7 @@ impl DirectLlmClient {
         };
         match self.provider.complete(llm_request).await {
             Ok(response) => {
-                let result = DirectLlmResult {
+                let result = DirectLlmOutcome {
                     response: response.response,
                     llm_call: response.call_record,
                 };

@@ -433,17 +433,17 @@ fn session_id(index: u8) -> String {
     format!("prop-session-{}", index % SESSION_COUNT)
 }
 
-fn disposition(index: u8) -> RecoveryDisposition {
+fn disposition(index: u8) -> RecoveryContract {
     match index % 3 {
-        0 => RecoveryDisposition::Rerunnable,
-        1 => RecoveryDisposition::OwnerBound,
-        _ => RecoveryDisposition::ExternallyOwned,
+        0 => RecoveryContract::Rerunnable,
+        1 => RecoveryContract::OwnerBound,
+        _ => RecoveryContract::ExternallyOwned,
     }
 }
 
 fn registration(
     process_id: &str,
-    disposition: RecoveryDisposition,
+    disposition: RecoveryContract,
     max_attempts: u32,
     wake_target: Option<String>,
 ) -> ProcessRegistration {
@@ -728,7 +728,7 @@ async fn apply_operation(
             let output = terminal_output(*terminal);
             if let Ok(Some(record)) = handles.registry.get_process(&id).await {
                 let authority = match record.disposition {
-                    RecoveryDisposition::ExternallyOwned => {
+                    RecoveryContract::ExternallyOwned => {
                         ProcessCompletionAuthority::external_owner()
                     }
                     _ => ProcessCompletionAuthority::workflow_key(format!("property:{id}")),
@@ -1384,12 +1384,7 @@ async fn assert_replay_key_idempotency(
 ) -> Result<(), TestCaseError> {
     let id = "law-replay-key";
     registry
-        .register_process(registration(
-            id,
-            RecoveryDisposition::ExternallyOwned,
-            1,
-            None,
-        ))
+        .register_process(registration(id, RecoveryContract::ExternallyOwned, 1, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let request =
@@ -1447,7 +1442,7 @@ async fn assert_attempt_monotonicity_and_budget(
     registry
         .register_process(registration(
             rerunnable,
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             2,
             None,
         ))
@@ -1487,7 +1482,7 @@ async fn assert_attempt_monotonicity_and_budget(
     registry
         .register_process(registration(
             owner_bound,
-            RecoveryDisposition::OwnerBound,
+            RecoveryContract::OwnerBound,
             3,
             None,
         ))
@@ -1527,7 +1522,7 @@ async fn assert_stale_authority_non_mutation(
 ) -> Result<(), TestCaseError> {
     let id = "law-stale-authority";
     registry
-        .register_process(registration(id, RecoveryDisposition::Rerunnable, 3, None))
+        .register_process(registration(id, RecoveryContract::Rerunnable, 3, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let current = invocation_authority(id, 1, 1);
@@ -1576,7 +1571,7 @@ async fn assert_wake_group_order_and_claim_ownership(
     registry
         .register_process(registration(
             id,
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             1,
             Some("law-wake-session".to_string()),
         ))
@@ -1839,7 +1834,7 @@ async fn assert_prune_reregister_wake_fence(
         .registry
         .register_process(registration(
             process,
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             1,
             Some(session.to_string()),
         ))
@@ -1952,7 +1947,7 @@ async fn assert_prune_reregister_wake_fence(
         .registry
         .register_process(registration(
             process,
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             1,
             Some(session.to_string()),
         ))
@@ -1992,12 +1987,7 @@ async fn assert_prune_tombstone_watermark_safety(
     let eligible_id = "law-prune-watermark-eligible";
     let live_id = "law-prune-live-must-survive";
     registry
-        .register_process(registration(
-            live_id,
-            RecoveryDisposition::Rerunnable,
-            3,
-            None,
-        ))
+        .register_process(registration(live_id, RecoveryContract::Rerunnable, 3, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     registry
@@ -2011,7 +2001,7 @@ async fn assert_prune_tombstone_watermark_safety(
     registry
         .register_process(registration(
             eligible_id,
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             1,
             None,
         ))
@@ -2029,12 +2019,7 @@ async fn assert_prune_tombstone_watermark_safety(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     registry
-        .register_process(registration(
-            id,
-            RecoveryDisposition::ExternallyOwned,
-            1,
-            None,
-        ))
+        .register_process(registration(id, RecoveryContract::ExternallyOwned, 1, None))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let (_, before_terminal) = registry
@@ -2142,7 +2127,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     registry
         .register_process(registration(
             id,
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             1,
             Some("law-prune-reregister-old".to_string()),
         ))
@@ -2193,7 +2178,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     let fresh_base = registry
         .register_process(registration(
             id,
-            RecoveryDisposition::Rerunnable,
+            RecoveryContract::Rerunnable,
             3,
             Some("law-prune-reregister-new".to_string()),
         ))

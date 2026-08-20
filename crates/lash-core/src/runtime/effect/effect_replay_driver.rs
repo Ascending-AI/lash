@@ -1056,7 +1056,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
     /// execution instead makes the cancellation the child's *terminal*, written
     /// through the same fence and allocating the same rank any other outcome
     /// would — which is what
-    /// [`LoserDisposition::Cancel`](super::group::LoserDisposition::Cancel)
+    /// [`LoserPolicy::Cancel`](super::group::LoserPolicy::Cancel)
     /// promises.
     async fn execute_effect_cancellable(
         &self,

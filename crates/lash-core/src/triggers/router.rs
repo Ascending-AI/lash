@@ -375,7 +375,7 @@ pub(super) fn reserve_in_memory_for_occurrence(
             subscription,
             process_id: delivery.process_id,
             created_at_ms: delivery.created_at_ms,
-            reservation_status: TriggerDeliveryReservationStatus::Reserved,
+            reservation_status: TriggerDeliveryReservationOutcome::Reserved,
         });
     }
     sort_trigger_delivery_reservations(&mut reservations);
@@ -575,7 +575,7 @@ impl TriggerRouter {
         request: TriggerOccurrenceRequest,
         effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<TriggerEmitReport, PluginError> {
-        let TriggerIngressResult {
+        let TriggerIngressReceipt {
             occurrence,
             reservations,
         } = self.store.ingest_occurrence(request).await?;
@@ -584,12 +584,12 @@ impl TriggerRouter {
                 .iter()
                 .map(|reservation| {
                     let outcome = match reservation.reservation_status {
-                        TriggerDeliveryReservationStatus::Reserved => {
+                        TriggerDeliveryReservationOutcome::Reserved => {
                             TriggerDeliveryEmitOutcome::Failed {
                                 reason: DELIVERY_REQUIRES_REGISTRY.to_string(),
                             }
                         }
-                        TriggerDeliveryReservationStatus::AlreadyReserved => {
+                        TriggerDeliveryReservationOutcome::AlreadyReserved => {
                             TriggerDeliveryEmitOutcome::AlreadyReserved
                         }
                     };
@@ -621,8 +621,8 @@ impl TriggerRouter {
             }
             started_any = true;
             let outcome = match reservation.reservation_status {
-                TriggerDeliveryReservationStatus::Reserved => TriggerDeliveryEmitOutcome::Started,
-                TriggerDeliveryReservationStatus::AlreadyReserved => {
+                TriggerDeliveryReservationOutcome::Reserved => TriggerDeliveryEmitOutcome::Started,
+                TriggerDeliveryReservationOutcome::AlreadyReserved => {
                     TriggerDeliveryEmitOutcome::AlreadyReserved
                 }
             };
@@ -678,7 +678,7 @@ impl TriggerRouter {
             target.clone(),
             // Trigger targets are journaled engine/tool rows, idempotent by
             // process id, so recovery may re-execute them (ADR 0019).
-            crate::RecoveryDisposition::Rerunnable,
+            crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::new(subscription.registrant.clone())
                 .with_caused_by(Some(trigger_causal_ref.clone())),
         )

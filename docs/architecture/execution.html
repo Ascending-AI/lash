@@ -30,7 +30,7 @@ flowchart LR
   Turn --> Protocol["selected protocol plugin"]
   Protocol --> Provider["provider"]
   Protocol --> Tools["tools + plugins"]
-  Turn --> Result["events + TurnResult"]
+  Turn --> Result["events + TurnReport"]
   Result --> Host
       </div></div></div>
       <pre data-lang="rust" data-snippet="architecture_execution#facade-turn"><code>let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)

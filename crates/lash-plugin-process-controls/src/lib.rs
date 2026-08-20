@@ -12,7 +12,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginSessionContext, PluginSpec, SessionPlugin,
     StaticPluginFactory,
 };
-use lash_core::{ToolCall, ToolDefinition, ToolProvider, ToolResult};
+use lash_core::{ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
 use lash_tool_support::{
     LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt,
 };
@@ -72,21 +72,21 @@ struct SessionProcessAdminTools {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for SessionProcessAdminTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-        ToolResult::err_fmt(format_args!(
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::err_fmt(format_args!(
             "process tool `{}` requires the leaf AttemptContext signature",
             call.name
         ))
     }
 
-    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptResult {
+    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         if call.name == "list_process_handles" {
             return done_without_intents(
                 execute_process_list_tool_call(call.context, call.args).await,
             );
         }
         if call.name != "cancel_process" || !self.include_cancel_process {
-            return done_without_intents(ToolResult::err_fmt(format_args!(
+            return done_without_intents(ToolOutcome::err_fmt(format_args!(
                 "Unknown leaf process tool: {}",
                 call.name
             )));
@@ -99,12 +99,12 @@ impl StaticToolExecute for SessionProcessAdminTools {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
         else {
-            return done_without_intents(ToolResult::err_fmt(
+            return done_without_intents(ToolOutcome::err_fmt(
                 "cancel_process requires `process_id`",
             ));
         };
-        lash_core::ToolAttemptResult::done(
-            lash_core::ToolResultDone::ok(serde_json::json!({
+        lash_core::ToolAttemptOutcome::done(
+            lash_core::ToolOutcomeDone::ok(serde_json::json!({
                 "process_id": process_id,
                 "status": "cancelled",
             })),
@@ -119,12 +119,12 @@ impl StaticToolExecute for SessionProcessAdminTools {
     }
 }
 
-fn done_without_intents(result: ToolResult) -> lash_core::ToolAttemptResult {
+fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemptOutcome {
     match result {
-        ToolResult::Done(output) => lash_core::ToolAttemptResult::done_without_intents(
-            lash_core::ToolResultDone::from_output(*output),
+        ToolOutcome::Done(output) => lash_core::ToolAttemptOutcome::done_without_intents(
+            lash_core::ToolOutcomeDone::from_output(*output),
         ),
-        ToolResult::Pending(pending) => lash_core::ToolAttemptResult::pending(pending),
+        ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(pending),
     }
 }
 
@@ -205,16 +205,16 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
 pub async fn execute_process_list_tool_call(
     context: &lash_core::AttemptContext<'_>,
     args: &Value,
-) -> ToolResult {
+) -> ToolOutcome {
     let filter = match lash_core::ProcessListFilter::decode(args) {
         Ok(filter) => filter,
-        Err(err) => return ToolResult::err_fmt(err),
+        Err(err) => return ToolOutcome::err_fmt(err),
     };
     let processes = context.processes();
     let result = processes.list_handles_filtered(&filter).await;
     match result {
-        Ok(entries) => ToolResult::ok(serde_json::json!(entries)),
-        Err(err) => ToolResult::err_fmt(err.to_string()),
+        Ok(entries) => ToolOutcome::ok(serde_json::json!(entries)),
+        Err(err) => ToolOutcome::err_fmt(err.to_string()),
     }
 }
 
@@ -316,7 +316,7 @@ mod tests {
                 context: &context,
             })
             .await;
-        let lash_core::ToolAttemptResult::Done { result, intents } = result else {
+        let lash_core::ToolAttemptOutcome::Done { result, intents } = result else {
             panic!("processes.cancel must complete with an intent")
         };
         assert_eq!(

@@ -84,7 +84,7 @@ impl RuntimeExecutionContext<'_> {
             },
             // Tool-call rows are journaled and idempotent by process id, so
             // recovery may re-execute them (ADR 0019).
-            crate::RecoveryDisposition::Rerunnable,
+            crate::RecoveryContract::Rerunnable,
         );
         let registration = match self
             .attach_captured_process_execution_env(registration)
@@ -348,8 +348,8 @@ mod tests {
     use crate::runtime::RuntimeEffectControllerHandle;
     use crate::tool_dispatch::ToolDispatchContext;
     use crate::{
-        PreparedToolCall, ProcessRegistry, ToolCall, ToolDefinition, ToolPrepareCall, ToolProvider,
-        ToolResult,
+        PreparedToolCall, ProcessRegistry, ToolCall, ToolDefinition, ToolOutcome, ToolPrepareCall,
+        ToolProvider,
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -388,7 +388,7 @@ mod tests {
         async fn prepare_tool_call(
             &self,
             call: ToolPrepareCall<'_>,
-        ) -> Result<PreparedToolCall, ToolResult> {
+        ) -> Result<PreparedToolCall, ToolOutcome> {
             self.prepares.fetch_add(1, Ordering::SeqCst);
             Ok(PreparedToolCall::from_parts(
                 call.pending.call_id,
@@ -400,8 +400,8 @@ mod tests {
             ))
         }
 
-        async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-            ToolResult::ok(serde_json::json!({
+        async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(serde_json::json!({
                 "payload": call.context.prepared_payload().clone(),
             }))
         }
@@ -556,7 +556,7 @@ mod tests {
                     ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    crate::RecoveryDisposition::ExternallyOwned,
+                    crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
                 )
                 .with_extra_event_types([crate::ProcessEventType {
@@ -660,7 +660,7 @@ mod tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             ))
             .await
@@ -753,7 +753,7 @@ mod tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             );
             if process_id == "local-signal" {

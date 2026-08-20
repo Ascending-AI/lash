@@ -14,7 +14,7 @@ fn registration(process_id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::json!({}),
         },
-        crate::RecoveryDisposition::ExternallyOwned,
+        crate::RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
     )
 }
@@ -395,7 +395,7 @@ async fn sink_receives_runtime_lifecycle_events_in_order() {
             kind: "test".to_string(),
             payload: serde_json::json!({}),
         },
-        crate::RecoveryDisposition::Rerunnable,
+        crate::RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
     );
     lifecycle_registration.env_ref = Some(crate::ProcessExecutionEnvRef::new("process-env:test"));

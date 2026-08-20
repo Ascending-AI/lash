@@ -16,10 +16,10 @@ use lash_core::{
     AbandonEvidence, AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope,
     PluginError, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionContext,
     ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    RecoveryDisposition, Resolution, RuntimeError, ScopedEffectController,
+    RecoveryContract, Resolution, RuntimeError, ScopedEffectController,
     facade_support::DurableProcessWorker, facade_support::ProcessAdmissionDeferred,
     facade_support::ProcessAdmissionReport, facade_support::ProcessAttach,
-    facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptDisposition,
+    facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptOutcome,
     facade_support::ProcessRecoveryOperation, facade_support::ProcessRunHandle,
     facade_support::ProcessWorkDriver, facade_support::ProcessWorkerFault,
     facade_support::watch_process_registry_with_sink,
@@ -381,7 +381,7 @@ impl RestateProcessIngressRunner {
         // sweep and any direct caller are safe; their closure comes from an
         // external actor calling `complete_process` or a reconciled Abandon
         // Request (see `claim_and_run_pending`).
-        if record.disposition == RecoveryDisposition::ExternallyOwned {
+        if record.disposition == RecoveryContract::ExternallyOwned {
             return Ok(IngressSubmitOutcome::ExternallyOwned);
         }
         // The record may have reached a terminal state between the list and the submit.
@@ -534,7 +534,7 @@ impl ProcessRunHandle for RestateProcessIngressRunner {
                 // terminal here, mirroring the core sweep's
                 // `reconcile_externally_owned_abandon`; rows without a request are
                 // left untouched for their external owner to complete.
-                if record.disposition == RecoveryDisposition::ExternallyOwned {
+                if record.disposition == RecoveryContract::ExternallyOwned {
                     let process_id = record.id.clone();
                     if record.abandon_request.is_some()
                         && let Err(error) =
@@ -545,7 +545,7 @@ impl ProcessRunHandle for RestateProcessIngressRunner {
                         // stay in the report instead of being discarded by `?`.
                         report.deferred.push(ProcessAdmissionDeferred {
                             process_id: process_id.clone(),
-                            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                            disposition: ProcessRecoveryAttemptOutcome::BackendError {
                                 operation: ProcessRecoveryOperation::WriteTerminal,
                                 error: error.to_string(),
                             },
@@ -562,7 +562,7 @@ impl ProcessRunHandle for RestateProcessIngressRunner {
                     // the inline worker reports the same typed deferral.
                     report.deferred.push(ProcessAdmissionDeferred {
                         process_id,
-                        disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+                        disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
                     });
                     continue;
                 }
@@ -572,13 +572,13 @@ impl ProcessRunHandle for RestateProcessIngressRunner {
                     Ok(IngressSubmitOutcome::ExternallyOwned) => {
                         report.deferred.push(ProcessAdmissionDeferred {
                             process_id,
-                            disposition: ProcessRecoveryAttemptDisposition::ExternallyOwned,
+                            disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
                         });
                     }
                     Ok(IngressSubmitOutcome::SettledByPeer(terminal_status)) => {
                         report.deferred.push(ProcessAdmissionDeferred {
                             process_id,
-                            disposition: ProcessRecoveryAttemptDisposition::SettledByPeer {
+                            disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
                                 terminal_status,
                             },
                         });
@@ -589,7 +589,7 @@ impl ProcessRunHandle for RestateProcessIngressRunner {
                         // already reached the ingress in this same pass.
                         report.deferred.push(ProcessAdmissionDeferred {
                             process_id: process_id.clone(),
-                            disposition: ProcessRecoveryAttemptDisposition::BackendError {
+                            disposition: ProcessRecoveryAttemptOutcome::BackendError {
                                 operation: ProcessRecoveryOperation::SubmitRun,
                                 error: error.to_string(),
                             },

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, ProcessStarted, RecoveryDisposition, WaitKind, WaitState,
+    ProcessRecord, ProcessRegistration, ProcessStarted, RecoveryContract, WaitKind, WaitState,
 };
 
 fn fixture_registration(id: &str) -> ProcessRegistration {
@@ -13,7 +13,7 @@ fn fixture_registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        RecoveryDisposition::ExternallyOwned,
+        RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
     )
 }
@@ -26,7 +26,7 @@ fn registration_for_input(input: ProcessInput) -> ProcessRegistration {
     ProcessRegistration::new(
         "lookup-id-is-not-in-the-fingerprint",
         input,
-        RecoveryDisposition::Rerunnable,
+        RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
     )
 }
@@ -117,9 +117,9 @@ fn process_registration_identity_golden_corpus() {
         .map(|(index, input)| {
             let mut registration = registration_for_input(input);
             registration.disposition = match index {
-                0 => RecoveryDisposition::Rerunnable,
-                1 => RecoveryDisposition::OwnerBound,
-                _ => RecoveryDisposition::ExternallyOwned,
+                0 => RecoveryContract::Rerunnable,
+                1 => RecoveryContract::OwnerBound,
+                _ => RecoveryContract::ExternallyOwned,
             };
             registration
         })

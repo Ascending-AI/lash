@@ -12,7 +12,7 @@ pub(crate) use lash_core::llm::transport::{
     ProviderFailureKind, known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AttachmentSource, ExecutionEvidence, GenerationDisposition, GenerationOptionDisposition,
+    AttachmentSource, ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt,
     LlmContentBlock, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole,
     LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
     ProviderReasoningReplay, ProviderReplayMeta, ProviderRouteIdentity, ResponseTextMeta,

@@ -47,7 +47,7 @@ fn group_record() -> EffectGroupRecord {
         scope_id: SCOPE.to_string(),
         session_id: Some("s1".to_string()),
         wake: lash_core::GroupWakePolicy::All,
-        loser_disposition: lash_core::LoserDisposition::RunToCompletion,
+        loser_disposition: lash_core::LoserPolicy::RunToCompletion,
         children: 2,
         created_at_ms: 1_000,
     }
@@ -384,7 +384,7 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
 
     let mut shrunk = group_record();
     shrunk.children = 1;
-    shrunk.loser_disposition = lash_core::LoserDisposition::Cancel;
+    shrunk.loser_disposition = lash_core::LoserPolicy::Cancel;
     shrunk.created_at_ms = 9_999;
     let reopened = store
         .open_group(&shrunk)

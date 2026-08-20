@@ -201,7 +201,7 @@ pub(crate) async fn append_process_event_tx(
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
     wake_delivery_config: lash_core::WakeDeliveryConfig,
-) -> Result<ProcessEventAppendResult, PluginError> {
+) -> Result<ProcessEventAppendReceipt, PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
         if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
@@ -233,7 +233,7 @@ pub(crate) async fn append_process_event_tx(
                 *record = repaired;
                 save_process_tx(tx, record).await?;
             }
-            Ok(ProcessEventAppendResult {
+            Ok(ProcessEventAppendReceipt {
                 event,
                 wake_delivery,
             })
@@ -265,7 +265,7 @@ pub(crate) async fn append_process_event_tx(
             insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
             advance_wake_allocation_floor_tx(tx, wake_session_id.as_deref(), &process_id, sequence)
                 .await?;
-            Ok(ProcessEventAppendResult {
+            Ok(ProcessEventAppendReceipt {
                 event,
                 wake_delivery,
             })

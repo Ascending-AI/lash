@@ -55,7 +55,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use super::Clock;
 use crate::LeaseTimings;
 use crate::store::{
-    RuntimeCommit, RuntimeCommitResult, RuntimePersistence, SessionExecutionLease,
+    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, SessionExecutionLease,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, StoreError,
 };
 
@@ -438,7 +438,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
     executor_id: &str,
     timings: LeaseTimings,
     clock: Arc<dyn Clock>,
-) -> Result<RuntimeCommitResult, StoreError> {
+) -> Result<RuntimeCommitReceipt, StoreError> {
     let session_id = commit.session_id.clone();
     let acquisition = SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
         Arc::clone(&store),
@@ -498,7 +498,7 @@ pub(super) async fn commit_runtime_state_with_borrowed_lease(
     store: Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
     owner: &crate::LeaseOwnerIdentity,
-) -> Result<RuntimeCommitResult, StoreError> {
+) -> Result<RuntimeCommitReceipt, StoreError> {
     let session_id = commit.session_id.clone();
     debug_assert_eq!(lease.fence().session_id, session_id);
     let evidence = lease.commit_evidence();

@@ -1,10 +1,10 @@
-use super::{RuntimeCommit, RuntimeCommitResult, SessionCommitStore, StoreError};
+use super::{RuntimeCommit, RuntimeCommitReceipt, SessionCommitStore, StoreError};
 
 /// Commit through the production realization boundary.
 pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
-) -> Result<RuntimeCommitResult, StoreError> {
+) -> Result<RuntimeCommitReceipt, StoreError> {
     commit.validate_budget()?;
     let meta = store.load_session_meta().await?.ok_or_else(|| {
         StoreError::SessionBindingNotMaterialized {
@@ -57,7 +57,7 @@ mod tests {
         async fn commit_runtime_state(
             &self,
             commit: RuntimeCommit,
-        ) -> Result<RuntimeCommitResult, StoreError> {
+        ) -> Result<RuntimeCommitReceipt, StoreError> {
             self.commit_attempts.fetch_add(1, Ordering::SeqCst);
             let realized_node_timestamps = commit
                 .graph
@@ -68,7 +68,7 @@ mod tests {
                 })
                 .collect();
             let manifest = commit.checkpoint.manifest()?;
-            Ok(RuntimeCommitResult {
+            Ok(RuntimeCommitReceipt {
                 head_revision: commit.expected_head_revision + 1,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,

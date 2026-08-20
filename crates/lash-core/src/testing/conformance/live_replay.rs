@@ -333,25 +333,25 @@ fn live_replay_text_payload(text: &str) -> SessionObservationEventPayload {
 }
 
 fn expect_live_replay_replayed(
-    result: Result<LiveReplayResult, LiveReplayStoreError>,
+    result: Result<LiveReplayOutcome, LiveReplayStoreError>,
     context: &str,
 ) -> Vec<Arc<SessionObservationEvent>> {
     match result.expect(context) {
-        LiveReplayResult::Replayed(events) => events,
-        LiveReplayResult::Gap(reason) => {
+        LiveReplayOutcome::Replayed(events) => events,
+        LiveReplayOutcome::Gap(reason) => {
             panic!("{context}: expected replayed events, got gap {reason:?}")
         }
     }
 }
 
 fn expect_live_replay_gap(
-    result: Result<LiveReplayResult, LiveReplayStoreError>,
+    result: Result<LiveReplayOutcome, LiveReplayStoreError>,
     expected: LiveReplayGapReason,
     context: &str,
 ) {
     match result.expect(context) {
-        LiveReplayResult::Gap(reason) => assert_eq!(reason, expected, "{context}"),
-        LiveReplayResult::Replayed(events) => {
+        LiveReplayOutcome::Gap(reason) => assert_eq!(reason, expected, "{context}"),
+        LiveReplayOutcome::Replayed(events) => {
             panic!(
                 "{context}: expected gap {expected:?}, got {} events",
                 events.len()
@@ -361,25 +361,25 @@ fn expect_live_replay_gap(
 }
 
 fn expect_live_replay_subscribed(
-    result: Result<LiveReplaySubscribeResult, LiveReplayStoreError>,
+    result: Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>,
     context: &str,
 ) -> crate::LiveReplaySubscription {
     match result.expect(context) {
-        LiveReplaySubscribeResult::Subscribed(subscription) => subscription,
-        LiveReplaySubscribeResult::Gap(reason) => {
+        LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,
+        LiveReplaySubscribeOutcome::Gap(reason) => {
             panic!("{context}: expected subscription, got gap {reason:?}")
         }
     }
 }
 
 fn expect_live_replay_subscribe_gap(
-    result: Result<LiveReplaySubscribeResult, LiveReplayStoreError>,
+    result: Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>,
     expected: LiveReplayGapReason,
     context: &str,
 ) {
     match result.expect(context) {
-        LiveReplaySubscribeResult::Gap(reason) => assert_eq!(reason, expected, "{context}"),
-        LiveReplaySubscribeResult::Subscribed(_) => {
+        LiveReplaySubscribeOutcome::Gap(reason) => assert_eq!(reason, expected, "{context}"),
+        LiveReplaySubscribeOutcome::Subscribed(_) => {
             panic!("{context}: expected subscribe gap {expected:?}, got subscription")
         }
     }

@@ -56,7 +56,7 @@
 //! is what each side can honestly write:
 //!
 //! * Under
-//!   [`LoserDisposition::Cancel`](super::super::group::LoserDisposition::Cancel),
+//!   [`LoserPolicy::Cancel`](super::super::group::LoserPolicy::Cancel),
 //!   a close cancels the children this process is running and each of them
 //!   journals its own cancellation terminal through its own fence. The drain
 //!   never touches a `Cancel` group: a terminal for a child it is not running is
@@ -81,7 +81,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::runtime::effect::group::{
-    EffectGroupHandle, EffectGroupMembership, GroupSettlement, LoserDisposition, RuntimeEffectGroup,
+    EffectGroupHandle, EffectGroupMembership, GroupSettlement, LoserPolicy, RuntimeEffectGroup,
 };
 
 /// How long a caller parked on rank `n` waits before re-reading the journal.
@@ -150,7 +150,7 @@ struct OpenGroup {
     /// this is the map between them — held rather than stored, because the
     /// caller that opened the group is the party that knows it.
     replay_keys: Vec<String>,
-    /// Fired by a close that resolves to [`LoserDisposition::Cancel`]. Children
+    /// Fired by a close that resolves to [`LoserPolicy::Cancel`]. Children
     /// take child tokens, so cancelling the group cancels exactly the children
     /// this process is still running.
     cancel: CancellationToken,
@@ -173,7 +173,7 @@ struct OpenGroupState {
     /// The disposition in force. Starts at the group's *declared* disposition
     /// and only ever narrows, so a second close cannot widen what a first one
     /// tightened.
-    effective: LoserDisposition,
+    effective: LoserPolicy,
     closed: bool,
 }
 
@@ -673,7 +673,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// fresh process — closes successfully, since there is nothing left here for
     /// a disposition to decide and the declared one is journaled for the drain.
     ///
-    /// Under [`LoserDisposition::Cancel`] the children this process runs are
+    /// Under [`LoserPolicy::Cancel`] the children this process runs are
     /// cancelled, and each writes its cancellation as its own terminal through
     /// its own fence, allocating a rank exactly as any other outcome would.
     /// Children of this group that this process does not run are the drain's
@@ -687,7 +687,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     pub async fn close_effect_group(
         &self,
         handle: &EffectGroupHandle,
-        requested: LoserDisposition,
+        requested: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.group_executors()?;
         let Some(state) = self.groups.get(handle.group_key()) else {
@@ -698,10 +698,10 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
             // Resolved against the disposition in force rather than the declared
             // one, so narrowing is cumulative: a group closed as `Cancel` cannot
             // be widened back by a second close either.
-            let effective = LoserDisposition::resolve_close(inner.effective, requested)?;
+            let effective = LoserPolicy::resolve_close(inner.effective, requested)?;
             inner.effective = effective;
             inner.closed = true;
-            matches!(effective, LoserDisposition::Cancel)
+            matches!(effective, LoserPolicy::Cancel)
         };
         if cancelled {
             state.cancel.cancel();

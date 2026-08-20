@@ -243,8 +243,8 @@ impl lash_core::ToolProvider for CompileSurfaceToolProvider {
             .then(|| Arc::new(compile_surface_tool_definition(&self.tool_name).contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolResult {
-        lash_core::ToolResult::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
     }
 }
 
@@ -2417,10 +2417,10 @@ async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Re
 #[test]
 fn turn_result_total_usage_sums_parent_and_children() {
     use lash_core::{
-        facade_support::ExecutionSummary, facade_support::OutputState, SessionPolicy, SessionSnapshot, facade_support::TurnFinish, facade_support::TurnOutcome,
+        facade_support::TurnExecutionMetrics, facade_support::OutputState, SessionPolicy, SessionSnapshot, facade_support::TurnFinish, facade_support::TurnOutcome,
     };
 
-    let result = TurnResult {
+    let result = TurnReport {
         state: SessionSnapshot {
             session_id: "s".to_string(),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -2468,7 +2468,7 @@ fn turn_result_total_usage_sums_parent_and_children() {
         ],
         llm_calls: Vec::new(),
         tool_calls: Vec::new(),
-        execution: ExecutionSummary::default(),
+        execution: TurnExecutionMetrics::default(),
         errors: Vec::new(),
     };
 

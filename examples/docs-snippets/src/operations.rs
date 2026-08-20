@@ -259,7 +259,7 @@ mod tests {
     async fn deployment_drain_status_counts_work_and_reaches_drained() -> anyhow::Result<()> {
         use lash::process::{
             ProcessAwaitOutput, ProcessCompletionAuthority, ProcessInput, ProcessProvenance,
-            ProcessRegistration, ProcessRegistry, RecoveryDisposition,
+            ProcessRegistration, ProcessRegistry, RecoveryContract,
         };
 
         let registry = Arc::new(
@@ -287,7 +287,7 @@ mod tests {
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                RecoveryDisposition::ExternallyOwned,
+                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
             ))
             .await?;

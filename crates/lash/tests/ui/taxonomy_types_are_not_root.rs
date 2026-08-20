@@ -7,7 +7,7 @@ fn main() {
     let _: Option<lash::SessionResume> = None;
     let _: Option<lash::TriggerEvent> = None;
     let _: Option<lash::TriggerRegistration> = None;
-    let _: Option<lash::ProcessHandleSummary> = None;
+    let _: Option<lash::ProcessHandleView> = None;
     let _: Option<lash::ToolState> = None;
     let _ = lash::empty_trigger_source_key("ui.button.pressed");
 }

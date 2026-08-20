@@ -28,7 +28,7 @@ fn main() {
     let report = lash::remote::triggers::RemoteTriggerEmitReport {
         protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
         occurrence_id: "occurrence:1".to_string(),
-        deliveries: vec![lash::remote::triggers::RemoteTriggerDeliveryEmitReport {
+        deliveries: vec![lash::remote::triggers::RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
             process_id: "process:1".to_string(),
@@ -88,7 +88,7 @@ fn main() {
         input: lash::remote::processes::RemoteProcessInput::External {
             metadata: serde_json::json!({}),
         },
-        disposition: lash::remote::processes::RemoteRecoveryDisposition::ExternallyOwned,
+        disposition: lash::remote::processes::RemoteRecoveryContract::ExternallyOwned,
         max_attempts: None,
         env_spec: Some(lash::remote::processes::RemoteProcessExecutionEnvSpec {
             plugin_options: lash::remote::processes::RemoteProcessPluginOptions::default(),
@@ -123,15 +123,15 @@ fn main() {
     };
     process_start.validate().unwrap();
 
-    let disposition = lash::remote::llm::RemoteGenerationDisposition {
-        output_token_cap: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
-        temperature: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedSamplingPinned,
-        seed: lash::remote::llm::RemoteGenerationOptionDisposition::OmittedUnsupported,
-        stop_sequences: lash::remote::llm::RemoteGenerationOptionDisposition::NotRequested,
-        cache: lash::remote::llm::RemoteGenerationOptionDisposition::Applied,
+    let disposition = lash::remote::llm::RemoteGenerationReceipt {
+        output_token_cap: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
+        temperature: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedSamplingPinned,
+        seed: lash::remote::llm::RemoteGenerationOptionOutcome::OmittedUnsupported,
+        stop_sequences: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
+        cache: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
     };
     assert_ne!(
         disposition.seed,
-        lash::remote::llm::RemoteGenerationOptionDisposition::NotRequested
+        lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested
     );
 }

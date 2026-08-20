@@ -9,7 +9,7 @@ use lash::persistence::{
 };
 use lash::process::{
     ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessRegistry as _,
-    RecoveryDisposition,
+    RecoveryContract,
 };
 use lash::provider::LlmResponse;
 use lash::runtime::SessionPolicy;
@@ -110,7 +110,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            RecoveryDisposition::ExternallyOwned,
+            RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
         ))
         .await

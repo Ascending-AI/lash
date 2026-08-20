@@ -8,7 +8,7 @@ use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkItem,
 };
 use lash_core::store;
-use lash_core::store::{PersistedSessionRead, RuntimeCommitResult, SessionHeadMeta};
+use lash_core::store::{PersistedSessionRead, RuntimeCommitReceipt, SessionHeadMeta};
 use lash_core::{
     BlobRef, GcReport, LeaseOwnerIdentity, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
     SelectedQueuedWorkClaimOutcome, SessionCommitStore, SessionExecutionLease,
@@ -145,7 +145,7 @@ pub(crate) struct RuntimePerfStore {
     session_graph: Mutex<SessionGraph>,
     usage_deltas: Mutex<Vec<store::RuntimeUsageDelta>>,
     session_meta: Mutex<Option<store::SessionMeta>>,
-    runtime_turn_commits: Mutex<HashMap<(String, String), (String, RuntimeCommitResult)>>,
+    runtime_turn_commits: Mutex<HashMap<(String, String), (String, RuntimeCommitReceipt)>>,
     session_execution_leases: Mutex<HashMap<String, RuntimePerfSessionExecutionLease>>,
     queued_work: Mutex<Vec<RuntimePerfQueuedBatch>>,
     pending_turn_input_next_seq: AtomicU64,
@@ -647,7 +647,7 @@ impl SessionCommitStore for RuntimePerfStore {
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitResult, store::StoreError> {
+    ) -> Result<RuntimeCommitReceipt, store::StoreError> {
         let planner = store::RuntimeCommitPlanner::prepare(commit)?;
         let commit = planner.commit();
         let session_id = &commit.session_id;
@@ -1143,7 +1143,7 @@ impl TurnInputStore for RuntimePerfStore {
         &self,
         session_id: &str,
         targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core::PendingTurnInputCancelResult>, StoreError> {
+    ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
         let now = current_epoch_ms();
         let live_generation = self.live_session_lease_generation(session_id, now);
         let mut pending = self.pending_turn_inputs.lock_recover();
@@ -1157,7 +1157,7 @@ impl TurnInputStore for RuntimePerfStore {
                 }
                 None => lash_core::PendingTurnInputCancelOutcome::NotFound,
             };
-            results.push(lash_core::PendingTurnInputCancelResult {
+            results.push(lash_core::PendingTurnInputCancelReceipt {
                 target: target.clone(),
                 outcome,
             });

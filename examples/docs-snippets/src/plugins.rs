@@ -76,7 +76,9 @@ struct PlanState {
 use std::sync::Mutex;
 
 use lash::plugins::PluginRegistrar;
-use lash::tools::{ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolProvider, ToolResult};
+use lash::tools::{
+    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+};
 
 const PLUGIN_ID: &str = "update_plan";
 
@@ -130,9 +132,9 @@ impl ToolProvider for UpdatePlanTool {
         (name == "update_plan").then(|| Arc::new(update_plan_definition().contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         // Validate call.args, mutate state, then return a typed payload.
-        ToolResult::ok(serde_json::json!({ "generation": 1 }))
+        ToolOutcome::ok(serde_json::json!({ "generation": 1 }))
     }
 }
 

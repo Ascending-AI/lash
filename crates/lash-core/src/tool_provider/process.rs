@@ -124,7 +124,7 @@ impl InternalProcessAdmin<'_> {
     pub async fn start(
         &self,
         mut request: crate::ProcessStartRequest,
-    ) -> Result<crate::ProcessHandleSummary, PluginError> {
+    ) -> Result<crate::ProcessHandleView, PluginError> {
         if !request
             .observers
             .iter()
@@ -215,14 +215,14 @@ impl InternalProcessAdmin<'_> {
     pub async fn list_handles_filtered(
         &self,
         filter: &crate::ProcessListFilter,
-    ) -> Result<Vec<crate::ProcessHandleSummary>, PluginError> {
+    ) -> Result<Vec<crate::ProcessHandleView>, PluginError> {
         Ok(self
             .processes
             .list_visible(&self.session_id, filter.list_mode(), self.process_scope())
             .await?
             .into_iter()
             .filter(|record| filter.matches_record(record))
-            .map(crate::ProcessHandleSummary::from_record)
+            .map(crate::ProcessHandleView::from_record)
             .collect())
     }
 
@@ -232,11 +232,11 @@ impl InternalProcessAdmin<'_> {
     pub async fn cancel(
         &self,
         process_id: &str,
-    ) -> Result<crate::ProcessCancelSummary, PluginError> {
+    ) -> Result<crate::ProcessCancelReceipt, PluginError> {
         self.processes
             .cancel_visible(&self.session_id, process_id, self.process_scope())
             .await
-            .map(crate::ProcessCancelSummary::from_record)
+            .map(crate::ProcessCancelReceipt::from_record)
     }
 
     /// Signal a process visible to this internal process body.
@@ -374,7 +374,7 @@ mod tests {
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                crate::RecoveryDisposition::ExternallyOwned,
+                crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
             ))
             .await

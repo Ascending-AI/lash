@@ -28,7 +28,7 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
                 lash::process::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash::process::RecoveryDisposition::ExternallyOwned,
+                lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash::process::ProcessEventType {

@@ -16,7 +16,7 @@ use lash::rlm::{
 };
 use lash::tools::{
     LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition,
-    ToolDefinitionLashlangExt, ToolProvider, ToolResult,
+    ToolDefinitionLashlangExt, ToolOutcome, ToolProvider,
 };
 use lash_core::AwaitEventResolver as _;
 use lash_provider_openai::OpenAiCompatibleProvider;
@@ -1039,7 +1039,7 @@ struct E2eTools {
     fail_once: bool,
 }
 
-type E2eToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult> + Send + 'a>>;
+type E2eToolFuture<'a> = Pin<Box<dyn Future<Output = ToolOutcome> + Send + 'a>>;
 
 /// Every tool whose body calls `AttemptContext::completion_key()` and parks.
 /// The coordinator only pre-derives a completion key for declared tools, so a
@@ -1049,7 +1049,7 @@ const DEFERRING_TOOL_IDS: &[&str] = &["tool:async_lookup", "tool:durable_input_r
 
 #[async_trait::async_trait]
 impl StaticToolExecute for E2eTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         self.execute_selected_tool(call).await
     }
 
@@ -1072,13 +1072,13 @@ impl E2eTools {
             "cancel_gate" => Box::pin(self.cancel_gate(call)),
             other => {
                 Box::pin(
-                    async move { ToolResult::err_fmt(format_args!("unknown e2e tool `{other}`")) },
+                    async move { ToolOutcome::err_fmt(format_args!("unknown e2e tool `{other}`")) },
                 )
             }
         }
     }
 
-    async fn app_lookup(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn app_lookup(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
         let key = call
             .args
@@ -1100,10 +1100,10 @@ impl E2eTools {
             result.clone(),
         )
         .await;
-        ToolResult::ok(result)
+        ToolOutcome::ok(result)
     }
 
-    async fn async_lookup(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn async_lookup(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
         let key_arg = call
             .args
@@ -1119,7 +1119,7 @@ impl E2eTools {
         });
         let completion_key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let call_id = call.context.tool_call_id().map(ToOwned::to_owned);
         let args = call.args.to_owned();
@@ -1165,10 +1165,10 @@ impl E2eTools {
             .await;
         });
 
-        ToolResult::pending(lash_core::PendingCompletion::new())
+        ToolOutcome::pending(lash_core::PendingCompletion::new())
     }
 
-    async fn batch_side_effect(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn batch_side_effect(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
         let key = call
             .args
@@ -1199,10 +1199,10 @@ impl E2eTools {
             result.clone(),
         )
         .await;
-        ToolResult::ok(result)
+        ToolOutcome::ok(result)
     }
 
-    async fn make_attachment(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn make_attachment(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
         let filename = call
             .args
@@ -1224,7 +1224,7 @@ impl E2eTools {
             .await
         {
             Ok(reference) => reference,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let mut result = BTreeMap::new();
         result.insert(
@@ -1261,10 +1261,10 @@ impl E2eTools {
             result_json,
         )
         .await;
-        ToolResult::from_output(lash_core::ToolCallOutput::success(result))
+        ToolOutcome::from_output(lash_core::ToolCallOutput::success(result))
     }
 
-    async fn crash_once(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn crash_once(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
         let result = serde_json::json!({
             "crashed": false,
@@ -1302,10 +1302,10 @@ impl E2eTools {
             );
             std::process::exit(75);
         }
-        ToolResult::ok(result)
+        ToolOutcome::ok(result)
     }
 
-    async fn cancel_gate(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn cancel_gate(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
         let started = serde_json::json!({
             "waiting": true,
@@ -1322,15 +1322,15 @@ impl E2eTools {
         )
         .await;
         let Some(cancel) = call.context.cancellation_token().cloned() else {
-            return ToolResult::err(serde_json::json!(
+            return ToolOutcome::err(serde_json::json!(
                 "cancel_gate requires a turn cancellation token"
             ));
         };
         cancel.cancelled().await;
-        ToolResult::err(serde_json::json!("cancel_gate cancelled"))
+        ToolOutcome::err(serde_json::json!("cancel_gate cancelled"))
     }
 
-    async fn durable_input_request(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn durable_input_request(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
         let question = call
             .args
@@ -1340,7 +1340,7 @@ impl E2eTools {
             .to_string();
         let key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let opened = serde_json::json!({
             "request_id": format!("{workflow_id}:request-1"),
@@ -1350,7 +1350,7 @@ impl E2eTools {
         if let Err(err) =
             record_tool_attempt(&self.pool, &workflow_id, "attempt", &self.worker_id).await
         {
-            return ToolResult::err_fmt(err);
+            return ToolOutcome::err_fmt(err);
         }
         let call_id = call.context.tool_call_id().map(ToOwned::to_owned);
         let args = call.args.to_owned();
@@ -1406,15 +1406,15 @@ impl E2eTools {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
                     Ok(false) => {
-                        return ToolResult::err(serde_json::json!(format!(
+                        return ToolOutcome::err(serde_json::json!(format!(
                             "timed out waiting for harness signal `{signal_name}`"
                         )));
                     }
-                    Err(err) => return ToolResult::err_fmt(err),
+                    Err(err) => return ToolOutcome::err_fmt(err),
                 }
             }
         }
-        ToolResult::pending(lash_core::PendingCompletion::new().announcing(announcement))
+        ToolOutcome::pending(lash_core::PendingCompletion::new().announcing(announcement))
     }
 }
 
@@ -1544,7 +1544,7 @@ mod deferral_declaration_tests {
             {
                 current = rest.split('(').next().map(str::to_string);
             }
-            if line.contains("ToolResult::pending(")
+            if line.contains("ToolOutcome::pending(")
                 && let Some(name) = current.as_deref()
             {
                 parking.push(format!("tool:{name}"));

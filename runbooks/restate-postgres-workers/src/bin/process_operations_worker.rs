@@ -7,7 +7,7 @@ use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{
     ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType, ProcessIdentity,
     ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
-    ProcessWakeDelivery, ProcessWakeSpec, RecoveryDisposition, SessionRelation,
+    ProcessWakeDelivery, ProcessWakeSpec, RecoveryContract, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory as _, WakeDeliveryConfig, WakeDeliveryState,
     WakeDiscardReason,
 };
@@ -37,7 +37,7 @@ fn registration() -> ProcessRegistration {
         ProcessInput::External {
             metadata: json!({"runbook": "process-operations"}),
         },
-        RecoveryDisposition::ExternallyOwned,
+        RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
     )
     .with_identity(
@@ -114,7 +114,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                 ProcessInput::External {
                     metadata: json!({"runbook": "process-operations"}),
                 },
-                RecoveryDisposition::ExternallyOwned,
+                RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
             )
             .with_identity(ProcessIdentity::new("runbook-retarget"))

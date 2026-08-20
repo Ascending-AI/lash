@@ -132,7 +132,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -497,7 +497,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
@@ -627,7 +627,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
         ))
         .await
@@ -720,7 +720,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryDisposition::ExternallyOwned,
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             ),
             &["fork-observer-source".to_string()],
@@ -819,7 +819,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryDisposition::ExternallyOwned,
+            lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
         ))
         .await?;
@@ -918,7 +918,7 @@ async fn nested_session_observer_intents_settle_every_layer_before_open_returns(
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
-                    lash_core::RecoveryDisposition::ExternallyOwned,
+                    lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
                 ))
                 .await?;

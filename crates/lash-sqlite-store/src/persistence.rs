@@ -428,7 +428,7 @@ impl SessionCommitStore for Store {
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitResult, StoreError> {
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
         let planner = lash_core::store::RuntimeCommitPlanner::prepare(commit)?;
         self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
@@ -440,7 +440,7 @@ impl SessionCommitStore for Store {
         let result = self
             .conn
             .write_flow(move |tx| {
-                let outcome: Result<RuntimeCommitResult, StoreError> = (|| {
+                let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
                     if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
@@ -2635,7 +2635,7 @@ impl TurnInputStore for Store {
                     let mut commits = Vec::new();
                     for row in rows {
                         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-                        let result: RuntimeCommitResult = serde_json::from_str(&result_json)
+                        let result: RuntimeCommitReceipt = serde_json::from_str(&result_json)
                             .map_err(|err| {
                                 StoreError::Backend(format!(
                                     "failed to decode runtime turn commit result: {err}"
@@ -2665,13 +2665,13 @@ impl TurnInputStore for Store {
         &self,
         session_id: &str,
         targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core::PendingTurnInputCancelResult>, StoreError> {
+    ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
         let session_id = session_id.to_string();
         let targets = targets.to_vec();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<Vec<lash_core::PendingTurnInputCancelResult>, StoreError> =
+                let outcome: Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> =
                     (|| {
                         let mut results = Vec::with_capacity(targets.len());
                         for target in targets {
@@ -2684,7 +2684,7 @@ impl TurnInputStore for Store {
                                 None => lash_core::PendingTurnInputCancelOutcome::NotFound,
                             };
                             results
-                                .push(lash_core::PendingTurnInputCancelResult { target, outcome });
+                                .push(lash_core::PendingTurnInputCancelReceipt { target, outcome });
                         }
                         Ok(results)
                     })();

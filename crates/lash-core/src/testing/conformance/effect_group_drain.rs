@@ -51,9 +51,7 @@ use super::*;
 use crate::runtime::effect::group_drain::{
     ChildDrainOutcome, EffectGroupDrain, GroupDrainReport, GroupExecutors,
 };
-use crate::{
-    EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserDisposition, RuntimeEffectGroup,
-};
+use crate::{EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 
 /// One host over the substrate under test, plus the drain wired to it.
 ///
@@ -322,7 +320,7 @@ async fn orphaned_losers_settle_exactly_once_across_a_restart(
     let report = drain_until_no_live_lease(&world, &key).await;
     assert_eq!(
         report.disposition,
-        LoserDisposition::RunToCompletion,
+        LoserPolicy::RunToCompletion,
         "the disposition comes off the group row, which the drain did not write"
     );
     assert_eq!(
@@ -627,7 +625,7 @@ async fn a_cancel_group_is_never_re_executed_by_the_drain(make: &DrainWorldFacto
     // so a `Cancel` group answers the same whether or not its children still
     // look claimed. That ordering is the law.
     let report = pass(&world, &key).await.expect("the pass runs");
-    assert_eq!(report.disposition, LoserDisposition::Cancel);
+    assert_eq!(report.disposition, LoserPolicy::Cancel);
     assert_eq!(report.children.len(), 2);
     for child in &report.children {
         assert_eq!(
@@ -782,8 +780,8 @@ async fn a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(
 // Fixtures
 // =============================================================================
 
-const RUN: LoserDisposition = LoserDisposition::RunToCompletion;
-const CANCEL: LoserDisposition = LoserDisposition::Cancel;
+const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
+const CANCEL: LoserPolicy = LoserPolicy::Cancel;
 
 /// The lease window a crash law uses: long enough that a claim is not lost while
 /// the pre-crash process is still working, short enough that a dead process's
@@ -980,7 +978,7 @@ fn child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
     )
 }
 
-fn group(key: &str, children: usize, disposition: LoserDisposition) -> RuntimeEffectGroup {
+fn group(key: &str, children: usize, disposition: LoserPolicy) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
         RuntimeInvocation::effect(
             RuntimeScope::new(key),
@@ -1014,7 +1012,7 @@ async fn open(
     scoped: &ScopedEffectController<'_>,
     key: &str,
     children: usize,
-    disposition: LoserDisposition,
+    disposition: LoserPolicy,
     executors: Vec<RuntimeEffectLocalExecutor<'static>>,
 ) -> EffectGroupHandle {
     scoped
@@ -1032,7 +1030,7 @@ async fn reopen(
     scoped: &ScopedEffectController<'_>,
     key: &str,
     children: usize,
-    disposition: LoserDisposition,
+    disposition: LoserPolicy,
 ) -> EffectGroupHandle {
     let executors = (0..children).map(|_| never()).collect();
     open(scoped, key, children, disposition, executors).await
@@ -1061,7 +1059,7 @@ async fn next(
 async fn close(
     scoped: &ScopedEffectController<'_>,
     handle: EffectGroupHandle,
-    disposition: LoserDisposition,
+    disposition: LoserPolicy,
 ) -> Result<(), RuntimeEffectControllerError> {
     scoped
         .controller()
