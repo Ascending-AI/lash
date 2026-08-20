@@ -591,8 +591,6 @@ pub(crate) use lash_sansio::{
     prompt_template_fingerprint, prompt_text_fingerprint, resolve_prompt_layers,
     visible_response_parts,
 };
-pub use store::AttachmentOwnerKind;
-
 /// Project a successful tool control into its terminal turn outcome.
 ///
 /// Agent-frame seeds are typed at their serde boundary, so a terminal outcome
@@ -943,44 +941,56 @@ pub(crate) use runtime::default_queued_drain_policy;
 #[doc(hidden)]
 pub use runtime::drive_with_event_pump;
 
+// This block includes the effect / process-control types consumed by external
+// effect hosts (e.g. lash-restate's workflows) and their integration tests —
+// they are deliberately public; the rest of the runtime module stays
+// crate-internal.
 pub use runtime::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AwaitEventKey, AwaitEventResolver,
-    AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock, DeliveryPolicy, DrainMode,
-    DrainModePolicy, EffectHost, EffectJournalRetirement, ExecutionScope, ForkPoint,
-    ForkSessionReceipt, ForkSessionRequest, InputItem, LiveReplayGapReason, LiveReplayOutcome,
-    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    AbandonEvidence, AbandonRequest, AbandonWriter, AssistantResponseHookEvents, AwaitEventKey,
+    AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef, CheckpointClaimSet,
+    ChildDrainOutcome, Clock, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
+    EffectGroupDrain, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    EffectJournalRetirement, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
+    GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
     ObserverInheritance, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
     PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessAwaitOutput,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine, ProcessEngineRunContext,
-    ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessInfraError,
-    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
-    ProcessOpScope, ProcessOriginator, ProcessOutcome, ProcessParentEndPlan, ProcessProvenance,
-    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome,
-    ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
-    ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalSpec, ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery,
-    ProcessWakeSpec, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
+    ProcessEffectOutcome, ProcessEngine, ProcessEngineRunContext, ProcessEngineValidationContext,
+    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
+    ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessListMode,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessOpScope, ProcessOriginator, ProcessOutcome,
+    ProcessOutcomeObserver, ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
+    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec,
+    ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
+    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
     ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
     ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
     QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy,
-    QueuedWorkKind, RecoveryContract, Resolution, ResolveOutcome, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCursor,
+    QueuedWorkKind, RecoveryContract, Resolution, ResolveOutcome, RuntimeCheckpointComponents,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
+    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
+    RuntimeSessionState, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCursor,
     SessionCursorError, SessionId, SessionObservationEvent, SessionObservationEventPayload,
     SessionProcessEventKind, SessionQueueEventKind, SessionRevision, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, TokenLedgerEntry, ToolCallLaunch, TurnActivity,
-    TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent, TurnInput, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
-    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState, WaitKind,
-    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WorkerSlotKind,
-    WorkerSlotPermit, WorkerSlotSupplier,
+    SessionStoreCreateRequest, SessionStoreFactory, TokenLedgerEntry, ToolAttemptLaunch,
+    ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent,
+    TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
+    TurnInputIngress, TurnInputState, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -997,26 +1007,10 @@ pub(crate) use runtime::{
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
 };
+pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use runtime::{apply_process_event_projection, fold_process_record};
 pub(crate) use session_model::plugin_runtime_protocol_event;
-pub use store::{TurnId, WorkClaim, WorkCompletion};
-// Effect / process-control types consumed by external effect hosts (e.g.
-// lash-restate's workflows) and their integration tests. Kept on the public
-// surface; the rest of the runtime block above stays crate-internal.
-
-pub use runtime::{
-    AssistantResponseHookEvents, CheckpointClaimSet, ChildDrainOutcome, DrainedChild,
-    EffectGroupDrain, EffectGroupHandle, EffectGroupMembership, GroupDrainReport, GroupExecutors,
-    GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserPolicy, ProcessCommand,
-    ProcessEffectOutcome, ProcessEventSemanticsSpec, ProcessOutcomeObserver,
-    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState,
-    ToolAttemptLaunch,
-};
-pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
@@ -1032,21 +1026,19 @@ pub use session_model::{NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentManifestEntry, AttachmentWriteFence, BlobRef, DurableItem, DurablePayload,
-    DurableScan, DurableScanPage, DurableSurface, GcReport, LeaseClaimNonce, LeaseOwnerIdentity,
+    AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence, BlobRef,
+    CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload,
+    DurableScan, DurableScanPage, DurableSurface, GcReport, HydratedCheckpointComponent,
+    HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity, OperationId,
     OrphanedTurnInputScope, QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore,
-    RuntimePersistence, ScanCoverage, SelectedQueuedWorkClaimOutcome, SessionAdmission,
+    RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
+    RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome, SessionAdmission,
     SessionBinding, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseDisplacement, SessionExecutionLeaseRenewalInstallMismatch,
     SessionExecutionLeaseStore, SessionMeta, StoreBackend, StoreError, StoreMaintenance,
     StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
-    TurnInputStore, VacuumReport,
-};
-pub use store::{
-    CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, HydratedCheckpointComponent,
-    HydratedSessionCheckpoint, OperationId, RuntimeCommit, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
@@ -1159,38 +1151,51 @@ mod tests {
         assert!(!source.contains(&removed_history_metadata));
     }
 
-    fn public_reexport_block(source: &str, module: &str) -> String {
-        let start = format!("pub use {module}::{{");
-        let mut block = String::new();
+    fn public_reexports(source: &str, module: &str) -> String {
+        let statement_start = format!("pub use {module}::");
+        let block_start = format!("{statement_start}{{");
+        assert_eq!(
+            source
+                .lines()
+                .filter(|line| line.starts_with(&block_start))
+                .count(),
+            1,
+            "public {module} re-exports must have one grouped block"
+        );
+
+        let mut exports = String::new();
         let mut collecting = false;
         for line in source.lines() {
-            if line.trim_start().starts_with(&start) {
+            if !collecting && line.starts_with(&statement_start) {
                 collecting = true;
             }
             if collecting {
-                block.push_str(line);
-                block.push('\n');
-                if line.trim_end() == "};" {
-                    break;
+                exports.push_str(line);
+                exports.push('\n');
+                if line.contains(';') {
+                    collecting = false;
                 }
             }
         }
-        assert!(!block.is_empty(), "missing public {module} re-export block");
-        block
+        assert!(!exports.is_empty(), "missing public {module} re-exports");
+        exports
+    }
+
+    fn contains_identifier(source: &str, identifier: &str) -> bool {
+        source
+            .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+            .any(|token| token == identifier)
     }
 
     #[test]
     // Architecture lint: lexical public-surface guard, not behavior proof.
     fn lint_root_runtime_exports_exclude_internal_runtime_records() {
-        let runtime_exports = public_reexport_block(include_str!("lib.rs"), "runtime");
+        let runtime_exports = public_reexports(include_str!("lib.rs"), "runtime");
+        assert!(
+            contains_identifier(&runtime_exports, "GroupWakePolicy"),
+            "runtime export scan must cover the complete public block"
+        );
         for removed in [
-            "RuntimeEffectCommand",
-            "RuntimeEffectEnvelope",
-            "RuntimeEffectKind",
-            "RuntimeEffectOutcome",
-            "RuntimeInvocation",
-            "RuntimeScope",
-            "RuntimeSessionState",
             "QueuedWorkBatch",
             "QueuedWorkBatchDraft",
             "QueuedWorkPayload",
@@ -1199,9 +1204,7 @@ mod tests {
             "require_event_replay",
         ] {
             assert!(
-                !runtime_exports
-                    .split(|character: char| !(character.is_alphanumeric() || character == '_'))
-                    .any(|export| export == removed),
+                !contains_identifier(&runtime_exports, removed),
                 "runtime root export leaked {removed}"
             );
         }
@@ -1210,17 +1213,19 @@ mod tests {
     #[test]
     // Architecture lint: lexical public-surface guard, not behavior proof.
     fn lint_root_store_exports_exclude_wire_records() {
-        let store_exports = public_reexport_block(include_str!("lib.rs"), "store");
+        let store_exports = public_reexports(include_str!("lib.rs"), "store");
+        assert!(
+            contains_identifier(&store_exports, "RuntimeCommit"),
+            "store export scan must cover the complete public block"
+        );
         for removed in [
             "SessionHead",
             "SessionCheckpoint",
-            "RuntimeCommit",
-            "HydratedSessionCheckpoint",
             "PersistedSessionRead",
             "GraphAppend",
         ] {
             assert!(
-                !store_exports.contains(removed),
+                !contains_identifier(&store_exports, removed),
                 "store root export leaked {removed}"
             );
         }
