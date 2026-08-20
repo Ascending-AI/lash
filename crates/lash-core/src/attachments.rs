@@ -547,6 +547,10 @@ pub struct AttachmentReclamationPolicy {
 /// retention policy, explicitly decides whether an empty root set may authorize
 /// deletion, and chooses when to run it. The window is not a correctness bound
 /// on replay duration. The lever does no background work.
+#[allow(
+    clippy::result_large_err,
+    reason = "boxing AttachmentReclamationFailure would change this public maintenance API"
+)]
 pub async fn reclaim_unreferenced_attachments<R>(
     root_set: &R,
     backend: &dyn AttachmentStore,

@@ -1,6 +1,5 @@
 //! Generated operation strategy shared by the store-contract law and differential harness.
 
-use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::{Config, RngSeed, TestRunner};
 

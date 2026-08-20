@@ -1,38 +1,73 @@
-error[E0432]: unresolved imports `lash::prelude::ScopedQueuedTurnBuilder`, `lash::prelude::ScopedTurnBuilder`
- --> tests/ui/scoped_turn_builders_are_not_prelude.rs:2:5
+error[E0425]: cannot find type `AdvancedTurn` in crate `lash`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:2:25
   |
-2 |     ScopedQueuedTurnBuilder as PreludeScopedQueuedTurnBuilder,
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `ScopedQueuedTurnBuilder` in `prelude`
-3 |     ScopedTurnBuilder as PreludeScopedTurnBuilder,
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `ScopedTurnBuilder` in `prelude`
+2 |     let _: Option<lash::AdvancedTurn> = None;
+  |                         ^^^^^^^^^^^^ not found in `lash`
+
+error[E0425]: cannot find type `ScopedTurnBuilder` in crate `lash`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:3:25
   |
-help: a similar name exists in the module
+3 |     let _: Option<lash::ScopedTurnBuilder<'static>> = None;
+  |                         ^^^^^^^^^^^^^^^^^
   |
-2 -     ScopedQueuedTurnBuilder as PreludeScopedQueuedTurnBuilder,
-2 +     QueuedTurnBuilder as PreludeScopedQueuedTurnBuilder,
+ ::: src/turn.rs
   |
-help: a similar name exists in the module
+  | pub struct QueuedTurnBuilder {
+  | ---------------------------- similarly named struct `QueuedTurnBuilder` defined here
   |
-3 -     ScopedTurnBuilder as PreludeScopedTurnBuilder,
-3 +     QueuedTurnBuilder as PreludeScopedTurnBuilder,
+help: a struct with a similar name exists
+  |
+3 -     let _: Option<lash::ScopedTurnBuilder<'static>> = None;
+3 +     let _: Option<lash::QueuedTurnBuilder<'static>> = None;
   |
 
-error[E0432]: unresolved imports `lash::AdvancedTurn`, `lash::ScopedQueuedTurnBuilder`, `lash::ScopedTurnBuilder`
- --> tests/ui/scoped_turn_builders_are_not_prelude.rs:5:12
+error[E0425]: cannot find type `ScopedQueuedTurnBuilder` in crate `lash`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:4:25
   |
-5 | use lash::{AdvancedTurn, ScopedQueuedTurnBuilder, ScopedTurnBuilder};
-  |            ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^ no `ScopedTurnBuilder` in the root
-  |            |             |
-  |            |             no `ScopedQueuedTurnBuilder` in the root
-  |            no `AdvancedTurn` in the root
+4 |     let _: Option<lash::ScopedQueuedTurnBuilder<'static>> = None;
+  |                         ^^^^^^^^^^^^^^^^^^^^^^^
   |
-help: a similar name exists in the module
+ ::: src/turn.rs
   |
-5 - use lash::{AdvancedTurn, ScopedQueuedTurnBuilder, ScopedTurnBuilder};
-5 + use lash::{AdvancedTurn, SelectedQueuedTurnBuilder, ScopedTurnBuilder};
+  | pub struct SelectedQueuedTurnBuilder {
+  | ------------------------------------ similarly named struct `SelectedQueuedTurnBuilder` defined here
   |
-help: a similar name exists in the module
+help: a struct with a similar name exists
   |
-5 - use lash::{AdvancedTurn, ScopedQueuedTurnBuilder, ScopedTurnBuilder};
-5 + use lash::{AdvancedTurn, ScopedQueuedTurnBuilder, QueuedTurnBuilder};
+4 -     let _: Option<lash::ScopedQueuedTurnBuilder<'static>> = None;
+4 +     let _: Option<lash::SelectedQueuedTurnBuilder<'static>> = None;
+  |
+
+error[E0425]: cannot find type `ScopedTurnBuilder` in module `lash::prelude`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:5:34
+  |
+5 |     let _: Option<lash::prelude::ScopedTurnBuilder<'static>> = None;
+  |                                  ^^^^^^^^^^^^^^^^^
+  |
+ ::: src/turn.rs
+  |
+  | pub struct QueuedTurnBuilder {
+  | ---------------------------- similarly named struct `QueuedTurnBuilder` defined here
+  |
+help: a struct with a similar name exists
+  |
+5 -     let _: Option<lash::prelude::ScopedTurnBuilder<'static>> = None;
+5 +     let _: Option<lash::prelude::QueuedTurnBuilder<'static>> = None;
+  |
+
+error[E0425]: cannot find type `ScopedQueuedTurnBuilder` in module `lash::prelude`
+ --> tests/ui/scoped_turn_builders_are_not_prelude.rs:6:34
+  |
+6 |     let _: Option<lash::prelude::ScopedQueuedTurnBuilder<'static>> = None;
+  |                                  ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+ ::: src/turn.rs
+  |
+  | pub struct QueuedTurnBuilder {
+  | ---------------------------- similarly named struct `QueuedTurnBuilder` defined here
+  |
+help: a struct with a similar name exists
+  |
+6 -     let _: Option<lash::prelude::ScopedQueuedTurnBuilder<'static>> = None;
+6 +     let _: Option<lash::prelude::QueuedTurnBuilder<'static>> = None;
   |

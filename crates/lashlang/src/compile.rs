@@ -26,6 +26,10 @@ pub struct ModuleCompileOutput {
 /// `parse` and `LinkedModule::link` remain public for tooling and low-level
 /// tests. Host integrations should prefer this facade so diagnostics,
 /// artifact identity, persistence, and introspection are produced consistently.
+#[allow(
+    clippy::result_large_err,
+    reason = "boxing ModuleCompileError would change this public serialized error API"
+)]
 pub async fn compile_module(
     request: ModuleCompileRequest<'_>,
 ) -> Result<ModuleCompileOutput, ModuleCompileError> {
