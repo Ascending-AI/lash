@@ -767,7 +767,6 @@ fn checkpoint_pending_exec(
             observation_truncation: Vec::new(),
             tool_calls: Vec::new(),
             executed_calls: Vec::new(),
-            images: Vec::new(),
             printed_images: Vec::new(),
             error: None,
             duration_ms: 1,

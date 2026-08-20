@@ -358,7 +358,6 @@ pub(crate) fn exec_response(
         observation_truncation: Vec::new(),
         tool_calls: Vec::new(),
         executed_calls: Vec::new(),
-        images: Vec::new(),
         printed_images: Vec::new(),
         error: error.map(str::to_string),
         duration_ms: 1,

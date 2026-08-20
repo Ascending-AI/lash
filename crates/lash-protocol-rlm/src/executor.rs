@@ -328,7 +328,6 @@ async fn execute_code_inner(
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
                 executed_calls: Vec::new(),
-                images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!("invalid Lashlang host tool surface: {err}")),
                 duration_ms: start.elapsed().as_millis() as u64,
@@ -450,7 +449,6 @@ async fn execute_code_inner(
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
                 executed_calls: Vec::new(),
-                images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(error),
                 duration_ms: start.elapsed().as_millis() as u64,
@@ -476,7 +474,6 @@ async fn execute_code_inner(
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
                 executed_calls: Vec::new(),
-                images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!("failed to store lashlang module artifact: {err}")),
                 duration_ms: start.elapsed().as_millis() as u64,
@@ -495,7 +492,6 @@ async fn execute_code_inner(
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
                 executed_calls: Vec::new(),
-                images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!("failed to resolve trigger owner namespace: {err}")),
                 duration_ms: start.elapsed().as_millis() as u64,
@@ -514,7 +510,6 @@ async fn execute_code_inner(
                 observation_truncation: Vec::new(),
                 tool_calls: Vec::new(),
                 executed_calls: Vec::new(),
-                images: Vec::new(),
                 printed_images: Vec::new(),
                 error: Some(format!(
                     "failed to replace current trigger key manifest: {err}"
@@ -549,7 +544,6 @@ async fn execute_code_inner(
             observation_truncation: Vec::new(),
             tool_calls: Vec::new(),
             executed_calls: Vec::new(),
-            images: Vec::new(),
             printed_images: Vec::new(),
             error: Some(err),
             duration_ms: start.elapsed().as_millis() as u64,
@@ -567,7 +561,6 @@ async fn execute_code_inner(
                     observation_truncation: Vec::new(),
                     tool_calls: Vec::new(),
                     executed_calls: Vec::new(),
-                    images: Vec::new(),
                     printed_images: Vec::new(),
                     error: Some(err),
                     duration_ms: start.elapsed().as_millis() as u64,
@@ -626,7 +619,6 @@ async fn execute_code_inner(
                 observation_truncation: collected.observation_truncation,
                 tool_calls: collected.tool_calls,
                 executed_calls: collected.executed_calls,
-                images: Vec::new(),
                 printed_images: collected.printed_images,
                 error: Some(
                     crate::feedback::RlmFeedbackKind::Error
@@ -658,7 +650,6 @@ async fn execute_code_inner(
                 observation_truncation: collected.observation_truncation,
                 tool_calls: collected.tool_calls,
                 executed_calls: collected.executed_calls,
-                images: Vec::new(),
                 printed_images: collected.printed_images,
                 error: Some(kind.label(lashlang::format_runtime_diagnostic(
                     code,
@@ -676,7 +667,6 @@ async fn execute_code_inner(
         observation_truncation: collected.observation_truncation,
         tool_calls: collected.tool_calls,
         executed_calls: collected.executed_calls,
-        images: Vec::new(),
         printed_images: collected.printed_images,
         error: None,
         duration_ms: start.elapsed().as_millis() as u64,
@@ -3551,7 +3541,7 @@ mod tests {
                     case.name
                 );
                 assert!(
-                    response.images.is_empty() && response.printed_images.is_empty(),
+                    response.printed_images.is_empty(),
                     "{} should not emit images",
                     case.name
                 );

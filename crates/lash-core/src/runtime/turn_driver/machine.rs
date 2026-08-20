@@ -89,7 +89,6 @@ impl RuntimeTurnDriver<'_> {
                         .await?;
                 }
                 Effect::Log { event } => self.handle_log_event(event),
-                Effect::CancelLlm { .. } => {}
                 Effect::ExecCode { id, language, code } => {
                     self.handle_exec_code_effect(
                         &mut machine,

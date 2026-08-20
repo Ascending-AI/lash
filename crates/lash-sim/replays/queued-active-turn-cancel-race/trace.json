@@ -1277,7 +1277,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 1 for session-001"
@@ -5681,7 +5680,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 1 for session-004"

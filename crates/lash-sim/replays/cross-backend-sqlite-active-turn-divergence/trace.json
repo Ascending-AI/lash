@@ -1199,7 +1199,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 1 for session-001"
@@ -7201,7 +7200,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 1 for session-002"
@@ -10185,7 +10183,6 @@
               "duration_ms": 0,
               "error": "exit code 1",
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 1 for session-004"
@@ -13435,7 +13432,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 2 for session-004"
@@ -14726,7 +14722,6 @@
               "duration_ms": 0,
               "error": "exit code 1",
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 2 for session-001"
@@ -15667,7 +15662,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 3 for session-001"
@@ -19511,7 +19505,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 1 for session-003"
@@ -20905,7 +20898,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 3 for session-003"
@@ -21451,7 +21443,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 2 for session-003"
@@ -23947,7 +23938,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 2 for session-002"
@@ -24020,7 +24010,6 @@
               "duration_ms": 0,
               "error": "exit code 1",
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 4 for session-003"
@@ -24631,7 +24620,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 3 for session-002"
@@ -26401,7 +26389,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 4 for session-002"
@@ -26617,7 +26604,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 4 for session-001"
@@ -28025,7 +28011,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 3 for session-004"
@@ -29879,7 +29864,6 @@
               "duration_ms": 0,
               "error": "exit code 1",
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 5 for session-001"
@@ -32820,7 +32804,6 @@
               "duration_ms": 0,
               "error": null,
               "executed_calls": [],
-              "images": [],
               "observation_truncation": [],
               "observations": [
                 "exec result 5 for session-003"
