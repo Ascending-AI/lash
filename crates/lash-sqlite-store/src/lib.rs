@@ -23,10 +23,12 @@
 //! simplest backend that gives us *atomic multi-statement transactions on a
 //! single file* with durability guarantees we can reason about.
 //!
-//! ## Schema cutover, not migrations
+//! ## Schema cutover, with one exact arming migration
 //!
 //! There is exactly one supported schema (see [`schema::SCHEMA`]). Older
-//! databases must be deleted before opening — we do not carry migration code.
+//! databases must normally be deleted before opening. The sole in-place
+//! exception is durable-core 37 -> 38, which decodes every rooted checkpoint
+//! manifest and arms the exact component-edge projection transactionally.
 //!
 //! ## Catalog contention
 //!
@@ -522,14 +524,8 @@ pub enum BuiltinBlobProfile {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct StoreGcPolicy {
-    pub auto_run_every_commits: Option<u64>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StoreOptions {
     pub blob_profile: BuiltinBlobProfile,
-    pub gc_policy: StoreGcPolicy,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

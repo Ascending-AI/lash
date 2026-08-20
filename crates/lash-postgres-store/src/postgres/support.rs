@@ -274,25 +274,6 @@ async fn get_blob_tx(
 // request to roughly one MiB of SHA-256 text plus array framing.
 const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
 
-async fn existing_checkpoint_component_refs_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    blob_refs: &std::collections::BTreeSet<String>,
-) -> Result<std::collections::HashSet<String>, StoreError> {
-    let mut existing = std::collections::HashSet::with_capacity(blob_refs.len());
-    let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
-    for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
-        let rows = sqlx::query_scalar::<_, String>(
-            "SELECT hash FROM lash_blobs WHERE hash = ANY($1::text[])",
-        )
-        .bind(chunk)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        existing.extend(rows);
-    }
-    Ok(existing)
-}
-
 async fn checkpoint_component_bodies_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     manifest: &SessionCheckpoint,
@@ -317,36 +298,6 @@ async fn checkpoint_component_bodies_tx(
     Ok(bodies)
 }
 
-async fn validate_checkpoint_component_refs_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    checkpoint: &HydratedSessionCheckpoint,
-) -> Result<(), StoreError> {
-    let mut referenced = std::collections::BTreeSet::new();
-    for (key, component) in &checkpoint.components {
-        lash_core::store::ensure_checkpoint_component_encoding_version(
-            key,
-            component.encoding_version(),
-        )?;
-        let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
-            continue;
-        };
-        referenced.insert(blob_ref.as_str().to_string());
-    }
-    let existing = existing_checkpoint_component_refs_tx(tx, &referenced).await?;
-    for (key, component) in &checkpoint.components {
-        let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
-            continue;
-        };
-        if !existing.contains(blob_ref.as_str()) {
-            return Err(StoreError::CheckpointComponentMissing {
-                key: key.clone(),
-                blob_ref: blob_ref.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
 /// Persist the complete checkpoint root and every changed leaf inside the
 /// caller's commit transaction. Keeping both writes under the same transaction
 /// is the GC-safety argument: no collector can observe a git-loose-object-style
@@ -356,12 +307,45 @@ pub(crate) async fn put_checkpoint_tx(
     checkpoint: &HydratedSessionCheckpoint,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
     let manifest = checkpoint.manifest()?;
-    validate_checkpoint_component_refs_tx(tx, checkpoint).await?;
-    for (key, descriptor) in &manifest.components {
+    let bytes = encode_msgpack(&manifest, "checkpoint root")?;
+    let checkpoint_ref = BlobRef(format!("{:x}", Sha256::digest(&bytes)));
+
+    // Global blob-row lock order: every commit acquires or inserts the manifest
+    // root and all of its component rows in ascending content hash order. A
+    // session delete takes FOR UPDATE on its complete candidate union in that
+    // same order before severing any root. Thus a delete that wins makes this
+    // commit observe a missing component, while a commit that wins publishes
+    // its FK-protected edge before the delete rechecks liveness, without a lock
+    // inversion between a reused component and an already-present manifest.
+    let mut acquisition_order = manifest
+        .components
+        .iter()
+        .map(|(key, descriptor)| (descriptor.blob_ref.as_str().to_string(), Some(key.clone())))
+        .collect::<Vec<_>>();
+    acquisition_order.push((checkpoint_ref.as_str().to_string(), None));
+    acquisition_order.sort();
+    for (blob_ref, component_key) in acquisition_order {
+        let Some(key) = component_key else {
+            let stored_ref = put_blob_tx(tx, &bytes).await?;
+            if stored_ref != checkpoint_ref {
+                return Err(StoreError::Backend(
+                    "checkpoint root content hash changed during persistence".to_string(),
+                ));
+            }
+            continue;
+        };
+        let descriptor =
+            manifest
+                .components
+                .get(&key)
+                .ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "HydratedSessionCheckpoint",
+                    message: format!("manifest projection lost component `{key}`"),
+                })?;
         let component =
             checkpoint
                 .components
-                .get(key)
+                .get(&key)
                 .ok_or_else(|| StoreError::StoredDataCorrupt {
                     record_kind: "HydratedSessionCheckpoint",
                     message: format!("manifest projection lost component `{key}`"),
@@ -369,14 +353,26 @@ pub(crate) async fn put_checkpoint_tx(
         if let Some(body) = component.body() {
             let stored_ref = put_blob_tx(tx, body).await?;
             lash_core::store::ensure_checkpoint_component_hash_agreement(
-                key,
+                &key,
                 &stored_ref,
                 &descriptor.blob_ref,
             )?;
+        } else {
+            let exists = sqlx::query_scalar::<_, bool>(
+                "SELECT TRUE FROM lash_blobs WHERE hash = $1 FOR KEY SHARE",
+            )
+            .bind(&blob_ref)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            if exists.is_none() {
+                return Err(StoreError::CheckpointComponentMissing {
+                    key,
+                    blob_ref: descriptor.blob_ref.clone(),
+                });
+            }
         }
     }
-    let bytes = encode_msgpack(&manifest, "checkpoint root")?;
-    let checkpoint_ref = put_blob_tx(tx, &bytes).await?;
     let component_refs = manifest
         .components
         .values()

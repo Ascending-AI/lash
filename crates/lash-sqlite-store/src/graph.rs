@@ -140,16 +140,6 @@ impl Store {
             .map_err(|error| stored_data_corrupt("SessionGraph", error))
     }
 
-    pub(crate) async fn maybe_auto_gc(&self) {
-        let Some(interval) = self.options.gc_policy.auto_run_every_commits else {
-            return;
-        };
-        let commits = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed) + 1;
-        if interval != 0 && commits.is_multiple_of(interval) {
-            let _ = self.gc_unreachable().await;
-        }
-    }
-
     pub async fn load_session_graph(&self) -> Result<lash_core::SessionGraph, StoreError> {
         let session_id = self.selected_session_id()?;
         self.conn

@@ -1020,7 +1020,6 @@ impl SessionCommitStore for Store {
             })
             .await
             .map_err(sqlite_error)??;
-        self.maybe_auto_gc().await;
         Ok(result)
     }
 

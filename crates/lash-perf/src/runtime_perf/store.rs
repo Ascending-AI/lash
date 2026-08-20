@@ -580,7 +580,9 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         &self,
         _session_id: &str,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        Ok(lash_core::SessionBlobReclaimReport::default())
+        Err(lash_core::MaintenanceFailure::failed_before_any_work(
+            unsupported_maintenance("delete_session"),
+        ))
     }
 }
 

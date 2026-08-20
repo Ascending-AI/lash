@@ -11,6 +11,106 @@
 
 use std::sync::Arc;
 
+use super::session_delete_blob_reclaim::SessionDeleteBlobProbe;
+
+/// Process retention must route its runtime-session severance through the same
+/// exact-edge blob reclaim as an explicit session delete. A failed blob delete
+/// aborts the process prune, and the identical retry reclaims the now-unowned
+/// checkpoint root and components.
+pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
+    backend: &str,
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    probe: Arc<dyn SessionDeleteBlobProbe>,
+) {
+    const PROCESS_ID: &str = "prune-reclaims-checkpoint-blobs";
+    let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
+    let process_session_id = crate::process_runtime_session_ids(PROCESS_ID)[0].clone();
+    register_process(registry.as_ref(), PROCESS_ID).await;
+    let store = create_store(&factory, &process_session_id, &policy).await;
+    let mut state = crate::RuntimeSessionState {
+        session_id: process_session_id,
+        ..crate::RuntimeSessionState::new(policy)
+    };
+    state.ensure_agent_frame_initialized();
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.checkpoint.components.insert(
+        "conformance/process-prune-owned".to_string(),
+        crate::HydratedCheckpointComponent::changed(
+            format!("process-prune-owned:{backend}").into_bytes(),
+        ),
+    );
+    let receipt = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("commit process-owned checkpoint");
+    let mut blob_refs = receipt
+        .manifest
+        .components
+        .values()
+        .map(|component| component.blob_ref.clone())
+        .collect::<Vec<_>>();
+    blob_refs.push(receipt.checkpoint_ref);
+
+    let terminal = registry
+        .complete_process(
+            PROCESS_ID,
+            crate::ProcessAwaitOutput::Success {
+                value: serde_json::Value::Null,
+                control: None,
+            },
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete process with owned checkpoint");
+    probe.fail_next_blob_delete().await;
+    let failure = registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect_err("a process-session blob failure must fail the process prune");
+    probe.clear_blob_delete_failure().await;
+    assert!(
+        failure.to_string().contains("blob"),
+        "{backend}: the process prune must propagate the blob reclaim failure: {failure}"
+    );
+    assert!(
+        registry
+            .get_process(PROCESS_ID)
+            .await
+            .expect("read process after failed prune")
+            .is_some(),
+        "{backend}: failed blob reclaim must roll back the process prune"
+    );
+    for blob_ref in &blob_refs {
+        assert!(
+            probe.blob_exists(blob_ref).await,
+            "{backend}: failed prune must retain blob `{}`",
+            blob_ref.as_str()
+        );
+    }
+
+    let report = registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("retry process prune after clearing blob failure");
+    assert_eq!(report.pruned_processes, 1);
+    for blob_ref in &blob_refs {
+        assert!(
+            !probe.blob_exists(blob_ref).await,
+            "{backend}: successful process prune must reclaim blob `{}`",
+            blob_ref.as_str()
+        );
+    }
+}
+
 /// A prune's ancestry retire tombstones nodes regardless of who owns them, so a
 /// batch can tombstone a node owned by a session *outside* the batch. When that
 /// owner is already deleted, its id is unbindable and no session-scoped vacuum

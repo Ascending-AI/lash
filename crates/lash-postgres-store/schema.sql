@@ -47,7 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_node_anchors_checkpoint_ref
 -- reference data, never a cached reference count.
 CREATE TABLE IF NOT EXISTS lash_checkpoint_blob_refs (
     checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
-    blob_ref TEXT NOT NULL,
+    blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
     PRIMARY KEY (checkpoint_ref, blob_ref)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_checkpoint_blob_refs_blob_ref

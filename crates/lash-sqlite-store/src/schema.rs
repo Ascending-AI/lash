@@ -18,13 +18,12 @@ pub(crate) enum StoreBacking {
 
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
-/// This is the *only* schema the store supports. Older durable-core databases —
-/// including any rolled forward through prior migration chains — must be
-/// deleted before opening with this binary; [`ensure_schema`] rejects any
-/// `PRAGMA user_version` that does not match [`SCHEMA_VERSION`] exactly. We
-/// run with no on-the-fly migrations on purpose: lash's durable contract
-/// lives one level up in the per-record `schema_version` stamps, not in
-/// SQL DDL juggling.
+/// This is the *only* schema the store supports. Older durable-core databases
+/// must normally be deleted before opening with this binary. The sole in-place
+/// exception is 37 -> 38: [`ensure_schema`] creates and transactionally backfills
+/// the exact checkpoint-component edge projection before advancing
+/// `PRAGMA user_version`. Lash's broader durable contract still lives one level
+/// up in per-record `schema_version` stamps, not in compatibility reads.
 pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS blobs (
     hash    TEXT PRIMARY KEY,
@@ -296,9 +295,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 ";
 
-/// Canonical schema version. There is no migration chain — older databases
-/// must be deleted before opening. See the [`SCHEMA`] doc comment for the
-/// rationale.
+/// Canonical schema version. There is no general migration chain — older
+/// databases must be deleted before opening except for the exact durable-core
+/// 37 -> 38 arming migration. See the [`SCHEMA`] doc comment for the rationale.
 ///
 /// Bumped to 10 for the attachment three-layer cutover (ADR 0028): the
 /// `attachment_manifest` this schema gates carried, pre-cutover, committed refs
@@ -393,8 +392,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// path.
 /// Version 38 projects checkpoint-manifest component edges into an indexed
 /// relation so owner-delete reclaim can decide blob liveness inside the
-/// severing transaction. Older catalogs have no complete edge projection and
-/// are rejected and recreated.
+/// severing transaction. Version-37 catalogs are armed in place by decoding
+/// every manifest reachable from a session head or node anchor and inserting
+/// its exact component edges in the same transaction that stamps version 38.
+/// Catalogs below 37 remain reject-and-recreate boundaries.
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
@@ -891,6 +892,12 @@ fn prepare_versioned_schema<'connection>(
         tx.execute_batch(schema)?;
         return Ok(tx);
     }
+    if database_kind == "session" && user_version == 37 && schema_version == 38 {
+        tx.execute_batch(schema)?;
+        backfill_checkpoint_blob_refs(&tx)?;
+        tx.pragma_update(None, "user_version", schema_version)?;
+        return Ok(tx);
+    }
     if user_version == 0 && !has_user_schema_objects(&tx)? {
         tx.execute_batch(schema)?;
         tx.pragma_update(None, "user_version", schema_version)?;
@@ -904,6 +911,50 @@ fn prepare_versioned_schema<'connection>(
             user_version,
         )),
     ))
+}
+
+/// Populate the version-38 exact-edge projection from every pre-existing live
+/// checkpoint root. Only the manifest is decoded: component codec compatibility
+/// remains a hydration concern, while even an opaque component still has an
+/// exact content-addressed edge that reclaim must preserve.
+fn backfill_checkpoint_blob_refs(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let checkpoint_refs = {
+        let mut statement = tx.prepare(
+            "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
+             UNION
+             SELECT checkpoint_ref FROM node_anchors
+             ORDER BY checkpoint_ref",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for checkpoint_ref in checkpoint_refs {
+        let bytes = tx
+            .query_row(
+                "SELECT content FROM blobs WHERE hash = ?1",
+                params![checkpoint_ref],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                sqlite_conversion_error(StoreError::StoredDataCorrupt {
+                    record_kind: "SessionCheckpoint",
+                    message: format!("rooted checkpoint manifest `{checkpoint_ref}` is missing"),
+                })
+            })?;
+        let content = decode_artifact_blob(&bytes)
+            .map_err(sqlite_conversion_error)?
+            .unwrap_or(bytes);
+        let manifest = decode_checkpoint(&content).map_err(sqlite_conversion_error)?;
+        for descriptor in manifest.components.values() {
+            tx.execute(
+                "INSERT OR IGNORE INTO checkpoint_blob_refs (checkpoint_ref, blob_ref)
+                 VALUES (?1, ?2)",
+                params![checkpoint_ref, descriptor.blob_ref.as_str()],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<bool> {

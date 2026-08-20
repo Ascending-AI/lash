@@ -1,25 +1,17 @@
 use lash_core::store::GraphAppend;
 use lash_core::{
-    HydratedSessionCheckpoint, LeaseOwnerIdentity, Message, MessageRole, ModelSpec, Part,
-    PersistedTurnState, PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState,
-    SessionCommitStore, SessionExecutionLeaseStore, SessionPolicy, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
-    facade_support::shared_parts,
+    HydratedSessionCheckpoint, Message, MessageRole, ModelSpec, Part, PersistedTurnState,
+    PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState, SessionCommitStore, SessionPolicy,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry,
+    TokenUsage, ToolState, facade_support::shared_parts,
 };
-use lash_sqlite_store::{
-    BlobArtifactDescriptor, BuiltinBlobProfile, SqliteSessionStoreFactory, Store, StoreGcPolicy,
-    StoreOptions,
-};
+use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, Store};
 
 fn model_spec(id: &str) -> ModelSpec {
     ModelSpec::builder(id)
         .context_window_tokens(200_000)
         .build()
         .expect("valid test model spec")
-}
-
-fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
-    LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
 fn persisted_tool_state_at_generation(generation: u64) -> ToolState {
@@ -158,60 +150,6 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
             .expect("read plugin blob")
             .is_some()
     );
-    assert!(
-        store
-            .get_blob(&orphan)
-            .await
-            .expect("read orphan blob")
-            .is_none()
-    );
-}
-
-#[tokio::test]
-async fn auto_gc_runs_after_commit_without_reentrant_locking() {
-    let store = Store::memory_with_options(StoreOptions {
-        blob_profile: BuiltinBlobProfile::LowLatency,
-        gc_policy: StoreGcPolicy {
-            auto_run_every_commits: Some(1),
-        },
-    })
-    .await
-    .expect("store");
-    let orphan = store
-        .put_artifact_blob(BlobArtifactDescriptor::checkpoint_component(), b"orphan")
-        .await
-        .expect("store orphan");
-    let state = RuntimeSessionState {
-        session_id: "auto-gc".to_string(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
-        .await
-        .expect("bind session to store");
-    let owner = lease_owner("auto-gc-test");
-    let session_lease = store
-        .try_claim_session_execution_lease(
-            "auto-gc",
-            &owner,
-            "auto-gc-runs-after-commit-without-reentrant-locking-executor",
-            60_000,
-        )
-        .await
-        .expect("claim session execution lease")
-        .acquired()
-        .expect("session execution lease");
-
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .releasing_session_execution_lease(session_lease.completion()),
-        )
-        .await
-        .expect("commit");
-
     assert!(
         store
             .get_blob(&orphan)

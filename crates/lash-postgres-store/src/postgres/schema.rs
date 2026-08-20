@@ -56,7 +56,7 @@ const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_conde
 
 const CHECKPOINT_BLOB_REFS_DDL: &str = r#"CREATE TABLE lash_checkpoint_blob_refs (
             checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
-            blob_ref TEXT NOT NULL,
+            blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
             PRIMARY KEY (checkpoint_ref, blob_ref)
         )"#;
 
@@ -223,9 +223,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
             SESSIONS_CHECKPOINT_REF_INDEX_DDL,
             NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
-            r#"UPDATE lash_schema_versions
-               SET version = 57
-             WHERE component = 'lash-postgres-store' AND version = 56"#,
         ],
     },
     // A component-55 store takes both later generations at once: trigger
@@ -251,9 +248,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
-            r#"UPDATE lash_schema_versions
-               SET version = 57
-             WHERE component = 'lash-postgres-store' AND version = 55"#,
         ],
     },
     // The 55 generation adds one index and nothing else: the drain's
@@ -283,9 +277,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
-            r#"UPDATE lash_schema_versions
-               SET version = 57
-             WHERE component = 'lash-postgres-store' AND version = 54"#,
         ],
     },
     // A 53 store takes both later generations at once: the 54 effect-group
@@ -328,9 +319,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
-            r#"UPDATE lash_schema_versions
-               SET version = 57
-             WHERE component = 'lash-postgres-store' AND version = 53"#,
         ],
     },
     SchemaMigration {
@@ -374,9 +362,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
-            r#"UPDATE lash_schema_versions
-               SET version = 57
-             WHERE component = 'lash-postgres-store' AND version = 52"#,
         ],
     },
     SchemaMigration {
@@ -426,9 +411,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
-            r#"UPDATE lash_schema_versions
-               SET version = 57
-             WHERE component = 'lash-postgres-store' AND version = 51"#,
         ],
     },
     // Component-50 stores skipped the 51 generation entirely; they take one
@@ -488,9 +470,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
-            r#"UPDATE lash_schema_versions
-               SET version = 57
-             WHERE component = 'lash-postgres-store' AND version = 50"#,
         ],
     },
 ];
@@ -761,6 +740,25 @@ async fn apply_schema_migration(
             .await
             .map_err(store_sqlx_error)?;
     }
+    backfill_checkpoint_blob_refs_tx(tx).await?;
+    let stamped = sqlx::query(
+        "UPDATE lash_schema_versions
+         SET version = $1
+         WHERE component = $2 AND version = $3",
+    )
+    .bind(migration.to)
+    .bind(SCHEMA_COMPONENT)
+    .bind(migration.from)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .rows_affected();
+    if stamped != 1 {
+        return Err(StoreError::Backend(format!(
+            "Postgres schema migration {} -> {} updated {stamped} component stamps, expected 1",
+            migration.from, migration.to
+        )));
+    }
     tracing::info!(
         component = SCHEMA_COMPONENT,
         from_version = migration.from,
@@ -771,6 +769,62 @@ async fn apply_schema_migration(
     Ok(SchemaMigrationOutcome::Applied {
         previous_search_path,
     })
+}
+
+/// Arm exact-edge reclaim for every checkpoint manifest that was rooted before
+/// component 56 existed. This runs after the projection table is created and
+/// before the component stamp advances, inside the opener's schema transaction.
+///
+/// Only the manifest envelope is decoded. Component codec compatibility remains
+/// a hydration concern: an old component version can still name an exact blob
+/// edge without this binary interpreting its body.
+async fn backfill_checkpoint_blob_refs_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<(), StoreError> {
+    let rooted_manifests = sqlx::query(
+        "WITH rooted AS (
+             SELECT checkpoint_ref FROM lash_sessions WHERE checkpoint_ref IS NOT NULL
+             UNION
+             SELECT checkpoint_ref FROM lash_node_anchors
+         )
+         SELECT rooted.checkpoint_ref, blob.content
+         FROM rooted
+         LEFT JOIN lash_blobs AS blob ON blob.hash = rooted.checkpoint_ref
+         ORDER BY rooted.checkpoint_ref",
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    for row in rooted_manifests {
+        let checkpoint_ref: String = row.get(0);
+        let bytes: Option<Vec<u8>> = row.get(1);
+        let bytes = bytes.ok_or_else(|| StoreError::StoredDataCorrupt {
+            record_kind: "SessionCheckpoint",
+            message: format!("rooted checkpoint manifest `{checkpoint_ref}` is missing"),
+        })?;
+        let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
+            &bytes,
+            "SessionCheckpoint",
+            lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+        )?;
+        let component_refs = manifest
+            .components
+            .values()
+            .map(|descriptor| descriptor.blob_ref.as_str())
+            .collect::<Vec<_>>();
+        sqlx::query(
+            "INSERT INTO lash_checkpoint_blob_refs (checkpoint_ref, blob_ref)
+             SELECT $1, component_ref
+             FROM unnest($2::TEXT[]) AS component_ref
+             ON CONFLICT (checkpoint_ref, blob_ref) DO NOTHING",
+        )
+        .bind(&checkpoint_ref)
+        .bind(component_refs)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
+    Ok(())
 }
 
 impl SchemaMigration {

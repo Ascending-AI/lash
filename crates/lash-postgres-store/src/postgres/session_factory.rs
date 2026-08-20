@@ -723,6 +723,36 @@ async fn lock_checkpoint_blob_root_tx(
     Ok(())
 }
 
+async fn lock_session_blob_candidates_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    candidates: &std::collections::BTreeSet<String>,
+    owner: &str,
+) -> Result<(), StoreError> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let candidate_vec = candidates.iter().cloned().collect::<Vec<_>>();
+    // Same global lock order as checkpoint publication in support.rs: every
+    // blob row in the complete union is locked by ascending content hash before
+    // any owner edge is severed.
+    let locked = sqlx::query_scalar::<_, String>(
+        "SELECT hash FROM lash_blobs
+         WHERE hash = ANY($1::TEXT[])
+         ORDER BY hash
+         FOR UPDATE",
+    )
+    .bind(&candidate_vec)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if locked.len() != candidate_vec.len() {
+        return Err(StoreError::Backend(format!(
+            "{owner} has a missing checkpoint blob reference"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
@@ -764,7 +794,9 @@ pub(crate) async fn delete_session_tx(
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
     let mut candidates = std::collections::BTreeSet::new();
+    let mut checkpoint_refs = std::collections::BTreeSet::new();
     if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
+        checkpoint_refs.insert(checkpoint_ref.to_string());
         candidates.insert(checkpoint_ref.to_string());
         candidates.extend(
             sqlx::query_scalar::<_, String>(
@@ -777,24 +809,7 @@ pub(crate) async fn delete_session_tx(
             .map_err(store_sqlx_error)?,
         );
     }
-    let candidate_vec = candidates.iter().cloned().collect::<Vec<_>>();
-    if !candidate_vec.is_empty() {
-        let locked = sqlx::query_scalar::<_, String>(
-            "SELECT hash FROM lash_blobs
-             WHERE hash = ANY($1::TEXT[])
-             ORDER BY hash
-             FOR UPDATE",
-        )
-        .bind(&candidate_vec)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if locked.len() != candidate_vec.len() {
-            return Err(StoreError::Backend(format!(
-                "session `{session_id}` has a missing checkpoint blob reference"
-            )));
-        }
-    }
+    lock_session_blob_candidates_tx(tx, &candidates, &format!("session `{session_id}`")).await?;
     report.enumerated_blob_count = candidates.len();
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
         .bind(session_id)
@@ -880,7 +895,7 @@ pub(crate) async fn delete_session_tx(
     crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
         tx,
         candidates,
-        checkpoint_ref.as_ref(),
+        &checkpoint_refs,
         report,
     )
     .await
@@ -898,31 +913,64 @@ pub(crate) async fn delete_session_tx(
 pub(crate) async fn delete_process_sessions_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[String],
-) -> Result<(), StoreError> {
+) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
     if session_ids.is_empty() {
-        return Ok(());
+        return Ok(lash_core::SessionBlobReclaimReport::default());
     }
 
-    // Take every session-history mutation fence in a standalone statement
-    // before deleting heads or deciding whether graph cleanup is required.
-    // The ordered subquery gives overlapping batches one lock-request order.
-    sqlx::query(
-        "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
+    let mut report = lash_core::SessionBlobReclaimReport::default();
+    let outcome: Result<(), StoreError> = async {
+        // Take every session-history mutation fence in a standalone statement
+        // before deleting heads or deciding whether graph cleanup is required.
+        // The ordered subquery gives overlapping batches one lock-request order.
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
          FROM (
              SELECT session_id
              FROM unnest($1::TEXT[]) AS target(session_id)
              ORDER BY session_id
          ) AS ordered",
-    )
-    .bind(session_ids)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+        )
+        .bind(session_ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
 
-    // Permanent identity evidence for every materialized id in the batch,
-    // recorded before the rows go away so the reclaim arm below can see it.
-    sqlx::query(
-        "INSERT INTO lash_deleted_sessions (session_id)
+        let checkpoint_refs = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT checkpoint_ref
+         FROM lash_sessions
+         WHERE session_id = ANY($1) AND checkpoint_ref IS NOT NULL
+         ORDER BY checkpoint_ref",
+        )
+        .bind(session_ids)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        let mut candidates = checkpoint_refs.clone();
+        if !checkpoint_refs.is_empty() {
+            let checkpoint_ref_vec = checkpoint_refs.iter().cloned().collect::<Vec<_>>();
+            candidates.extend(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT DISTINCT blob_ref
+                 FROM lash_checkpoint_blob_refs
+                 WHERE checkpoint_ref = ANY($1::TEXT[])
+                 ORDER BY blob_ref",
+                )
+                .bind(checkpoint_ref_vec)
+                .fetch_all(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?,
+            );
+        }
+        lock_session_blob_candidates_tx(tx, &candidates, "process-prune session batch").await?;
+        report.enumerated_blob_count = candidates.len();
+
+        // Permanent identity evidence for every materialized id in the batch,
+        // recorded before the rows go away so the reclaim arm below can see it.
+        sqlx::query(
+            "INSERT INTO lash_deleted_sessions (session_id)
          SELECT target.session_id
          FROM unnest($1::TEXT[]) AS target(session_id)
          WHERE EXISTS (
@@ -934,14 +982,15 @@ pub(crate) async fn delete_process_sessions_tx(
                    WHERE session.session_id = target.session_id
                )
          ON CONFLICT (session_id) DO NOTHING",
-    )
-    .bind(session_ids)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+        )
+        .bind(session_ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
 
-    let (deleted_leaf_node_ids, has_graph_candidates) = sqlx::query_as::<_, (Vec<String>, bool)>(
-        "WITH deleted_sessions AS (
+        let (deleted_leaf_node_ids, has_graph_candidates) =
+            sqlx::query_as::<_, (Vec<String>, bool)>(
+                "WITH deleted_sessions AS (
                  DELETE FROM lash_sessions AS session
                  WHERE session.session_id = ANY($1)
                  RETURNING session.session_id, session.leaf_node_id
@@ -964,18 +1013,19 @@ pub(crate) async fn delete_process_sessions_tx(
                           )
                     )
              FROM deleted_sessions",
-    )
-    .bind(session_ids)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+            )
+            .bind(session_ids)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
 
-    if has_graph_candidates {
-        for leaf_node_id in deleted_leaf_node_ids {
-            crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id).await?;
-        }
-        let unreachable_candidates = sqlx::query_scalar::<_, String>(
-            "SELECT graph.node_id FROM lash_graph_nodes AS graph
+        if has_graph_candidates {
+            for leaf_node_id in deleted_leaf_node_ids {
+                crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id)
+                    .await?;
+            }
+            let unreachable_candidates = sqlx::query_scalar::<_, String>(
+                "SELECT graph.node_id FROM lash_graph_nodes AS graph
              WHERE graph.session_id = ANY($1) AND graph.tombstoned = FALSE
                AND NOT EXISTS (
                    SELECT 1 FROM lash_graph_nodes AS child
@@ -991,29 +1041,29 @@ pub(crate) async fn delete_process_sessions_tx(
                    WHERE anchor.node_id = graph.node_id
                )
              ORDER BY graph.seq DESC",
-        )
-        .bind(session_ids)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        for node_id in unreachable_candidates {
-            crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
+            )
+            .bind(session_ids)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            for node_id in unreachable_candidates {
+                crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
+            }
         }
-    }
 
-    let trigger_owner_namespaces = session_ids
-        .iter()
-        .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
-        .collect::<Vec<_>>();
-    sqlx::query(
-        // Delete-time reclaim covers the batch's tombstoned rows plus any
-        // tombstoned row owned by an already-deleted session. The ancestry
-        // retire above tombstones a node regardless of who owns it, so a batch
-        // can strand a row belonging to a session outside it; that owner is
-        // unbindable, so no session-scoped vacuum could ever reach the row.
-        // Live sessions' rows stay resident for their own vacuum, so this is
-        // not a catalog-wide sweep.
-        "WITH deleted_graph_nodes AS (
+        let trigger_owner_namespaces = session_ids
+            .iter()
+            .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
+            .collect::<Vec<_>>();
+        sqlx::query(
+            // Delete-time reclaim covers the batch's tombstoned rows plus any
+            // tombstoned row owned by an already-deleted session. The ancestry
+            // retire above tombstones a node regardless of who owns it, so a batch
+            // can strand a row belonging to a session outside it; that owner is
+            // unbindable, so no session-scoped vacuum could ever reach the row.
+            // Live sessions' rows stay resident for their own vacuum, so this is
+            // not a catalog-wide sweep.
+            "WITH deleted_graph_nodes AS (
              DELETE FROM lash_graph_nodes
              WHERE tombstoned = TRUE
                AND (session_id = ANY($1)
@@ -1098,15 +1148,33 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_fork_lineage)
               + (SELECT count(*) FROM deleted_session_meta)
               + (SELECT count(*) FROM deleted_trigger_manifests)",
-    )
-    .bind(session_ids)
-    .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-    .bind(&trigger_owner_namespaces)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+        )
+        .bind(session_ids)
+        .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
+        .bind(&trigger_owner_namespaces)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
 
-    Ok(())
+        crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
+            tx,
+            candidates,
+            &checkpoint_refs,
+            &mut report,
+        )
+        .await?;
+        Ok(())
+    }
+    .await;
+    match outcome {
+        Ok(()) => Ok(report),
+        Err(error) => {
+            // The caller owns the transaction and rolls it back on this stop;
+            // no physical delete in the partial report can survive.
+            report.deleted_blob_count = 0;
+            Err(lash_core::MaintenanceFailure::failed(error, report))
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

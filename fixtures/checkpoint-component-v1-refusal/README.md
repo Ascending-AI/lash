@@ -5,7 +5,10 @@ encoding version 1. They are intentionally not regenerated when the current
 durable-read fixture advances.
 
 - `sqlite/durable-core.db` uses the schema-38 SQLite catalog while
-  retaining the checkpoint blob from commit `a461383be`.
+  retaining the checkpoint blob from commit `a461383be`. Its one live head has
+  all six manifest-component edges projected in `checkpoint_blob_refs`; the
+  fixture was re-armed through the same transactional 37 -> 38 backfill as a
+  deployed legacy catalog.
 - `postgres/fixture.sql` uses the schema-50 PostgreSQL catalog while
   retaining the checkpoint blob from the same commit.
 

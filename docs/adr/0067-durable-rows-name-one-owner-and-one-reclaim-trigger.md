@@ -181,9 +181,9 @@ cannot complete, the delete does not claim to have happened.
 
 Factory-global work — anything whose cost scales with the store rather than
 with the owner — runs only when the host invokes a lever. There is no
-auto-sweep hook: `StoreGcPolicy.auto_run_every_commits` is **deleted** from the
-contract. A commit path that occasionally becomes a full sweep is an unbounded
-latency cliff the host never asked for and cannot schedule around.
+commit-triggered auto-sweep configuration in the contract. A commit path that
+occasionally becomes a full sweep is an unbounded latency cliff the host never
+asked for and cannot schedule around.
 
 The FIG-1506 asymmetry resolves in both directions at once: SQLite's whole-DB
 blob sweep moves **out** of the session-delete transaction, and Postgres gains
@@ -353,8 +353,8 @@ it never consulted, which section 2 forbids.
 
 * Every new durable table states its owner and trigger class at review time.
   A table that cannot is a design finding, not a style nit.
-* `StoreGcPolicy.auto_run_every_commits` leaves the contract. Hosts that relied
-  on incidental sweeping now schedule the lever, and the sweep's cost becomes
+* Commit-triggered automatic GC leaves the contract. Hosts that relied on
+  incidental sweeping now schedule the lever, and the sweep's cost becomes
   something they can observe and place.
 * Reclamation reports gain typed blocked reasons and an error that carries its
   partial report; backends that previously returned a clean empty report on

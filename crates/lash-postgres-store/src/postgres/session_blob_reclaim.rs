@@ -3,17 +3,18 @@ use crate::*;
 pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     candidates: std::collections::BTreeSet<String>,
-    checkpoint_ref: Option<&String>,
+    checkpoint_refs: &std::collections::BTreeSet<String>,
     report: &mut lash_core::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     let mut ordered_candidates = Vec::with_capacity(candidates.len());
-    if let Some(checkpoint_ref) = checkpoint_ref {
-        ordered_candidates.push(checkpoint_ref.clone());
-    }
+    // Roots go first so their outgoing projection edges cascade away before a
+    // component's exact-edge predicate runs. Blob row locks were already taken
+    // in global hash order; this is delete order only and cannot deadlock.
+    ordered_candidates.extend(checkpoint_refs.iter().cloned());
     ordered_candidates.extend(
         candidates
             .into_iter()
-            .filter(|candidate| Some(candidate) != checkpoint_ref),
+            .filter(|candidate| !checkpoint_refs.contains(candidate)),
     );
     for blob_ref in ordered_candidates {
         let deleted = sqlx::query(
