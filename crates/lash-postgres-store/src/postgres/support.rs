@@ -34,6 +34,46 @@ pub(crate) fn clamp_epoch_ms(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
+pub(crate) async fn retained_fork_config_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+) -> Result<lash_core::PersistedSessionConfig, StoreError> {
+    let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
+        .await?
+        .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+            leaf_node_id: node_id.to_string(),
+        })?;
+    let row = sqlx::query(
+        "SELECT parent_node_id, node_json FROM lash_graph_nodes
+         WHERE node_id = $1 AND tombstoned = FALSE",
+    )
+    .bind(&frame_node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .ok_or_else(|| {
+        StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
+    })?;
+    let parent_node_id = row.get(0);
+    let node_json: String = row.get(1);
+    lash_core::SessionNodeRecord::decode_storage_body(
+        frame_node_id.clone(),
+        parent_node_id,
+        &node_json,
+    )
+    .map_err(|error| {
+        StoreError::Backend(format!(
+            "failed to decode retained frame node `{frame_node_id}`: {error}"
+        ))
+    })?
+    .frame_config()
+    .ok_or_else(|| {
+        StoreError::Backend(format!(
+            "retained frame node `{frame_node_id}` has no frame assignment"
+        ))
+    })
+}
+
 pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     if is_contention_error(&err) {
         StoreError::Contended

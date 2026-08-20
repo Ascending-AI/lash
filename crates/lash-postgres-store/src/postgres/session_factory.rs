@@ -1,45 +1,5 @@
 use crate::*;
 
-async fn retained_fork_config_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-) -> Result<lash_core::PersistedSessionConfig, StoreError> {
-    let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
-        .await?
-        .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-            leaf_node_id: node_id.to_string(),
-        })?;
-    let row = sqlx::query(
-        "SELECT parent_node_id, node_json FROM lash_graph_nodes
-         WHERE node_id = $1 AND tombstoned = FALSE",
-    )
-    .bind(&frame_node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?
-    .ok_or_else(|| {
-        StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
-    })?;
-    let parent_node_id = row.get(0);
-    let node_json: String = row.get(1);
-    lash_core::SessionNodeRecord::decode_storage_body(
-        frame_node_id.clone(),
-        parent_node_id,
-        &node_json,
-    )
-    .map_err(|error| {
-        StoreError::Backend(format!(
-            "failed to decode retained frame node `{frame_node_id}`: {error}"
-        ))
-    })?
-    .frame_config()
-    .ok_or_else(|| {
-        StoreError::Backend(format!(
-            "retained frame node `{frame_node_id}` has no frame assignment"
-        ))
-    })
-}
-
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn create_store(
@@ -198,7 +158,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .await
         .map_err(store_sqlx_error)?
         {
-            let config = retained_fork_config_tx(&mut tx, node_id).await?;
+            let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::ForkPoint {
                 node_id: node_id.to_string(),
@@ -222,7 +182,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             retained.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: node_id.to_string(),
             })?;
-        lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
+        crate::session_blob_reclaim::lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
         sqlx::query(
             "INSERT INTO lash_node_anchors (node_id, checkpoint_ref, source_session_id)
              VALUES ($1, $2, $3)",
@@ -233,7 +193,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let config = retained_fork_config_tx(&mut tx, node_id).await?;
+        let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core::ForkPoint {
             node_id: node_id.to_string(),
@@ -299,7 +259,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         for row in rows {
             let node_id: String = row.get(0);
             points.push(lash_core::ForkPoint {
-                config: retained_fork_config_tx(&mut tx, &node_id).await?,
+                config: crate::support::retained_fork_config_tx(&mut tx, &node_id).await?,
                 node_id,
                 checkpoint_ref: BlobRef(row.get(1)),
                 source_session_id: row.get(2),
@@ -367,7 +327,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             retained.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             })?;
-        lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
+        crate::session_blob_reclaim::lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
         let node_facts = sqlx::query_as::<_, (String, i64)>(
             "SELECT session_id, generation FROM lash_graph_nodes
              WHERE node_id = $1 AND tombstoned = FALSE
@@ -705,54 +665,6 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
     }
 }
 
-async fn lock_checkpoint_blob_root_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    checkpoint_ref: &str,
-) -> Result<(), StoreError> {
-    let exists =
-        sqlx::query_scalar::<_, bool>("SELECT TRUE FROM lash_blobs WHERE hash = $1 FOR KEY SHARE")
-            .bind(checkpoint_ref)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    if exists.is_none() {
-        return Err(StoreError::Backend(format!(
-            "checkpoint root `{checkpoint_ref}` is missing"
-        )));
-    }
-    Ok(())
-}
-
-async fn lock_session_blob_candidates_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    candidates: &std::collections::BTreeSet<String>,
-    owner: &str,
-) -> Result<(), StoreError> {
-    if candidates.is_empty() {
-        return Ok(());
-    }
-    let candidate_vec = candidates.iter().cloned().collect::<Vec<_>>();
-    // Same global lock order as checkpoint publication in support.rs: every
-    // blob row in the complete union is locked by ascending content hash before
-    // any owner edge is severed.
-    let locked = sqlx::query_scalar::<_, String>(
-        "SELECT hash FROM lash_blobs
-         WHERE hash = ANY($1::TEXT[])
-         ORDER BY hash
-         FOR UPDATE",
-    )
-    .bind(&candidate_vec)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    if locked.len() != candidate_vec.len() {
-        return Err(StoreError::Backend(format!(
-            "{owner} has a missing checkpoint blob reference"
-        )));
-    }
-    Ok(())
-}
-
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
@@ -793,23 +705,19 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
-    let mut candidates = std::collections::BTreeSet::new();
     let mut checkpoint_refs = std::collections::BTreeSet::new();
     if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
         checkpoint_refs.insert(checkpoint_ref.to_string());
-        candidates.insert(checkpoint_ref.to_string());
-        candidates.extend(
-            sqlx::query_scalar::<_, String>(
-                "SELECT blob_ref FROM lash_checkpoint_blob_refs
-                 WHERE checkpoint_ref = $1 ORDER BY blob_ref",
-            )
-            .bind(checkpoint_ref)
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?,
-        );
     }
-    lock_session_blob_candidates_tx(tx, &candidates, &format!("session `{session_id}`")).await?;
+    let candidates =
+        crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(tx, &checkpoint_refs)
+            .await?;
+    crate::session_blob_reclaim::lock_session_blob_candidates_tx(
+        tx,
+        &candidates,
+        &format!("session `{session_id}`"),
+    )
+    .await?;
     report.enumerated_blob_count = candidates.len();
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
         .bind(session_id)
@@ -948,23 +856,17 @@ pub(crate) async fn delete_process_sessions_tx(
         .map_err(store_sqlx_error)?
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
-        let mut candidates = checkpoint_refs.clone();
-        if !checkpoint_refs.is_empty() {
-            let checkpoint_ref_vec = checkpoint_refs.iter().cloned().collect::<Vec<_>>();
-            candidates.extend(
-                sqlx::query_scalar::<_, String>(
-                    "SELECT DISTINCT blob_ref
-                 FROM lash_checkpoint_blob_refs
-                 WHERE checkpoint_ref = ANY($1::TEXT[])
-                 ORDER BY blob_ref",
-                )
-                .bind(checkpoint_ref_vec)
-                .fetch_all(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?,
-            );
-        }
-        lock_session_blob_candidates_tx(tx, &candidates, "process-prune session batch").await?;
+        let candidates = crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(
+            tx,
+            &checkpoint_refs,
+        )
+        .await?;
+        crate::session_blob_reclaim::lock_session_blob_candidates_tx(
+            tx,
+            &candidates,
+            "process-prune session batch",
+        )
+        .await?;
         report.enumerated_blob_count = candidates.len();
 
         // Permanent identity evidence for every materialized id in the batch,

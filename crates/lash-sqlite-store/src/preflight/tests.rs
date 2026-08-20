@@ -49,20 +49,19 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
 }
 
 #[tokio::test]
-async fn preflight_reports_a_rewound_version_that_open_would_refuse() {
+async fn preflight_reports_a_version_below_the_migration_boundary_that_open_would_refuse() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
+    let unsupported = expected - 2;
 
-    rewind_user_version(&path, expected - 1);
+    rewind_user_version(&path, unsupported);
 
     let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
     assert_eq!(
         found.verdict,
-        StoreSchemaVerdict::Mismatch {
-            found: expected - 1
-        }
+        StoreSchemaVerdict::Mismatch { found: unsupported }
     );
     assert_eq!(found.expected, expected);
     assert!(found.verdict.refuses_open());
@@ -73,7 +72,7 @@ async fn preflight_reports_a_rewound_version_that_open_would_refuse() {
         Ok(_) => panic!("a rewound database must be refused at open"),
         Err(err) => err.to_string(),
     };
-    assert!(refusal.contains(&(expected - 1).to_string()), "{refusal}");
+    assert!(refusal.contains(&unsupported.to_string()), "{refusal}");
     assert!(refusal.contains(&expected.to_string()), "{refusal}");
 }
 

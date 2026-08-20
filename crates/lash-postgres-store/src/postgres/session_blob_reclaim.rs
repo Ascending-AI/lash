@@ -1,5 +1,76 @@
 use crate::*;
 
+pub(crate) async fn lock_checkpoint_blob_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    checkpoint_ref: &str,
+) -> Result<(), StoreError> {
+    let exists =
+        sqlx::query_scalar::<_, bool>("SELECT TRUE FROM lash_blobs WHERE hash = $1 FOR KEY SHARE")
+            .bind(checkpoint_ref)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    if exists.is_none() {
+        return Err(StoreError::Backend(format!(
+            "checkpoint root `{checkpoint_ref}` is missing"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) async fn enumerate_checkpoint_blob_candidates_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    checkpoint_refs: &std::collections::BTreeSet<String>,
+) -> Result<std::collections::BTreeSet<String>, StoreError> {
+    let mut candidates = checkpoint_refs.clone();
+    if !checkpoint_refs.is_empty() {
+        let checkpoint_ref_vec = checkpoint_refs.iter().cloned().collect::<Vec<_>>();
+        candidates.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT blob_ref
+                 FROM lash_checkpoint_blob_refs
+                 WHERE checkpoint_ref = ANY($1::TEXT[])
+                 ORDER BY blob_ref",
+            )
+            .bind(checkpoint_ref_vec)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?,
+        );
+    }
+    Ok(candidates)
+}
+
+pub(crate) async fn lock_session_blob_candidates_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    candidates: &std::collections::BTreeSet<String>,
+    owner: &str,
+) -> Result<(), StoreError> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let candidate_vec = candidates.iter().cloned().collect::<Vec<_>>();
+    // Same global lock order as checkpoint publication in support.rs: every
+    // blob row in the complete union is locked by ascending content hash before
+    // any owner edge is severed.
+    let locked = sqlx::query_scalar::<_, String>(
+        "SELECT hash FROM lash_blobs
+         WHERE hash = ANY($1::TEXT[])
+         ORDER BY hash
+         FOR UPDATE",
+    )
+    .bind(&candidate_vec)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if locked.len() != candidate_vec.len() {
+        return Err(StoreError::Backend(format!(
+            "{owner} has a missing checkpoint blob reference"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     candidates: std::collections::BTreeSet<String>,
