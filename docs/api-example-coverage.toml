@@ -3263,7 +3263,7 @@ aliases = ["lash::prelude::LashSession::turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2183#.turn(lash::TurnInput::text(turn_text))"
-assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2210#\"the first provider call must be blocked before the mid-turn read\""
+assertion = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs:2215#assert_eq!(running.active_turns.len(), 1);"
 
 [[api]]
 symbol = "lash::LashSession::turn_address"
@@ -8629,7 +8629,7 @@ aliases = ["lash_core::AttachmentTypeMetadata::image"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:173#lash::attachments::AttachmentTypeMetadata::image(Some(width), Some(height))"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:177#assert_eq!(uploaded_ref.media_type().as_str(), \"image/png\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:182#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
 # The Workbench evidence below intentionally exercises its PNG-only upload surface.
@@ -12637,7 +12637,7 @@ aliases = ["lash_core::facade_support::SessionResume::Replayed::events"]
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:686#events: replay_events,"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:698#\"{label} observer missed ModelAttemptReset: {events:#?}\""
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:697#resets, 1,"
 
 [[api]]
 symbol = "lash::observe::SessionRevision"
@@ -14096,9 +14096,9 @@ availability = "default+all-features"
 aliases = ["lash_core::LeaseOwnerIdentity::opaque"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1004#\"stream should expose an opaque live replay cursor: {lines:#?}\""
-assertion = "examples/agent-service/src/routes.rs:1004#\"stream should expose an opaque live replay cursor: {lines:#?}\""
-reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
+usage = "examples/agent-service/src/lease_triage.rs:273#&owner(\"worker-a\", \"worker-a:boot-1\"),"
+assertion = "examples/agent-service/src/lease_triage.rs:287#assert_eq!(report.holder_owner_id.as_deref(), Some(\"worker-a\"));"
+reason = "The agent-service lease-triage example passes an owner constructed by the facade helper into the durable lease claim and asserts the projected holder identity."
 
 [[api]]
 symbol = "lash::persistence::LeaseOwnerIdentity::owner_id"
@@ -29447,7 +29447,7 @@ availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/remote_trigger_assertions.rs:91#.list(&filter)"
-assertion = "examples/agent-workbench/src/main_sections/tests/remote_trigger_assertions.rs:108#\"remote process list did not include started process {process_id}\""
+assertion = "examples/agent-workbench/src/main_sections/tests/remote_trigger_assertions.rs:180#assert_eq!(round_trip_ids, observed_ids);"
 
 [[api]]
 symbol = "lash::process::Processes::list_observed_by"
@@ -37068,8 +37068,8 @@ availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:261#invocation: Some(runtime_invocation()),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:600#assert_eq!(projected_process[\"external_ref\"][\"id\"], \"invocation-778\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::signal_event#`event_type: \"signal.approval\".to_string(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`projected_process[\"lease_expires_at_ms\"],` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"external_ref\"][\"id\"]` equals `\"invocation-778\"`."
+assertion = "examples/docs-snippets/src/remote_protocol.rs:694#assert_eq!(signal_json[\"event\"][\"invocation\"][\"scope\"][\"turn_index\"], 4);"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::signal_event#`invocation: Some(runtime_invocation()),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`assert_eq!(signal_json[\"event\"][\"invocation\"][\"scope\"][\"turn_index\"], 4);` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes the projected invocation scope."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessEvent::occurred_at_ms"
@@ -39072,7 +39072,7 @@ availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:534#process: observed_process(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:325#assert!(RemoteProcessExecutionEnvRef::parse(\"process-env:sha256:not-a-digest\").is_err());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:564#assert_eq!(snapshot_json[\"items\"][0][\"process\"][\"terminal\"], false);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`process: observed_process(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`assert_eq!(snapshot_json[\"items\"][0][\"process\"][\"terminal\"], false);` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that the projected `process` reports `terminal` as false."
 
 [[api]]

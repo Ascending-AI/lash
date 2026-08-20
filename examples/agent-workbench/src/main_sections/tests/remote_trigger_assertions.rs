@@ -169,4 +169,13 @@
             assert_eq!(round_trip_process_id, *process_id);
             assert_eq!(round_trip_tail, expected_tail);
         }
+        let observed_ids = observed
+            .iter()
+            .map(|process| process.process_id.as_str())
+            .collect::<Vec<_>>();
+        let round_trip_ids = round_trip_observed
+            .iter()
+            .map(|process| process.process_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(round_trip_ids, observed_ids);
     }
