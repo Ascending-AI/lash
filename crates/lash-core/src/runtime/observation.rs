@@ -407,13 +407,29 @@ impl RuntimeHandle {
         cursor: &SessionCursor,
     ) -> Result<SessionResume, LiveReplayStoreError> {
         let observation = self.observe();
-        cursor.parse_for_session(observation.session_id())?;
+        let requested = cursor.parse_for_session(observation.session_id())?;
         match self.live_replay_store.replay_after_cursor(cursor)? {
-            LiveReplayOutcome::Replayed(events) => Ok(SessionResume::Replayed { events }),
-            LiveReplayOutcome::Gap(reason) => Ok(SessionResume::Gap {
-                gap: self.live_replay_gap(cursor, reason, observation.as_ref()),
-                observation: observation.session_observation(),
-            }),
+            LiveReplayOutcome::Replayed(events)
+                if Self::has_replacement_evidence(
+                    requested.revision,
+                    observation.session_revision(),
+                    events.iter().map(AsRef::as_ref),
+                ) =>
+            {
+                Ok(SessionResume::Replayed { events })
+            }
+            LiveReplayOutcome::Replayed(_) => {
+                let (observation, gap) = self.live_replay_gap(
+                    cursor,
+                    LiveReplayGapReason::Unavailable,
+                    observation.as_ref(),
+                );
+                Ok(SessionResume::Gap { observation, gap })
+            }
+            LiveReplayOutcome::Gap(reason) => {
+                let (observation, gap) = self.live_replay_gap(cursor, reason, observation.as_ref());
+                Ok(SessionResume::Gap { observation, gap })
+            }
         }
     }
 
@@ -422,16 +438,45 @@ impl RuntimeHandle {
         cursor: &SessionCursor,
     ) -> Result<SessionObservationSubscription, LiveReplayStoreError> {
         let observation = self.observe();
-        cursor.parse_for_session(observation.session_id())?;
+        let requested = cursor.parse_for_session(observation.session_id())?;
         match self.live_replay_store.subscribe_after_cursor(cursor)? {
-            LiveReplaySubscribeOutcome::Subscribed(subscription) => {
+            LiveReplaySubscribeOutcome::Subscribed(subscription)
+                if requested.revision == observation.session_revision()
+                    || (requested.revision < observation.session_revision()
+                        && subscription
+                            .contains_committed_at_or_after(observation.session_revision())) =>
+            {
                 Ok(SessionObservationSubscription::Subscribed(subscription))
             }
-            LiveReplaySubscribeOutcome::Gap(reason) => Ok(SessionObservationSubscription::Gap {
-                gap: self.live_replay_gap(cursor, reason, observation.as_ref()),
-                observation: observation.session_observation(),
-            }),
+            LiveReplaySubscribeOutcome::Subscribed(_) => {
+                let (observation, gap) = self.live_replay_gap(
+                    cursor,
+                    LiveReplayGapReason::Unavailable,
+                    observation.as_ref(),
+                );
+                Ok(SessionObservationSubscription::Gap { observation, gap })
+            }
+            LiveReplaySubscribeOutcome::Gap(reason) => {
+                let (observation, gap) = self.live_replay_gap(cursor, reason, observation.as_ref());
+                Ok(SessionObservationSubscription::Gap { observation, gap })
+            }
         }
+    }
+
+    fn has_replacement_evidence<'a>(
+        requested_revision: SessionRevision,
+        authoritative_revision: SessionRevision,
+        events: impl IntoIterator<Item = &'a SessionObservationEvent>,
+    ) -> bool {
+        requested_revision == authoritative_revision
+            || (requested_revision < authoritative_revision
+                && events.into_iter().any(|event| {
+                    event.revision >= authoritative_revision
+                        && matches!(
+                            &event.payload,
+                            SessionObservationEventPayload::Committed { .. }
+                        )
+                }))
     }
 
     fn live_replay_gap(
@@ -439,14 +484,40 @@ impl RuntimeHandle {
         requested_cursor: &SessionCursor,
         reason: LiveReplayGapReason,
         observation: &RuntimeObservation,
-    ) -> LiveReplayGap {
-        LiveReplayGap {
-            session_id: observation.session_id().to_string(),
-            requested_cursor: requested_cursor.clone(),
-            latest_cursor: observation.cursor().clone(),
-            latest_revision: observation.session_revision(),
-            reason,
-        }
+    ) -> (SessionObservation, LiveReplayGap) {
+        let latest_revision = observation.session_revision();
+        let observation_cursor = observation.cursor();
+        let current_cursor = self
+            .live_replay_store
+            .current_cursor(observation.session_id(), latest_revision);
+        let latest_cursor = match (
+            requested_cursor.parse_for_session(observation.session_id()),
+            observation_cursor.parse_for_session(observation.session_id()),
+            current_cursor.parse_for_session(observation.session_id()),
+        ) {
+            (Ok(requested), Ok(observation), Ok(current)) => [
+                (observation.live_position, observation_cursor.clone()),
+                (current.live_position, current_cursor),
+            ]
+            .into_iter()
+            .filter(|(position, _)| *position != requested.live_position)
+            .min_by_key(|(position, _)| *position)
+            .map_or_else(|| observation_cursor.clone(), |(_, cursor)| cursor),
+            _ => observation_cursor.clone(),
+        };
+        (
+            SessionObservation {
+                read_view: observation.read_view.clone(),
+                cursor: latest_cursor.clone(),
+            },
+            LiveReplayGap {
+                session_id: observation.session_id().to_string(),
+                requested_cursor: requested_cursor.clone(),
+                latest_cursor,
+                latest_revision,
+                reason,
+            },
+        )
     }
 
     pub async fn enqueue_turn_input(
@@ -711,6 +782,58 @@ mod tests {
 
     struct PanicLiveReplayStore;
 
+    #[derive(Debug)]
+    struct FailCommittedLiveReplayStore {
+        inner: InMemoryLiveReplayStore,
+    }
+
+    impl FailCommittedLiveReplayStore {
+        fn new() -> Self {
+            Self {
+                inner: InMemoryLiveReplayStore::default(),
+            }
+        }
+    }
+
+    impl LiveReplayStore for FailCommittedLiveReplayStore {
+        fn append(
+            &self,
+            session_id: &str,
+            revision: SessionRevision,
+            turn_id: Option<&str>,
+            payload: SessionObservationEventPayload,
+        ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
+            if matches!(&payload, SessionObservationEventPayload::Committed { .. }) {
+                return Err(LiveReplayStoreError::Store(
+                    "injected committed-event append failure".to_string(),
+                ));
+            }
+            self.inner.append(session_id, revision, turn_id, payload)
+        }
+
+        fn replay_after_cursor(
+            &self,
+            cursor: &SessionCursor,
+        ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
+            self.inner.replay_after_cursor(cursor)
+        }
+
+        fn subscribe_after_cursor(
+            &self,
+            cursor: &SessionCursor,
+        ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
+            self.inner.subscribe_after_cursor(cursor)
+        }
+
+        fn current_cursor(&self, session_id: &str, revision: SessionRevision) -> SessionCursor {
+            self.inner.current_cursor(session_id, revision)
+        }
+
+        fn trim_session(&self, session_id: &str) -> Result<(), LiveReplayStoreError> {
+            self.inner.trim_session(session_id)
+        }
+    }
+
     impl LiveReplayStore for PanicLiveReplayStore {
         fn append(
             &self,
@@ -796,6 +919,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_is_proven_continuity_not_missing_history_for_future_revision() {
+        let runtime = Box::pin(
+            LashRuntime::builder(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_session_id("future-revision-cursor")
+            .with_policy(crate::SessionPolicy {
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
+                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            })
+            .build(),
+        )
+        .await
+        .expect("runtime");
+        let handle = RuntimeHandle::new(runtime);
+        let ahead = SessionCursor::new("future-revision-cursor", SessionRevision::new(1), 0);
+
+        assert!(matches!(
+            handle
+                .resume_session_observation(&ahead)
+                .expect("resume future revision"),
+            SessionResume::Gap {
+                gap: LiveReplayGap {
+                    reason: LiveReplayGapReason::Unavailable,
+                    latest_revision: SessionRevision(0),
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            handle
+                .subscribe_session_observation(&ahead)
+                .expect("subscribe future revision"),
+            SessionObservationSubscription::Gap {
+                gap: LiveReplayGap {
+                    reason: LiveReplayGapReason::Unavailable,
+                    latest_revision: SessionRevision(0),
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn publish_revision_matches_the_single_export_across_a_commit() {
         let runtime = Box::pin(
             LashRuntime::builder(
@@ -874,6 +1048,80 @@ mod tests {
             SessionObservationEventPayload::Committed { .. }
         ));
         assert_eq!(events[1].turn_id, None);
+    }
+
+    #[tokio::test]
+    async fn auxiliary_event_does_not_reconcile_commit() {
+        let runtime = Box::pin(
+            LashRuntime::builder(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_session_id("auxiliary-reconciliation")
+            .with_policy(crate::SessionPolicy {
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
+                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            })
+            .build(),
+        )
+        .await
+        .expect("runtime");
+        let replay_store = Arc::new(FailCommittedLiveReplayStore::new());
+        let handle = RuntimeHandle::with_live_replay_store(runtime, replay_store.clone());
+        let cursor = handle.observe().cursor().clone();
+        let writer = handle.writer();
+        let mut runtime = writer.lock().await;
+        runtime.state.turn_index = 1;
+        runtime.state.current_frame_node_id = Some("next-frame".to_string());
+
+        handle.publish_from(&runtime);
+        drop(runtime);
+        let LiveReplayOutcome::Replayed(events) = replay_store
+            .replay_after_cursor(&cursor)
+            .expect("inspect retained auxiliary event")
+        else {
+            panic!("the retained auxiliary event should remain positionally replayable");
+        };
+        assert!(matches!(
+            events.as_slice(),
+            [event]
+                if event.revision == SessionRevision::new(1)
+                    && matches!(
+                        &event.payload,
+                        SessionObservationEventPayload::AgentFrameSwitched { .. }
+                    )
+        ));
+
+        assert!(matches!(
+            handle
+                .resume_session_observation(&cursor)
+                .expect("resume through public runtime seam"),
+            SessionResume::Gap {
+                gap: LiveReplayGap {
+                    reason: LiveReplayGapReason::Unavailable,
+                    latest_revision: SessionRevision(1),
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            handle
+                .subscribe_session_observation(&cursor)
+                .expect("subscribe through public runtime seam"),
+            SessionObservationSubscription::Gap {
+                gap: LiveReplayGap {
+                    reason: LiveReplayGapReason::Unavailable,
+                    latest_revision: SessionRevision(1),
+                    ..
+                },
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

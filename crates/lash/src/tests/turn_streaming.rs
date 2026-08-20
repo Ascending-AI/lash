@@ -3026,7 +3026,7 @@ async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<(
 }
 
 #[tokio::test]
-async fn session_observation_recovery_stream_yields_gap_for_trimmed_cursor() -> Result<()> {
+async fn capacity_and_age_trim_force_snapshot_with_matching_observation_cursor() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -3060,6 +3060,61 @@ async fn session_observation_recovery_stream_yields_gap_for_trimmed_cursor() -> 
 
     assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Trimmed);
     assert_eq!(gap.latest_cursor, observation.cursor);
+    Ok(())
+}
+
+#[tokio::test]
+async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                    max_events_per_session: 1,
+                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                },
+            ),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("trimmed-gap-unseen-auxiliary-event")
+        .open()
+        .await?;
+    let stale_cursor = session.observe().current_observation().cursor;
+
+    session
+        .turn(TurnInput::text("install replacement projection"))
+        .run()
+        .await?;
+    let installed_projection = session.observe().current_observation();
+    session.observe().runtime.record_queue_changed(
+        lash_core::SessionQueueEventKind::Enqueued,
+        vec!["unseen-batch".to_string()],
+    );
+
+    let SessionResume::Gap { gap, .. } = session.observe().resume_from_cursor(&stale_cursor)?
+    else {
+        panic!("the trimmed cursor must yield a replacement gap");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Trimmed);
+    assert_eq!(
+        gap.latest_cursor, installed_projection.cursor,
+        "the replacement cursor must stay before auxiliary events absent from the projection"
+    );
+
+    let SessionResume::Replayed { events } =
+        session.observe().resume_from_cursor(&gap.latest_cursor)?
+    else {
+        panic!("the replacement cursor must retain a replayable auxiliary suffix");
+    };
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0].payload,
+        lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
+            if *kind == lash_core::SessionQueueEventKind::Enqueued
+                && batch_ids == &["unseen-batch"]
+    ));
     Ok(())
 }
 
@@ -3111,6 +3166,226 @@ struct PausedCommitReplayStore {
     release_commit: std::sync::atomic::AtomicBool,
     pause_lock: StdMutex<()>,
     pause_changed: std::sync::Condvar,
+}
+
+#[derive(Debug)]
+struct FailingAppendReplayStore {
+    inner: lash_core::facade_support::InMemoryLiveReplayStore,
+}
+
+impl FailingAppendReplayStore {
+    fn new() -> Self {
+        Self {
+            inner: lash_core::facade_support::InMemoryLiveReplayStore::default(),
+        }
+    }
+}
+
+impl lash_core::LiveReplayStore for FailingAppendReplayStore {
+    fn append(
+        &self,
+        _session_id: &str,
+        _revision: lash_core::SessionRevision,
+        _turn_id: Option<&str>,
+        _payload: lash_core::SessionObservationEventPayload,
+    ) -> std::result::Result<Arc<lash_core::SessionObservationEvent>, lash_core::LiveReplayStoreError>
+    {
+        Err(lash_core::LiveReplayStoreError::Store(
+            "injected live-replay append failure".to_string(),
+        ))
+    }
+
+    fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
+        self.inner.replay_after_cursor(cursor)
+    }
+
+    fn subscribe_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
+    {
+        self.inner.subscribe_after_cursor(cursor)
+    }
+
+    fn current_cursor(
+        &self,
+        session_id: &str,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.current_cursor(session_id, revision)
+    }
+
+    fn trim_session(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.trim_session(session_id)
+    }
+}
+
+#[tokio::test]
+async fn durable_revision_requires_replacement_evidence() -> Result<()> {
+    let replay_store = Arc::new(FailingAppendReplayStore::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(replay_store)
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("failed-commit-observation-reconciliation")
+        .open()
+        .await?;
+    let before = session.observe().current_observation();
+
+    let output = session
+        .turn(TurnInput::text("commit despite replay failure"))
+        .run()
+        .await?;
+    assert_eq!(
+        output.assistant_message(),
+        Some("echo: commit despite replay failure"),
+        "the durable turn must still commit"
+    );
+
+    let SessionResume::Gap { observation, gap } =
+        session.observe().resume_from_cursor(&before.cursor)?
+    else {
+        panic!("a pre-commit cursor without replacement evidence must not replay cleanly");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
+    assert_eq!(gap.latest_revision, lash_core::SessionRevision::new(1));
+    assert_eq!(gap.requested_cursor, before.cursor);
+    assert_eq!(gap.latest_cursor, observation.cursor);
+    assert_ne!(
+        gap.latest_cursor, before.cursor,
+        "the unchanged live position must still carry the new durable revision"
+    );
+
+    let SessionObservationSubscription::Gap { observation, gap } =
+        session.observe().subscribe_from_cursor(&before.cursor)?
+    else {
+        panic!("a pre-commit cursor without replacement evidence must not subscribe cleanly");
+    };
+    assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
+    assert_eq!(gap.latest_revision, lash_core::SessionRevision::new(1));
+    assert_eq!(gap.requested_cursor, before.cursor);
+    assert_eq!(gap.latest_cursor, observation.cursor);
+    assert_ne!(
+        gap.latest_cursor, before.cursor,
+        "subscribe must adopt the revision-stamped replacement cursor"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn idle_session_reconnect_after_failed_append_yields_gap_without_another_commit() -> Result<()>
+{
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(Arc::new(FailingAppendReplayStore::new()))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("idle-failed-commit-observation-reconciliation")
+        .open()
+        .await?;
+    let cursor = session.observe().current_observation().cursor;
+
+    session
+        .turn(TurnInput::text("commit before becoming idle"))
+        .run()
+        .await?;
+
+    let mut reconnect = session.observe().subscribe_and_recover(cursor);
+    let item = tokio::time::timeout(std::time::Duration::from_millis(250), reconnect.next())
+        .await
+        .expect("an idle reconnect must not wait for a future commit")
+        .expect("recovery stream remains open")?;
+    assert!(matches!(
+        item,
+        crate::observe::SessionObservationStreamItem::Gap {
+            gap: lash_core::facade_support::LiveReplayGap {
+                reason: lash_core::LiveReplayGapReason::Unavailable,
+                ..
+            },
+            ..
+        }
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "FIG-1660 must add cursor reservation and prepared publication before every race boundary can be stated"]
+async fn snapshot_subscribe_has_only_two_histories() {
+    unreachable!("documented conformance-law placeholder")
+}
+
+#[tokio::test]
+#[ignore = "FIG-1663 must bind replay incarnation identity into cursor validity"]
+async fn incarnation_change_invalidates_cursor() {
+    unreachable!("documented conformance-law placeholder")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-1660: fails today — Committed append/broadcast precedes projection install"]
+async fn notification_observes_installed_projection() -> Result<()> {
+    let replay_store = Arc::new(PausedCommitReplayStore::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(replay_store.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("notification-observes-installed-projection")
+        .open()
+        .await?;
+    let cursor = session.observe().current_observation().cursor;
+    let SessionObservationSubscription::Subscribed(mut subscription) =
+        session.observe().subscribe_from_cursor(&cursor)?
+    else {
+        panic!("a fresh cursor must subscribe without a gap");
+    };
+
+    let turn_session = session.clone();
+    let turn = tokio::spawn(async move {
+        turn_session
+            .turn(TurnInput::text("projection before notification"))
+            .run()
+            .await
+    });
+    replay_store.wait_for_commit_append().await;
+    let notification = loop {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.next())
+            .await
+            .expect("timed out waiting for committed notification")
+            .expect("notification subscription remains open")
+            .expect("committed notification");
+        if matches!(
+            &event.payload,
+            lash_core::SessionObservationEventPayload::Committed { .. }
+        ) {
+            break event;
+        }
+    };
+    let projection_at_notification = session.observe().current_observation();
+
+    replay_store.release_commit_install();
+    turn.await.expect("join publishing turn")?;
+
+    assert_eq!(
+        projection_at_notification.cursor, notification.cursor,
+        "a Committed notification must not be observable before its authoritative projection is installed"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "FIG-1660 must add ResidentChanged and revision-stable/no-op publication taxonomy"]
+async fn payload_authority_matches_revision_transition() {
+    unreachable!("documented conformance-law placeholder")
 }
 
 impl PausedCommitReplayStore {
@@ -3206,7 +3481,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn recoverable_chat_snapshot_handoff_never_loses_concurrent_terminal_commit() -> Result<()> {
+async fn snapshot_subscribe_has_only_two_histories_at_append_install_boundary() -> Result<()> {
     let replay_store = Arc::new(PausedCommitReplayStore::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
@@ -3307,7 +3582,7 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
 }
 
 #[tokio::test]
-async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> Result<()> {
+async fn gap_replacement_then_continuation_after_unavailable_history() -> Result<()> {
     let session_id = "recoverable-chat-restart-cursor";
     let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let bootstrap_core =
@@ -3433,7 +3708,7 @@ async fn recoverable_chat_restart_identity_does_not_depend_on_gap_clearing() -> 
 }
 
 #[tokio::test]
-async fn recoverable_chat_conformance_forwards_trimmed_gap_and_continues() -> Result<()> {
+async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -3486,6 +3761,81 @@ async fn recoverable_chat_conformance_forwards_trimmed_gap_and_continues() -> Re
         "continued recovery must replace from a snapshot containing the next turn"
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(Arc::new(
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                    max_events_per_session: 1,
+                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                },
+            ),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("subscriber-lag-trimmed-recovery")
+        .open()
+        .await?;
+    let cursor = session.observe().current_observation().cursor;
+    let mut stream = session.observe().subscribe_and_recover(cursor);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(10), stream.next())
+            .await
+            .is_err(),
+        "the initial poll must install the live receiver and wait"
+    );
+
+    for text in ["lag one", "lag two", "lag three"] {
+        session.observe().runtime.record_turn_activity(
+            Some("lagged-turn"),
+            TurnActivity::independent(TurnEvent::AssistantProseDelta { text: text.into() }),
+        );
+    }
+
+    let gap = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+        .await
+        .expect("lag recovery timed out")
+        .expect("lag recovery stream remains open")?;
+    assert!(matches!(
+        gap,
+        crate::observe::SessionObservationStreamItem::Gap {
+            gap: lash_core::facade_support::LiveReplayGap {
+                reason: lash_core::LiveReplayGapReason::Trimmed,
+                ..
+            },
+            ..
+        }
+    ));
+
+    session.observe().runtime.record_turn_activity(
+        Some("after-lag-turn"),
+        TurnActivity::independent(TurnEvent::AssistantProseDelta {
+            text: "after lag".into(),
+        }),
+    );
+    let continued = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+        .await
+        .expect("post-lag continuation timed out")
+        .expect("post-lag stream remains open")?;
+    let crate::observe::SessionObservationStreamItem::Event(event) = continued else {
+        panic!("lag recovery must continue with the next live event");
+    };
+    assert_eq!(
+        observation_assistant_delta(&event).as_deref(),
+        Some("after lag")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "FIG-1660: the current public store surface couples broadcast capacity to retention, so a lagged receiver cannot retain its whole missed suffix"]
+async fn subscriber_lag_recovers_from_last_delivered_cursor() {
+    unreachable!("documented conformance-law placeholder")
 }
 
 #[tokio::test]

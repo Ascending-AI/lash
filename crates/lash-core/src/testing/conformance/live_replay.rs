@@ -1,4 +1,8 @@
 //! [`LiveReplayStore`] conformance: cursors, replay, subscriptions, trims.
+//!
+//! These vectors are the store-only portion of the ratified live-replay law
+//! family. Laws which need the authoritative projection belong at the public
+//! runtime seam rather than in a host-store fitness contract.
 
 use super::*;
 use futures_util::StreamExt as _;
@@ -19,14 +23,18 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "live_replay_store");
     drop((first, second));
-    live_replay_store_appends_replays_and_isolates_sessions(make()).await;
+    exclusive_after_valid_cursor(make()).await;
     live_replay_store_cursor_preserves_newer_revisions(make()).await;
     live_replay_store_subscribe_replays_then_yields_live_events(make()).await;
     live_replay_store_rejects_malformed_cursors(make()).await;
-    live_replay_store_reports_unavailable_for_cursor_ahead_of_tail(make()).await;
+    empty_is_proven_continuity_not_missing_history(make()).await;
+    replay_cut_and_live_registration_are_linearizable(&make).await;
 }
 
 /// Run the capacity-trim portion of the [`LiveReplayStore`] conformance suite.
+///
+/// Together with [`live_replay_store_ttl_trim`], this states the store-owned
+/// portion of `capacity_and_age_trim_force_snapshot`.
 ///
 /// `make` must return a fresh store configured to retain exactly one event per
 /// session. Stores with a fixed larger capacity should expose a test
@@ -74,9 +82,39 @@ where
         "after first cursor",
     );
     assert_live_replay_labels(&replay_after_first, &["text:capacity two"]);
+    let mut subscribe_after_first = expect_live_replay_subscribed(
+        store.subscribe_after_cursor(&first.cursor),
+        "capacity-trim subscribe from retained boundary",
+    );
+    let retained =
+        next_live_replay_event(&mut subscribe_after_first, "capacity-trim retained suffix").await;
+    assert_live_replay_labels(&[retained], &["text:capacity two"]);
+
+    let tail = store.current_cursor("capacity-session", revision);
+    let tail_replay = expect_live_replay_replayed(
+        store.replay_after_cursor(&tail),
+        "capacity-trim replay from tail",
+    );
+    assert!(tail_replay.is_empty(), "capacity tail replay must be empty");
+    let mut tail_subscription = expect_live_replay_subscribed(
+        store.subscribe_after_cursor(&tail),
+        "capacity-trim subscribe from tail",
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            futures_util::StreamExt::next(&mut tail_subscription),
+        )
+        .await
+        .is_err(),
+        "capacity tail subscription must wait for a future event"
+    );
 }
 
 /// Run the TTL-trim portion of the [`LiveReplayStore`] conformance suite.
+///
+/// Together with [`live_replay_store_capacity_trim`], this states the
+/// store-owned portion of `capacity_and_age_trim_force_snapshot`.
 ///
 /// `make` must return a fresh store whose event TTL expires within
 /// `expiration_wait`. The suite explicitly calls [`LiveReplayStore::trim_session`]
@@ -123,9 +161,22 @@ where
         tail_replay.is_empty(),
         "latest cursor after ttl trim must replay no events"
     );
+    let mut tail_subscription = expect_live_replay_subscribed(
+        store.subscribe_after_cursor(&tail),
+        "ttl-trim subscribe from latest cursor",
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            futures_util::StreamExt::next(&mut tail_subscription),
+        )
+        .await
+        .is_err(),
+        "ttl tail subscription must wait for a future event"
+    );
 }
 
-async fn live_replay_store_appends_replays_and_isolates_sessions(store: Arc<dyn LiveReplayStore>) {
+async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
     let revision = SessionRevision::new(7);
     let start_a = store.current_cursor("session-a", revision);
     let start_b = store.current_cursor("session-b", revision);
@@ -209,6 +260,39 @@ async fn live_replay_store_appends_replays_and_isolates_sessions(store: Arc<dyn 
     assert!(
         replay_from_tail.is_empty(),
         "current tail cursor must not replay old events"
+    );
+
+    let mut from_start = expect_live_replay_subscribed(
+        store.subscribe_after_cursor(&start_a),
+        "session-a subscribe from initial cursor",
+    );
+    let subscribed_first = next_live_replay_event(&mut from_start, "first exclusive event").await;
+    let subscribed_second = next_live_replay_event(&mut from_start, "second exclusive event").await;
+    assert_live_replay_labels(
+        &[subscribed_first, subscribed_second],
+        &["text:alpha one", "queue:Enqueued:batch-a"],
+    );
+
+    let mut after_first = expect_live_replay_subscribed(
+        store.subscribe_after_cursor(&first_a.cursor),
+        "session-a subscribe after first cursor",
+    );
+    let subscribed_suffix =
+        next_live_replay_event(&mut after_first, "exclusive suffix event").await;
+    assert_live_replay_labels(&[subscribed_suffix], &["queue:Enqueued:batch-a"]);
+
+    let mut at_tail = expect_live_replay_subscribed(
+        store.subscribe_after_cursor(&second_a.cursor),
+        "session-a subscribe at tail",
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            futures_util::StreamExt::next(&mut at_tail),
+        )
+        .await
+        .is_err(),
+        "a valid tail subscription must wait rather than gap or replay"
     );
 }
 
@@ -300,11 +384,9 @@ async fn live_replay_store_rejects_malformed_cursors(store: Arc<dyn LiveReplaySt
     );
 }
 
-async fn live_replay_store_reports_unavailable_for_cursor_ahead_of_tail(
-    store: Arc<dyn LiveReplayStore>,
-) {
+async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveReplayStore>) {
     let revision = SessionRevision::new(4);
-    store
+    let existing = store
         .append(
             "ahead-session",
             revision,
@@ -312,6 +394,25 @@ async fn live_replay_store_reports_unavailable_for_cursor_ahead_of_tail(
             live_replay_text_payload("existing"),
         )
         .expect("append existing event");
+    let tail_replay = expect_live_replay_replayed(
+        store.replay_after_cursor(&existing.cursor),
+        "replay from proven tail",
+    );
+    assert!(tail_replay.is_empty(), "only a valid tail may replay empty");
+    let mut tail_subscription = expect_live_replay_subscribed(
+        store.subscribe_after_cursor(&existing.cursor),
+        "subscribe from proven tail",
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            futures_util::StreamExt::next(&mut tail_subscription),
+        )
+        .await
+        .is_err(),
+        "a proven tail subscription must remain live and empty"
+    );
+
     let ahead = crate::SessionCursor::new("ahead-session", revision, 99);
 
     expect_live_replay_gap(
@@ -324,6 +425,73 @@ async fn live_replay_store_reports_unavailable_for_cursor_ahead_of_tail(
         LiveReplayGapReason::Unavailable,
         "subscribe from cursor ahead of tail",
     );
+}
+
+async fn replay_cut_and_live_registration_are_linearizable<F>(make: &F)
+where
+    F: Fn() -> Arc<dyn LiveReplayStore>,
+{
+    const RACES: usize = 64;
+    for race in 0..RACES {
+        let store = make();
+        let session_id = format!("subscribe-race-{race}");
+        let revision = SessionRevision::new(5);
+        let start = store.current_cursor(&session_id, revision);
+        let prior = store
+            .append(
+                &session_id,
+                revision,
+                Some("race-turn"),
+                live_replay_text_payload("prior"),
+            )
+            .expect("append prior event");
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let subscribe_store = Arc::clone(&store);
+        let subscribe_cursor = start.clone();
+        let subscribe_barrier = Arc::clone(&barrier);
+        let subscribe = tokio::task::spawn_blocking(move || {
+            subscribe_barrier.wait();
+            subscribe_store.subscribe_after_cursor(&subscribe_cursor)
+        });
+        let append_store = Arc::clone(&store);
+        let append_session_id = session_id.clone();
+        let append_barrier = Arc::clone(&barrier);
+        let append = tokio::task::spawn_blocking(move || {
+            append_barrier.wait();
+            append_store.append(
+                &append_session_id,
+                revision,
+                Some("race-turn"),
+                live_replay_text_payload("raced"),
+            )
+        });
+        barrier.wait();
+
+        let mut subscription = expect_live_replay_subscribed(
+            subscribe.await.expect("join racing subscription"),
+            "racing subscription",
+        );
+        let raced = append
+            .await
+            .expect("join racing append")
+            .expect("racing append");
+        let first = next_live_replay_event(&mut subscription, "prior racing event").await;
+        let second = next_live_replay_event(&mut subscription, "concurrent racing event").await;
+        assert_eq!(first.cursor, prior.cursor, "prior event must remain first");
+        assert_eq!(
+            second.cursor, raced.cursor,
+            "raced event must appear exactly once"
+        );
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(2),
+                futures_util::StreamExt::next(&mut subscription),
+            )
+            .await
+            .is_err(),
+            "the append racing subscription creation must not be duplicated"
+        );
+    }
 }
 
 fn live_replay_text_payload(text: &str) -> SessionObservationEventPayload {
