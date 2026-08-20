@@ -110,8 +110,8 @@ const HOST_FOREIGN_MARKERS_LASHLANG: &[&str] = &[
 
 fn foreign_markers_for(dialect: lash::rlm::RlmDialect) -> &'static [&'static str] {
     match dialect {
+        lash::rlm::RlmDialect::Lashlang => HOST_FOREIGN_MARKERS_LASHLANG,
         lash::rlm::RlmDialect::Typescript => HOST_FOREIGN_MARKERS,
-        _ => HOST_FOREIGN_MARKERS_LASHLANG,
     }
 }
 
@@ -134,22 +134,16 @@ fn foreign_words_in(text: &str, markers: &[&str]) -> Vec<String> {
 #[test]
 fn the_workbench_tutorials_are_written_in_the_session_dialect() {
     let mut violations = Vec::new();
-    for dialect in [
-        lash::rlm::RlmDialect::Lashlang,
-        lash::rlm::RlmDialect::Typescript,
-    ] {
+    for dialect in lash::rlm::RlmDialect::ALL {
         let prompt = workbench_prompt(dialect);
         for word in foreign_words_in(prompt, foreign_markers_for(dialect)) {
             violations.push(format!("{} prompt carries `{word}`", dialect.language_id()));
         }
         // Non-vacuity: each prompt must actually contain worked programs in its
         // own dialect, or an empty constant would pass every marker check.
-        let own_tag = match dialect {
-            lash::rlm::RlmDialect::Typescript => "<typescript>",
-            _ => "<lashlang>",
-        };
+        let own_tag = format!("<{}>", dialect.language_id());
         assert!(
-            prompt.matches(own_tag).count() >= 3,
+            prompt.matches(&own_tag).count() >= 3,
             "the {} prompt must carry its own worked programs",
             dialect.language_id()
         );
@@ -487,28 +481,23 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
     let mut hits = Vec::new();
     let mut seen = 0usize;
     for scenario in scenarios {
-        for dialect in [
-            lash::rlm::RlmDialect::Lashlang,
-            lash::rlm::RlmDialect::Typescript,
-        ] {
-            let (open, close) = match dialect {
-                lash::rlm::RlmDialect::Typescript => ("<typescript>", "</typescript>"),
-                _ => ("<lashlang>", "</lashlang>"),
-            };
+        for dialect in lash::rlm::RlmDialect::ALL {
+            let open = format!("<{}>", dialect.language_id());
+            let close = format!("</{}>", dialect.language_id());
             for call in 0..3 {
                 let Some(text) = scenario.scripted_cell_for_test(dialect, call) else {
                     continue;
                 };
                 seen += 1;
                 let label = format!("{} call {call} ({})", scenario.as_str(), dialect.language_id());
-                if !text.starts_with(open) || !text.trim_end().ends_with(close) {
+                if !text.starts_with(&open) || !text.trim_end().ends_with(&close) {
                     hits.push(format!("{label}: not a {} cell: {text}", dialect.language_id()));
                     continue;
                 }
                 let code = text
-                    .trim_start_matches(open)
+                    .trim_start_matches(&open)
                     .trim_end()
-                    .trim_end_matches(close)
+                    .trim_end_matches(&close)
                     .trim();
                 match dialect {
                     lash::rlm::RlmDialect::Typescript => {
@@ -516,7 +505,7 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
                             hits.push(format!("{label}: {error}"));
                         }
                     }
-                    _ => match lashlang::parse(code) {
+                    lash::rlm::RlmDialect::Lashlang => match lashlang::parse(code) {
                         Ok(program) => {
                             // The deliberate code failure is a *runtime* failure
                             // by construction: it must link and then fail while
@@ -561,10 +550,7 @@ fn every_dev_provider_scenario_reaches_a_finish() {
         failure_provider::DevProviderScenario::CodeFailure,
         failure_provider::DevProviderScenario::RetryResetPartial,
     ] {
-        for dialect in [
-            lash::rlm::RlmDialect::Lashlang,
-            lash::rlm::RlmDialect::Typescript,
-        ] {
+        for dialect in lash::rlm::RlmDialect::ALL {
             let last = scenario
                 .scripted_cell_for_test(dialect, 1)
                 .unwrap_or_else(|| panic!("{} scripts a second call", scenario.as_str()));
@@ -575,7 +561,7 @@ fn every_dev_provider_scenario_reaches_a_finish() {
             );
             let finish = match dialect {
                 lash::rlm::RlmDialect::Typescript => "finish(",
-                _ => "finish ",
+                lash::rlm::RlmDialect::Lashlang => "finish ",
             };
             assert!(
                 last.contains(finish),
@@ -608,10 +594,7 @@ fn every_dev_provider_scenario_reaches_a_finish() {
 /// link-verifies the cell in both dialects.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
-    for dialect in [
-        lash::rlm::RlmDialect::Lashlang,
-        lash::rlm::RlmDialect::Typescript,
-    ] {
+    for dialect in lash::rlm::RlmDialect::ALL {
         let data_dir = tempfile::tempdir().expect("temp dir");
         let provider = failure_provider::DevProviderScenario::CodeFailure.provider(dialect);
         let mut state = queued_send_test_state(data_dir.path(), provider).await;

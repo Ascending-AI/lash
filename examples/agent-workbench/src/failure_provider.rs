@@ -399,10 +399,12 @@ impl DevFailureProvider {
 
 /// One scripted cell, in the dialect the host is running.
 fn cell(dialect: lash::rlm::RlmDialect, lashlang: &str, typescript: &str) -> String {
-    match dialect {
-        lash::rlm::RlmDialect::Typescript => format!("<typescript>\n{typescript}\n</typescript>"),
-        _ => format!("<lashlang>\n{lashlang}\n</lashlang>"),
-    }
+    let body = match dialect {
+        lash::rlm::RlmDialect::Lashlang => lashlang,
+        lash::rlm::RlmDialect::Typescript => typescript,
+    };
+    let tag = dialect.language_id();
+    format!("<{tag}>\n{body}\n</{tag}>")
 }
 
 /// The common shape: one cell that finishes with `value`, spelled per dialect.
