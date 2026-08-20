@@ -888,7 +888,7 @@ availability = "all-features"
 aliases = ["lash_core::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES"]
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:146#RuntimeCommit::MAX_COMMIT_BUDGET_BYTES + 1,"
+usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:307#RuntimeCommit::MAX_COMMIT_BUDGET_BYTES + 1;"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -14328,7 +14328,7 @@ availability = "default+all-features"
 aliases = ["lash_core::OperationId::new"]
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:96#.with_operation(lash_core::store::OperationId::new("
+usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:174#.with_operation(lash_core::store::OperationId::new("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -15380,6 +15380,15 @@ aliases = ["lash_core::RuntimeCommit"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::RuntimeCommit::adopted_intent_rows"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeCommit::adopted_intent_rows"]
+area = "attachments"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers reading the adopted attachment-intent row count the runtime stamps on the commit; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::borrowing_session_execution_lease"
@@ -17681,7 +17690,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionNodeRecord::timestamp"]
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:31#timestamp: \"2026-07-26T12:00:00Z\".to_string(),"
+usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:89#timestamp: \"2026-08-20T12:00:00Z\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -69312,7 +69321,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:42#SessionNodePayload::Event {"
+usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:100#SessionNodePayload::Event {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -69321,7 +69330,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:43#event: SessionHistoryRecord::Protocol("
+usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:101#event: SessionHistoryRecord::Protocol("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
