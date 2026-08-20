@@ -1517,6 +1517,15 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
 }
 
 /// Runtime session orchestration over host-supplied services and policy.
+/// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResidentSessionState {
+    /// In-memory session and plugin state are valid and match durable expectations.
+    Valid,
+    /// Resident state was invalidated and requires durable reload before further execution.
+    Invalidated { decision_id: String },
+}
+
 pub struct LashRuntime {
     pub(in crate::runtime) session: Option<Session>,
     pub(in crate::runtime) policy: SessionPolicy,
@@ -1557,11 +1566,7 @@ pub struct LashRuntime {
     pub(in crate::runtime) last_committed_observation_turn: Option<(u64, String)>,
     /// Set only after this handle itself has attempted a durable graph load.
     pub(in crate::runtime) graph_loaded_from_store: bool,
-    /// False after a committed turn encounters a post-commit delivery failure.
-    /// The next turn must rebuild all resident/plugin state from the durable
-    /// head before it can execute.
-    pub(in crate::runtime) resident_session_state_valid: bool,
-    /// Stable identity for the invalidation incident consulted by async reload
-    /// decisions and synchronous refusal gates.
-    pub(in crate::runtime) resident_session_reload_decision_id: Option<String>,
+    /// Freshness state for live plugin/protocol resident state on this handle.
+    /// Invalidation retains the initial incident decision identity until a successful reload.
+    pub(in crate::runtime) resident_session_state: ResidentSessionState,
 }

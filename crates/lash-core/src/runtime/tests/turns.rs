@@ -654,7 +654,7 @@ async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
     assert_eq!(durable.head_revision, 1);
     drop(turn);
     assert_eq!(runtime.state.turn_index, 1);
-    assert!(runtime.resident_session_state_valid);
+    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
     let recovered = runtime
         .run_turn_assembled(
             TurnInput::text("continue after dropped host delivery"),
@@ -742,7 +742,10 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
     assert!(committed.errors.iter().any(|issue| {
         issue.code.as_deref() == Some("protocol_restore_session") && issue.retryable == Some(false)
     }));
-    assert!(!runtime.resident_session_state_valid);
+    assert!(matches!(
+        runtime.resident_session_state,
+        ResidentSessionState::Invalidated { .. }
+    ));
     let durable = crate::store::SessionCommitStore::load_session(store.as_ref())
         .await
         .expect("load committed frame switch")
@@ -771,7 +774,7 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         crate::RuntimeErrorCode::ResidentSessionReloadFailed
     );
     assert_eq!(exported.head_revision, 1);
-    assert!(runtime.resident_session_state_valid);
+    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
     assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
 
     let refusal_event = capture.exactly_one("resident_session_state.sync_refusal");
@@ -833,8 +836,66 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         recovered.assistant_output.safe_text,
         "resident state reloaded"
     );
-    assert!(runtime.resident_session_state_valid);
+    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
     assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn double_invalidation_preserves_first_decision_id() {
+    let mut runtime =
+        runtime_with_plugins_and_tools(Vec::new(), Arc::new(EmptyTools), mock_provider(Vec::new()))
+            .await;
+    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+
+    runtime.invalidate_resident_session_state();
+    let initial_decision_id = match &runtime.resident_session_state {
+        ResidentSessionState::Invalidated { decision_id } => decision_id.clone(),
+        ResidentSessionState::Valid => panic!("expected invalidated resident state"),
+    };
+    assert!(!initial_decision_id.is_empty());
+
+    // A second invalidation while already invalidated must preserve the first decision id
+    runtime.invalidate_resident_session_state();
+    match &runtime.resident_session_state {
+        ResidentSessionState::Invalidated { decision_id } => {
+            assert_eq!(
+                decision_id, &initial_decision_id,
+                "subsequent invalidation must not overwrite the initial decision identity"
+            );
+        }
+        ResidentSessionState::Valid => panic!("expected invalidated resident state"),
+    }
+}
+
+#[tokio::test]
+async fn successful_reload_clears_invalidated_state_to_valid() {
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        test_host_config(),
+        store.clone() as Arc<dyn crate::RuntimePersistence>,
+    )
+    .await;
+    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+
+    runtime.invalidate_resident_session_state();
+    assert!(matches!(
+        runtime.resident_session_state,
+        ResidentSessionState::Invalidated { .. }
+    ));
+
+    runtime
+        .reload_invalidated_resident_session_state()
+        .await
+        .expect("successful reload from store/snapshot");
+
+    assert_eq!(
+        runtime.resident_session_state,
+        ResidentSessionState::Valid,
+        "successful reload must clear invalidated state back to Valid"
+    );
 }
 
 /// FIG-1573: a turn that ends without committing must not leave an input
@@ -3908,7 +3969,10 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
     assert!(first.errors.iter().any(|issue| {
         issue.code.as_deref() == Some("store_commit_failed") && issue.retryable == Some(false)
     }));
-    assert!(!runtime.resident_session_state_valid);
+    assert!(matches!(
+        runtime.resident_session_state,
+        ResidentSessionState::Invalidated { .. }
+    ));
 
     let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
         .await
