@@ -668,7 +668,7 @@ class Journey:
             value = json.loads(node["node_json"])
             conversation = value.get("event", {}).get("Conversation", {})
             for part in conversation.get("parts", []):
-                if part.get("kind") == "ToolOutcome" and part.get("tool_name"):
+                if part.get("kind") == "ToolResult" and part.get("tool_name"):
                     tool_results[part["tool_name"]] = json.loads(part["content"])
         tools = (
             "mcp__slack_clone__sample_summary",
