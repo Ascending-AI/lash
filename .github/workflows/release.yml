@@ -36,7 +36,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git config --local http.extraheader "AUTHORIZATION: basic ${auth_header}"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
           git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
           git fetch --force --tags origin
           git checkout --force --detach origin/main
@@ -149,7 +155,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git config --local http.extraheader "AUTHORIZATION: basic ${auth_header}"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
           git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
           git checkout --force --detach FETCH_HEAD
 
@@ -214,7 +226,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git config --local http.extraheader "AUTHORIZATION: basic ${auth_header}"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
           git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
           git checkout --force --detach FETCH_HEAD
 
@@ -246,7 +264,13 @@ jobs:
           git init .release-tools
           git -C .release-tools remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -C .release-tools config --local http.extraheader "AUTHORIZATION: basic ${auth_header}"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git -C .release-tools config --local include.path "${auth_config}"
           git -C .release-tools fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
           git -C .release-tools checkout --force --detach FETCH_HEAD
 
@@ -310,7 +334,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git config --local http.extraheader "AUTHORIZATION: basic ${auth_header}"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
           git fetch --no-tags --prune origin "+refs/heads/*:refs/remotes/origin/*"
           git fetch --force --tags origin
           git fetch --no-tags origin "${CHECKOUT_REF}"

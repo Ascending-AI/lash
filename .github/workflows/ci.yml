@@ -113,9 +113,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -218,9 +222,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -304,9 +312,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -353,9 +365,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -442,9 +458,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -523,9 +543,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -585,8 +609,6 @@ jobs:
 
     steps:
       - name: Check out repository
-        # Full branch and tag fetches preserve actions/checkout's fetch-depth: 0
-        # contract for the merge-base and release-note checks below.
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
@@ -594,13 +616,17 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune origin "+refs/heads/*:refs/remotes/origin/*"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          git fetch \
             --force --tags origin
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          git fetch \
             --no-tags origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Check and preview PR release notes
         if: github.event_name == 'pull_request'
@@ -818,9 +844,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -875,9 +905,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Download confidence fast shard artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -946,9 +980,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -1017,9 +1055,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -1096,9 +1138,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -1160,9 +1206,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -1254,9 +1304,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -1351,9 +1405,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh

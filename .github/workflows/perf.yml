@@ -54,9 +54,13 @@ jobs:
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
             --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          git checkout --force --detach FETCH_HEAD
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh

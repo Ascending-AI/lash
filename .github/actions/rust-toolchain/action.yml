@@ -59,7 +59,7 @@ runs:
         done
 
         RUSTUP_PERMIT_COPY_RENAME=1 rustup "${rustup_args[@]}"
-        rustup default "${TOOLCHAIN}" || true
+        rustup default "${TOOLCHAIN}"
         rustc "+${TOOLCHAIN}" --version --verbose
 
         if [ -z "${CARGO_INCREMENTAL+x}" ]; then

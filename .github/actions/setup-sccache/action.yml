@@ -40,6 +40,3 @@ runs:
     # composite action does not reliably see.
     - name: Install mold
       uses: ./.github/actions/setup-mold
-      env:
-        # Keep the vendored provenance machine-visible to the CI contract test.
-        VENDORED_SETUP_MOLD_SOURCE: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
