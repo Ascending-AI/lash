@@ -10922,7 +10922,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessEventSink::emit_worker_fault"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1308#async fn emit_worker_fault(&self, fault: &lash::process::ProcessWorkerFault) {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1309#async fn emit_worker_fault(&self, fault: &lash::process::ProcessWorkerFault) {"
 reason = "The workbench implements the sink method itself: the durable-process worker calls it with each typed fault, and the host turns it into one rendered operator line."
 
 [[api]]
@@ -10932,7 +10932,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1228#fn from_fault(fault: &lash::process::ProcessWorkerFault) -> Self {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1229#fn from_fault(fault: &lash::process::ProcessWorkerFault) -> Self {"
 reason = "The workbench's fault notice is built by matching on this enum, so the host reads the worker's typed fault report rather than a formatted string."
 
 [[api]]
@@ -10942,7 +10942,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1230#lash::process::ProcessWorkerFault::RecoveryBackendError {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1231#lash::process::ProcessWorkerFault::RecoveryBackendError {"
 reason = "Matched in the workbench's host code to render a registry-call failure that happened after admission."
 
 [[api]]
@@ -10952,7 +10952,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError::process_id"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1231#process_id,"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1232#process_id,"
 reason = "Bound by the workbench's host-side match so the rendered operator line names the row the pass lost."
 
 [[api]]
@@ -10962,7 +10962,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError::operation"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1232#operation,"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1233#operation,"
 reason = "Bound by the workbench's host-side match so the rendered line says which registry call failed without parsing the message."
 
 [[api]]
@@ -10972,7 +10972,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError::error"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1233#error,"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1234#error,"
 reason = "Bound by the workbench's host-side match and rendered into the operator line."
 
 [[api]]
@@ -10982,7 +10982,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1242#lash::process::ProcessWorkerFault::RecoveryRunFailed { process_id, error } => Self {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1243#lash::process::ProcessWorkerFault::RecoveryRunFailed { process_id, error } => Self {"
 reason = "Matched in the workbench's host code to render a run that could not be resumed after admission."
 
 [[api]]
@@ -10992,7 +10992,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed::process_id"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1242#lash::process::ProcessWorkerFault::RecoveryRunFailed { process_id, error } => Self {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1243#lash::process::ProcessWorkerFault::RecoveryRunFailed { process_id, error } => Self {"
 reason = "Bound by the workbench's host-side match so the rendered operator line names the row whose run failed."
 
 [[api]]
@@ -11002,7 +11002,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed::error"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1242#lash::process::ProcessWorkerFault::RecoveryRunFailed { process_id, error } => Self {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1243#lash::process::ProcessWorkerFault::RecoveryRunFailed { process_id, error } => Self {"
 reason = "Bound by the workbench's host-side match and rendered into the operator line."
 
 [[api]]
@@ -11012,7 +11012,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::WorklistScanIncomplete"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1250#lash::process::ProcessWorkerFault::WorklistScanIncomplete { error } => Self {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1251#lash::process::ProcessWorkerFault::WorklistScanIncomplete { error } => Self {"
 reason = "Matched in the workbench's host code; the notice carries no process id because a part-way scan blames no single row."
 
 [[api]]
@@ -11022,7 +11022,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkerFault::WorklistScanIncomplete::error"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:1250#lash::process::ProcessWorkerFault::WorklistScanIncomplete { error } => Self {"
+usage = "examples/agent-workbench/src/main_sections/state.rs:1251#lash::process::ProcessWorkerFault::WorklistScanIncomplete { error } => Self {"
 reason = "Bound by the workbench's host-side match and rendered into the pass-scoped operator line."
 
 [[api]]
@@ -12702,7 +12702,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentReclamationPolicy", "lash_core::facade_support::AttachmentReclamationPolicy"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:479#policy: lash::persistence::AttachmentReclamationPolicy,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:516#policy: lash::persistence::AttachmentReclamationPolicy,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:455#assert_eq!(protected.reclaimed_count, 0);"
 
 [[api]]
@@ -12712,7 +12712,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentReclamationPolicy::empty_root_set", "lash_core::facade_support::AttachmentReclamationPolicy::empty_root_set"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:466#empty_root_set: empty_roots,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:503#empty_root_set: empty_roots,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:645#assert_eq!(refused.status, StatusCode::CONFLICT);"
 
 [[api]]
@@ -12722,7 +12722,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentReclamationPolicy::grace_period_ms", "lash_core::facade_support::AttachmentReclamationPolicy::grace_period_ms"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:465#grace_period_ms: retention_ms,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:502#grace_period_ms: retention_ms,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:455#assert_eq!(protected.reclaimed_count, 0);"
 
 [[api]]
@@ -12732,7 +12732,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:515#report: lash::persistence::AttachmentReclamationReport,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:552#report: lash::persistence::AttachmentReclamationReport,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:479#assert_eq!(summary.scanned_blob_count, 2);"
 
 [[api]]
@@ -12742,7 +12742,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport::deleted_while_referenced"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:527#deleted_while_referenced: attachment_ids_to_strings(&report.deleted_while_referenced),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:564#deleted_while_referenced: attachment_ids_to_strings(&report.deleted_while_referenced),"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:490#assert!(summary.deleted_while_referenced.is_empty(), \"{summary:?}\");"
 
 [[api]]
@@ -12752,7 +12752,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport::failed_ids"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:524#failed_ids: attachment_ids_to_strings(&report.failed_ids),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:561#failed_ids: attachment_ids_to_strings(&report.failed_ids),"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:488#assert!(summary.failed_ids.is_empty(), \"{summary:?}\");"
 
 [[api]]
@@ -12762,7 +12762,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport::reclaimed_count"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:522#reclaimed_count: report.reclaimed_count,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:559#reclaimed_count: report.reclaimed_count,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:481#assert_eq!(summary.reclaimed_count, 1);"
 
 [[api]]
@@ -12772,7 +12772,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport::root_enumeration_failure"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:529#root_enumeration_failure: report.root_enumeration_failure,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:566#root_enumeration_failure: report.root_enumeration_failure,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:492#assert_eq!(summary.root_enumeration_failure, None);"
 
 [[api]]
@@ -12782,7 +12782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport::scanned_blob_count"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:521#scanned_blob_count: report.scanned_blob_count,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:558#scanned_blob_count: report.scanned_blob_count,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:479#assert_eq!(summary.scanned_blob_count, 2);"
 
 [[api]]
@@ -12792,7 +12792,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentRootSet"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:477#root_set: &dyn lash::persistence::AttachmentRootSet,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:514#root_set: &dyn lash::persistence::AttachmentRootSet,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:481#assert_eq!(summary.reclaimed_count, 1);"
 
 [[api]]
@@ -13008,7 +13008,7 @@ availability = "default+all-features"
 aliases = ["lash_core::EmptyRootSetPolicy", "lash_core::facade_support::EmptyRootSetPolicy"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:462#empty_roots: EmptyRootSetPolicy,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:499#empty_roots: EmptyRootSetPolicy,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:645#assert_eq!(refused.status, StatusCode::CONFLICT);"
 
 [[api]]
@@ -13018,7 +13018,7 @@ availability = "default+all-features"
 aliases = ["lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll", "lash_core::facade_support::EmptyRootSetPolicy::AuthorizeDeleteAll"]
 area = "attachments"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:125#Self::AuthorizeDeleteAll => EmptyRootSetPolicy::AuthorizeDeleteAll,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:162#Self::AuthorizeDeleteAll => EmptyRootSetPolicy::AuthorizeDeleteAll,"
 reason = "Syntax-only evidence: the agent-workbench store-maintenance route maps this variant onto its wire authorization in `EmptyRootSetAuthorization::policy`, which is a variant pattern that only distinguishes an enum shape; the executed assertion observes the resulting reclaimed count rather than this variant. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -13028,7 +13028,7 @@ availability = "default+all-features"
 aliases = ["lash_core::EmptyRootSetPolicy::Refuse", "lash_core::facade_support::EmptyRootSetPolicy::Refuse"]
 area = "attachments"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:124#Self::Refuse => EmptyRootSetPolicy::Refuse,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:161#Self::Refuse => EmptyRootSetPolicy::Refuse,"
 reason = "Syntax-only evidence: the agent-workbench store-maintenance route maps this variant onto its wire authorization in `EmptyRootSetAuthorization::policy`, which is a variant pattern that only distinguishes an enum shape; the executed refusal assertion observes lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized rather than this variant. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -19425,7 +19425,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::vacuum"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:406#lash::persistence::StoreMaintenance::vacuum(store)"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:443#lash::persistence::StoreMaintenance::vacuum(store)"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:284#assert_eq!(report.removed_pending_turn_input_tombstone_count, 1);"
 
 [[api]]
@@ -19900,7 +19900,7 @@ availability = "default+all-features"
 aliases = ["lash_core::VacuumReport"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:425#report: lash::persistence::VacuumReport,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:462#report: lash::persistence::VacuumReport,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:284#assert_eq!(report.removed_pending_turn_input_tombstone_count, 1);"
 
 [[api]]
@@ -19910,7 +19910,7 @@ availability = "default+all-features"
 aliases = ["lash_core::VacuumReport::removed_node_count"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:430#removed_node_count: report.removed_node_count,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:467#removed_node_count: report.removed_node_count,"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:286#assert_eq!(report.removed_node_count, 0);"
 
 [[api]]
@@ -19920,7 +19920,7 @@ availability = "default+all-features"
 aliases = ["lash_core::VacuumReport::removed_pending_turn_input_tombstone_count"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:431#removed_pending_turn_input_tombstone_count: report"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:468#removed_pending_turn_input_tombstone_count: report"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:284#assert_eq!(report.removed_pending_turn_input_tombstone_count, 1);"
 
 [[api]]
@@ -20221,7 +20221,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::reclaim_unreferenced_attachments"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:482#lash::persistence::reclaim_unreferenced_attachments(root_set, backend, policy).await;"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:519#lash::persistence::reclaim_unreferenced_attachments(root_set, backend, policy).await;"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:481#assert_eq!(summary.reclaimed_count, 1);"
 
 [[api]]
@@ -63046,7 +63046,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservation::created_at_ms"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:668#created_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:690#created_at_ms,"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryReservation::occurrence"
@@ -63055,7 +63055,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservation::occurrence"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:665#occurrence: occurrence.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:687#occurrence: occurrence.clone(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryReservation::process_id"
@@ -63064,7 +63064,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservation::process_id"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:667#process_id,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:689#process_id,"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryReservation::reservation_status"
@@ -63073,7 +63073,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservation::reservation_status"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:669#reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:691#reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryReservation::subscription"
@@ -63082,7 +63082,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservation::subscription"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:666#subscription,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:688#subscription,"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryReservationOutcome"
@@ -63091,7 +63091,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservationOutcome"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:669#reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:691#reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryReservationOutcome::AlreadyReserved"
@@ -63100,7 +63100,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:697#reservation_status: lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:719#reservation_status: lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryReservationOutcome::Reserved"
@@ -63109,7 +63109,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerDeliveryReservationOutcome::Reserved"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:669#reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:691#reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,"
 
 [[api]]
 symbol = "lash::triggers::TriggerDeliveryRetentionCandidate"
@@ -63598,7 +63598,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceReclamationReport"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:545#let mut report = lash_core::TriggerOccurrenceReclamationReport {"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:568#let mut report = lash_core::TriggerOccurrenceReclamationReport {"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceReclamationReport::grace_deferred_count"
@@ -63607,7 +63607,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceReclamationReport::grace_deferred_count"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:556#Some(_) => report.grace_deferred_count += 1,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:571#grace_deferred_count: first.get::<i64, _>(2) as usize,"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceReclamationReport::inspected_occurrence_count"
@@ -63616,7 +63616,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceReclamationReport::inspected_occurrence_count"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:546#inspected_occurrence_count: rows.len(),"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:569#inspected_occurrence_count: first.get::<i64, _>(0) as usize,"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceReclamationReport::live_fan_out_count"
@@ -63625,7 +63625,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceReclamationReport::live_fan_out_count"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:557#None => report.live_fan_out_count += 1,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:570#live_fan_out_count: first.get::<i64, _>(1) as usize,"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceReclamationReport::reclaimed_occurrence_count"
@@ -63634,7 +63634,16 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceReclamationReport::reclaimed_occurrence_count"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:583#report.reclaimed_occurrence_count += deleted;"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:604#report.reclaimed_occurrence_count += deleted;"
+
+[[api]]
+symbol = "lash::triggers::TriggerOccurrenceReclamationReport::reinspection_deferred_count"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TriggerOccurrenceReclamationReport::reinspection_deferred_count"]
+area = "triggers"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:602#report.reinspection_deferred_count += 1;"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceReclamationResult"
@@ -64647,7 +64656,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:980#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:981#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::created_at_ms"
@@ -64710,7 +64719,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord::incarnation"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:643#&subscription.incarnation,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:665#&subscription.incarnation,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::input_template"
@@ -64764,7 +64773,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord::registrant_scope_id"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/state.rs:980#registrant_scope: record.registrant_scope_id(),"
+usage = "examples/agent-workbench/src/main_sections/state.rs:981#registrant_scope: record.registrant_scope_id(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::registrant_session_id"
@@ -64818,7 +64827,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionRecord::subscription_id"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:642#&subscription.subscription_id,"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:664#&subscription.subscription_id,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionRecord::subscription_key"
@@ -73528,7 +73537,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:640#let process_id = lash_core::facade_support::deterministic_delivery_process_id("
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:662#let process_id = lash_core::facade_support::deterministic_delivery_process_id("
 
 [[api]]
 symbol = "lash_core::facade_support::deterministic_occurrence_id"
@@ -75283,7 +75292,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:672#lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);"
+usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:694#lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);"
 
 [[api]]
 symbol = "lash_core::facade_support::system_time_from_epoch_ms"
@@ -84279,7 +84288,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport::condemn_deferred_ids"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:526#condemn_deferred_ids: attachment_ids_to_strings(&report.condemn_deferred_ids),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:563#condemn_deferred_ids: attachment_ids_to_strings(&report.condemn_deferred_ids),"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:489#assert!(summary.condemn_deferred_ids.is_empty(), \"{summary:?}\");"
 
 [[api]]
@@ -84289,7 +84298,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AttachmentReclamationReport::fence"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:528#fence: SweepFence::from(report.fence),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:565#fence: SweepFence::from(report.fence),"
 assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:486#assert_eq!(summary.fence, SweepFence::Fenced);"
 
 [[api]]
@@ -84434,7 +84443,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentGcFence", "lash_core::facade_support::AttachmentGcFence"]
 area = "attachments"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:214#fn from(fence: lash::persistence::AttachmentGcFence) -> Self {"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:251#fn from(fence: lash::persistence::AttachmentGcFence) -> Self {"
 reason = "Syntax-only evidence: the agent-workbench store-maintenance route names this enum as the input of the projection that puts a sweep's fence on the wire, which only declares the type, without observing its behavior; the executed assertion observes the projected SweepFence. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84444,7 +84453,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentGcFence::BestEffort", "lash_core::facade_support::AttachmentGcFence::BestEffort"]
 area = "attachments"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:217#lash::persistence::AttachmentGcFence::BestEffort => Self::BestEffort,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:254#lash::persistence::AttachmentGcFence::BestEffort => Self::BestEffort,"
 reason = "Syntax-only evidence: the agent-workbench store-maintenance route matches this variant when projecting a sweep's fence, which is a variant pattern that only distinguishes an enum shape; the workbench's fenced SQLite root authority never produces it, so no executed assertion reaches it. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84454,7 +84463,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentGcFence::Fenced", "lash_core::facade_support::AttachmentGcFence::Fenced"]
 area = "attachments"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:216#lash::persistence::AttachmentGcFence::Fenced => Self::Fenced,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:253#lash::persistence::AttachmentGcFence::Fenced => Self::Fenced,"
 reason = "Syntax-only evidence: the agent-workbench store-maintenance route matches this variant when projecting a sweep's fence, which is a variant pattern that only distinguishes an enum shape; the executed assertion observes the projected SweepFence rather than this variant. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -91975,7 +91984,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceSweep"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:195#impl From<lash::persistence::MaintenanceSweep> for SweepOutcome {"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:232#impl From<lash::persistence::MaintenanceSweep> for SweepOutcome {"
 reason = "FIG-1505: the agent-workbench store-maintenance route projects this classification onto its wire response so an operator can tell a witnessed nothing-to-do from a swept pass; the executed assertions observe the wire projection `SweepOutcome` rather than this type."
 
 [[api]]
@@ -91985,7 +91994,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceSweep::Swept"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:198#lash::persistence::MaintenanceSweep::Swept => Self::Swept,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:235#lash::persistence::MaintenanceSweep::Swept => Self::Swept,"
 reason = "FIG-1505: a variant pattern that only distinguishes an enum shape; the executed assertion observes the wire projection `SweepOutcome::Swept`."
 
 [[api]]
@@ -91995,7 +92004,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceSweep::Incomplete"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:199#lash::persistence::MaintenanceSweep::Incomplete => Self::Incomplete,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:236#lash::persistence::MaintenanceSweep::Incomplete => Self::Incomplete,"
 reason = "FIG-1505: the workbench projects a completed pass with per-item failures as `incomplete`; the route test asserts the serialized wire value and its failure counts."
 
 [[api]]
@@ -92005,7 +92014,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceSweep::NothingToDo"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:200#lash::persistence::MaintenanceSweep::NothingToDo => Self::NothingToDo,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:237#lash::persistence::MaintenanceSweep::NothingToDo => Self::NothingToDo,"
 reason = "FIG-1505: a variant pattern that only distinguishes an enum shape; the executed assertion observes the wire projection `SweepOutcome::NothingToDo`."
 
 [[api]]
@@ -92015,7 +92024,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceReport"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:429#sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:466#sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),"
 reason = "FIG-1505: the agent-workbench store-maintenance route classifies both maintenance reports through this trait; the executed assertions observe the wire projection it produces."
 
 [[api]]
@@ -92025,7 +92034,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceReport::sweep"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:429#sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:466#sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),"
 reason = "FIG-1505: the agent-workbench store-maintenance route calls this to classify a vacuum report; the executed assertions observe the wire projection rather than this call's return value directly."
 
 [[api]]
@@ -92044,7 +92053,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceStop"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:484#lash::persistence::MaintenanceStop::Refused("
+usage = "examples/agent-workbench/src/main_sections/admin.rs:521#lash::persistence::MaintenanceStop::Refused("
 reason = "FIG-1505: the agent-workbench store-maintenance route maps this enum onto its HTTP status -- a refusal is a 409 naming what was refused, a backend failure a 500 -- which is a variant pattern that only distinguishes an enum shape."
 
 [[api]]
@@ -92054,7 +92063,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceStop::Refused"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:484#lash::persistence::MaintenanceStop::Refused("
+usage = "examples/agent-workbench/src/main_sections/admin.rs:521#lash::persistence::MaintenanceStop::Refused("
 reason = "FIG-1505: a variant pattern that only distinguishes an enum shape; the executed refusal assertion observes the route's 409 rather than this variant."
 
 [[api]]
@@ -92064,7 +92073,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceStop::Refused::0"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:485#lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:522#lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized,"
 reason = "FIG-1505: the route reads the refusal this variant carries to say which refusal happened; the executed assertion observes the resulting 409 message."
 
 [[api]]
@@ -92074,7 +92083,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceStop::Failed"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:508#lash::persistence::MaintenanceStop::Failed(other) => AppError::internal(other),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:545#lash::persistence::MaintenanceStop::Failed(other) => AppError::internal(other),"
 reason = "FIG-1505: a variant pattern that only distinguishes an enum shape; the bundled sweeps refuse rather than fail, so no example test drives a backend failure to assert on."
 
 [[api]]
@@ -92084,7 +92093,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceStop::Failed::0"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:508#lash::persistence::MaintenanceStop::Failed(other) => AppError::internal(other),"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:545#lash::persistence::MaintenanceStop::Failed(other) => AppError::internal(other),"
 reason = "FIG-1505: the route carries the backend error this variant holds into its 500; the bundled sweeps refuse rather than fail, so no example test drives it."
 
 [[api]]
@@ -92094,7 +92103,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceRefusal"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:485#lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:522#lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized,"
 reason = "FIG-1505: the agent-workbench store-maintenance route distinguishes the two refusals to say which one happened, which is a variant pattern that only distinguishes an enum shape."
 
 [[api]]
@@ -92104,7 +92113,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceRefusal::EmptyRootSetUnauthorized"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:485#lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:522#lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized,"
 reason = "FIG-1505: a variant pattern that only distinguishes an enum shape; the executed refusal assertion in the store-maintenance example test observes the route's 409 and its message rather than this variant."
 
 [[api]]
@@ -92114,7 +92123,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceRefusal::UnwitnessedScope"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:496#lash::persistence::MaintenanceRefusal::UnwitnessedScope { scope },"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:533#lash::persistence::MaintenanceRefusal::UnwitnessedScope { scope },"
 reason = "FIG-1505: a variant pattern that only distinguishes an enum shape; reaching it needs a root authority that fails enumeration while grace-protected blobs exist, which no bundled example fixture produces."
 
 [[api]]
@@ -92124,7 +92133,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceRefusal::UnwitnessedScope::scope"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:496#lash::persistence::MaintenanceRefusal::UnwitnessedScope { scope },"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:533#lash::persistence::MaintenanceRefusal::UnwitnessedScope { scope },"
 reason = "FIG-1505: the route names the unenumerable scope in its 409; reaching it needs a root authority that fails enumeration while grace-protected blobs exist, which no bundled example fixture produces."
 
 [[api]]
@@ -92144,7 +92153,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::stop"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:483#let report = report.map_err(|failure| match failure.stop {"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:520#let report = report.map_err(|failure| match failure.stop {"
 reason = "FIG-1505: the agent-workbench store-maintenance route branches on this field to choose its HTTP status; the executed assertion observes the resulting status rather than the field."
 
 [[api]]
@@ -92154,7 +92163,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::partial"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/admin.rs:416#failure.partial.removed_node_count,"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:453#failure.partial.removed_node_count,"
 reason = "FIG-1505: the route reports how far a stopped vacuum got by reading the partial report this field carries; the executed assertion observes the error message it produces."
 
 [[api]]
