@@ -11789,6 +11789,16 @@ disposition = "unused-add"
 reason = "Add lash::observe::InMemoryLiveReplayStore::with_clock to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::observe::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"
+kind = "function"
+availability = "all-features"
+aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"]
+area = "observation-admin"
+disposition = "internal-test-only"
+usage = "crates/lash/src/tests/turn_streaming.rs:3663#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
+reason = "Relocate: this all-features-only method is implemented in lash_core::testing and consumed only to pin the distinct replay-visible and pre-notification cuts in the snapshot-subscribe conformance law."
+
+[[api]]
 symbol = "lash::observe::InMemoryLiveReplayStoreConfig"
 kind = "struct"
 availability = "default+all-features"

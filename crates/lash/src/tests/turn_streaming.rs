@@ -3163,8 +3163,13 @@ async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replace
 struct PausedCommitReplayStore {
     inner: lash_core::facade_support::InMemoryLiveReplayStore,
     boundary: PublicationBoundary,
-    commit_appended: std::sync::atomic::AtomicBool,
-    release_commit: std::sync::atomic::AtomicBool,
+    pause: Arc<PublicationPause>,
+}
+
+#[derive(Debug)]
+struct PublicationPause {
+    boundary_reached: std::sync::atomic::AtomicBool,
+    release_boundary: std::sync::atomic::AtomicBool,
     pause_lock: StdMutex<()>,
     pause_changed: std::sync::Condvar,
 }
@@ -3363,6 +3368,7 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
                 .build(crate::testing::runtime_lease_owner())?;
         let session_id = format!("two-histories-{boundary:?}");
         let session = core.session(session_id).open().await?;
+        let before = session.observe().recoverable_chat_snapshot();
         let turn_session = session.clone();
         let turn = tokio::spawn(async move {
             turn_session
@@ -3372,11 +3378,40 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         });
 
         replay_store.wait_for_commit_append().await;
+        let batch_is_visible = match lash_core::LiveReplayStore::replay_after_cursor(
+            replay_store.as_ref(),
+            &before.cursor,
+        )
+        .expect("boundary visibility probe must read replay")
+        {
+            lash_core::LiveReplayOutcome::Replayed(events) => events.iter().any(|event| {
+                matches!(
+                    event.payload,
+                    lash_core::SessionObservationEventPayload::Committed { .. }
+                )
+            }),
+            lash_core::LiveReplayOutcome::Gap(reason) => {
+                panic!("{boundary:?}: boundary probe unexpectedly gapped: {reason:?}")
+            }
+        };
+        assert_eq!(
+            batch_is_visible,
+            boundary == PublicationBoundary::BeforeNotification,
+            "{boundary:?}: only the pre-notification cut may expose the batch to replay"
+        );
         let snapshot = session.observe().recoverable_chat_snapshot();
         let snapshot_is_new =
             snapshot.read_view.messages().iter().any(|message| {
                 crate::message_text(message).contains("exactly once across the cut")
             });
+        assert_eq!(
+            snapshot_is_new,
+            matches!(
+                boundary,
+                PublicationBoundary::AfterInstall | PublicationBoundary::BeforeNotification
+            ),
+            "{boundary:?}: projection installation must divide the two allowed histories"
+        );
         let mut stream = session
             .observe()
             .subscribe_recoverable_chat(snapshot.cursor);
@@ -3617,39 +3652,60 @@ impl PausedCommitReplayStore {
     }
 
     fn at(boundary: PublicationBoundary) -> Self {
-        Self {
-            inner: lash_core::facade_support::InMemoryLiveReplayStore::default(),
-            boundary,
-            commit_appended: std::sync::atomic::AtomicBool::new(false),
-            release_commit: std::sync::atomic::AtomicBool::new(false),
+        let pause = Arc::new(PublicationPause {
+            boundary_reached: std::sync::atomic::AtomicBool::new(false),
+            release_boundary: std::sync::atomic::AtomicBool::new(false),
             pause_lock: StdMutex::new(()),
             pause_changed: std::sync::Condvar::new(),
+        });
+        let inner = if boundary == PublicationBoundary::BeforeNotification {
+            let notification_pause = Arc::clone(&pause);
+            lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing(
+                lash_core::facade_support::InMemoryLiveReplayStore::default(),
+                move |events| {
+                    if Self::is_authoritative_events(events) {
+                        notification_pause.pause();
+                    }
+                },
+            )
+        } else {
+            lash_core::facade_support::InMemoryLiveReplayStore::default()
+        };
+        Self {
+            inner,
+            boundary,
+            pause,
         }
     }
 
+    fn is_authoritative_events(events: &[Arc<lash_core::SessionObservationEvent>]) -> bool {
+        events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+                    | lash_core::SessionObservationEventPayload::ResidentChanged { .. }
+            )
+        })
+    }
+
     fn arm_pause(&self) {
-        self.release_commit
+        self.pause
+            .release_boundary
             .store(false, std::sync::atomic::Ordering::Release);
-        self.commit_appended
+        self.pause
+            .boundary_reached
             .store(false, std::sync::atomic::Ordering::Release);
     }
 
     fn pause(&self) {
-        self.commit_appended
-            .store(true, std::sync::atomic::Ordering::Release);
-        let mut guard = self.pause_lock.lock_recover();
-        while !self
-            .release_commit
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
-            guard = self.pause_changed.wait(guard).recover();
-        }
+        self.pause.pause();
     }
 
     async fn wait_for_commit_append(&self) {
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             while !self
-                .commit_appended
+                .pause
+                .boundary_reached
                 .load(std::sync::atomic::Ordering::Acquire)
             {
                 tokio::task::yield_now().await;
@@ -3660,9 +3716,24 @@ impl PausedCommitReplayStore {
     }
 
     fn release_commit_install(&self) {
-        self.release_commit
+        self.pause
+            .release_boundary
             .store(true, std::sync::atomic::Ordering::Release);
-        self.pause_changed.notify_all();
+        self.pause.pause_changed.notify_all();
+    }
+}
+
+impl PublicationPause {
+    fn pause(&self) {
+        self.boundary_reached
+            .store(true, std::sync::atomic::Ordering::Release);
+        let mut guard = self.pause_lock.lock_recover();
+        while !self
+            .release_boundary
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            guard = self.pause_changed.wait(guard).recover();
+        }
     }
 }
 
@@ -3702,19 +3773,8 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         Vec<Arc<lash_core::SessionObservationEvent>>,
         lash_core::LiveReplayStoreError,
     > {
-        let pause = prepared.events().iter().any(|event| {
-            matches!(
-                &event.payload,
-                lash_core::SessionObservationEventPayload::Committed { .. }
-                    | lash_core::SessionObservationEventPayload::ResidentChanged { .. }
-            )
-        });
-        if pause
-            && matches!(
-                self.boundary,
-                PublicationBoundary::AfterInstall | PublicationBoundary::BeforeNotification
-            )
-        {
+        let pause = Self::is_authoritative_events(prepared.events());
+        if pause && self.boundary == PublicationBoundary::AfterInstall {
             self.pause();
         }
         self.inner.publish_prepared(prepared)

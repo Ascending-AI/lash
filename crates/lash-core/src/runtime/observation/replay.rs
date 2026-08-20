@@ -568,6 +568,22 @@ pub struct InMemoryLiveReplayStore {
     config: InMemoryLiveReplayStoreConfig,
     clock: Arc<dyn crate::Clock>,
     sessions: Arc<StdMutex<HashMap<String, LiveReplaySessionBuffer>>>,
+    #[cfg(any(test, feature = "testing"))]
+    before_notification_gate: Option<BeforeNotificationGate>,
+}
+
+#[cfg(any(test, feature = "testing"))]
+type BeforeNotificationCallback = dyn Fn(&[Arc<SessionObservationEvent>]) + Send + Sync + 'static;
+
+#[cfg(any(test, feature = "testing"))]
+#[derive(Clone)]
+struct BeforeNotificationGate(Arc<BeforeNotificationCallback>);
+
+#[cfg(any(test, feature = "testing"))]
+impl fmt::Debug for BeforeNotificationGate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("BeforeNotificationGate(..)")
+    }
 }
 
 impl InMemoryLiveReplayStore {
@@ -581,6 +597,8 @@ impl InMemoryLiveReplayStore {
             config,
             clock,
             sessions: Arc::new(StdMutex::new(HashMap::new())),
+            #[cfg(any(test, feature = "testing"))]
+            before_notification_gate: None,
         }
     }
 
@@ -589,6 +607,15 @@ impl InMemoryLiveReplayStore {
             max_events_per_session,
             max_age,
         })
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn with_before_notification_gate(
+        mut self,
+        gate: impl Fn(&[Arc<SessionObservationEvent>]) + Send + Sync + 'static,
+    ) -> Self {
+        self.before_notification_gate = Some(BeforeNotificationGate(Arc::new(gate)));
+        self
     }
 }
 
@@ -642,6 +669,12 @@ impl LiveReplaySessionBuffer {
             self.sender = None;
         }
     }
+
+    fn reservation_mut(&mut self, reservation_id: &str) -> Option<&mut ReservedPublication> {
+        self.reservations
+            .values_mut()
+            .find(|reservation| reservation.reservation_id == reservation_id)
+    }
 }
 
 #[derive(Debug)]
@@ -670,7 +703,8 @@ impl InMemoryLiveReplayStore {
         config: &InMemoryLiveReplayStoreConfig,
         buffer: &mut LiveReplaySessionBuffer,
         now: Instant,
-    ) {
+    ) -> Vec<Arc<SessionObservationEvent>> {
+        let mut notifications = Vec::new();
         loop {
             let next_position = buffer.settled_position.saturating_add(1);
             let Some(mut reservation) = buffer.reservations.remove(&next_position) else {
@@ -694,7 +728,7 @@ impl InMemoryLiveReplayStore {
                             appended_at: now,
                             event: clone_event(&event),
                         });
-                        buffer.publish(event);
+                        notifications.push(event);
                     }
                 }
                 ReservedPublicationState::Abandoned => {
@@ -710,6 +744,7 @@ impl InMemoryLiveReplayStore {
             buffer.settled_position = reservation.end_position;
         }
         Self::trim_locked(config, buffer, now);
+        notifications
     }
 
     fn trim_locked(
@@ -819,15 +854,14 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             let Some(buffer) = sessions.get_mut(&abandoned_session_id) else {
                 return;
             };
-            let Some(reservation) = buffer
-                .reservations
-                .values_mut()
-                .find(|reservation| reservation.reservation_id == reservation_id)
-            else {
+            let Some(reservation) = buffer.reservation_mut(reservation_id) else {
                 return;
             };
             reservation.state = ReservedPublicationState::Abandoned;
-            InMemoryLiveReplayStore::settle_ready(&config, buffer, now);
+            let notifications = InMemoryLiveReplayStore::settle_ready(&config, buffer, now);
+            for event in notifications {
+                buffer.publish(event);
+            }
         })
     }
 
@@ -847,22 +881,41 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let buffer = sessions.get_mut(&session_id).ok_or_else(|| {
             LiveReplayStoreError::Store("prepared live replay session is missing".to_string())
         })?;
-        let reservation = buffer
-            .reservations
-            .values_mut()
-            .find(|reservation| reservation.reservation_id == reservation_id)
-            .ok_or_else(|| {
-                LiveReplayStoreError::Store(
-                    "prepared live replay reservation is missing or retired".to_string(),
-                )
-            })?;
+        let reservation = buffer.reservation_mut(&reservation_id).ok_or_else(|| {
+            LiveReplayStoreError::Store(
+                "prepared live replay reservation is missing or retired".to_string(),
+            )
+        })?;
         if !matches!(reservation.state, ReservedPublicationState::Pending(_)) {
             return Err(LiveReplayStoreError::Store(
                 "prepared live replay reservation was already settled".to_string(),
             ));
         }
         reservation.state = ReservedPublicationState::Ready(events.clone());
-        Self::settle_ready(&self.config, buffer, now);
+        let notifications = Self::settle_ready(&self.config, buffer, now);
+
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(gate) = self.before_notification_gate.as_ref()
+            && !notifications.is_empty()
+        {
+            drop(sessions);
+            (gate.0)(&notifications);
+            sessions = self.sessions.lock_recover();
+            let buffer = sessions.get_mut(&session_id).ok_or_else(|| {
+                LiveReplayStoreError::Store(
+                    "published live replay session disappeared before notification".to_string(),
+                )
+            })?;
+            for event in notifications {
+                buffer.publish(event);
+            }
+            let _ = prepared.into_parts();
+            return Ok(events);
+        }
+
+        for event in notifications {
+            buffer.publish(event);
+        }
         let _ = prepared.into_parts();
         Ok(events)
     }

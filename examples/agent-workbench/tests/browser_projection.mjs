@@ -96,6 +96,186 @@ test("resident replacement refetches without settling provisional rows", () => {
   assert.doesNotMatch(residentBranch, /finishTransientRows\(/);
 });
 
+test("resident replacement async refetch preserves an actual provisional tool row", async () => {
+  function element(tagName) {
+    const selectors = new Map();
+    const node = {
+      tagName,
+      className: "",
+      children: [],
+      parentNode: null,
+      textContent: "",
+      value: "",
+      hidden: false,
+      append(...children) {
+        for (const child of children) {
+          if (typeof child !== "string") this.appendChild(child);
+        }
+      },
+      appendChild(child) {
+        this.children.push(child);
+        child.parentNode = this;
+        return child;
+      },
+      querySelector(selector) { return selectors.get(selector) ?? null; },
+      addEventListener() {},
+      setAttribute() {},
+      classList: {
+        toggle(token, force) {
+          const tokens = node.className.split(" ").filter(Boolean).filter(item => item !== token);
+          if (force) tokens.push(token);
+          node.className = tokens.join(" ");
+        },
+      },
+    };
+    Object.defineProperty(node, "innerHTML", {
+      set() {
+        if (node.className.startsWith("tool")) {
+          for (const selector of ["strong", ".badge", ".tool-head span:last-child", ".tool-summary", "pre"]) {
+            selectors.set(selector, element(selector));
+          }
+        }
+      },
+    });
+    return node;
+  }
+
+  const timeline = element("timeline");
+  const modelInput = element("modelInput");
+  const variantSelect = element("variantSelect");
+  const modelList = element("modelList");
+  const sessionDialect = element("sessionDialect");
+  let resolveSnapshot;
+  let fetchCalls = 0;
+  const recoveryContext = {
+    Map,
+    Math,
+    Number,
+    Set,
+    timeline,
+    modelInput,
+    variantSelect,
+    sessionDialect,
+    knownModels: new Set(),
+    modelListenersBound: false,
+    knownWebState: null,
+    knownSessionLabel: null,
+    assistantDraft: null,
+    assistantDraftTurnId: null,
+    assistantDraftText: "",
+    assistantDraftChunks: [],
+    reasoning: null,
+    reasoningChunks: [],
+    pendingCodeBlock: null,
+    pendingTools: [],
+    busy: true,
+    resetInFlight: false,
+    clearCalls: 0,
+    transcriptRenderCalls: 0,
+    executionScorecardState: new Map(),
+    executionScorecard: element("executionScorecard"),
+    shellAvailability: {},
+    document: {
+      createElement: element,
+      getElementById(id) { return id === "modelList" ? modelList : element(id); },
+    },
+    clearEmpty() {},
+    clearRetryStatus() {},
+    scrollToEnd() {},
+    refreshWork() {},
+    validateModel() {},
+    clearTerminalTurnTombstones() {},
+    markShellChannel() {},
+    markShellHydrated() {},
+    renderShellStatus() {},
+    scheduleStateRetry() {},
+    renderError() {},
+    snapshotFailureReason(error) { return String(error); },
+    renderUsage() {},
+    renderQueuedWork() {},
+    renderApprovals() {},
+    renderIngressReceipt() {},
+    recordTurnInputApplications() {},
+    rebuildExecutionScorecard() {},
+    renderStreamingUsage() {},
+    renderQueuedWorkStarted() {},
+    applyExecutionScorecardRecord() {},
+    renderExecutionScorecard() {},
+    setBusy(value) { this.busy = value; },
+    __LASH_WORKBENCH_TURN_EVENT_HOOK__() {},
+    async fetchStateSnapshot() {
+      fetchCalls += 1;
+      return new Promise(resolve => { resolveSnapshot = resolve; });
+    },
+  };
+
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+     this.projectionState = createWorkbenchProjectionState();
+     this.renderedProductEvents = projectionState.renderedProductEvents;
+     this.appliedObservationEvents = projectionState.appliedObservationEvents;
+     function clearTranscript() {
+       clearCalls += 1;
+       timeline.children = [];
+       pendingTools = [];
+     }
+     function renderStateTranscript() { transcriptRenderCalls += 1; }
+     ${markedSource("WORKBENCH_TOOL_CODE_PROJECTION", "WORKBENCH_TOOL_CODE_PROJECTION")}
+     ${markedSource("WORKBENCH_TURN_EVENT_DISPATCH", "WORKBENCH_TURN_EVENT_DISPATCH")}
+     ${markedSource("WORKBENCH_STATE_SNAPSHOT", "WORKBENCH_STATE_SNAPSHOT")}
+     ${markedSource("WORKBENCH_REMOTE_STREAM_RECOVERY", "WORKBENCH_REMOTE_STREAM_RECOVERY")}
+     applyProjectionSnapshot(projectionState, {
+       settings: { session_id: "resident-session" },
+       observation: { cursor: "cursor-before-resident" },
+       product_events: { cursor: 0, events: [] }
+     }, true);
+     projectionState.replayIncarnationId = "resident-incarnation";
+     handleTurnEvent(${JSON.stringify(turnEvents.toolStarted)}, "provisional-turn");`,
+    recoveryContext,
+  );
+
+  assert.equal(timeline.children.length, 1);
+  assert.match(timeline.children[0].className, /pending/);
+  const provisionalRow = timeline.children[0];
+
+  recoveryContext.handleObservationStreamLine(JSON.stringify({
+    type: "resident_replacement",
+    cursor: "cursor-after-resident",
+    event: {
+      type: "resident_changed",
+      session_id: "resident-session",
+      replay_incarnation_id: "resident-incarnation",
+      cursor: "cursor-after-resident",
+    },
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(fetchCalls, 1, "resident replacement must drive the async state refetch");
+
+  resolveSnapshot({
+    settings: {
+      session_id: "resident-session",
+      model: "resident-model",
+      models: ["resident-model"],
+      model_variant: "",
+      model_variants: [""],
+      web_configured: true,
+      rlm_dialect: "standard",
+    },
+    observation: { cursor: "cursor-after-resident" },
+    product_events: { cursor: 0, events: [] },
+    transcript: [],
+    active_turns: [{ turn_id: "provisional-turn" }],
+  });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(recoveryContext.clearCalls, 0);
+  assert.equal(recoveryContext.transcriptRenderCalls, 0);
+  assert.equal(timeline.children.length, 1);
+  assert.equal(timeline.children[0], provisionalRow);
+  assert.equal(recoveryContext.pendingTools.length, 1);
+  assert.equal(modelInput.value, "resident-model", "resident authority outside the transcript must refresh");
+});
+
 function dispatchTurnEvent(event) {
   const calls = [];
   const dispatchContext = {

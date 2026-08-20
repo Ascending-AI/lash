@@ -4608,7 +4608,10 @@
       if (event.type === "turn_activity") handleTurnEvent(event.activity, event.turn_id);
     }
 
-    async function recoverFromState(failureMessage) {
+    async function recoverFromState(
+      failureMessage,
+      transcriptApplication = SNAPSHOT_TRANSCRIPT_REPLACE
+    ) {
       const token = beginStateRecovery(projectionState);
       try {
         const state = await fetchStateSnapshot();
@@ -4619,7 +4622,7 @@
           scheduleStateRetry();
           return;
         }
-        applyStateSnapshot(state, true, true);
+        applyStateSnapshot(state, true, true, transcriptApplication);
       } catch (error) {
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
@@ -4649,7 +4652,8 @@
 
     async function recoverResidentReplacement() {
       await recoverFromState(
-        "resident state changed; reload to refresh the conversation"
+        "resident state changed; reload to refresh the conversation",
+        SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT
       );
     }
     // END WORKBENCH_REMOTE_STREAM_RECOVERY
@@ -5499,16 +5503,25 @@
     }
 
     // BEGIN WORKBENCH_STATE_SNAPSHOT
+    const SNAPSHOT_TRANSCRIPT_APPEND = "append";
+    const SNAPSHOT_TRANSCRIPT_REPLACE = "replace";
+    const SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT = "preserve_transient";
+
     function applyStateSnapshot(
       state,
       replaceTranscript = false,
-      authoritative = replaceTranscript
+      authoritative = replaceTranscript,
+      transcriptApplication = replaceTranscript
+        ? SNAPSHOT_TRANSCRIPT_REPLACE
+        : SNAPSHOT_TRANSCRIPT_APPEND
     ) {
       const snapshotSessionId = state?.settings?.session_id || null;
       if (projectionState.sessionId !== null && projectionState.sessionId !== snapshotSessionId) {
         clearTerminalTurnTombstones();
       }
-      if (replaceTranscript) clearTranscript();
+      const preserveTransientTranscript =
+        transcriptApplication === SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT;
+      if (replaceTranscript && !preserveTransientTranscript) clearTranscript();
       applyProjectionSnapshot(projectionState, state, authoritative);
       modelInput.value = state.settings.model || "";
       const modelList = document.getElementById("modelList");
@@ -5546,7 +5559,7 @@
       renderUsage(state.usage);
       renderQueuedWork(state.queued_work || []);
       renderApprovals(state.pending_approvals || []);
-      renderStateTranscript(state);
+      if (!preserveTransientTranscript) renderStateTranscript(state);
       rebuildExecutionScorecard(
         executionScorecardState,
         state.product_events?.events,

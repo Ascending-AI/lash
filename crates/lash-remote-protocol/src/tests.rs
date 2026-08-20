@@ -1191,34 +1191,136 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     assert_eq!(decoded, process);
 }
 
-/// A version 41 peer has no resident-replacement signal. Exact negotiation
-/// rejects it before decode, and its frozen strict enum cannot reinterpret the
-/// new signal as `committed`.
-#[test]
-fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback() {
-    let resident = serde_json::to_value(RemoteSessionObservationEventPayload::ResidentChanged)
-        .expect("serialize version 42 resident signal");
-    assert_eq!(resident, serde_json::json!({ "type": "resident_changed" }));
-    assert!(matches!(
-        ensure_protocol_version(41),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 41,
-            expected: 42,
-        })
-    ));
-    let error = serde_json::from_value::<Protocol41ObservationSignal>(resident)
-        .expect_err("a version 41 peer cannot name resident_changed");
-    assert!(error.to_string().contains("unknown variant"), "{error}");
-    serde_json::from_value::<Protocol41ObservationSignal>(serde_json::json!({
-        "type": "committed"
-    }))
-    .expect("a version 41 peer still decodes its committed signal exactly");
+/// Frozen version-41 observation-envelope reader copied from
+/// `e4681ed877605ec094fc5a609f4425c6a5aeccc3`, the last pre-v42 protocol source.
+/// The literal version and closed payload vocabulary are deliberately
+/// independent of current protocol types.
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct Protocol41ObservationEnvelope {
+    protocol_version: u32,
+    session_id: String,
+    replay_incarnation_id: String,
+    #[serde(default)]
+    turn_id: Option<String>,
+    revision: u64,
+    cursor: String,
+    #[serde(flatten)]
+    event: Protocol41ObservationSignal,
+}
+
+impl Protocol41ObservationEnvelope {
+    fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        #[derive(serde::Deserialize)]
+        struct VersionProbe {
+            protocol_version: u32,
+        }
+
+        let probe: VersionProbe = serde_json::from_slice(bytes)?;
+        if probe.protocol_version != 41 {
+            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                actual: probe.protocol_version,
+                expected: 41,
+            });
+        }
+        Ok(serde_json::from_slice(bytes)?)
+    }
+}
+
+static PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[derive(Debug)]
+#[allow(dead_code)]
+struct Protocol41ObservationSignal(Protocol41ObservationSignalShape);
+
+impl<'de> serde::Deserialize<'de> for Protocol41ObservationSignal {
+    fn deserialize<Deserializer>(deserializer: Deserializer) -> Result<Self, Deserializer::Error>
+    where
+        Deserializer: serde::Deserializer<'de>,
+    {
+        PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(true, std::sync::atomic::Ordering::SeqCst);
+        <Protocol41ObservationSignalShape as serde::Deserialize>::deserialize(deserializer)
+            .map(Self)
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum Protocol41ObservationSignal {
+#[allow(dead_code)]
+enum Protocol41ObservationSignalShape {
+    TurnActivity {
+        activity: serde_json::Value,
+    },
     Committed,
+    AgentFrameSwitched {
+        frame_id: String,
+    },
+    QueueChanged {
+        kind: serde_json::Value,
+        batch_ids: Vec<String>,
+    },
+    ProcessChanged {
+        kind: serde_json::Value,
+        process_ids: Vec<String>,
+    },
+}
+
+/// A version 41 peer has no resident-replacement signal. Its frozen envelope
+/// reader must reject the complete v42 envelope at the version probe, before
+/// its closed payload decoder can see `resident_changed`.
+#[test]
+fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback() {
+    let resident = RemoteSessionObservationEvent {
+        protocol_version: REMOTE_PROTOCOL_VERSION,
+        session_id: "resident-session".to_string(),
+        replay_incarnation_id: "resident-incarnation".to_string(),
+        turn_id: None,
+        revision: 7,
+        cursor: "resident-cursor".to_string(),
+        event: RemoteSessionObservationEventPayload::ResidentChanged,
+    };
+    let wire = serde_json::to_vec(&resident).expect("serialize complete version 42 envelope");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
+        serde_json::json!({
+            "protocol_version": 42,
+            "session_id": "resident-session",
+            "replay_incarnation_id": "resident-incarnation",
+            "revision": 7,
+            "cursor": "resident-cursor",
+            "type": "resident_changed",
+        })
+    );
+
+    PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(false, std::sync::atomic::Ordering::SeqCst);
+    let error = Protocol41ObservationEnvelope::decode_json(&wire)
+        .expect_err("version 41 reader must reject a complete version 42 envelope");
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 42,
+            expected: 41,
+        }
+    ));
+    assert!(
+        !PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.load(std::sync::atomic::Ordering::SeqCst),
+        "version refusal must happen before the frozen payload decoder runs"
+    );
+
+    let mut mislabeled =
+        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect v42 fixture");
+    mislabeled["protocol_version"] = serde_json::json!(41);
+    PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(false, std::sync::atomic::Ordering::SeqCst);
+    let error = Protocol41ObservationEnvelope::decode_json(
+        &serde_json::to_vec(&mislabeled).expect("serialize mislabeled control envelope"),
+    )
+    .expect_err("the v41 payload vocabulary cannot decode resident_changed");
+    assert!(error.to_string().contains("unknown variant"), "{error}");
+    assert!(
+        PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.load(std::sync::atomic::Ordering::SeqCst),
+        "the control proves the frozen payload decoder records when it is reached"
+    );
 }
 
 #[test]
