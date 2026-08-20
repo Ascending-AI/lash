@@ -11,9 +11,9 @@ pub(crate) async fn lock_checkpoint_blob_root_tx(
             .await
             .map_err(store_sqlx_error)?;
     if exists.is_none() {
-        return Err(StoreError::Backend(format!(
-            "checkpoint root `{checkpoint_ref}` is missing"
-        )));
+        return Err(StoreError::CheckpointRootMissing {
+            blob_ref: BlobRef(checkpoint_ref.to_string()),
+        });
     }
     Ok(())
 }

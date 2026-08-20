@@ -135,6 +135,15 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let (source_session_id, checkpoint_ref) =
+            crate::support::retained_checkpoint_tx(&mut tx, node_id)
+                .await?
+                .ok_or_else(|| StoreError::ForkPointNotRetained {
+                    node_id: node_id.to_string(),
+                })?;
+        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &source_session_id)
+            .await?;
+        crate::session_blob_reclaim::lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
         let live_node = sqlx::query_scalar::<_, bool>(
             "SELECT TRUE FROM lash_graph_nodes
              WHERE node_id = $1 AND tombstoned = FALSE
@@ -168,21 +177,18 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 pinned: true,
             });
         }
-        let retained = sqlx::query_as::<_, (String, String)>(
-            "SELECT session_id, checkpoint_ref FROM lash_sessions
-             WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
-             ORDER BY session_id LIMIT 1
-             FOR SHARE",
+        if !crate::support::retention_source_holds_checkpoint_tx(
+            &mut tx,
+            node_id,
+            &source_session_id,
+            &checkpoint_ref,
         )
-        .bind(node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let (source_session_id, checkpoint_ref) =
-            retained.ok_or_else(|| StoreError::ForkPointNotRetained {
+        .await?
+        {
+            return Err(StoreError::ForkPointNotRetained {
                 node_id: node_id.to_string(),
-            })?;
-        crate::session_blob_reclaim::lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
+            });
+        }
         sqlx::query(
             "INSERT INTO lash_node_anchors (node_id, checkpoint_ref, source_session_id)
              VALUES ($1, $2, $3)",
@@ -275,10 +281,45 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         request: &lash_core::ForkSessionRequest,
     ) -> Result<lash_core::ForkSessionReceipt, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
+        // Target identity fences precede source-retention fences. This unlocked
+        // fast path only decides already-materialized targets and permanent
+        // tombstones; keep the post-lock checks below for concurrent changes.
+        let (exists, deleted) = sqlx::query_as::<_, (bool, bool)>(
+            "SELECT
+                EXISTS(
+                    SELECT 1 FROM lash_sessions WHERE session_id = $1
+                    UNION ALL
+                    SELECT 1 FROM lash_session_meta WHERE session_id = $1
+                ),
+                EXISTS(
+                    SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
+                )",
+        )
+        .bind(&request.session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if exists {
+            return Err(StoreError::ForkSessionAlreadyExists {
+                session_id: request.session_id.clone(),
+            });
+        }
+        if deleted {
+            return Err(StoreError::SessionDeleted {
+                session_id: request.session_id.clone(),
+            });
+        }
+        let (source_session_id, checkpoint_ref) =
+            crate::support::retained_checkpoint_tx(&mut tx, &request.node_id)
+                .await?
+                .ok_or_else(|| StoreError::ForkPointNotRetained {
+                    node_id: request.node_id.clone(),
+                })?;
+        let session_ids = vec![request.session_id.clone(), source_session_id.clone()];
+        crate::runtime_persistence::lock_session_history_mutations_tx(&mut tx, &session_ids)
             .await?;
-        // Keep the fork fences in the shared order: exists -> deleted ->
-        // retained -> live -> frame.
+        // Keep the fork fences in the global order: every session advisory
+        // fence first, then the retained checkpoint root, then graph and head.
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(
                  SELECT 1 FROM lash_sessions WHERE session_id = $1
@@ -309,24 +350,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
-        let retained = sqlx::query_as::<_, (String, String)>(
-            "SELECT source_session_id, checkpoint_ref FROM (
-                 SELECT source_session_id, checkpoint_ref, 0 AS priority
-                 FROM lash_node_anchors WHERE node_id = $1
-                 UNION ALL
-                 SELECT session_id, checkpoint_ref, 1 AS priority FROM lash_sessions
-                 WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
-             ) retained
-             ORDER BY priority, source_session_id LIMIT 1",
-        )
-        .bind(&request.node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let (source_session_id, checkpoint_ref) =
-            retained.ok_or_else(|| StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
-            })?;
         crate::session_blob_reclaim::lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
         let node_facts = sqlx::query_as::<_, (String, i64)>(
             "SELECT session_id, generation FROM lash_graph_nodes
@@ -341,6 +364,18 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             node_facts.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             })?;
+        if !crate::support::retention_source_holds_checkpoint_tx(
+            &mut tx,
+            &request.node_id,
+            &source_session_id,
+            &checkpoint_ref,
+        )
+        .await?
+        {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            });
+        }
         let current_frame_node_id =
             crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
                 .await?
@@ -696,9 +731,11 @@ pub(crate) async fn delete_session_tx(
     }
     // Attachment intents are released before the rest of the session store so
     // a failed transaction cannot leave live-looking state without its owner.
+    // The session advisory fence stabilizes this head read. Do not take its
+    // row lock before the complete hash-sorted blob candidate set below.
     let head = sqlx::query_as::<_, (Option<String>, Option<String>)>(
         "SELECT leaf_node_id, checkpoint_ref FROM lash_sessions
-         WHERE session_id = $1 FOR UPDATE",
+         WHERE session_id = $1",
     )
     .bind(session_id)
     .fetch_optional(&mut **tx)
@@ -828,21 +865,9 @@ pub(crate) async fn delete_process_sessions_tx(
 
     let mut report = lash_core::SessionBlobReclaimReport::default();
     let outcome: Result<(), StoreError> = async {
-        // Take every session-history mutation fence in a standalone statement
-        // before deleting heads or deciding whether graph cleanup is required.
-        // The ordered subquery gives overlapping batches one lock-request order.
-        sqlx::query(
-            "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
-         FROM (
-             SELECT session_id
-             FROM unnest($1::TEXT[]) AS target(session_id)
-             ORDER BY session_id
-         ) AS ordered",
-        )
-        .bind(session_ids)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        // Take every session-history mutation fence before deleting heads or
+        // deciding whether graph cleanup is required.
+        crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
 
         let checkpoint_refs = sqlx::query_scalar::<_, String>(
             "SELECT DISTINCT checkpoint_ref
