@@ -95,22 +95,18 @@ impl TurnCommitDraft {
         cancelled: bool,
     ) {
         let projected_messages =
-            (new_messages.is_empty() && cancelled).then(|| self.graph.message_sequence().shared());
-        let appended_messages = if let Some(projected_messages) = projected_messages.as_ref() {
-            self.graph
-                .message_delta_if_current_preserved(projected_messages.iter())
-        } else {
-            self.graph
-                .message_delta_if_current_preserved(new_messages.iter())
-        };
+            (new_messages.is_empty() && cancelled).then(|| self.graph.message_sequence());
+        let projected_messages = projected_messages.as_ref().unwrap_or(&new_messages);
 
-        if let Some(appended_messages) = appended_messages {
+        if let Some(appended_messages) = self
+            .graph
+            .message_delta_if_current_preserved(projected_messages)
+        {
             self.graph
                 .append_active_conversation_messages(&appended_messages);
             return;
         }
 
-        let projected_messages = projected_messages.unwrap_or_else(|| new_messages.shared());
         self.graph
             .project_active_read_state(projected_messages.as_slice());
     }
@@ -144,16 +140,11 @@ impl TurnCommitDraft {
     }
 
     fn apply_message_projection(&mut self, messages: &MessageSequence) {
-        if let Some(appended_messages) = self
-            .graph
-            .message_delta_if_current_preserved(messages.iter())
-        {
+        if let Some(appended_messages) = self.graph.message_delta_if_current_preserved(messages) {
             self.graph
                 .append_active_conversation_messages(&appended_messages);
         } else {
-            let read_messages = messages.shared();
-            self.graph
-                .project_active_read_state(read_messages.as_slice());
+            self.graph.project_active_read_state(messages.as_slice());
         }
     }
 }

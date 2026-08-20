@@ -8,6 +8,7 @@ use crate::session_graph_integrity::{
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, Clock, Message, PromptUsage, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
+use lash_sansio::core_support::MessageCoreSupport;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RealizedNodeTimestamp {
@@ -562,6 +563,16 @@ struct SessionGraphCache {
     /// Replaced (not invalidated in-place) whenever `active_messages`
     /// changes — the `Arc` identity tracks the cache's validity.
     prompt_render_cache: Arc<BaseRenderCache>,
+    /// Memoized `read_model_for_frame` answer, keyed by the frame it was
+    /// projected for.
+    ///
+    /// Identity is the point, not the saved work: the turn projection decides
+    /// prefix agreement by comparing the `Arc` a read model handed out
+    /// (`TurnGraphEditor::message_delta_if_current_preserved`), so a frame
+    /// projection rebuilt per call would hand the turn's two readers two
+    /// equal-but-distinct `Arc`s and force the whole-window reconciliation on
+    /// every boundary. Cleared whenever the active path moves.
+    frame_read_model: OnceLock<(String, SessionReadModel)>,
 }
 
 impl SessionGraphCache {
@@ -577,6 +588,7 @@ impl SessionGraphCache {
             active_events: Arc::new(Vec::new()),
             active_messages: Arc::new(Vec::new()),
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
+            frame_read_model: OnceLock::new(),
         };
         cache.rebuild_read_model(graph);
         Ok(cache)
@@ -600,9 +612,27 @@ impl SessionGraphCache {
         self.active_messages = Arc::new(active_messages);
         self.active_events = Arc::new(active_events);
         self.prompt_render_cache = Arc::new(BaseRenderCache::new());
+        self.frame_read_model = OnceLock::new();
     }
 
     fn read_model_for_frame(&self, graph: &SessionGraph, frame_node_id: &str) -> SessionReadModel {
+        if let Some((memoized_frame_node_id, read_model)) = self.frame_read_model.get()
+            && memoized_frame_node_id == frame_node_id
+        {
+            return read_model.clone();
+        }
+        let read_model = self.project_read_model_for_frame(graph, frame_node_id);
+        let _ = self
+            .frame_read_model
+            .set((frame_node_id.to_string(), read_model.clone()));
+        read_model
+    }
+
+    fn project_read_model_for_frame(
+        &self,
+        graph: &SessionGraph,
+        frame_node_id: &str,
+    ) -> SessionReadModel {
         let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
         let mut active_events = Vec::with_capacity(self.active_path_indices.len());
         let mut in_frame = false;
@@ -644,6 +674,7 @@ impl SessionGraphCache {
         if !parent_matches_leaf {
             return;
         }
+        self.frame_read_model = OnceLock::new();
         self.active_path_indices.push(node_index);
         if let Some(event) = node.event() {
             Arc::make_mut(&mut self.active_events).push(event.clone());
@@ -1412,8 +1443,7 @@ pub(crate) fn build_active_read_replacement<'a>(
             let Some(target_item) = target.get(target_idx) else {
                 break;
             };
-            if serde_json::to_value(&current_message).ok() != serde_json::to_value(target_item).ok()
-            {
+            if !current_message.content_equals(target_item) {
                 break;
             }
             leaf_node_id = Some(node.node_id.clone());
@@ -1475,8 +1505,7 @@ pub(crate) fn build_active_read_projection<'a>(
             let Some(target_item) = target.get(target_idx) else {
                 break;
             };
-            if serde_json::to_value(&current_message).ok() != serde_json::to_value(target_item).ok()
-            {
+            if !current_message.content_equals(target_item) {
                 break;
             }
             push_active_read_node(node, &mut active_events, &mut active_messages);

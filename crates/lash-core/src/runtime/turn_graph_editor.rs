@@ -104,16 +104,43 @@ impl TurnGraphEditor {
         self.record_append_builder_nodes(nodes);
     }
 
-    pub(super) fn message_delta_if_current_preserved<'a>(
+    /// The messages `next` appends to the turn's read state, or `None` when
+    /// `next` rewrites the prefix this editor already holds.
+    ///
+    /// The answer is normally a pointer comparison: `next` and
+    /// `self.active_messages` are ropes over the same `base` allocation — the
+    /// read model this editor was opened on — so a preserved prefix is
+    /// witnessed by rope identity and only the turn-sized delta is inspected.
+    /// The content walk below is the fallback for a `next` that was rebuilt
+    /// (a compaction transform, a restored sequence), and it is bounded by the
+    /// active window rather than by the session's history because it compares
+    /// messages directly instead of materializing JSON for each one.
+    pub(super) fn message_delta_if_current_preserved(
         &self,
-        next: impl IntoIterator<Item = &'a Message>,
+        next: &MessageSequence,
     ) -> Option<Vec<Message>> {
+        if let Some(tail) = self.active_messages.preserved_extension_delta(next) {
+            // The shared prefix is transient-filtered by construction: every
+            // writer of `active_messages` (the read model it is based on,
+            // `append_events`, `append_active_conversation_messages`) drops
+            // transient messages before they land.
+            debug_assert!(
+                !self.active_messages.iter().any(Message::is_transient),
+                "active read messages carry no transient message"
+            );
+            return Some(
+                tail.iter()
+                    .filter(|message| !message.is_transient())
+                    .cloned()
+                    .collect(),
+            );
+        }
+
         let mut current = self.active_messages.iter();
         let mut appended = Vec::new();
-        for message in next.into_iter().filter(|message| !message.is_transient()) {
+        for message in next.iter().filter(|message| !message.is_transient()) {
             if let Some(current_message) = current.next() {
-                if serde_json::to_value(current_message).ok() != serde_json::to_value(message).ok()
-                {
+                if !current_message.content_equals(message) {
                     return None;
                 }
             } else {
@@ -350,7 +377,7 @@ impl TurnGraphEditor {
 }
 
 fn messages_structurally_equal(left: &Message, right: &Message) -> bool {
-    serde_json::to_value(left).ok() == serde_json::to_value(right).ok()
+    left.content_equals(right)
 }
 
 #[cfg(test)]
@@ -387,7 +414,7 @@ mod tests {
         let mut editor = editor();
         let first = message("first", "one");
         let delta = editor
-            .message_delta_if_current_preserved([&first])
+            .message_delta_if_current_preserved(&MessageSequence::from_owned(vec![first.clone()]))
             .expect("empty editor accepts appended message");
         assert_eq!(
             delta
@@ -417,8 +444,91 @@ mod tests {
         let rewritten = message("first", "changed");
         assert!(
             editor
-                .message_delta_if_current_preserved([&rewritten])
+                .message_delta_if_current_preserved(&MessageSequence::from_owned(vec![rewritten]))
                 .is_none()
+        );
+    }
+
+    /// The turn's read state and the protocol machine's message list are ropes
+    /// over the same read-model `base`, so agreement on the history they share
+    /// is settled by rope identity: no message on the base is ever inspected,
+    /// however long the session is. The probe base carries a message whose
+    /// content differs from anything a walk would accept, so a fallback that
+    /// compared content would reject this delta instead of naming it.
+    #[test]
+    fn a_shared_read_model_base_witnesses_agreement_without_walking_history() {
+        let mut graph = SessionGraph::default();
+        graph.append_active_read_delta(&[message("history", "committed")]);
+        let graph = Arc::new(graph);
+        let base_read_model = graph.read_model();
+        let base = Arc::clone(&base_read_model.messages);
+        let editor = TurnGraphEditor::new(
+            graph,
+            base_read_model,
+            None,
+            "turn-graph-editor-witness-test",
+            Arc::new(crate::SystemClock),
+            HashSet::new(),
+        );
+
+        let next = MessageSequence::from_base_and_delta(base, vec![message("turn", "new")]);
+
+        let delta = editor
+            .message_delta_if_current_preserved(&next)
+            .expect("a rope over the editor's own base preserves its prefix");
+        assert_eq!(
+            delta
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["turn"]
+        );
+    }
+
+    /// A transform that rebuilds the message list drops the witness, and the
+    /// content fallback reconciles it exactly as the serialize-and-compare
+    /// walk it replaced did.
+    #[test]
+    fn a_rebuilt_message_list_falls_back_to_content_reconciliation() {
+        let mut editor = editor();
+        editor.append_active_conversation_messages(&[
+            message("first", "one"),
+            message("second", "two"),
+        ]);
+
+        let preserved = MessageSequence::from_owned(vec![
+            message("first", "one"),
+            message("second", "two"),
+            message("third", "three"),
+        ]);
+        assert_eq!(
+            editor
+                .message_delta_if_current_preserved(&preserved)
+                .expect("an owned list that preserves the prefix still reconciles")
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["third"]
+        );
+
+        let rewritten = MessageSequence::from_owned(vec![
+            message("first", "one"),
+            message("second", "rewritten"),
+            message("third", "three"),
+        ]);
+        assert!(
+            editor
+                .message_delta_if_current_preserved(&rewritten)
+                .is_none(),
+            "rewriting the middle of the prefix is not an append"
+        );
+
+        let truncated = MessageSequence::from_owned(vec![message("first", "one")]);
+        assert!(
+            editor
+                .message_delta_if_current_preserved(&truncated)
+                .is_none(),
+            "dropping the tail of the prefix is not an append"
         );
     }
 
