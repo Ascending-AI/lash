@@ -11,10 +11,10 @@ use serde_json::Value;
 use crate::llm::types::LlmToolSpec;
 use crate::{
     AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata, BaseRenderCache,
-    MediaType, Message, MessageSequence, ModelEffortValidationCategory, ModelToolReturn,
-    ModelToolReturnPart, PromptContribution, PromptFingerprint, ProtocolEvent, SessionAppendNode,
-    ToolCancellation, ToolCatalog, ToolContract, ToolDefinition, ToolFailure, ToolFailureClass,
-    ToolManifest, ToolRetryPolicy, ToolValue,
+    ConversationRecord, MediaType, Message, MessageSequence, ModelEffortValidationCategory,
+    ModelToolReturn, ModelToolReturnPart, PromptContribution, PromptFingerprint, ProtocolEvent,
+    SessionAppendNode, ToolCancellation, ToolCatalog, ToolContract, ToolDefinition, ToolFailure,
+    ToolFailureClass, ToolManifest, ToolRetryPolicy, ToolValue,
 };
 
 pub trait AttachmentIdCoreSupport {
@@ -90,6 +90,12 @@ pub trait MessageCoreSupport {
 }
 
 impl MessageCoreSupport for Message {
+    fn content_equals(&self, other: &Message) -> bool {
+        crate::session_model::message::message_content_equal(self, other)
+    }
+}
+
+impl MessageCoreSupport for ConversationRecord {
     fn content_equals(&self, other: &Message) -> bool {
         crate::session_model::message::message_content_equal(self, other)
     }

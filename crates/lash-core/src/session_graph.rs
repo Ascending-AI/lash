@@ -418,6 +418,11 @@ pub(crate) struct ActiveReadProjection {
     pub(crate) active_messages: Vec<Message>,
 }
 
+pub(crate) struct ActiveReadPrefix<'a> {
+    retained_nodes: Vec<&'a SessionNodeRecord>,
+    retained_message_count: usize,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SessionReadModel {
     pub(crate) active_events: Arc<Vec<SessionHistoryRecord>>,
@@ -1429,34 +1434,16 @@ pub(crate) fn build_active_read_replacement<'a>(
         .filter(|message| !message.is_transient())
         .collect::<Vec<_>>();
 
-    let mut target_idx = 0usize;
-    let mut leaf_node_id = None;
-    for node in current_nodes {
-        if node
-            .message()
-            .map(|message| message.is_transient())
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        if let Some(current_message) = node.message() {
-            let Some(target_item) = target.get(target_idx) else {
-                break;
-            };
-            if !current_message.content_equals(target_item) {
-                break;
-            }
-            leaf_node_id = Some(node.node_id.clone());
-            target_idx += 1;
-        } else {
-            leaf_node_id = Some(node.node_id.clone());
-        }
-    }
+    let prefix = active_read_prefix(current_nodes, &target);
+    let mut leaf_node_id = prefix
+        .retained_nodes
+        .last()
+        .map(|node| node.node_id.clone());
 
     let mut new_node_ids = HashSet::new();
     let mut new_tail_nodes = Vec::new();
 
-    for message in target.into_iter().skip(target_idx) {
+    for message in target.into_iter().skip(prefix.retained_message_count) {
         let parent_node_id = leaf_node_id.clone();
         let node_id =
             next_replacement_draft_node_id(existing_node_ids, &new_node_ids, draft_namespace);
@@ -1490,32 +1477,14 @@ pub(crate) fn build_active_read_projection<'a>(
         .filter(|message| !message.is_transient())
         .collect::<Vec<_>>();
 
+    let prefix = active_read_prefix(current_nodes, &target);
     let mut active_events = Vec::new();
     let mut active_messages = Vec::new();
-    let mut target_idx = 0usize;
-    for node in current_nodes {
-        if node
-            .message()
-            .map(|message| message.is_transient())
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        if let Some(current_message) = node.message() {
-            let Some(target_item) = target.get(target_idx) else {
-                break;
-            };
-            if !current_message.content_equals(target_item) {
-                break;
-            }
-            push_active_read_node(node, &mut active_events, &mut active_messages);
-            target_idx += 1;
-        } else {
-            push_active_read_node(node, &mut active_events, &mut active_messages);
-        }
+    for node in prefix.retained_nodes {
+        push_active_read_node(node, &mut active_events, &mut active_messages);
     }
 
-    for message in target.into_iter().skip(target_idx) {
+    for message in target.into_iter().skip(prefix.retained_message_count) {
         active_events.push(SessionHistoryRecord::Conversation(
             ConversationRecord::from_message(message.clone()),
         ));
@@ -1525,6 +1494,35 @@ pub(crate) fn build_active_read_projection<'a>(
     ActiveReadProjection {
         active_events,
         active_messages,
+    }
+}
+
+pub(crate) fn active_read_prefix<'a>(
+    current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
+    target: &[&Message],
+) -> ActiveReadPrefix<'a> {
+    let mut retained_nodes = Vec::new();
+    let mut retained_message_count = 0usize;
+    for node in current_nodes {
+        match node.message() {
+            Some(current_message) if current_message.is_transient() => continue,
+            Some(current_message) => {
+                let Some(target_message) = target.get(retained_message_count) else {
+                    break;
+                };
+                if !current_message.content_equals(target_message) {
+                    break;
+                }
+                retained_message_count += 1;
+            }
+            None => {}
+        }
+        retained_nodes.push(node);
+    }
+
+    ActiveReadPrefix {
+        retained_nodes,
+        retained_message_count,
     }
 }
 

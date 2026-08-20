@@ -30,6 +30,49 @@ pub fn shared_parts(parts: Vec<Part>) -> Arc<Vec<Part>> {
     Arc::new(parts)
 }
 
+/// A borrowed view of the fields that define message content.
+#[derive(Clone, Copy)]
+pub(crate) struct MessageContentRef<'a> {
+    id: &'a str,
+    role: MessageRole,
+    parts: &'a Arc<Vec<Part>>,
+    origin: Option<&'a MessageOrigin>,
+}
+
+impl<'a> From<&'a Message> for MessageContentRef<'a> {
+    fn from(message: &'a Message) -> Self {
+        let Message {
+            id,
+            role,
+            parts,
+            origin,
+        } = message;
+        Self {
+            id: id.as_str(),
+            role: *role,
+            parts,
+            origin: origin.as_ref(),
+        }
+    }
+}
+
+impl<'a> From<&'a super::ConversationRecord> for MessageContentRef<'a> {
+    fn from(record: &'a super::ConversationRecord) -> Self {
+        let super::ConversationRecord {
+            id,
+            role,
+            parts,
+            origin,
+        } = record;
+        Self {
+            id: id.as_str(),
+            role: *role,
+            parts,
+            origin: origin.as_ref(),
+        }
+    }
+}
+
 /// Whether two messages carry the same content.
 ///
 /// This is the predicate the active-read projection asks of every message it
@@ -43,11 +86,16 @@ pub fn shared_parts(parts: Vec<Part>) -> Arc<Vec<Part>> {
 /// hop (`ConversationRecord::to_message` clones the pointer, not the parts),
 /// so the pointer check settles the common case in constant time regardless
 /// of how large the payload is.
-pub(crate) fn message_content_equal(left: &Message, right: &Message) -> bool {
+pub(crate) fn message_content_equal<'left, 'right>(
+    left: impl Into<MessageContentRef<'left>>,
+    right: impl Into<MessageContentRef<'right>>,
+) -> bool {
+    let left = left.into();
+    let right = right.into();
     left.id == right.id
         && left.role == right.role
         && left.origin == right.origin
-        && (Arc::ptr_eq(&left.parts, &right.parts) || left.parts == right.parts)
+        && (Arc::ptr_eq(left.parts, right.parts) || left.parts == right.parts)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

@@ -136,6 +136,11 @@ impl TurnGraphEditor {
             );
         }
 
+        // This message-only fallback cannot use `active_read_prefix`: this
+        // method must reject a shorter `next` after matching all of its
+        // messages (`current.next().is_none()`), while the graph resolver
+        // intentionally stops when target messages are exhausted so it can
+        // retain graph nodes, including protocol nodes, for projection.
         let mut current = self.active_messages.iter();
         let mut appended = Vec::new();
         for message in next.iter().filter(|message| !message.is_transient()) {
@@ -191,7 +196,7 @@ impl TurnGraphEditor {
         for message in messages.iter().filter(|message| !message.is_transient()) {
             if let Some(durable_message) = durable_messages.get(&message.id) {
                 observation_only_messages += 1;
-                if !messages_structurally_equal(durable_message, message) {
+                if !durable_message.content_equals(message) {
                     id_mismatches.push(message.id.clone());
                 }
                 continue;
@@ -374,10 +379,6 @@ impl TurnGraphEditor {
             self.appended_nodes.push(node);
         }
     }
-}
-
-fn messages_structurally_equal(left: &Message, right: &Message) -> bool {
-    left.content_equals(right)
 }
 
 #[cfg(test)]

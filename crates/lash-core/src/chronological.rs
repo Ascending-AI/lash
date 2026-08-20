@@ -79,13 +79,6 @@ impl<'a> BorrowedChronologicalMessage<'a> {
             origin: self.origin.cloned(),
         }
     }
-
-    fn structurally_matches(self, other: Self) -> bool {
-        self.id == other.id
-            && self.role == other.role
-            && self.parts == other.parts
-            && self.origin == other.origin
-    }
 }
 
 impl ChronologicalProjection {
@@ -157,7 +150,7 @@ fn visit_active_read<'a>(
             SessionHistoryRecord::Conversation(record) => {
                 let message = BorrowedChronologicalMessage::from_record(record);
                 if !message.is_transient() {
-                    represented_messages.push(message);
+                    represented_messages.push(record);
                     visit(BorrowedChronologicalEntry {
                         index,
                         payload: BorrowedChronologicalPayload::Message(message),
@@ -176,20 +169,20 @@ fn visit_active_read<'a>(
     }
 
     for message in messages {
-        let message = BorrowedChronologicalMessage::from_message(message);
-        if message.is_transient() {
+        let borrowed = BorrowedChronologicalMessage::from_message(message);
+        if borrowed.is_transient() {
             continue;
         }
         if let Some(position) = represented_messages
             .iter()
-            .position(|represented| represented.structurally_matches(message))
+            .position(|represented| represented.content_equals(message))
         {
             represented_messages.swap_remove(position);
             continue;
         }
         visit(BorrowedChronologicalEntry {
             index,
-            payload: BorrowedChronologicalPayload::Message(message),
+            payload: BorrowedChronologicalPayload::Message(borrowed),
         });
         index += 1;
     }
