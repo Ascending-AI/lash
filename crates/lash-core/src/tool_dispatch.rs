@@ -37,5 +37,5 @@ pub(crate) use preparation::{
 };
 #[cfg(test)]
 pub(crate) use retry::execute_once;
-pub(crate) use retry::{mark_retry_exhausted, retry_after_ms};
+pub(crate) use retry::{mark_retry_exhausted, resolve_retry_policy, retry_after_ms};
 pub(crate) use scheduling::schedule_tool_batch;

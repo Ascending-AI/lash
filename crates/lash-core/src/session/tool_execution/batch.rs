@@ -237,18 +237,11 @@ impl RuntimeExecutionContext<'_> {
             };
         }
 
-        let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
+        let retry_policy = crate::tool_dispatch::resolve_retry_policy(
             self.dispatch.as_ref(),
             &child.call.tool_id,
-        )
-        .map(|manifest| manifest.retry_policy)
-        .or_else(|| {
-            child
-                .execution_grant
-                .as_ref()
-                .map(|grant| grant.manifest.retry_policy)
-        })
-        .unwrap_or(crate::ToolRetryPolicy::Never);
+            child.execution_grant.as_deref(),
+        );
         let intent_trace_hook = child_execution_trace_hook.clone();
         let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
             child_execution_trace_hook

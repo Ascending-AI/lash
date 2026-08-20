@@ -14,6 +14,7 @@
 //! both launch orders so neither input order nor its reverse can pass.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use crate::session::tool_execution::ToolInvocation;
@@ -96,16 +97,13 @@ impl crate::ToolProvider for LatencyProbeTools {
     }
 }
 
-fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
-    let controller = Arc::new(
-        crate::InlineRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
-    );
-    let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
-        controller: Arc::clone(&controller),
-    });
+fn probe_context(
+    provider: Arc<dyn crate::ToolProvider>,
+    controller: Arc<crate::InlineRuntimeEffectController>,
+) -> crate::RuntimeExecutionContext<'static> {
     let spec = crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider));
     let plugins = crate::plugin::PluginHost::new(vec![Arc::new(
-        crate::plugin::StaticPluginFactory::new("latency_probe_tools", spec),
+        crate::plugin::StaticPluginFactory::new("probe_tools", spec),
     )])
     .build_session("root", None)
     .expect("plugin session");
@@ -155,6 +153,90 @@ fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
         None,
         crate::TurnContext::default(),
     )
+}
+
+fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
+    let controller = Arc::new(
+        crate::InlineRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
+    );
+    let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
+        controller: Arc::clone(&controller),
+    });
+    probe_context(provider, controller)
+}
+
+struct GrantedRetryProbeTools {
+    catalog_definition: crate::ToolDefinition,
+    attempts: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for GrantedRetryProbeTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![self.catalog_definition.manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.catalog_definition.name())
+            .then(|| Arc::new(self.catalog_definition.contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        crate::ToolOutcome::retryable_failure(
+            crate::ToolFailureClass::External,
+            "retry_probe",
+            "retry probe failure",
+            Some(0),
+        )
+    }
+}
+
+#[tokio::test]
+async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batch() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let catalog_definition =
+        probe_tool("granted_retry_probe").with_retry_policy(crate::ToolRetryPolicy::Never);
+    let granted_definition =
+        probe_tool("granted_retry_probe").with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0));
+    let grant = crate::ToolExecutionGrant::from_definition(granted_definition)
+        .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
+    let provider: Arc<dyn crate::ToolProvider> = Arc::new(GrantedRetryProbeTools {
+        catalog_definition,
+        attempts: Arc::clone(&attempts),
+    });
+    let controller = Arc::new(crate::InlineRuntimeEffectController::default());
+    let context = probe_context(provider, controller);
+
+    let scalar = context
+        .call_tool_with_execution_grant(
+            "scalar".to_string(),
+            grant.clone(),
+            serde_json::json!({}),
+            0,
+        )
+        .await;
+    let scalar_attempts = attempts.load(Ordering::SeqCst);
+
+    let batch = context
+        .call_tool_batch(vec![
+            ToolInvocation::new(
+                "batch",
+                crate::ToolId::from("tool:granted_retry_probe"),
+                serde_json::json!({}),
+            )
+            .with_execution_grant(grant),
+        ])
+        .await;
+    let batch_attempts = attempts.load(Ordering::SeqCst) - scalar_attempts;
+
+    assert_eq!(
+        scalar_attempts, 2,
+        "the grant's safe policy wins for scalar"
+    );
+    assert_eq!(batch_attempts, scalar_attempts, "batch matches scalar");
+    assert!(!scalar.output.is_success());
+    assert!(!batch.replies[0].output.is_success());
 }
 
 /// The headline claim: a batch whose leaves both park reports the order their
