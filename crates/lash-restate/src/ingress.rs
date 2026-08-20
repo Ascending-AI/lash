@@ -378,6 +378,10 @@ pub struct RestateIngressClient {
     connection: RestateConnection,
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "boxing RestateHttpError would change the public ingress client API"
+)]
 impl RestateIngressClient {
     pub fn new(connection: impl Into<RestateConnection>) -> Self {
         Self {
@@ -628,6 +632,10 @@ pub struct RestateAdminClient {
     connection: RestateConnection,
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "boxing RestateHttpError would change the public admin client API"
+)]
 impl RestateAdminClient {
     pub fn new(connection: impl Into<RestateConnection>) -> Self {
         Self {
@@ -921,6 +929,10 @@ async fn status_error(
     }
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "this helper preserves the Restate clients' public error type"
+)]
 async fn send_request(
     connection: &RestateConnection,
     class: RestateRequestClass,
@@ -952,6 +964,10 @@ async fn send_request(
     })
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "this helper preserves the Restate clients' public error type"
+)]
 async fn decode_response<T: DeserializeOwned>(
     operation: &'static str,
     url: &str,

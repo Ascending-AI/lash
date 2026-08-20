@@ -507,6 +507,10 @@ fn graph_has_required_variant(graph: &lashlang::WorkflowGraph, variant: &str) ->
 
 fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &str) -> bool {
     let mut invalid = graph.clone();
+    #[allow(
+        clippy::needless_late_init,
+        reason = "the mutation-heavy match arms stay substantially clearer without expression nesting"
+    )]
     let expected;
     match variant {
         "data" => {

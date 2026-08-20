@@ -246,6 +246,10 @@ impl RlmProtocolPluginFactory {
 
     /// Compile a Lashlang module against the compile-time surface, persisting the
     /// artifact through this factory's artifact store.
+    #[allow(
+        clippy::result_large_err,
+        reason = "boxing LashlangModuleCompileError would change this public compile API"
+    )]
     pub async fn compile_lashlang_module(
         &self,
         plugin_host: &PluginHost,

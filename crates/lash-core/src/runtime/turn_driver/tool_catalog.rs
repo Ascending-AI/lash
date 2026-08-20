@@ -72,7 +72,7 @@ impl RuntimeTurnDriver<'_> {
         let model = match self.prepare_provider(&mut session_policy).await {
             Ok(model) => model,
             Err(event) => {
-                emit!(event);
+                emit!(*event);
                 emit!(SessionStreamEvent::Done);
                 return Err((messages.clone(), run_offset));
             }
@@ -280,7 +280,7 @@ impl RuntimeTurnDriver<'_> {
     pub(super) async fn prepare_provider(
         &mut self,
         policy: &mut RuntimeSessionPolicy,
-    ) -> Result<String, SessionStreamEvent> {
+    ) -> Result<String, Box<SessionStreamEvent>> {
         let model = policy.model.id.clone();
         let provider_kind = policy.provider().kind();
         // Validate the requested effort against the host-supplied capability
@@ -293,12 +293,12 @@ impl RuntimeTurnDriver<'_> {
         ) {
             Ok(resolved) => policy.model.variant = resolved,
             Err(error) => {
-                return Err(make_error_event(
+                return Err(Box::new(make_error_event(
                     "llm_provider",
                     Some(error.category.code()),
                     error.message.clone(),
                     Some(error.message),
-                ));
+                )));
             }
         }
         Ok(model)

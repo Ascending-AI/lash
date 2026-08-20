@@ -636,7 +636,7 @@ async fn complete_websocket_with_events_and_capture(
     events: &Arc<Mutex<Vec<LlmStreamEvent>>>,
 ) -> (
     lash_core::ProviderRouteIdentity,
-    Result<ProviderCompletion, ProviderCompletionError>,
+    Result<ProviderCompletion, Box<ProviderCompletionError>>,
     Vec<Value>,
 ) {
     let actions = recordings
@@ -684,7 +684,8 @@ async fn complete_websocket_with_events_and_capture(
             row,
             Arc::clone(events),
         ))
-        .await;
+        .await
+        .map_err(Box::new);
     (route, result, server.captured())
 }
 
@@ -696,7 +697,7 @@ enum CompletionMode {
 
 struct MatrixCompletion {
     route: lash_core::ProviderRouteIdentity,
-    result: Result<ProviderCompletion, ProviderCompletionError>,
+    result: Result<ProviderCompletion, Box<ProviderCompletionError>>,
     captured_websocket_requests: Vec<Value>,
 }
 
@@ -823,7 +824,7 @@ async fn complete_http_buffered(
     dialect: &str,
     row: &MatrixRow,
     recording: &Recording,
-) -> Result<ProviderCompletion, ProviderCompletionError> {
+) -> Result<ProviderCompletion, Box<ProviderCompletionError>> {
     let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts([recorded_script(
         dialect,
         &row.variation,
@@ -832,7 +833,7 @@ async fn complete_http_buffered(
     let mut provider = http_provider(dialect, transport);
     let mut request = matrix_request(dialect, row, Arc::new(Mutex::new(Vec::new())));
     request.stream_events = None;
-    provider.complete(request).await
+    provider.complete(request).await.map_err(Box::new)
 }
 
 async fn complete_http_with_events(
@@ -840,7 +841,7 @@ async fn complete_http_with_events(
     row: &MatrixRow,
     recordings: &[Recording],
     events: &Arc<Mutex<Vec<LlmStreamEvent>>>,
-) -> Result<ProviderCompletion, ProviderCompletionError> {
+) -> Result<ProviderCompletion, Box<ProviderCompletionError>> {
     let scripts = recordings
         .iter()
         .map(|recording| recorded_script(dialect, &row.variation, recording))
@@ -857,6 +858,7 @@ async fn complete_http_with_events(
     provider
         .complete(matrix_request(dialect, row, Arc::clone(events)))
         .await
+        .map_err(Box::new)
 }
 
 fn http_provider(dialect: &str, transport: Arc<ScriptedLlmHttpTransport>) -> ProviderHandle {

@@ -1,13 +1,7 @@
-use lash::prelude::{
-    ScopedQueuedTurnBuilder as PreludeScopedQueuedTurnBuilder,
-    ScopedTurnBuilder as PreludeScopedTurnBuilder,
-};
-use lash::{AdvancedTurn, ScopedQueuedTurnBuilder, ScopedTurnBuilder};
-
 fn main() {
-    let _: Option<AdvancedTurn> = None;
-    let _: Option<ScopedTurnBuilder<'static>> = None;
-    let _: Option<ScopedQueuedTurnBuilder<'static>> = None;
-    let _: Option<PreludeScopedTurnBuilder<'static>> = None;
-    let _: Option<PreludeScopedQueuedTurnBuilder<'static>> = None;
+    let _: Option<lash::AdvancedTurn> = None;
+    let _: Option<lash::ScopedTurnBuilder<'static>> = None;
+    let _: Option<lash::ScopedQueuedTurnBuilder<'static>> = None;
+    let _: Option<lash::prelude::ScopedTurnBuilder<'static>> = None;
+    let _: Option<lash::prelude::ScopedQueuedTurnBuilder<'static>> = None;
 }

@@ -239,6 +239,10 @@ impl ProviderHandle {
         self.components.provider.requires_streaming()
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "boxing ProviderCompletionError would change this public provider API"
+    )]
     pub async fn complete(
         &mut self,
         mut request: LlmRequest,
@@ -281,6 +285,10 @@ impl ProviderHandle {
         sideband
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "this internal half preserves the public complete error type"
+    )]
     pub(crate) async fn complete_prepared(
         &mut self,
         request: LlmRequest,
