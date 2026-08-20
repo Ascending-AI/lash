@@ -203,8 +203,8 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // index unversioned, and `RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL` says why.
 // Version 56 adds the nullable trigger-occurrence reclaim eligibility arm and
 // its partial maintenance index. Stores at 50 through 55 take a creation-only
-// migration only when the occurrence table is witnessed empty; populated
-// stores refuse so the migration cannot initiate eligibility or strand rows.
+// migration that arms legacy zero-fan-out rows from their occurrence time while
+// leaving live-fan-out rows unarmed for the normal terminal transition.
 const SCHEMA_VERSION: i32 = 56;
 
 #[derive(Clone)]

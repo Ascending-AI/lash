@@ -403,17 +403,9 @@ impl TriggerStore for InMemoryTriggerStore {
             .collect::<std::collections::HashSet<_>>();
         let mut state = self.state.lock_recover();
         let before = state.deliveries.len();
-        let affected_occurrence_ids = state
-            .deliveries
-            .values()
-            .filter(|delivery| {
-                candidates.contains(&(
-                    delivery.occurrence_id.as_str(),
-                    delivery.subscription_id.as_str(),
-                    delivery.process_id.as_str(),
-                ))
-            })
-            .map(|delivery| delivery.occurrence_id.clone())
+        let affected_occurrence_ids = candidates
+            .iter()
+            .map(|(occurrence_id, _, _)| (*occurrence_id).to_string())
             .collect::<std::collections::BTreeSet<_>>();
         state.deliveries.retain(|_, delivery| {
             !candidates.contains(&(
@@ -423,20 +415,18 @@ impl TriggerStore for InMemoryTriggerStore {
             ))
         });
         let deleted = before.saturating_sub(state.deliveries.len());
-        if deleted > 0 {
-            let armed_at_ms = self.clock.timestamp_ms();
-            for occurrence_id in affected_occurrence_ids {
-                if state.occurrences.contains_key(&occurrence_id)
-                    && !state
-                        .deliveries
-                        .values()
-                        .any(|delivery| delivery.occurrence_id == occurrence_id)
-                {
-                    state
-                        .occurrence_reclaimable_at_ms
-                        .entry(occurrence_id)
-                        .or_insert(armed_at_ms);
-                }
+        let armed_at_ms = self.clock.timestamp_ms();
+        for occurrence_id in affected_occurrence_ids {
+            if state.occurrences.contains_key(&occurrence_id)
+                && !state
+                    .deliveries
+                    .values()
+                    .any(|delivery| delivery.occurrence_id == occurrence_id)
+            {
+                state
+                    .occurrence_reclaimable_at_ms
+                    .entry(occurrence_id)
+                    .or_insert(armed_at_ms);
             }
         }
         Ok(deleted)
@@ -482,6 +472,7 @@ impl TriggerStore for InMemoryTriggerStore {
             }
 
             let Some(occurrence) = state.occurrences.remove(&occurrence_id) else {
+                report.reinspection_deferred_count += 1;
                 continue;
             };
             state

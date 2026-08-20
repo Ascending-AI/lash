@@ -392,6 +392,11 @@ async fn async_main() -> AnyhowResult<()> {
             "/api/admin/trigger-mutation-receipts/prune",
             post(prune_trigger_mutation_receipts),
         )
+        // Deliberately absent from the UI and unscheduled, like receipt prune.
+        .route(
+            "/api/admin/trigger-occurrences/reclaim",
+            post(reclaim_trigger_occurrences),
+        )
         // Deliberately absent from the UI, and deliberately unscheduled: see
         // the handler's contract.
         .route("/api/admin/store-maintenance", post(run_store_maintenance))

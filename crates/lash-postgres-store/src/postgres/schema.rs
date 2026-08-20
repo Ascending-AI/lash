@@ -153,13 +153,13 @@ const RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL: &str = r#"CREATE INDEX IF
 const TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL: &str = r#"ALTER TABLE lash_trigger_occurrences
             ADD COLUMN IF NOT EXISTS reclaimable_at_ms BIGINT"#;
 
-const TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL: &str = r#"DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM lash_trigger_occurrences) THEN
-                RAISE EXCEPTION 'component 56 requires an empty lash_trigger_occurrences table; recreate the store so reclaim eligibility is armed only by terminal transitions';
-            END IF;
-        END
-        $$"#;
+const TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL: &str = r#"UPDATE lash_trigger_occurrences AS occurrence
+            SET reclaimable_at_ms = occurrence.occurred_at_ms
+            WHERE occurrence.reclaimable_at_ms IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM lash_trigger_deliveries AS delivery
+                  WHERE delivery.occurrence_id = occurrence.occurrence_id
+              )"#;
 
 const TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_reclaimable
             ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
@@ -188,10 +188,10 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
-    // The nullable arm records only future fan-out terminal transitions. The
-    // migration admits an empty occurrence scope only: carrying old rows
-    // forward unarmed would leak zero-match rows, while deriving eligibility
-    // during migration would let a scan initiate reclaim.
+    // The nullable arm records fan-out terminality. Inside the migration
+    // transaction, legacy zero-fan-out rows are armed from their durable
+    // occurrence time; rows with live fan-out stay unarmed and take the normal
+    // final-delivery transition later.
     SchemaMigration {
         from: 55,
         to: 56,
@@ -200,8 +200,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_guards: &[],
         introduced_relations: &["idx_lash_trigger_occurrences_reclaimable"],
         statements: &[
-            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
                SET version = 56
@@ -223,9 +223,9 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
-            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
                SET version = 56
@@ -254,7 +254,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
-            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL,
             RUNTIME_EFFECT_REPLAY_SETTLEMENT_SEQ_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_SEQ_INDEX_DDL,
@@ -263,6 +262,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
                SET version = 56
@@ -290,7 +290,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
-            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
             PENDING_TURN_INPUT_ORDER_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL,
@@ -301,6 +300,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
                SET version = 56
@@ -329,7 +329,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
-            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             ATTACHMENT_CONDEMNATIONS_DDL,
             QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
             PENDING_TURN_INPUT_ORDER_INDEX_DDL,
@@ -341,6 +340,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
                SET version = 56
@@ -379,7 +379,6 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
-            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             PROCESS_PARENT_END_PLANS_DDL,
             TOOL_INTENT_SUBMISSIONS_DDL,
             TOOL_INTENT_SUBMISSIONS_INDEX_DDL,
@@ -394,6 +393,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
                SET version = 56

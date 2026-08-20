@@ -64294,8 +64294,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerStore::reclaim_trigger_occurrences"]
 area = "triggers"
-disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:528#async fn reclaim_trigger_occurrences("
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/admin.rs:96#.reclaim_trigger_occurrences(request.cutoff_epoch_ms)"
+reason = "The operator-only example route executes the lever and returns its complete typed report, but it does not assert an externally meaningful outcome."
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft"

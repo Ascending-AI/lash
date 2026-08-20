@@ -530,11 +530,33 @@ impl TriggerStore for PostgresTriggerStore {
         cutoff_epoch_ms: u64,
     ) -> lash_core::TriggerOccurrenceReclamationResult {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        // One statement gives the scope proof and the indexed worklist from the
+        // same snapshot. The aggregate deliberately visits the whole table so
+        // `NothingToDo` remains witnessed emptiness; only eligible ids are
+        // materialized, through the partial reclaimability index.
         let rows = sqlx::query(
-            "SELECT occurrence_id, reclaimable_at_ms
-             FROM lash_trigger_occurrences
-             ORDER BY occurrence_id ASC",
+            "WITH scope AS (
+                 SELECT COUNT(*) AS inspected_count,
+                        COUNT(*) FILTER (WHERE reclaimable_at_ms IS NULL)
+                            AS live_fan_out_count,
+                        COUNT(*) FILTER (WHERE reclaimable_at_ms > $1)
+                            AS grace_deferred_count
+                 FROM lash_trigger_occurrences
+             ), candidates AS (
+                 SELECT occurrence_id
+                 FROM lash_trigger_occurrences
+                 WHERE reclaimable_at_ms IS NOT NULL
+                   AND reclaimable_at_ms <= $1
+             )
+             SELECT scope.inspected_count,
+                    scope.live_fan_out_count,
+                    scope.grace_deferred_count,
+                    candidates.occurrence_id
+             FROM scope
+             LEFT JOIN candidates ON TRUE
+             ORDER BY candidates.occurrence_id ASC",
         )
+        .bind(cutoff_epoch_ms)
         .fetch_all(&self.pool)
         .await
         .map_err(|error| {
@@ -542,21 +564,17 @@ impl TriggerStore for PostgresTriggerStore {
                 error,
             )))
         })?;
+        let first = &rows[0];
         let mut report = lash_core::TriggerOccurrenceReclamationReport {
-            inspected_occurrence_count: rows.len(),
+            inspected_occurrence_count: first.get::<i64, _>(0) as usize,
+            live_fan_out_count: first.get::<i64, _>(1) as usize,
+            grace_deferred_count: first.get::<i64, _>(2) as usize,
             ..lash_core::TriggerOccurrenceReclamationReport::default()
         };
-        let mut candidates = Vec::new();
-        for row in rows {
-            let occurrence_id: String = row.get(0);
-            match row.get::<Option<i64>, _>(1) {
-                Some(armed_at_ms) if armed_at_ms <= cutoff_epoch_ms => {
-                    candidates.push(occurrence_id);
-                }
-                Some(_) => report.grace_deferred_count += 1,
-                None => report.live_fan_out_count += 1,
-            }
-        }
+        let candidates = rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>(3))
+            .collect::<Vec<_>>();
 
         for occurrence_id in candidates {
             let deleted = sqlx::query(
@@ -580,7 +598,11 @@ impl TriggerStore for PostgresTriggerStore {
                 )
             })?
             .rows_affected() as usize;
-            report.reclaimed_occurrence_count += deleted;
+            if deleted == 0 {
+                report.reinspection_deferred_count += 1;
+            } else {
+                report.reclaimed_occurrence_count += deleted;
+            }
         }
         Ok(report)
     }

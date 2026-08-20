@@ -1,5 +1,6 @@
 //! Schema migration proofs for trigger-occurrence reclaim eligibility.
 
+use lash_core::{TriggerDeliveryRetentionCandidate, TriggerStore};
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaProvisioning};
 
 use crate::harness::{REWIND_PAST_56_ARTIFACTS, ScratchSchema};
@@ -63,14 +64,13 @@ async fn main_component_55_store_upgrades_cleanly_to_56() {
     scratch.cleanup().await;
 }
 
-/// Eligibility must be armed by ingest or final-delivery terminality. A schema
-/// migration may not infer it from old row shape, and carrying those rows
-/// forward as permanently unarmed would leak them, so a populated predecessor
-/// refuses without changing either its stamp or table.
+/// A populated predecessor migrates by witnessing the same terminal data
+/// predicate as the runtime: zero-fan-out rows arm from their occurrence time,
+/// while live-fan-out rows stay unarmed until the final delivery is deleted.
 #[tokio::test]
-async fn populated_component_55_trigger_scope_refuses_the_56_migration() {
+async fn populated_component_55_trigger_scope_arms_only_terminal_rows() {
     let Some(database_url) = database_url() else {
-        eprintln!("skipping populated component-55 refusal law: database URL is not set");
+        eprintln!("skipping populated component-55 migration law: database URL is not set");
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
@@ -80,9 +80,22 @@ async fn populated_component_55_trigger_scope_refuses_the_56_migration() {
              INSERT INTO lash_trigger_occurrences (
                  occurrence_id, idempotency_key, source_type, source_key,
                  occurred_at_ms, record_json
+             ) VALUES
+                 (
+                     'legacy-zero-fanout', 'legacy-zero-idempotency',
+                     'legacy', 'zero', 11, '{{}}'
+                 ),
+                 (
+                     'legacy-live-fanout', 'legacy-live-idempotency',
+                     'legacy', 'live', 22, '{{}}'
+                 );
+             INSERT INTO lash_trigger_deliveries (
+                 occurrence_id, subscription_id, process_id,
+                 subscription_incarnation, subscription_revision,
+                 subscription_snapshot_json, created_at_ms
              ) VALUES (
-                 'legacy-occurrence', 'legacy-idempotency', 'legacy', 'legacy',
-                 1, '{{}}'
+                 'legacy-live-fanout', 'legacy-subscription', 'legacy-process',
+                 'legacy-incarnation', 1, '{{}}', 23
              );
              UPDATE lash_schema_versions
                 SET version = 55
@@ -90,7 +103,7 @@ async fn populated_component_55_trigger_scope_refuses_the_56_migration() {
         ))
         .await;
 
-    let error = PostgresStorage::from_pool_with(
+    let storage = PostgresStorage::from_pool_with(
         scratch.pool.clone(),
         PostgresStoreConfig {
             schema_provisioning: SchemaProvisioning::LashManaged,
@@ -98,28 +111,52 @@ async fn populated_component_55_trigger_scope_refuses_the_56_migration() {
             ..PostgresStoreConfig::default()
         },
     )
-    .await;
-    let error = match error {
-        Ok(_) => panic!("a populated trigger scope cannot cross the eligibility cutover"),
-        Err(error) => error,
-    };
-    assert!(
-        error
-            .to_string()
-            .contains("component 56 requires an empty lash_trigger_occurrences table"),
-        "the refusal must name the empty-scope precondition: {error}"
-    );
+    .await
+    .expect("a populated component-55 trigger scope migrates to 56");
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
     )
     .fetch_one(&scratch.pool)
     .await
-    .expect("read refused component version");
-    assert_eq!(version, 55);
-    let occurrence_count: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_trigger_occurrences")
-        .fetch_one(&scratch.pool)
+    .expect("read migrated component version");
+    assert_eq!(version, 56);
+    let zero_fanout_arm: Option<i64> = sqlx::query_scalar(
+        "SELECT reclaimable_at_ms
+         FROM lash_trigger_occurrences
+         WHERE occurrence_id = 'legacy-zero-fanout'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read migrated zero-fanout occurrence arm");
+    assert_eq!(zero_fanout_arm, Some(11));
+    let live_fanout_arm: Option<i64> = sqlx::query_scalar(
+        "SELECT reclaimable_at_ms
+         FROM lash_trigger_occurrences
+         WHERE occurrence_id = 'legacy-live-fanout'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read migrated live-fanout occurrence arm");
+    assert_eq!(live_fanout_arm, None);
+
+    let trigger_store = storage.trigger_store();
+    let deleted = trigger_store
+        .delete_delivery_retention_candidates(&[TriggerDeliveryRetentionCandidate {
+            occurrence_id: "legacy-live-fanout".to_string(),
+            subscription_id: "legacy-subscription".to_string(),
+            process_id: "legacy-process".to_string(),
+        }])
         .await
-        .expect("read preserved predecessor occurrence");
-    assert_eq!(occurrence_count, 1);
+        .expect("delete the legacy occurrence's final delivery");
+    assert_eq!(deleted, 1);
+    let armed_after_terminal_delete: bool = sqlx::query_scalar(
+        "SELECT reclaimable_at_ms IS NOT NULL
+         FROM lash_trigger_occurrences
+         WHERE occurrence_id = 'legacy-live-fanout'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read live-fanout occurrence after terminal delivery delete");
+    assert!(armed_after_terminal_delete);
     scratch.cleanup().await;
 }

@@ -1351,6 +1351,11 @@ pub struct TriggerOccurrenceReclamationReport {
     pub live_fan_out_count: usize,
     /// Armed occurrences whose eligibility time is newer than the host cutoff.
     pub grace_deferred_count: usize,
+    /// Eligible occurrences whose per-row delete no longer matched after the
+    /// scope snapshot. A concurrent maintenance pass may already have removed
+    /// them; a fresh pass must re-inspect the scope before reporting witnessed
+    /// emptiness.
+    pub reinspection_deferred_count: usize,
 }
 
 impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
@@ -1359,7 +1364,10 @@ impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
     }
 
     fn sweep(&self) -> crate::store::MaintenanceSweep {
-        if self.live_fan_out_count > 0 || self.grace_deferred_count > 0 {
+        if self.live_fan_out_count > 0
+            || self.grace_deferred_count > 0
+            || self.reinspection_deferred_count > 0
+        {
             crate::store::MaintenanceSweep::Incomplete
         } else if self.reclaimed_occurrence_count > 0 {
             crate::store::MaintenanceSweep::Swept
@@ -1367,6 +1375,28 @@ impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
             crate::store::MaintenanceSweep::NothingToDo
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn raced_occurrence_delete_requires_reinspection_instead_of_claiming_emptiness() {
+    let report = TriggerOccurrenceReclamationReport {
+        inspected_occurrence_count: 1,
+        reinspection_deferred_count: 1,
+        ..TriggerOccurrenceReclamationReport::default()
+    };
+
+    assert_eq!(
+        crate::store::MaintenanceReport::sweep(&report),
+        crate::store::MaintenanceSweep::Incomplete
+    );
+    assert_eq!(
+        report.reclaimed_occurrence_count
+            + report.live_fan_out_count
+            + report.grace_deferred_count
+            + report.reinspection_deferred_count,
+        report.inspected_occurrence_count
+    );
 }
 
 /// A trigger-occurrence reclaim pass either completes with its counters or
@@ -1520,9 +1550,11 @@ pub trait TriggerStore: Send + Sync {
     /// never initiate eligibility for a live one. Hosts that do not invoke this
     /// method simply have not run occurrence maintenance.
     ///
-    /// The implementation enumerates the complete occurrence scope before the
-    /// first destructive step. Enumeration failure is an error, and a later
-    /// delete failure carries the partial report accumulated so far.
+    /// The implementation witnesses the complete occurrence scope before the
+    /// first destructive step. SQL backends may do that with aggregate counts
+    /// while materializing only indexed reclaim candidates. Enumeration failure
+    /// is an error, and a later delete failure carries the partial report
+    /// accumulated so far.
     async fn reclaim_trigger_occurrences(
         &self,
         cutoff_epoch_ms: u64,

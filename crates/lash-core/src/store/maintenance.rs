@@ -2,7 +2,9 @@
 //!
 //! Every reclamation lever — [`StoreMaintenance::vacuum`],
 //! [`StoreMaintenance::gc_unreachable`], and the attachment sweep
-//! [`reclaim_unreferenced_attachments`](crate::attachments::reclaim_unreferenced_attachments)
+//! [`reclaim_unreferenced_attachments`](crate::attachments::reclaim_unreferenced_attachments),
+//! plus trigger occurrence reclamation
+//! [`TriggerStore::reclaim_trigger_occurrences`](crate::TriggerStore::reclaim_trigger_occurrences)
 //! — answers in one vocabulary with five arms, and every backend reaches all of
 //! the arms it can reach:
 //!
