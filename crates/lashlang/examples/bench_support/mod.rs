@@ -9,199 +9,91 @@ use lashlang::{
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
-#[derive(Clone, Copy, Debug)]
-pub enum Scenario {
-    Baseline,
-    LanguageHostEnvironment,
-    AsyncAwait,
-    DirectUnwrap,
-    GeneralFanout,
-    LoopControl,
-    IndexedAssignment,
-    ProjectedValues,
-    LargeData,
-    CachePressure,
-    ProjectedOperations,
-    TypeSystemStress,
-    WrappedErrorPaths,
-    ToolControlHostEnvironment,
-    SnapshotProjectedState,
-    ContinueAsSeedHostEnvironment,
-    TriggerRegistryHostEnvironment,
-    SyntaxTextHostEnvironment,
-    IntegerRangeHostEnvironment,
-    FanoutExpressionHostEnvironment,
-    ImageHostEnvironment,
-    HeapListIteration,
-    HeapNestedLoop,
-    HeapAllocationChurn,
-    HeapDeepChainMutation,
-    HeapComprehensionBuild,
-    HeapVariableConcat,
-    HeapShallowChainMutation,
-    HeapDeepChainMutation24,
+macro_rules! scenarios {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $( $variant:ident => $str:literal ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, Debug)]
+        $vis enum $name {
+            $( $variant, )*
+        }
+
+        #[allow(dead_code)]
+        impl $name {
+            pub const ALL: &'static [Self] = &[
+                $( Self::$variant, )*
+            ];
+
+            pub fn parse(value: &str) -> Option<Self> {
+                Some(match value {
+                    $( $str => Self::$variant, )*
+                    _ => return None,
+                })
+            }
+
+            pub fn expected_values() -> &'static str {
+                concat!($( $str, ", ", )* "or all")
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(match self {
+                    $( Self::$variant => $str, )*
+                })
+            }
+        }
+    };
 }
 
-impl Scenario {
-    pub const ALL: &'static [Self] = &[
-        Self::Baseline,
-        Self::LanguageHostEnvironment,
-        Self::AsyncAwait,
-        Self::DirectUnwrap,
-        Self::GeneralFanout,
-        Self::LoopControl,
-        Self::IndexedAssignment,
-        Self::ProjectedValues,
-        Self::LargeData,
-        Self::CachePressure,
-        Self::ProjectedOperations,
-        Self::TypeSystemStress,
-        Self::WrappedErrorPaths,
-        Self::ToolControlHostEnvironment,
-        Self::SnapshotProjectedState,
-        Self::ContinueAsSeedHostEnvironment,
-        Self::TriggerRegistryHostEnvironment,
-        Self::SyntaxTextHostEnvironment,
-        Self::IntegerRangeHostEnvironment,
-        Self::FanoutExpressionHostEnvironment,
-        Self::ImageHostEnvironment,
-        Self::HeapListIteration,
-        Self::HeapNestedLoop,
-        Self::HeapAllocationChurn,
-        Self::HeapDeepChainMutation,
-        Self::HeapComprehensionBuild,
-        Self::HeapVariableConcat,
-        Self::HeapShallowChainMutation,
-        Self::HeapDeepChainMutation24,
-    ];
+scenarios! {
+    pub enum Scenario {
+        Baseline => "baseline",
+        LanguageHostEnvironment => "language_host_environment",
+        AsyncAwait => "async_await",
+        DirectUnwrap => "direct_unwrap",
+        GeneralFanout => "general_fanout",
+        LoopControl => "loop_control",
+        IndexedAssignment => "indexed_assignment",
+        ProjectedValues => "projected_values",
+        LargeData => "large_data",
+        CachePressure => "cache_pressure",
+        ProjectedOperations => "projected_operations",
+        TypeSystemStress => "type_system_stress",
+        WrappedErrorPaths => "wrapped_error_paths",
+        ToolControlHostEnvironment => "tool_control_host_environment",
+        SnapshotProjectedState => "snapshot_projected_state",
+        ContinueAsSeedHostEnvironment => "continue_as_seed_host_environment",
+        TriggerRegistryHostEnvironment => "trigger_registry_host_environment",
+        SyntaxTextHostEnvironment => "syntax_text_host_environment",
+        IntegerRangeHostEnvironment => "integer_range_host_environment",
+        FanoutExpressionHostEnvironment => "fanout_expression_host_environment",
+        ImageHostEnvironment => "image_host_environment",
+        HeapListIteration => "heap_list_iteration",
+        HeapNestedLoop => "heap_nested_loop",
+        HeapAllocationChurn => "heap_allocation_churn",
+        HeapDeepChainMutation => "heap_deep_chain_mutation",
+        HeapComprehensionBuild => "heap_comprehension_build",
+        HeapVariableConcat => "heap_variable_concat",
+        HeapShallowChainMutation => "heap_shallow_chain_mutation",
+        HeapDeepChainMutation24 => "heap_deep_chain_mutation_24",
+    }
+}
 
+scenarios! {
     #[allow(dead_code)]
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value {
-            "baseline" => Self::Baseline,
-            "language_host_environment" => Self::LanguageHostEnvironment,
-            "async_await" => Self::AsyncAwait,
-            "direct_unwrap" => Self::DirectUnwrap,
-            "general_fanout" => Self::GeneralFanout,
-            "loop_control" => Self::LoopControl,
-            "indexed_assignment" => Self::IndexedAssignment,
-            "projected_values" => Self::ProjectedValues,
-            "large_data" => Self::LargeData,
-            "cache_pressure" => Self::CachePressure,
-            "projected_operations" => Self::ProjectedOperations,
-            "type_system_stress" => Self::TypeSystemStress,
-            "wrapped_error_paths" => Self::WrappedErrorPaths,
-            "tool_control_host_environment" => Self::ToolControlHostEnvironment,
-            "snapshot_projected_state" => Self::SnapshotProjectedState,
-            "continue_as_seed_host_environment" => Self::ContinueAsSeedHostEnvironment,
-            "trigger_registry_host_environment" => Self::TriggerRegistryHostEnvironment,
-            "syntax_text_host_environment" => Self::SyntaxTextHostEnvironment,
-            "integer_range_host_environment" => Self::IntegerRangeHostEnvironment,
-            "fanout_expression_host_environment" => Self::FanoutExpressionHostEnvironment,
-            "image_host_environment" => Self::ImageHostEnvironment,
-            "heap_list_iteration" => Self::HeapListIteration,
-            "heap_nested_loop" => Self::HeapNestedLoop,
-            "heap_allocation_churn" => Self::HeapAllocationChurn,
-            "heap_deep_chain_mutation" => Self::HeapDeepChainMutation,
-            "heap_comprehension_build" => Self::HeapComprehensionBuild,
-            "heap_variable_concat" => Self::HeapVariableConcat,
-            "heap_shallow_chain_mutation" => Self::HeapShallowChainMutation,
-            "heap_deep_chain_mutation_24" => Self::HeapDeepChainMutation24,
-            _ => return None,
-        })
-    }
-
-    #[allow(dead_code)]
-    pub fn expected_values() -> &'static str {
-        "baseline, language_host_environment, async_await, direct_unwrap, general_fanout, loop_control, indexed_assignment, projected_values, large_data, cache_pressure, projected_operations, type_system_stress, wrapped_error_paths, tool_control_host_environment, snapshot_projected_state, continue_as_seed_host_environment, trigger_registry_host_environment, syntax_text_host_environment, integer_range_host_environment, fanout_expression_host_environment, image_host_environment, heap_list_iteration, heap_nested_loop, heap_allocation_churn, heap_deep_chain_mutation, heap_comprehension_build, heap_variable_concat, heap_shallow_chain_mutation, heap_deep_chain_mutation_24, or all"
-    }
-}
-
-impl fmt::Display for Scenario {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Baseline => "baseline",
-            Self::LanguageHostEnvironment => "language_host_environment",
-            Self::AsyncAwait => "async_await",
-            Self::DirectUnwrap => "direct_unwrap",
-            Self::GeneralFanout => "general_fanout",
-            Self::LoopControl => "loop_control",
-            Self::IndexedAssignment => "indexed_assignment",
-            Self::ProjectedValues => "projected_values",
-            Self::LargeData => "large_data",
-            Self::CachePressure => "cache_pressure",
-            Self::ProjectedOperations => "projected_operations",
-            Self::TypeSystemStress => "type_system_stress",
-            Self::WrappedErrorPaths => "wrapped_error_paths",
-            Self::ToolControlHostEnvironment => "tool_control_host_environment",
-            Self::SnapshotProjectedState => "snapshot_projected_state",
-            Self::ContinueAsSeedHostEnvironment => "continue_as_seed_host_environment",
-            Self::TriggerRegistryHostEnvironment => "trigger_registry_host_environment",
-            Self::SyntaxTextHostEnvironment => "syntax_text_host_environment",
-            Self::IntegerRangeHostEnvironment => "integer_range_host_environment",
-            Self::FanoutExpressionHostEnvironment => "fanout_expression_host_environment",
-            Self::ImageHostEnvironment => "image_host_environment",
-            Self::HeapListIteration => "heap_list_iteration",
-            Self::HeapNestedLoop => "heap_nested_loop",
-            Self::HeapAllocationChurn => "heap_allocation_churn",
-            Self::HeapDeepChainMutation => "heap_deep_chain_mutation",
-            Self::HeapComprehensionBuild => "heap_comprehension_build",
-            Self::HeapVariableConcat => "heap_variable_concat",
-            Self::HeapShallowChainMutation => "heap_shallow_chain_mutation",
-            Self::HeapDeepChainMutation24 => "heap_deep_chain_mutation_24",
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
-pub enum FunctionScenario {
-    NonCapturingCall,
-    CapturedCall,
-    DeepRecursion,
-    Map64,
-    Map256,
-    Map1024,
-    FrameHeavy,
-}
-
-#[allow(dead_code)]
-impl FunctionScenario {
-    pub const ALL: &'static [Self] = &[
-        Self::NonCapturingCall,
-        Self::CapturedCall,
-        Self::DeepRecursion,
-        Self::Map64,
-        Self::Map256,
-        Self::Map1024,
-        Self::FrameHeavy,
-    ];
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value {
-            "function_call_noncapturing" => Self::NonCapturingCall,
-            "function_call_captured" => Self::CapturedCall,
-            "function_deep_recursion" => Self::DeepRecursion,
-            "function_map_64" => Self::Map64,
-            "function_map_256" => Self::Map256,
-            "function_map_1024" => Self::Map1024,
-            "function_frame_heavy" => Self::FrameHeavy,
-            _ => return None,
-        })
-    }
-}
-
-impl fmt::Display for FunctionScenario {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::NonCapturingCall => "function_call_noncapturing",
-            Self::CapturedCall => "function_call_captured",
-            Self::DeepRecursion => "function_deep_recursion",
-            Self::Map64 => "function_map_64",
-            Self::Map256 => "function_map_256",
-            Self::Map1024 => "function_map_1024",
-            Self::FrameHeavy => "function_frame_heavy",
-        })
+    pub enum FunctionScenario {
+        NonCapturingCall => "function_call_noncapturing",
+        CapturedCall => "function_call_captured",
+        DeepRecursion => "function_deep_recursion",
+        Map64 => "function_map_64",
+        Map256 => "function_map_256",
+        Map1024 => "function_map_1024",
+        FrameHeavy => "function_frame_heavy",
     }
 }
 
