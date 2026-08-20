@@ -680,14 +680,14 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     assert_eq!(child.observed_processes.len(), 3);
     assert_eq!(
         child.observed_processes[0],
-        crate::SessionObservedProcessResult {
+        crate::SessionObservedProcessReceipt {
             process_id: "named-process".to_string(),
             outcome: crate::SessionObservedProcessOutcome::Observed,
         }
     );
     assert_eq!(
         child.observed_processes[1],
-        crate::SessionObservedProcessResult {
+        crate::SessionObservedProcessReceipt {
             process_id: "missing-process".to_string(),
             outcome: crate::SessionObservedProcessOutcome::NotFound,
         }

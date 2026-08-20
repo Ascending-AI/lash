@@ -10,7 +10,7 @@ use super::{LashRuntime, ProcessHandleView, ProcessRecord, ProcessRegistry};
 
 pub use replay::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
-    LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
+    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
     LiveReplaySubscription, SessionCursor, SessionCursorError, SessionObservation,
     SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
     SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
@@ -407,8 +407,8 @@ impl RuntimeHandle {
         let observation = self.observe();
         cursor.parse_for_session(observation.session_id())?;
         match self.live_replay_store.replay_after_cursor(cursor)? {
-            LiveReplayResult::Replayed(events) => Ok(SessionResume::Replayed { events }),
-            LiveReplayResult::Gap(reason) => Ok(SessionResume::Gap {
+            LiveReplayOutcome::Replayed(events) => Ok(SessionResume::Replayed { events }),
+            LiveReplayOutcome::Gap(reason) => Ok(SessionResume::Gap {
                 gap: self.live_replay_gap(cursor, reason, observation.as_ref()),
                 observation: observation.session_observation(),
             }),
@@ -723,7 +723,7 @@ mod tests {
         fn replay_after_cursor(
             &self,
             _cursor: &SessionCursor,
-        ) -> Result<LiveReplayResult, LiveReplayStoreError> {
+        ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
             panic!("replay_after_cursor should not be called for rejected cursors")
         }
 

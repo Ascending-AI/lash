@@ -333,25 +333,25 @@ fn live_replay_text_payload(text: &str) -> SessionObservationEventPayload {
 }
 
 fn expect_live_replay_replayed(
-    result: Result<LiveReplayResult, LiveReplayStoreError>,
+    result: Result<LiveReplayOutcome, LiveReplayStoreError>,
     context: &str,
 ) -> Vec<Arc<SessionObservationEvent>> {
     match result.expect(context) {
-        LiveReplayResult::Replayed(events) => events,
-        LiveReplayResult::Gap(reason) => {
+        LiveReplayOutcome::Replayed(events) => events,
+        LiveReplayOutcome::Gap(reason) => {
             panic!("{context}: expected replayed events, got gap {reason:?}")
         }
     }
 }
 
 fn expect_live_replay_gap(
-    result: Result<LiveReplayResult, LiveReplayStoreError>,
+    result: Result<LiveReplayOutcome, LiveReplayStoreError>,
     expected: LiveReplayGapReason,
     context: &str,
 ) {
     match result.expect(context) {
-        LiveReplayResult::Gap(reason) => assert_eq!(reason, expected, "{context}"),
-        LiveReplayResult::Replayed(events) => {
+        LiveReplayOutcome::Gap(reason) => assert_eq!(reason, expected, "{context}"),
+        LiveReplayOutcome::Replayed(events) => {
             panic!(
                 "{context}: expected gap {expected:?}, got {} events",
                 events.len()

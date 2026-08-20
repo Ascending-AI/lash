@@ -1,6 +1,6 @@
 use super::{ProcessObserverBy, ProcessRegistry};
 use crate::store::{RuntimePersistence, StoreError};
-use crate::{SessionObservedProcessOutcome, SessionObservedProcessResult, SessionRelation};
+use crate::{SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionRelation};
 
 /// Source of the relation whose process-observer intents must be settled.
 pub enum SessionObserverIntentSource<'a> {
@@ -29,7 +29,7 @@ pub async fn reconcile_session_process_observer_intents(
     process_registry: Option<&dyn ProcessRegistry>,
     session_id: &str,
     source: SessionObserverIntentSource<'_>,
-) -> Result<Vec<SessionObservedProcessResult>, StoreError> {
+) -> Result<Vec<SessionObservedProcessReceipt>, StoreError> {
     let (mut relation, persisted) = match source {
         SessionObserverIntentSource::Persisted(store) => {
             let meta = store.load_session_meta().await?.ok_or_else(|| {
@@ -107,7 +107,7 @@ async fn apply_process_observers(
     session_id: &str,
     process_ids: &[crate::ProcessId],
     observer_by: ProcessObserverBy,
-) -> Vec<SessionObservedProcessResult> {
+) -> Vec<SessionObservedProcessReceipt> {
     let mut results = Vec::with_capacity(process_ids.len());
     for process_id in process_ids {
         let outcome = apply_process_observer(
@@ -117,7 +117,7 @@ async fn apply_process_observers(
             observer_by.clone(),
         )
         .await;
-        results.push(SessionObservedProcessResult {
+        results.push(SessionObservedProcessReceipt {
             process_id: process_id.clone(),
             outcome,
         });

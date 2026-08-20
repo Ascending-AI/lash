@@ -96,7 +96,7 @@ use std::time::Duration;
 
 use crate::{
     AgentFrameReason, AttachmentId, AttachmentIntent, AwaitEventWaitIdentity, DeliveryPolicy,
-    EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayResult, LiveReplayStore,
+    EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, ModelSpec, PluginSessionSnapshot,
     ProtocolEvent, ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaimBoundary, QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit,

@@ -93,6 +93,10 @@ IDENTIFIER_RENAME_BASELINES = {
     # field name, variant name, and emitted fingerprint tag byte-identical, so
     # REMOTE_PROTOCOL_VERSION stays 41, SESSION_NODE_BODY_SCHEMA_VERSION stays
     # 1, and PROCESS_REGISTRATION_FAMILY_VERSION stays 4.
+    # Known residual, inherited from REGISTRATION_BASELINES and equally narrow:
+    # the baseline pins a STATE, not a transition, so a future change that
+    # restores the guarded text to exactly these bytes would re-match and be
+    # excused a second time.
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
         "sha256:35bf1df42914317cac344d2c979fad7ba889e034abf8472f3c3f95ea5729d328"
     ),

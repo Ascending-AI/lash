@@ -15,11 +15,11 @@ pub struct SessionHandle {
     pub policy: SessionPolicy,
     /// Per-id outcome for observer edges requested at session creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub observed_processes: Vec<SessionObservedProcessResult>,
+    pub observed_processes: Vec<SessionObservedProcessReceipt>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionObservedProcessResult {
+pub struct SessionObservedProcessReceipt {
     pub process_id: crate::ProcessId,
     pub outcome: SessionObservedProcessOutcome,
 }

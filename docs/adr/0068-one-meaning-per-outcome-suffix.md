@@ -94,11 +94,20 @@ distinction is deliberate:
   written down, and the suffix rule is about answers, not modules.
 * **Local bindings and test-function names are neither.** They are not API.
 
-The wave itself moves the exported surface — the types a host can name. Crate-
-internal types still carrying a retired suffix (`RecoveryCompletionDisposition`
-and its kin) are governed by the same rule and are renamed as their code is
-touched; paying for a second thousand-line mechanical diff to reach names no
-host can write is not worth a reviewer's afternoon.
+The wave itself moves the exported surface — every type a host can name,
+whether it is re-exported from the `lash` root or reached as a `lash_core`
+contract symbol. The line is *nameability by a host*, not the module a type
+happens to live in: `TurnResultSummary` is handed to plugin hooks,
+`LiveReplayResult` is returned by a store trait a host implements, and
+`SessionObservedProcessResult` rides in a session snapshot, so all three are
+renamed here even though none is a `lash::` root export.
+
+What is carved out is what a host cannot write. Crate-internal types still
+carrying a retired suffix — `RecoveryCompletionDisposition`, the private tuple
+alias `LiveReplayRecvResult`, and their kin — are governed by the same rule and
+are renamed as their code is touched; paying for a second thousand-line
+mechanical diff to reach names no host can write is not worth a reviewer's
+afternoon.
 
 ### Two near-neighbours, kept apart on purpose
 
@@ -137,7 +146,7 @@ host configured, the status is where one failure's retries actually stand.
 
 ## Consequences
 
-* Forty-three exported types are renamed and one satellite (`ToolResultDone` →
+* Forty-six exported types are renamed and one satellite (`ToolResultDone` →
   `ToolOutcomeDone`) follows its parent. Forty-six were already canonical and
   keep their names. The appendix is the whole table.
 * This is a breaking release for every host that names one of the renamed types.
@@ -171,9 +180,10 @@ host configured, the status is where one failure's retries actually stand.
 
 ## Appendix: reclassification table
 
-Every facade-reachable exported type whose name ended in `Result`, `Outcome`,
-`Report`, `Summary`, `Disposition`, `Receipt`, or `Status`, in alphabetical
-order of the old name.
+Every host-nameable exported type whose name ended in `Result`, `Outcome`,
+`Report`, `Summary`, `Disposition`, `Receipt`, or `Status` — the `lash` facade's
+re-exports and the `lash_core` contract symbols a host reaches through them — in
+alphabetical order of the old name.
 
 | Old name | New name | Why |
 | --- | --- | --- |
@@ -186,6 +196,7 @@ order of the old name.
 | `GcReport` | *unchanged* | Sweep aggregate: root, retained, and deleted blob counts. |
 | `GenerationDisposition` | `GenerationReceipt` | The adapter's acknowledgement of what it accepted from one request's generation intent. |
 | `GenerationOptionDisposition` | `GenerationOptionOutcome` | Closed enum of the terminal fates of one requested option. |
+| `LiveReplayResult` | `LiveReplayOutcome` | Closed enum: the replayed events, or a gap. |
 | `LiveReplaySubscribeResult` | `LiveReplaySubscribeOutcome` | Closed enum: subscribed, or a gap. |
 | `LoserDisposition` | `LoserPolicy` | Not an answer: a caller-chosen policy stated before the group runs. |
 | `PendingTurnInputCancelOutcome` | *unchanged* | Closed enum of terminal cancel states. |
@@ -239,6 +250,8 @@ order of the old name.
 | `SessionCommandReceipt` | *unchanged* | Acknowledges an enqueued session command. |
 | `SessionDeleteReport` | *unchanged* | Aggregate of what a session deletion removed. |
 | `SessionExecutionLeaseClaimOutcome` | *unchanged* | Closed enum: acquired, or busy with the holder. |
+| `SessionObservedProcessOutcome` | *unchanged* | Closed enum of terminal states for one observed process. |
+| `SessionObservedProcessResult` | `SessionObservedProcessReceipt` | Binds one addressed process to its `SessionObservedProcessOutcome`; same shape as `PendingTurnInputCancelReceipt`. |
 | `StoreSchemaOutcome` | *unchanged* | Closed enum: ready, refused, undecided. |
 | `StoreSchemaStatus` | *unchanged* | Point-in-time read of every schema-carrying database. |
 | `ToolAttemptResult` | `ToolAttemptOutcome` | Closed enum of how one provider attempt ended: done, or parked. |
@@ -265,5 +278,6 @@ order of the old name.
 | `TurnInputAcceptanceReceipt` | *unchanged* | Durable acceptance evidence for an ingress caller. |
 | `TurnOutcome` | *unchanged* | Closed enum: finished, frame switch, stopped. |
 | `TurnResult` | `TurnReport` | Aggregate over one turn: the `TurnOutcome` plus per-item llm calls, tool calls, activities, issues, and the usage ledger. **CONTESTED** — a record noun (`TurnRecord`) would read better as the daily return type, at the cost of leaving the four nouns for the facade's most prominent answer. |
+| `TurnResultSummary` | `TurnHookReport` | The plugin-hook mirror of `TurnReport` — the same aggregate over one turn, named for where it is delivered. |
 | `VacuumReport` | *unchanged* | Maintenance aggregate of physically removed rows. |
 | `WakeDeliveryDriveReport` | *unchanged* | Drive aggregate of per-category counts. |

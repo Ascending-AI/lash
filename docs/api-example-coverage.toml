@@ -11858,7 +11858,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplayGapReason::Trimmed"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:157#LiveReplayResult::Gap(lash_core::LiveReplayGapReason::Trimmed) => Ok(1usize),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:157#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Trimmed) => Ok(1usize),"
 
 [[api]]
 symbol = "lash::observe::LiveReplayGapReason::Unavailable"
@@ -11867,7 +11867,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplayGapReason::Unavailable"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:180#LiveReplayResult::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:180#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,"
 
 [[api]]
 symbol = "lash::observe::LiveReplayStore"
@@ -66501,44 +66501,44 @@ disposition = "internal-consumed"
 usage = "crates/lash-tools/src/shell/mod.rs:643#context: &call.context.__attempt_context(),"
 
 [[api]]
-symbol = "lash_core::LiveReplayResult"
+symbol = "lash_core::LiveReplayOutcome"
 kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:69#LiveReplayResult::Replayed(events) if events.is_empty() => Ok(cursor),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:69#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
 
 [[api]]
-symbol = "lash_core::LiveReplayResult::Gap"
+symbol = "lash_core::LiveReplayOutcome::Gap"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:74#LiveReplayResult::Gap(reason) => {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:74#LiveReplayOutcome::Gap(reason) => {"
 
 [[api]]
-symbol = "lash_core::LiveReplayResult::Gap::0"
+symbol = "lash_core::LiveReplayOutcome::Gap::0"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:74#LiveReplayResult::Gap(reason) => {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:74#LiveReplayOutcome::Gap(reason) => {"
 
 [[api]]
-symbol = "lash_core::LiveReplayResult::Replayed"
+symbol = "lash_core::LiveReplayOutcome::Replayed"
 kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:69#LiveReplayResult::Replayed(events) if events.is_empty() => Ok(cursor),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:69#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
 
 [[api]]
-symbol = "lash_core::LiveReplayResult::Replayed::0"
+symbol = "lash_core::LiveReplayOutcome::Replayed::0"
 kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:69#LiveReplayResult::Replayed(events) if events.is_empty() => Ok(cursor),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:69#LiveReplayOutcome::Replayed(events) if events.is_empty() => Ok(cursor),"
 
 [[api]]
 symbol = "lash_core::LiveReplaySubscription"
@@ -72238,16 +72238,16 @@ disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-plugin-mcp/src/policy_tests.rs::silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle#`.message` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::test_support::SessionObservedProcessResult"
+symbol = "lash_core::test_support::SessionObservedProcessReceipt"
 kind = "struct"
 availability = "all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/control_admin.rs:944#vec![lash_core::test_support::SessionObservedProcessResult {"
+usage = "crates/lash/src/tests/control_admin.rs:944#vec![lash_core::test_support::SessionObservedProcessReceipt {"
 reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::test_support::SessionObservedProcessResult::outcome"
+symbol = "lash_core::test_support::SessionObservedProcessReceipt::outcome"
 kind = "field"
 availability = "all-features"
 area = "sessions-turns"
@@ -72256,7 +72256,7 @@ usage = "crates/lash/src/tests/control_admin.rs:946#outcome: lash_core::test_sup
 reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::test_support::SessionObservedProcessResult::process_id"
+symbol = "lash_core::test_support::SessionObservedProcessReceipt::process_id"
 kind = "field"
 availability = "all-features"
 area = "sessions-turns"
@@ -75725,76 +75725,76 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_tool_result#`tool_name: ctx.tool_name.clone(),`, crates/lash-plugin-tool-output-budget/src/lib.rs::project_model_parts#`if ctx.tool_name == \"batch\" {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary"
+symbol = "lash_core::facade_support::TurnHookReport"
 kind = "struct"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport"]
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash_core::plugin::hooks::TurnResultSummary to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash_core::plugin::hooks::TurnHookReport to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary::assistant_output"
+symbol = "lash_core::facade_support::TurnHookReport::assistant_output"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary::assistant_output"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport::assistant_output"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnResultSummary::from_assembled#`assistant_output: turn.assistant_output.clone(),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnHookReport` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnHookReport::from_assembled#`assistant_output: turn.assistant_output.clone(),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary::errors"
+symbol = "lash_core::facade_support::TurnHookReport::errors"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary::errors"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport::errors"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::PluginSession::finalize_turn_with_phase_probe#`turn.errors.push(super::plugin_lifecycle_hook_issue(error));`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnHookReport` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::PluginSession::finalize_turn_with_phase_probe#`turn.errors.push(super::plugin_lifecycle_hook_issue(error));`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary::execution"
+symbol = "lash_core::facade_support::TurnHookReport::execution"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary::execution"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport::execution"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnResultSummary::from_assembled#`execution: turn.execution.clone(),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnHookReport` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnHookReport::from_assembled#`execution: turn.execution.clone(),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary::from_assembled"
+symbol = "lash_core::facade_support::TurnHookReport::from_assembled"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary::from_assembled"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport::from_assembled"]
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash_core::plugin::hooks::TurnResultSummary::from_assembled to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash_core::plugin::hooks::TurnHookReport::from_assembled to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary::outcome"
+symbol = "lash_core::facade_support::TurnHookReport::outcome"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary::outcome"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport::outcome"]
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash_core::plugin::hooks::TurnResultSummary::outcome to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash_core::plugin::hooks::TurnHookReport::outcome to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary::token_usage"
+symbol = "lash_core::facade_support::TurnHookReport::token_usage"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary::token_usage"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport::token_usage"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnResultSummary::from_assembled#`token_usage: turn.token_usage.clone(),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnHookReport` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnHookReport::from_assembled#`token_usage: turn.token_usage.clone(),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
 
 [[api]]
-symbol = "lash_core::facade_support::TurnResultSummary::tool_calls"
+symbol = "lash_core::facade_support::TurnHookReport::tool_calls"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::TurnResultSummary::tool_calls"]
+aliases = ["lash_core::plugin::hooks::TurnHookReport::tool_calls"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnResultSummary` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnResultSummary::from_assembled#`tool_calls: Arc::new(turn.tool_calls.clone()),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::hooks::TurnResultHookContext::turn` hands `TurnHookReport` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is load-bearing inside its own defining module at crates/lash-core/src/plugin/hooks.rs::TurnHookReport::from_assembled#`tool_calls: Arc::new(turn.tool_calls.clone()),` and has no consumer outside it, so the host-facing half of the contract is what remains unexercised."
 
 [[api]]
 symbol = "lash_core::plugin::runtime_impl::SessionAuthorityContext"
@@ -89770,6 +89770,48 @@ superseded_by = "unused-add"
 reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash::plugins::TurnHookContext::turn_context."
 
 [[removal_verdict]]
+symbol = "lash_core::TurnHookReport"
+kind = "struct"
+superseded_by = "unused-add"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash_core::facade_support::TurnHookReport."
+
+[[removal_verdict]]
+symbol = "lash_core::TurnHookReport::assistant_output"
+kind = "field"
+superseded_by = "unused-justify"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnHookReport::assistant_output."
+
+[[removal_verdict]]
+symbol = "lash_core::TurnHookReport::errors"
+kind = "field"
+superseded_by = "unused-justify"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnHookReport::errors."
+
+[[removal_verdict]]
+symbol = "lash_core::TurnHookReport::execution"
+kind = "field"
+superseded_by = "unused-justify"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnHookReport::execution."
+
+[[removal_verdict]]
+symbol = "lash_core::TurnHookReport::from_assembled"
+kind = "function"
+superseded_by = "unused-add"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash_core::facade_support::TurnHookReport::from_assembled."
+
+[[removal_verdict]]
+symbol = "lash_core::TurnHookReport::outcome"
+kind = "field"
+superseded_by = "unused-add"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash_core::facade_support::TurnHookReport::outcome."
+
+[[removal_verdict]]
+symbol = "lash_core::TurnHookReport::token_usage"
+kind = "field"
+superseded_by = "unused-justify"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnHookReport::token_usage."
+
+[[removal_verdict]]
 symbol = "lash_core::TurnInputAcceptanceReceipt::ingress"
 kind = "field"
 superseded_by = "unused-add"
@@ -89894,48 +89936,6 @@ symbol = "lash_core::TurnResultHookContext::turn"
 kind = "field"
 superseded_by = "unused-justify"
 reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash::plugins::TurnResultHookContext::turn."
-
-[[removal_verdict]]
-symbol = "lash_core::TurnResultSummary"
-kind = "struct"
-superseded_by = "unused-add"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash_core::facade_support::TurnResultSummary."
-
-[[removal_verdict]]
-symbol = "lash_core::TurnResultSummary::assistant_output"
-kind = "field"
-superseded_by = "unused-justify"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnResultSummary::assistant_output."
-
-[[removal_verdict]]
-symbol = "lash_core::TurnResultSummary::errors"
-kind = "field"
-superseded_by = "unused-justify"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnResultSummary::errors."
-
-[[removal_verdict]]
-symbol = "lash_core::TurnResultSummary::execution"
-kind = "field"
-superseded_by = "unused-justify"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnResultSummary::execution."
-
-[[removal_verdict]]
-symbol = "lash_core::TurnResultSummary::from_assembled"
-kind = "function"
-superseded_by = "unused-add"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash_core::facade_support::TurnResultSummary::from_assembled."
-
-[[removal_verdict]]
-symbol = "lash_core::TurnResultSummary::outcome"
-kind = "field"
-superseded_by = "unused-add"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash_core::facade_support::TurnResultSummary::outcome."
-
-[[removal_verdict]]
-symbol = "lash_core::TurnResultSummary::token_usage"
-kind = "field"
-superseded_by = "unused-justify"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::TurnResultSummary::token_usage."
 
 [[removal_verdict]]
 symbol = "lash_core::TurnStop::RuntimeError"

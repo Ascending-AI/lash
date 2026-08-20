@@ -125,7 +125,7 @@ pub enum PluginLifecycleEvent<'run> {
 }
 
 #[derive(Clone, Debug)]
-pub struct TurnResultSummary {
+pub struct TurnHookReport {
     pub outcome: crate::TurnOutcome,
     pub assistant_output: crate::runtime::AssistantOutput,
     pub execution: crate::runtime::TurnExecutionMetrics,
@@ -134,7 +134,7 @@ pub struct TurnResultSummary {
     pub errors: Arc<Vec<crate::runtime::TurnIssue>>,
 }
 
-impl TurnResultSummary {
+impl TurnHookReport {
     pub fn from_assembled(turn: &AssembledTurn) -> Self {
         Self {
             outcome: turn.outcome.clone(),
@@ -251,7 +251,7 @@ pub struct ToolResultProjectionContext {
 #[derive(Clone)]
 pub struct TurnResultHookContext {
     pub session_id: String,
-    pub turn: Arc<TurnResultSummary>,
+    pub turn: Arc<TurnHookReport>,
     pub sessions: Arc<dyn SessionStateService>,
 }
 

@@ -322,7 +322,7 @@ pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
-    LiveReplayResult, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
+    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
     LiveReplaySubscription, RuntimeHandle, RuntimeObservation, SessionCursor, SessionCursorError,
     SessionObservation, SessionObservationEvent, SessionObservationEventPayload,
     SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,

@@ -263,8 +263,8 @@ pub mod facade_support {
     pub use crate::plugin::ToolResultProjector;
     pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
+    pub use crate::plugin::TurnHookReport;
     pub use crate::plugin::TurnResultHookContext;
-    pub use crate::plugin::TurnResultSummary;
     pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
     pub use crate::plugin_stack::PluginStack;
@@ -514,7 +514,7 @@ pub(crate) use crate::attachments::{
     AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
 };
 pub(crate) use crate::plugin::{
-    RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessResult,
+    RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
 };
 pub(crate) use crate::runtime::UnavailableProcessService;
 pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
@@ -948,7 +948,7 @@ pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AwaitEventKey, AwaitEventResolver,
     AwaitEventWaitIdentity, BoundaryReason, CausalRef, Clock, DeliveryPolicy, DrainMode,
     DrainModePolicy, EffectHost, EffectJournalRetirement, ExecutionScope, ForkPoint,
-    ForkSessionReceipt, ForkSessionRequest, InputItem, LiveReplayGapReason, LiveReplayResult,
+    ForkSessionReceipt, ForkSessionRequest, InputItem, LiveReplayGapReason, LiveReplayOutcome,
     LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
     ObserverInheritance, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,

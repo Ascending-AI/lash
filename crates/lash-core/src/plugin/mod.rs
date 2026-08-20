@@ -54,8 +54,8 @@ pub use hooks::{
     PluginLifecycleFuture, PluginSessionTask, PromptContributor, PromptHookContext,
     SessionConfigChangedContext, SessionConfigMutator, SessionStateChangedContext,
     ToolCallHookContext, ToolCatalogContributor, ToolResultHookContext,
-    ToolResultProjectionContext, ToolResultProjector, TurnHookContext, TurnResultHookContext,
-    TurnResultSummary,
+    ToolResultProjectionContext, ToolResultProjector, TurnHookContext, TurnHookReport,
+    TurnResultHookContext,
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CodeExecutorPlugin, EXECUTION_STATE_LEAF_MIN_BODY_BYTES,
@@ -89,7 +89,7 @@ pub use session_obj::PluginSession;
 pub use session_types::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, OpenAgentFrameRequest,
     OpenAgentFrameResult, PluginOwned, SessionContextOverlay, SessionCreateRequest, SessionHandle,
-    SessionObservedProcessOutcome, SessionObservedProcessResult, SessionPluginSource,
+    SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionPluginSource,
     SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess, SubagentSessionContext,
 };
 pub(crate) use snapshot::{InMemorySnapshotReader, InMemorySnapshotWriter};

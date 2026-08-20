@@ -3177,7 +3177,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
     fn replay_after_cursor(
         &self,
         cursor: &lash_core::SessionCursor,
-    ) -> std::result::Result<lash_core::LiveReplayResult, lash_core::LiveReplayStoreError> {
+    ) -> std::result::Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
         self.inner.replay_after_cursor(cursor)
     }
 
