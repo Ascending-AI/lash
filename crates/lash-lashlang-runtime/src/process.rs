@@ -10,9 +10,10 @@ use lash_core::facade_support::ToolChildExecutionTraceHook;
 use lash_sansio::sync::MutexExt;
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceEvent, TraceLabelMetadata,
-    TraceLanguageChildExecution, TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity,
+    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
-    TraceLanguageExecutionStatus, TraceRecord, TraceRuntimeScope, TraceRuntimeSubject, TraceSink,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceRecord, TraceRuntimeScope,
+    TraceRuntimeSubject, TraceSink,
 };
 use lashlang::{ExecutionHost, ExecutionHostError};
 use sha2::{Digest, Sha256};
@@ -1067,14 +1068,16 @@ impl LashlangProcessExecutionTrace {
     }
 
     fn emit_started(&self, artifact: &lashlang::ModuleArtifact) {
-        self.emit(TraceLanguageExecutionEvent::ExecutionStarted {
+        self.emit(TraceLanguageExecution {
             event_key: self.event_key("started"),
             identity: self.identity(),
-            execution_map: trace_lashlang_process_map(
-                artifact,
-                &self.process_ref,
-                &self.process_name,
-            ),
+            payload: TraceLanguageExecutionPayload::ExecutionStarted {
+                execution_map: trace_lashlang_process_map(
+                    artifact,
+                    &self.process_ref,
+                    &self.process_name,
+                ),
+            },
         });
     }
 
@@ -1102,11 +1105,10 @@ impl LashlangProcessExecutionTrace {
                 Some(format!("process no longer retained ({terminal_label})")),
             ),
         };
-        self.emit(TraceLanguageExecutionEvent::ExecutionFinished {
+        self.emit(TraceLanguageExecution {
             event_key: self.event_key("finished"),
             identity: self.identity(),
-            status,
-            error,
+            payload: TraceLanguageExecutionPayload::ExecutionFinished { status, error },
         });
     }
 
@@ -1114,84 +1116,82 @@ impl LashlangProcessExecutionTrace {
         if self.sink.is_none() {
             return;
         }
-        let identity = self.identity();
-        let event = match observation {
-            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => {
-                TraceLanguageExecutionEvent::NodeStarted {
-                    event_key: self
-                        .event_key(format!("node:{}:{occurrence}:started", site.node_id)),
-                    identity,
+        let (suffix, payload) = match observation {
+            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => (
+                format!("node:{}:{occurrence}:started", site.node_id),
+                TraceLanguageExecutionPayload::NodeStarted {
                     node_id: site.node_id,
                     node_kind: site.node_kind,
                     label: site.label,
                     occurrence,
-                }
-            }
-            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence } => {
-                TraceLanguageExecutionEvent::NodeCompleted {
-                    event_key: self
-                        .event_key(format!("node:{}:{occurrence}:completed", site.node_id)),
-                    identity,
+                },
+            ),
+            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence } => (
+                format!("node:{}:{occurrence}:completed", site.node_id),
+                TraceLanguageExecutionPayload::NodeCompleted {
                     node_id: site.node_id,
                     node_kind: site.node_kind,
                     label: site.label,
                     occurrence,
-                }
-            }
+                },
+            ),
             lashlang::LashlangExecutionObservation::NodeFailed {
                 site,
                 occurrence,
                 error,
-            } => TraceLanguageExecutionEvent::NodeFailed {
-                event_key: self.event_key(format!("node:{}:{occurrence}:failed", site.node_id)),
-                identity,
-                node_id: site.node_id,
-                node_kind: site.node_kind,
-                label: site.label,
-                occurrence,
-                error,
-            },
+            } => (
+                format!("node:{}:{occurrence}:failed", site.node_id),
+                TraceLanguageExecutionPayload::NodeFailed {
+                    node_id: site.node_id,
+                    node_kind: site.node_kind,
+                    label: site.label,
+                    occurrence,
+                    error,
+                },
+            ),
             lashlang::LashlangExecutionObservation::BranchSelected {
                 site,
                 occurrence,
                 edge_id,
                 selected,
-            } => TraceLanguageExecutionEvent::BranchSelected {
-                event_key: self
-                    .event_key(format!("branch:{}:{occurrence}:{edge_id}", site.node_id)),
-                identity,
-                node_id: site.node_id,
-                occurrence,
-                edge_id,
-                selected: match selected {
-                    lashlang::ProcessBranchSelection::Then => TraceBranchSelection::Then,
-                    lashlang::ProcessBranchSelection::Else => TraceBranchSelection::Else,
+            } => (
+                format!("branch:{}:{occurrence}:{edge_id}", site.node_id),
+                TraceLanguageExecutionPayload::BranchSelected {
+                    node_id: site.node_id,
+                    occurrence,
+                    edge_id,
+                    selected: match selected {
+                        lashlang::ProcessBranchSelection::Then => TraceBranchSelection::Then,
+                        lashlang::ProcessBranchSelection::Else => TraceBranchSelection::Else,
+                    },
                 },
-            },
+            ),
             lashlang::LashlangExecutionObservation::ChildStarted {
                 site,
                 occurrence,
                 child,
-            } => TraceLanguageExecutionEvent::ChildStarted {
-                event_key: self.event_key(format!(
-                    "child:{}:{occurrence}:{}",
-                    site.node_id, child.process_id
-                )),
-                identity,
-                parent_node_id: site.node_id,
-                occurrence,
-                child: TraceLanguageChildExecution {
-                    scope: TraceRuntimeScope::new(self.session_id.clone()),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: child.process_id,
+            } => (
+                format!("child:{}:{occurrence}:{}", site.node_id, child.process_id),
+                TraceLanguageExecutionPayload::ChildStarted {
+                    parent_node_id: site.node_id,
+                    occurrence,
+                    child: TraceLanguageChildExecution {
+                        scope: TraceRuntimeScope::new(self.session_id.clone()),
+                        subject: TraceRuntimeSubject::Process {
+                            process_id: child.process_id,
+                        },
+                        module_ref: Some(child.module_ref.to_string()),
+                        entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),
+                        entry_name: Some(child.process_name),
                     },
-                    module_ref: Some(child.module_ref.to_string()),
-                    entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),
-                    entry_name: Some(child.process_name),
                 },
-            },
+            ),
         };
-        self.emit(event);
+        self.emit(TraceLanguageExecution {
+            event_key: self.event_key(suffix),
+            identity: self.identity(),
+            payload,
+        });
     }
 
     fn tool_child_execution_trace_hook(
@@ -1213,19 +1213,21 @@ impl LashlangProcessExecutionTrace {
                 entry_name: started.child_entry_name,
             };
             let child_graph_key = child.graph_key();
-            trace.emit(TraceLanguageExecutionEvent::ChildStarted {
+            trace.emit(TraceLanguageExecution {
                 event_key: trace.event_key(format!(
                     "child:{parent_node_id}:{occurrence}:{child_graph_key}"
                 )),
                 identity: trace.identity(),
-                parent_node_id: parent_node_id.clone(),
-                occurrence,
-                child,
+                payload: TraceLanguageExecutionPayload::ChildStarted {
+                    parent_node_id: parent_node_id.clone(),
+                    occurrence,
+                    child,
+                },
             });
         }))
     }
 
-    fn emit(&self, event: TraceLanguageExecutionEvent) {
+    fn emit(&self, event: TraceLanguageExecution) {
         let Some(sink) = &self.sink else {
             return;
         };

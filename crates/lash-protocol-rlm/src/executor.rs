@@ -19,8 +19,8 @@ use lash_core::{
     facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
-    LashlangSurface, TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionMap, TraceLanguageExecutionStatus,
+    LashlangSurface, TraceLanguageExecution, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionMap, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
 };
 use lashlang::{ExecutionOutcome, State as FlowState};
 
@@ -846,10 +846,12 @@ fn emit_foreground_execution_started(
     trace: &LashlangExecutionTrace,
     artifact: &lashlang::ModuleArtifact,
 ) {
-    trace.emit(TraceLanguageExecutionEvent::ExecutionStarted {
+    trace.emit(TraceLanguageExecution {
         event_key: trace.event_key("started"),
         identity: trace.identity().clone(),
-        execution_map: trace_main_map(artifact),
+        payload: TraceLanguageExecutionPayload::ExecutionStarted {
+            execution_map: trace_main_map(artifact),
+        },
     });
 }
 
@@ -875,11 +877,10 @@ fn emit_foreground_execution_finished(
             ),
         ),
     };
-    trace.emit(TraceLanguageExecutionEvent::ExecutionFinished {
+    trace.emit(TraceLanguageExecution {
         event_key: trace.event_key("finished"),
         identity: trace.identity().clone(),
-        status,
-        error,
+        payload: TraceLanguageExecutionPayload::ExecutionFinished { status, error },
     });
 }
 

@@ -11,11 +11,11 @@ pub use typescript_runtime::{is_typescript_runtime_receiver, journaled_typescrip
 pub mod testing;
 
 pub use lash_trace::{
-    TraceLanguageChildExecution, TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity,
+    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
-    TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangGraph,
-    TraceLashlangGraphChildLink, TraceLashlangGraphEdge, TraceLashlangGraphNode,
-    TraceLashlangGraphStore, TraceLashlangNodeStatus,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
+    TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
+    TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeStatus,
 };
 pub use lashlang::{
     CompiledProcessCache, InMemoryLashlangArtifactStore, LASH_TYPE_KEY, LashlangAbilities,

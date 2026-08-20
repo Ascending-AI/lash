@@ -402,7 +402,7 @@ pub enum TraceEvent {
     },
     LanguageExecution {
         language: String,
-        event: TraceLanguageExecutionEvent,
+        event: TraceLanguageExecution,
     },
     TurnCompleted {
         status: String,
@@ -862,39 +862,37 @@ impl TraceLanguageExecutionIdentity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceLanguageExecution {
+    pub event_key: String,
+    pub identity: TraceLanguageExecutionIdentity,
+    #[serde(flatten)]
+    pub payload: TraceLanguageExecutionPayload,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TraceLanguageExecutionEvent {
+pub enum TraceLanguageExecutionPayload {
     ExecutionStarted {
-        event_key: String,
-        identity: TraceLanguageExecutionIdentity,
         execution_map: TraceLanguageExecutionMap,
     },
     ExecutionFinished {
-        event_key: String,
-        identity: TraceLanguageExecutionIdentity,
         status: TraceLanguageExecutionStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
     NodeStarted {
-        event_key: String,
-        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         node_kind: String,
         label: String,
         occurrence: u64,
     },
     NodeCompleted {
-        event_key: String,
-        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         node_kind: String,
         label: String,
         occurrence: u64,
     },
     NodeFailed {
-        event_key: String,
-        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         node_kind: String,
         label: String,
@@ -902,16 +900,12 @@ pub enum TraceLanguageExecutionEvent {
         error: String,
     },
     BranchSelected {
-        event_key: String,
-        identity: TraceLanguageExecutionIdentity,
         node_id: String,
         occurrence: u64,
         edge_id: String,
         selected: TraceBranchSelection,
     },
     ChildStarted {
-        event_key: String,
-        identity: TraceLanguageExecutionIdentity,
         parent_node_id: String,
         occurrence: u64,
         child: TraceLanguageChildExecution,
@@ -1298,13 +1292,15 @@ mod tests {
             entry_ref: Some("component:0".to_string()),
             entry_name: "main".to_string(),
         };
-        let event = TraceLanguageExecutionEvent::NodeStarted {
+        let event = TraceLanguageExecution {
             event_key: "process:p1:node:n1:1:started".to_string(),
             identity,
-            node_id: "n1".to_string(),
-            node_kind: "resource_operation".to_string(),
-            label: "read_file".to_string(),
-            occurrence: 1,
+            payload: TraceLanguageExecutionPayload::NodeStarted {
+                node_id: "n1".to_string(),
+                node_kind: "resource_operation".to_string(),
+                label: "read_file".to_string(),
+                occurrence: 1,
+            },
         };
         let record = TraceRecord::new(
             TraceContext::default().for_session("s1"),
@@ -1326,7 +1322,10 @@ mod tests {
             round_trip.event,
             TraceEvent::LanguageExecution {
                 language,
-                event: TraceLanguageExecutionEvent::NodeStarted { .. }
+                event: TraceLanguageExecution {
+                    payload: TraceLanguageExecutionPayload::NodeStarted { .. },
+                    ..
+                }
             } if language == "lashlang"
         ));
     }

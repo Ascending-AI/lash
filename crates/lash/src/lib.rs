@@ -629,11 +629,11 @@ pub mod tracing {
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
-        TraceLanguageChildExecution, TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity,
+        TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
         TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
-        TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangGraph,
-        TraceLashlangGraphChildLink, TraceLashlangGraphEdge, TraceLashlangGraphNode,
-        TraceLashlangGraphStore, TraceLashlangNodeStatus,
+        TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
+        TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
+        TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeStatus,
     };
     pub use lash_trace::{StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink};
 }

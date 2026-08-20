@@ -906,10 +906,11 @@ mod tests {
     use super::*;
     use lash_trace::{
         TraceAgentFrameSwitch, TraceContentBlock, TraceContext, TraceError, TraceEvent,
-        TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-        TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TraceProviderRequestEvent,
-        TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope, TraceRuntimeStreamEvent,
-        TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome, TraceToolCallOutput,
+        TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
+        TraceLanguageExecutionPayload, TraceLlmMessage, TraceLlmRequest, TraceLlmResponse,
+        TraceProviderRequestEvent, TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope,
+        TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome,
+        TraceToolCallOutput,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1180,10 +1181,12 @@ mod tests {
             },
             TraceEvent::LanguageExecution {
                 language: "lashlang".to_string(),
-                event: TraceLanguageExecutionEvent::ExecutionStarted {
+                event: TraceLanguageExecution {
                     event_key: "k".to_string(),
                     identity: identity(),
-                    execution_map: TraceLanguageExecutionMap::default(),
+                    payload: TraceLanguageExecutionPayload::ExecutionStarted {
+                        execution_map: TraceLanguageExecutionMap::default(),
+                    },
                 },
             },
             TraceEvent::TurnCompleted {

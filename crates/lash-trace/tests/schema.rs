@@ -9,13 +9,15 @@
 use std::collections::BTreeSet;
 
 use lash_trace::{
-    TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLanguageExecutionEvent,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionStatus, TraceLlmRequest,
-    TraceLlmResponse, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
-    TraceProviderReplayKind, TraceProviderRequestEvent, TraceProviderRouteIdentity,
-    TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope, TraceRuntimeStreamEvent,
-    TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome, TraceToolCallOutput,
+    TraceBranchSelection, TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
+    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLanguageChildExecution,
+    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
+    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
+    TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse, TraceProviderReplayDropEvent,
+    TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
+    TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope,
+    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome,
+    TraceToolCallOutput,
 };
 use serde_json::json;
 
@@ -303,11 +305,13 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
-            event: TraceLanguageExecutionEvent::ExecutionFinished {
+            event: TraceLanguageExecution {
                 event_key: "process:p1:finished".to_string(),
                 identity: lashlang_identity(),
-                status: TraceLanguageExecutionStatus::Completed,
-                error: None,
+                payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                    status: TraceLanguageExecutionStatus::Completed,
+                    error: None,
+                },
             },
         },
         TraceEvent::TurnCompleted {
@@ -635,7 +639,7 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
         TraceContext::default(),
         TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
-            event: TraceLanguageExecutionEvent::ExecutionFinished {
+            event: TraceLanguageExecution {
                 event_key: "execution:finished".to_string(),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::new("s1"),
@@ -647,8 +651,10 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
                     entry_ref: None,
                     entry_name: "main".to_string(),
                 },
-                status: TraceLanguageExecutionStatus::Completed,
-                error: None,
+                payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                    status: TraceLanguageExecutionStatus::Completed,
+                    error: None,
+                },
             },
         },
     );
@@ -893,13 +899,18 @@ fn protocol_step_exec_diagnostic_full_shape() {
 fn language_execution_full_shape() {
     let event = TraceEvent::LanguageExecution {
         language: "lashlang".to_string(),
-        event: TraceLanguageExecutionEvent::ExecutionFinished {
+        event: TraceLanguageExecution {
             event_key: "process:p1:finished".to_string(),
             identity: lashlang_identity(),
-            status: TraceLanguageExecutionStatus::Completed,
-            error: None,
+            payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                status: TraceLanguageExecutionStatus::Completed,
+                error: None,
+            },
         },
     };
+    // This pin compares parsed `serde_json::Value`s and is key-order-insensitive.
+    // The envelope hoist moved the `kind` key from first to third while keeping
+    // identical keys and values; this `json!` literal is not a byte-level pin.
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
         json!({
@@ -920,6 +931,102 @@ fn language_execution_full_shape() {
             },
         })
     );
+}
+
+#[test]
+fn language_execution_all_seven_payload_variants_round_trip() {
+    let variants = vec![
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            execution_map: TraceLanguageExecutionMap {
+                module_ref: "module".to_string(),
+                entry_kind: "process".to_string(),
+                entry_ref: Some("component:0".to_string()),
+                entry_name: "main".to_string(),
+                nodes: vec![TraceLanguageExecutionMapNode {
+                    id: "n1".to_string(),
+                    kind: "resource_operation".to_string(),
+                    label: "read_file".to_string(),
+                    label_metadata: None,
+                }],
+                edges: vec![TraceLanguageExecutionMapEdge {
+                    id: "e1".to_string(),
+                    from: "n1".to_string(),
+                    to: "n2".to_string(),
+                    label: "next".to_string(),
+                }],
+            },
+        },
+        TraceLanguageExecutionPayload::ExecutionFinished {
+            status: TraceLanguageExecutionStatus::Completed,
+            error: Some("test error".to_string()),
+        },
+        TraceLanguageExecutionPayload::NodeStarted {
+            node_id: "n1".to_string(),
+            node_kind: "resource_operation".to_string(),
+            label: "read_file".to_string(),
+            occurrence: 1,
+        },
+        TraceLanguageExecutionPayload::NodeCompleted {
+            node_id: "n1".to_string(),
+            node_kind: "resource_operation".to_string(),
+            label: "read_file".to_string(),
+            occurrence: 1,
+        },
+        TraceLanguageExecutionPayload::NodeFailed {
+            node_id: "n1".to_string(),
+            node_kind: "resource_operation".to_string(),
+            label: "read_file".to_string(),
+            occurrence: 1,
+            error: "failed to read file".to_string(),
+        },
+        TraceLanguageExecutionPayload::BranchSelected {
+            node_id: "b1".to_string(),
+            occurrence: 1,
+            edge_id: "e1".to_string(),
+            selected: TraceBranchSelection::Then,
+        },
+        TraceLanguageExecutionPayload::ChildStarted {
+            parent_node_id: "p_node".to_string(),
+            occurrence: 1,
+            child: TraceLanguageChildExecution {
+                scope: TraceRuntimeScope::new("s1"),
+                subject: TraceRuntimeSubject::Process {
+                    process_id: "p2".to_string(),
+                },
+                module_ref: Some("child_mod".to_string()),
+                entry_ref: Some("component:1".to_string()),
+                entry_name: Some("child_main".to_string()),
+            },
+        },
+    ];
+
+    assert_eq!(variants.len(), 7, "must test all 7 payload variants");
+
+    for payload in variants {
+        let record = TraceRecord::new(
+            TraceContext::default().for_session("s1"),
+            TraceEvent::LanguageExecution {
+                language: "lashlang".to_string(),
+                event: TraceLanguageExecution {
+                    event_key: "k1".to_string(),
+                    identity: lashlang_identity(),
+                    payload: payload.clone(),
+                },
+            },
+        );
+
+        let json = serde_json::to_value(&record).expect("serialize record");
+        assert_eq!(json["type"], "language_execution");
+        assert_eq!(json["event"]["event_key"], "k1");
+        assert!(
+            json["event"].get("kind").is_some(),
+            "kind must be flattened into event envelope"
+        );
+
+        let round_tripped: TraceRecord =
+            serde_json::from_value(json).expect("deserialize round trip");
+        assert_eq!(record, round_tripped);
+    }
 }
 
 #[test]
