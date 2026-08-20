@@ -1,11 +1,13 @@
-//! [`AttachmentStore`] conformance: content addressing and round trips.
+//! [`AttachmentStore`] conformance: content addressing, freshness, and round trips.
 
 use super::*;
 
 /// Run the full [`AttachmentStore`] conformance suite against the backend
 /// produced by `make`. `make` must return a fresh, empty store on each call.
 /// `expected_persistence` is the tier this backend declares (`Ephemeral` for
-/// in-memory, `Durable` for file/Sqlite-backed).
+/// in-memory, `Durable` for persistent backends). The freshness law waits on the
+/// real clock so it also works for backends whose timestamps have whole-second
+/// resolution; do not run this suite with a frozen system clock.
 pub async fn attachment_store<F>(make: F, expected_persistence: AttachmentStorePersistence)
 where
     F: Fn() -> Arc<dyn AttachmentStore>,
@@ -16,9 +18,12 @@ where
     drop((first, second));
     attachment_put_get_round_trips_bytes_and_meta(make()).await;
     attachment_is_content_addressed(make()).await;
+    attachment_head_reflects_put_and_refreshes_timestamp(make()).await;
     attachment_get_unknown_is_not_found(make()).await;
     attachment_delete_removes_content_and_is_idempotent(make()).await;
+    attachment_head_reports_absence(make()).await;
     attachment_list_enumerates_stored_blobs(make()).await;
+    attachment_head_agrees_with_list(make()).await;
     attachment_reports_declared_persistence(make(), expected_persistence);
 }
 
@@ -85,6 +90,79 @@ async fn attachment_is_content_addressed(store: Arc<dyn AttachmentStore>) {
     );
 }
 
+async fn attachment_head_reflects_put_and_refreshes_timestamp(store: Arc<dyn AttachmentStore>) {
+    let bytes = vec![3u8, 1, 4, 1, 5];
+    let reference = store
+        .put(bytes.clone(), attachment_meta())
+        .await
+        .expect("put attachment before head");
+    let first_head = store
+        .head(&reference.id)
+        .await
+        .expect("head just-written attachment")
+        .expect("head must find a just-written attachment");
+    assert_eq!(
+        first_head.id, reference.id,
+        "head must return the requested just-written attachment"
+    );
+
+    let Some(first_modified) = first_head.last_modified_epoch_ms else {
+        // `StoredBlobRef` permits timestamp-free backends. They have no write-
+        // grace protection, but `head` must still prove presence and identity.
+        let repeated = store
+            .put(bytes, attachment_meta())
+            .await
+            .expect("repeat identical put");
+        assert_eq!(repeated.id, reference.id);
+        let refreshed_head = store
+            .head(&reference.id)
+            .await
+            .expect("head attachment after repeated put")
+            .expect("head must still find an attachment after a repeated put");
+        assert_eq!(refreshed_head.id, reference.id);
+        assert!(
+            refreshed_head.last_modified_epoch_ms.is_none(),
+            "head timestamp availability must remain stable across a repeated put"
+        );
+        return;
+    };
+
+    // S3 exposes `HEAD` freshness at whole-second HTTP-date resolution while
+    // local stores are finer grained. Retry on the real clock so the law tests
+    // a genuine restamp without assuming one backend's timer precision.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(1_100));
+        let repeated = store
+            .put(bytes.clone(), attachment_meta())
+            .await
+            .expect("repeat identical put");
+        assert_eq!(
+            repeated.id, reference.id,
+            "the repeated put must address the same blob"
+        );
+        let refreshed_head = store
+            .head(&reference.id)
+            .await
+            .expect("head attachment after repeated put")
+            .expect("head must still find an attachment after a repeated put");
+        assert_eq!(
+            refreshed_head.id, reference.id,
+            "head must return the requested attachment after a repeated put"
+        );
+        let refreshed_modified = refreshed_head
+            .last_modified_epoch_ms
+            .expect("head timestamp availability must remain stable across a repeated put");
+        if refreshed_modified > first_modified {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a repeated identical put must refresh head's reported timestamp: {refreshed_modified} <= {first_modified}"
+        );
+    }
+}
+
 async fn attachment_get_unknown_is_not_found(store: Arc<dyn AttachmentStore>) {
     let err = store
         .get(&AttachmentId::parse("sha256:does-not-exist").expect("valid attachment id"))
@@ -126,6 +204,41 @@ async fn attachment_delete_removes_content_and_is_idempotent(store: Arc<dyn Atta
         .delete(&AttachmentId::parse("sha256:never-existed").expect("valid attachment id"))
         .await
         .expect("delete of unknown id is a no-op");
+}
+
+async fn attachment_head_reports_absence(store: Arc<dyn AttachmentStore>) {
+    let never_written =
+        AttachmentId::parse("sha256:never-written-head").expect("valid attachment id");
+    assert!(
+        store
+            .head(&never_written)
+            .await
+            .expect("head never-written attachment")
+            .is_none(),
+        "head must report None for a never-written attachment"
+    );
+
+    let reference = store
+        .put(vec![2u8, 7, 1, 8], attachment_meta())
+        .await
+        .expect("put attachment before delete");
+    store
+        .head(&reference.id)
+        .await
+        .expect("head attachment before delete")
+        .expect("head must find attachment before delete");
+    store
+        .delete(&reference.id)
+        .await
+        .expect("delete attachment before head");
+    assert!(
+        store
+            .head(&reference.id)
+            .await
+            .expect("head deleted attachment")
+            .is_none(),
+        "head must report None for a deleted attachment"
+    );
 }
 
 async fn attachment_list_enumerates_stored_blobs(store: Arc<dyn AttachmentStore>) {
@@ -180,6 +293,41 @@ async fn attachment_list_enumerates_stored_blobs(store: Arc<dyn AttachmentStore>
     assert!(after.contains(&second.id), "surviving blob stays listed");
 }
 
+async fn attachment_head_agrees_with_list(store: Arc<dyn AttachmentStore>) {
+    store
+        .put(vec![6u8, 2, 6, 4], attachment_meta())
+        .await
+        .expect("put first attachment before comparing head and list");
+    store
+        .put(vec![3u8, 3, 8, 3], attachment_meta())
+        .await
+        .expect("put second attachment before comparing head and list");
+
+    let listed = store.list().await.expect("list attachments for head check");
+    assert_eq!(
+        listed.len(),
+        2,
+        "list must expose both blobs used by the head agreement law"
+    );
+    for listed_blob in listed {
+        let id = listed_blob.id.clone();
+        let head = store
+            .head(&id)
+            .await
+            .expect("head listed attachment")
+            .expect("head must find every attachment returned by list");
+        assert_eq!(
+            head.id, id,
+            "head must return the attachment requested from list"
+        );
+        assert_eq!(
+            head.last_modified_epoch_ms.is_some(),
+            listed_blob.last_modified_epoch_ms.is_some(),
+            "head and list must agree on timestamp availability for stored attachment {id}"
+        );
+    }
+}
+
 fn attachment_reports_declared_persistence(
     store: Arc<dyn AttachmentStore>,
     expected: AttachmentStorePersistence,
@@ -204,4 +352,163 @@ async fn attachment_store_survives_reopen(factory: ReopenableAttachmentStore) {
         .expect("get attachment after reopen");
     assert_eq!(reopened.bytes, vec![4u8, 3, 2, 1]);
     assert_eq!(reference.byte_len, 4);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    #[derive(Clone, Copy)]
+    enum HeadDefect {
+        StaleTimestamp,
+        MissingLive,
+        PhantomUnknown,
+        RetainDeleted,
+        MissingTimestamp,
+    }
+
+    struct BrokenHeadStore {
+        inner: crate::InMemoryAttachmentStore,
+        defect: HeadDefect,
+        cached: Mutex<BTreeMap<AttachmentId, crate::StoredBlobRef>>,
+    }
+
+    impl BrokenHeadStore {
+        fn new(defect: HeadDefect) -> Self {
+            Self {
+                inner: crate::InMemoryAttachmentStore::new(),
+                defect,
+                cached: Mutex::new(BTreeMap::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AttachmentStore for BrokenHeadStore {
+        async fn put(
+            &self,
+            bytes: Vec<u8>,
+            meta: AttachmentCreateMeta,
+        ) -> Result<crate::AttachmentRef, AttachmentStoreError> {
+            self.inner.put(bytes, meta).await
+        }
+
+        async fn get(
+            &self,
+            id: &AttachmentId,
+        ) -> Result<crate::StoredAttachment, AttachmentStoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+            self.inner.delete(id).await
+        }
+
+        async fn list(&self) -> Result<Vec<crate::StoredBlobRef>, AttachmentStoreError> {
+            self.inner.list().await
+        }
+
+        async fn head(
+            &self,
+            id: &AttachmentId,
+        ) -> Result<Option<crate::StoredBlobRef>, AttachmentStoreError> {
+            let honest = self.inner.head(id).await?;
+            match self.defect {
+                HeadDefect::StaleTimestamp => Ok(honest.map(|mut blob| {
+                    blob.last_modified_epoch_ms = Some(1);
+                    blob
+                })),
+                HeadDefect::MissingLive => Ok(None),
+                HeadDefect::PhantomUnknown => {
+                    Ok(Some(honest.unwrap_or_else(|| crate::StoredBlobRef {
+                        id: id.clone(),
+                        last_modified_epoch_ms: None,
+                    })))
+                }
+                HeadDefect::RetainDeleted => match honest {
+                    Some(blob) => {
+                        self.cached
+                            .lock()
+                            .expect("head cache lock")
+                            .insert(id.clone(), blob.clone());
+                        Ok(Some(blob))
+                    }
+                    None => Ok(self
+                        .cached
+                        .lock()
+                        .expect("head cache lock")
+                        .get(id)
+                        .cloned()),
+                },
+                HeadDefect::MissingTimestamp => Ok(honest.map(|mut blob| {
+                    blob.last_modified_epoch_ms = None;
+                    blob
+                })),
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "a repeated identical put must refresh head's reported timestamp")]
+    async fn head_freshness_law_rejects_a_stale_timestamp() {
+        attachment_store(
+            || {
+                Arc::new(BrokenHeadStore::new(HeadDefect::StaleTimestamp))
+                    as Arc<dyn AttachmentStore>
+            },
+            AttachmentStorePersistence::Ephemeral,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "head must find a just-written attachment")]
+    async fn head_freshness_law_rejects_a_missing_live_blob() {
+        attachment_store(
+            || Arc::new(BrokenHeadStore::new(HeadDefect::MissingLive)) as Arc<dyn AttachmentStore>,
+            AttachmentStorePersistence::Ephemeral,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "head must report None for a never-written attachment")]
+    async fn head_absence_law_rejects_a_phantom_unknown_blob() {
+        attachment_store(
+            || {
+                Arc::new(BrokenHeadStore::new(HeadDefect::PhantomUnknown))
+                    as Arc<dyn AttachmentStore>
+            },
+            AttachmentStorePersistence::Ephemeral,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "head must report None for a deleted attachment")]
+    async fn head_absence_law_rejects_a_deleted_blob_that_remains_visible() {
+        attachment_store(
+            || {
+                Arc::new(BrokenHeadStore::new(HeadDefect::RetainDeleted))
+                    as Arc<dyn AttachmentStore>
+            },
+            AttachmentStorePersistence::Ephemeral,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "head and list must agree on timestamp availability")]
+    async fn head_list_agreement_law_rejects_missing_freshness() {
+        attachment_store(
+            || {
+                Arc::new(BrokenHeadStore::new(HeadDefect::MissingTimestamp))
+                    as Arc<dyn AttachmentStore>
+            },
+            AttachmentStorePersistence::Ephemeral,
+        )
+        .await;
+    }
 }
