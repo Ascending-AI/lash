@@ -105,6 +105,16 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn claim_ready_queued_work(",
             "async fn abandon_queued_work_claim(",
         ),
+        // The third queued-work claim copy. `claim_ready_queued_work` above is
+        // a thin caller of this free function, which is what actually reads
+        // `now` and CAS-stamps the claim, and it lives far below the impl block
+        // — outside every region above. Without this entry the only claim path
+        // that could read a host clock unnoticed is the one doing the work.
+        (
+            RUNTIME_PERSISTENCE_SOURCE,
+            "async fn claim_ready_queued_work_postgres_tx(",
+            "async fn defer_orphaned_active_turn_inputs_tx(",
+        ),
         (
             RUNTIME_PERSISTENCE_SOURCE,
             "async fn cancel_queued_work_batch(",

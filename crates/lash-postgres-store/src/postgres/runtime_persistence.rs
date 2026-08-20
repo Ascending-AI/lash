@@ -2040,13 +2040,15 @@ impl QueuedWorkStore for PostgresSessionStore {
             .bind(&owner.incarnation_id)
             .bind(liveness_json)
             .bind(&lease.lease_token)
-            .bind(sql_session_lease_generation(generation)?)
+            .bind(sql_session_lease_generation(
+                lease.session_lease_generation,
+            )?)
             .bind(sql_fencing_token)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
-            if changed != 1 {
+            if changed == 0 {
                 tx.rollback().await.map_err(store_sqlx_error)?;
                 return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
                     None,
