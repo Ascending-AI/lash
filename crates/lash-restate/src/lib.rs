@@ -114,7 +114,7 @@ pub use turn::{RestateTurnAttach, RestateTurnDeployment};
 #[doc(hidden)]
 pub use controller::RestateControllerContext;
 #[doc(hidden)]
-pub use durable_wait::{RestateTurnAwaitEventWaitRequest, RestateTurnCancelRaceOutcome};
+pub use durable_wait::RestateTurnCancelRaceOutcome;
 
 #[cfg(test)]
 mod tests;

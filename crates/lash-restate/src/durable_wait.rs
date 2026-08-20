@@ -306,11 +306,6 @@ where
     Ok(())
 }
 
-#[doc(hidden)]
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateTurnAwaitEventWaitRequest {
-    pub(crate) event: RestateDurableWaitAwaitRequest,
-}
 /// One durable Restate workflow per Lash await-event identity.
 ///
 /// Bind [`LashDurableWaitWorkflowImpl::serve`] on every endpoint that runs a
@@ -331,11 +326,6 @@ pub trait LashDurableWaitWorkflow {
     async fn resolve(
         request: Json<RestateDurableWaitResolveRequest>,
     ) -> HandlerResult<Json<ResolveOutcome>>;
-
-    #[shared]
-    async fn await_event_or_turn_cancel(
-        request: Json<RestateTurnAwaitEventWaitRequest>,
-    ) -> HandlerResult<Json<RestateTurnCancelRaceOutcome<Resolution>>>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -449,58 +439,6 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
             serde_json::to_string(&request.resolution).map_err(TerminalError::from_error)?;
         ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
         Ok(Json(ResolveOutcome::Accepted))
-    }
-
-    async fn await_event_or_turn_cancel(
-        &self,
-        ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateTurnAwaitEventWaitRequest>,
-    ) -> HandlerResult<Json<RestateTurnCancelRaceOutcome<Resolution>>> {
-        let event_address = request.event.address.clone();
-        let event: restate_sdk::context::Request<
-            '_,
-            Json<RestateDurableWaitAwaitRequest>,
-            Json<Resolution>,
-        > = ContextClient::request(
-            &ctx,
-            RequestTarget::workflow(
-                "LashDurableWaitWorkflow",
-                event_address.workflow_key.clone(),
-                "await_resolution",
-            ),
-            Json(request.event),
-        );
-        let event = event.call();
-        let cancellation = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY);
-        let outcome = restate_sdk::select! {
-            result = event => {
-                let Json(resolution) = result?;
-                RestateTurnCancelRaceOutcome::Completed(resolution)
-            },
-            result = cancellation => {
-                let _ = result?;
-                let target = RequestTarget::object(
-                    "LashDurableWaitIndex",
-                    durable_wait_index_object_key(&event_address),
-                    "resolve",
-                );
-                let resolve: restate_sdk::context::Request<
-                    '_,
-                    Json<RestateDurableWaitResolveRequest>,
-                    Json<ResolveOutcome>,
-                > = ContextClient::request(
-                    &ctx,
-                    target,
-                    Json(RestateDurableWaitResolveRequest {
-                        address: event_address,
-                        resolution: Resolution::Cancelled,
-                    }),
-                );
-                let Json(_) = resolve.call().await?;
-                RestateTurnCancelRaceOutcome::TurnCancelled
-            }
-        };
-        Ok(Json(outcome))
     }
 }
 /// Durable session-to-wait index used by cancellation and session deletion.

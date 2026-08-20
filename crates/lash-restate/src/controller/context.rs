@@ -29,9 +29,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
-    RestateTurnAwaitEventWaitRequest, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
-    RestateTurnCancelWake, durable_wait_index_object_key, register_turn_cancel_gate,
-    retire_turn_cancel_gate,
+    RestateTurnCancelGate, RestateTurnCancelRaceOutcome, RestateTurnCancelWake,
+    durable_wait_index_object_key, register_turn_cancel_gate, retire_turn_cancel_gate,
 };
 use crate::process::{
     RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessWorkflowInput,
@@ -831,22 +830,90 @@ macro_rules! impl_restate_controller_context {
                                 .map(RestateTurnCancelRaceOutcome::Completed);
                         };
 
-                        let cancel_workflow_key = turn_cancel.address.workflow_key;
-                        let race: restate_sdk::context::Request<
+                        let Some(session_id) = turn_cancel.address.session_id.clone() else {
+                            return Err(TerminalError::new(
+                                "turn cancellation gate is missing its session id",
+                            ));
+                        };
+                        let event_address = request.address.clone();
+                        // Same journal geometry as process await: the guarded
+                        // wait's CallCommand is emitted first, then the gate's
+                        // awakeable, then the registration.
+                        let event: restate_sdk::context::Request<
                             '_,
-                            Json<RestateTurnAwaitEventWaitRequest>,
-                            Json<RestateTurnCancelRaceOutcome<Resolution>>,
+                            Json<RestateDurableWaitAwaitRequest>,
+                            Json<Resolution>,
                         > = ContextClient::request(
                             self,
                             RequestTarget::workflow(
                                 "LashDurableWaitWorkflow",
-                                cancel_workflow_key,
-                                "await_event_or_turn_cancel",
+                                event_address.workflow_key.clone(),
+                                "await_resolution",
                             ),
-                            Json(RestateTurnAwaitEventWaitRequest { event: request }),
+                            Json(request),
                         );
-                        let Json(outcome) = race.call().await?;
-                        Ok(outcome)
+                        let event = event.call();
+                        let (awakeable_id, awakeable) =
+                            self.awakeable::<Json<RestateTurnCancelWake>>();
+                        let gate = match register_turn_cancel_gate(
+                            self,
+                            &session_id,
+                            turn_cancel.address,
+                            awakeable_id,
+                        )
+                        .await?
+                        {
+                            RestateTurnCancelGate::Registered(gate) => gate,
+                            RestateTurnCancelGate::Revoked => {
+                                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
+                                    session_id,
+                                });
+                            }
+                        };
+
+                        restate_sdk::select! {
+                            result = event => {
+                                let Json(resolution) = result?;
+                                retire_turn_cancel_gate(self, &session_id, gate).await?;
+                                Ok(RestateTurnCancelRaceOutcome::Completed(resolution))
+                            },
+                            result = awakeable => {
+                                let Json(wake) = result?;
+                                match wake {
+                                    RestateTurnCancelWake::TurnCancelled => {
+                                        // Release the losing event wait. The
+                                        // retired nested workflow did this from
+                                        // its own journal; on the gate it is the
+                                        // waiter's job, or the event workflow
+                                        // stays parked with nobody left to
+                                        // resolve it.
+                                        let resolve: restate_sdk::context::Request<
+                                            '_,
+                                            Json<RestateDurableWaitResolveRequest>,
+                                            Json<ResolveOutcome>,
+                                        > = ContextClient::request(
+                                            self,
+                                            RequestTarget::object(
+                                                "LashDurableWaitIndex",
+                                                durable_wait_index_object_key(&event_address),
+                                                "resolve",
+                                            ),
+                                            Json(RestateDurableWaitResolveRequest {
+                                                address: event_address,
+                                                resolution: Resolution::Cancelled,
+                                            }),
+                                        );
+                                        let Json(_) = resolve.call().await?;
+                                        Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
+                                    }
+                                    RestateTurnCancelWake::SessionRevoked => {
+                                        Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
+                                            session_id,
+                                        })
+                                    }
+                                }
+                            }
+                        }
                     })
                 }
 
