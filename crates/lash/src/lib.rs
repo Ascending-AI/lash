@@ -361,6 +361,7 @@ pub mod attachments {
         AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType,
         facade_support::AttachmentMeta,
     };
+    pub use lash_sansio::{InvalidAttachmentId, InvalidMediaType};
 }
 
 /// Wire-format DTOs for driving lash across a process boundary, sub-namespaced
