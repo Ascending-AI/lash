@@ -58,16 +58,10 @@ async fn async_main() -> AnyhowResult<()> {
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
     // The ambient default for the boot session and for any session the roster
     // does not know; a per-session choice made in the UI overrides it.
-    let rlm_dialect = {
-        let configured = std::env::var("LASH_RUNBOOK_DIALECT")
-            .unwrap_or_else(|_| lash::rlm::RlmDialect::default().language_id().to_string());
-        lash::rlm::RlmDialect::from_language_id(&configured).ok_or_else(|| {
-            anyhow!(
-                "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
-                lash::rlm::RlmDialect::registered_language_ids()
-            )
-        })?
-    };
+    let rlm_dialect = lash::rlm::RlmDialect::from_env()
+        .map_err(|refusal| anyhow!(refusal))?
+        // Unset is the Lashlang default, stated like any named id.
+        .unwrap_or_default();
     validate_provider_credentials(dev_provider_scenario, &api_key)?;
 
     let addr: SocketAddr = std::env::var("AGENT_WORKBENCH_ADDR")

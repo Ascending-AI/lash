@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use lash::durability::EffectHost;
 use lash::persistence::{
     AttachmentStore, LashlangArtifactStore, LeaseOwnerIdentity, ProcessExecutionEnvStore,
@@ -1510,15 +1510,9 @@ pub fn current_epoch_ms() -> u64 {
 /// failing. `runbooks/RULES.md` requires the host to pass this value on every
 /// session open, and these harnesses are hosts.
 pub fn runbook_rlm_dialect() -> Result<lash::rlm::RlmDialect> {
-    let configured = std::env::var("LASH_RUNBOOK_DIALECT")
-        .unwrap_or_else(|_| lash::rlm::RlmDialect::default().language_id().to_string());
-    let Some(dialect) = lash::rlm::RlmDialect::from_language_id(&configured) else {
-        bail!(
-            "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
-            lash::rlm::RlmDialect::registered_language_ids()
-        );
-    };
-    Ok(dialect)
+    let stated = lash::rlm::RlmDialect::from_env().map_err(|refusal| anyhow!(refusal))?;
+    // Unset is the Lashlang default, stated like any named id.
+    Ok(stated.unwrap_or_default())
 }
 
 /// One scripted cell that finishes with `value`, spelled for `dialect`.

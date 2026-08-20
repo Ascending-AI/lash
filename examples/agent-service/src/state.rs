@@ -297,17 +297,8 @@ pub(crate) mod anyhow_like {
 /// a chat that recorded another one. Read once at startup so the value is
 /// injected into the state rather than consulted on every session open.
 pub(crate) fn rlm_dialect_from_env() -> Result<Option<lash::rlm::RlmDialect>, String> {
-    let Ok(configured) = std::env::var("LASH_RUNBOOK_DIALECT") else {
-        return Ok(None);
-    };
-    lash::rlm::RlmDialect::from_language_id(&configured)
-        .map(Some)
-        .ok_or_else(|| {
-            format!(
-                "LASH_RUNBOOK_DIALECT must be a registered RLM language id ({}), got `{configured}`",
-                lash::rlm::RlmDialect::registered_language_ids()
-            )
-        })
+    // Unset stays "the operator stated nothing" on this host.
+    lash::rlm::RlmDialect::from_env()
 }
 
 /// The dialect a turn actually resolved, for prompt copy that has to be written
