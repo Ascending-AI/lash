@@ -1523,12 +1523,12 @@ pub fn runbook_rlm_dialect() -> Result<lash::rlm::RlmDialect> {
 
 /// One scripted cell that finishes with `value`, spelled for `dialect`.
 pub fn scripted_finish_cell(dialect: lash::rlm::RlmDialect, value: &str) -> String {
-    match dialect {
-        lash::rlm::RlmDialect::Typescript => {
-            format!("<typescript>\nfinish({value});\n</typescript>")
-        }
-        _ => format!("<lashlang>\nfinish {value}\n</lashlang>"),
-    }
+    let finish = match dialect {
+        lash::rlm::RlmDialect::Typescript => format!("finish({value});"),
+        lash::rlm::RlmDialect::Lashlang => format!("finish {value}"),
+    };
+    let tag = dialect.language_id();
+    format!("<{tag}>\n{finish}\n</{tag}>")
 }
 
 #[cfg(test)]
@@ -1575,10 +1575,19 @@ mod deferral_declaration_tests {
 mod dialect_tests {
     use super::*;
 
-    /// Both spellings are real cells of their own dialect, and neither carries
-    /// the other's words (ADR 0063).
+    /// Both spellings are real cells of their own dialect, round-trip through
+    /// `language_id()`, and neither carries the other's words (ADR 0063).
     #[test]
     fn a_scripted_finish_is_a_cell_of_its_own_dialect() {
+        for dialect in lash::rlm::RlmDialect::ALL {
+            let cell = scripted_finish_cell(dialect, "\"ok\"");
+            let tag = dialect.language_id();
+            assert!(
+                cell.starts_with(&format!("<{tag}>"))
+                    && cell.trim_end().ends_with(&format!("</{tag}>"))
+            );
+            assert_eq!(lash::rlm::RlmDialect::from_language_id(tag), Some(dialect));
+        }
         let lashlang = scripted_finish_cell(lash::rlm::RlmDialect::Lashlang, "\"ok\"");
         assert_eq!(lashlang, "<lashlang>\nfinish \"ok\"\n</lashlang>");
         let typescript = scripted_finish_cell(lash::rlm::RlmDialect::Typescript, "\"ok\"");

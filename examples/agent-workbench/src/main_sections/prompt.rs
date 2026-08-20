@@ -33,8 +33,8 @@ pub(crate) fn tutorial_dialect(
 
 pub(crate) fn workbench_prompt(dialect: lash::rlm::RlmDialect) -> &'static str {
     match dialect {
+        lash::rlm::RlmDialect::Lashlang => WORKBENCH_PROMPT_LASHLANG,
         lash::rlm::RlmDialect::Typescript => WORKBENCH_PROMPT_TYPESCRIPT,
-        _ => WORKBENCH_PROMPT_LASHLANG,
     }
 }
 
