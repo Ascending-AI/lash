@@ -21,11 +21,13 @@ use loops::*;
 mod array_callbacks;
 mod array_map;
 mod await_expr;
+mod binding;
 mod calls;
 mod constructs;
 mod graph;
 mod json_replacer;
 mod regex;
+use binding::*;
 use constructs::*;
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
@@ -88,6 +90,7 @@ pub(crate) fn lower_with_ambient(
                 kind: BindingKind::Const,
                 initialized: true,
                 owner_function: 0,
+                role: BindingRole::Plain,
             },
         );
     }
@@ -110,29 +113,6 @@ pub(crate) fn lower_with_ambient(
         expression_spans: Vec::new(),
         expression_source_spans: Vec::new(),
     })
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BindingKind {
-    Const,
-    Let,
-    Var,
-    Function,
-    Parameter,
-    Catch,
-}
-
-#[derive(Clone, Debug)]
-struct Binding {
-    internal: String,
-    kind: BindingKind,
-    initialized: bool,
-    owner_function: usize,
-}
-
-#[derive(Clone, Debug, Default)]
-struct Scope {
-    bindings: BTreeMap<String, Binding>,
 }
 
 #[derive(Default)]
@@ -174,10 +154,6 @@ struct Lowerer {
     await_depth: usize,
     iterable_sink_depth: usize,
     declarations: Vec<Declaration>,
-    process_bindings: BTreeMap<String, String>,
-    process_handle_bindings: BTreeSet<String>,
-    async_bindings: BTreeSet<String>,
-    iterable_kinds: BTreeMap<String, String>,
     intrinsic_global_slots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
 }
@@ -266,7 +242,7 @@ impl Lowerer {
             if let Stmt::Function { name, function } = statement {
                 let binding = self.binding(name)?.clone();
                 if function.is_async {
-                    self.async_bindings.insert(binding.internal.clone());
+                    self.set_role(name, BindingRole::AsyncHelper)?;
                 }
                 let expression = self.lower_function(function, Some(binding.internal.clone()))?;
                 let definition = match &expression {
@@ -437,8 +413,32 @@ impl Lowerer {
                 kind,
                 initialized,
                 owner_function,
+                role: BindingRole::Plain,
             },
         );
+        Ok(())
+    }
+
+    /// Records what the binding `name` resolves to *is*.
+    ///
+    /// The role is learned from the initializer, so it is always set after the
+    /// declaration that a lexical scope hoists — the same resolution `binding`
+    /// performs, against the same scope stack, so the fact lands on the
+    /// binding the reads will find and dies when its scope pops.
+    fn set_role(&mut self, name: &str, role: BindingRole) -> Result<(), Diagnostic> {
+        let binding = self
+            .scopes
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.bindings.get_mut(name))
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::UnknownBinding,
+                    format!("unknown binding `{name}`"),
+                    None,
+                )
+            })?;
+        binding.role = role;
         Ok(())
     }
 
@@ -535,15 +535,13 @@ impl Lowerer {
                         (process_name, declaration.init.as_ref())
                         && function.is_async
                     {
-                        self.async_bindings
-                            .insert(self.binding(name)?.internal.clone());
+                        self.set_role(name, BindingRole::AsyncHelper)?;
                     }
                     if let (Some(name), Some(Expr::New { constructor, .. })) =
                         (process_name, declaration.init.as_ref())
-                        && matches!(constructor.as_str(), "Map" | "Set" | "URLSearchParams")
+                        && let Some(kind) = IterableKind::from_constructor(constructor)
                     {
-                        self.iterable_kinds
-                            .insert(self.binding(name)?.internal.clone(), constructor.clone());
+                        self.set_role(name, BindingRole::ExoticIterable(kind))?;
                     }
                     if let (Some(name), Some(Expr::Call { callee, .. })) =
                         (process_name, declaration.init.as_ref())
@@ -555,18 +553,17 @@ impl Lowerer {
                         let kind = if matches!(object.as_ref(), Expr::Ident(owner) if owner == "Map")
                             && method == "groupBy"
                         {
-                            Some("Map")
+                            Some(IterableKind::Map)
                         } else if matches!(
                             method.as_str(),
                             "union" | "intersection" | "difference" | "symmetricDifference"
                         ) {
-                            Some("Set")
+                            Some(IterableKind::Set)
                         } else {
                             None
                         };
                         if let Some(kind) = kind {
-                            self.iterable_kinds
-                                .insert(self.binding(name)?.internal.clone(), kind.to_string());
+                            self.set_role(name, BindingRole::ExoticIterable(kind))?;
                         }
                     }
                     let value = if let Some(init) = declaration.init.as_ref()
@@ -609,8 +606,7 @@ impl Lowerer {
                         && *kind == VarKind::Const
                         && matches!(&value, LashExpr::StartProcess(_))
                     {
-                        self.process_handle_bindings
-                            .insert(self.binding(name)?.internal.clone());
+                        self.set_role(name, BindingRole::ProcessHandle)?;
                     }
                     output.extend(self.lower_pattern(
                         &declaration.pattern,
@@ -899,6 +895,10 @@ impl Lowerer {
                     kind: BindingKind::Function,
                     initialized: true,
                     owner_function: id,
+                    // A function expression's own name has never carried the
+                    // async-helper fact: recursion inside the body is a plain
+                    // call, and this change does not alter that.
+                    role: BindingRole::Plain,
                 },
             );
         }
@@ -1280,8 +1280,10 @@ impl Lowerer {
                 finally: None,
             })),
         }));
-        self.process_bindings
-            .insert(binding_name.to_string(), process_name.clone());
+        self.set_role(
+            binding_name,
+            BindingRole::ProcessDefinition(process_name.clone()),
+        )?;
         Ok(LashExpr::ProcessRef {
             process: process_name.as_str().into(),
         })

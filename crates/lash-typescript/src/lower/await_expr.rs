@@ -5,16 +5,22 @@ impl Lowerer {
         let async_helper = match inner {
             Expr::Call { callee, .. } => match callee.as_ref() {
                 Expr::Ident(name) => self
-                    .scopes
-                    .iter()
-                    .rev()
-                    .find_map(|scope| scope.bindings.get(name))
-                    .is_some_and(|binding| self.async_bindings.contains(&binding.internal)),
+                    .binding(name)
+                    .is_ok_and(|binding| binding.role == BindingRole::AsyncHelper),
                 Expr::Function(function) => function.is_async,
                 _ => false,
             },
             _ => false,
         };
+        // Resolved before lowering, against the scope stack: the awaited name
+        // is a process handle only if the binding it reads is one.
+        let process_handle = matches!(
+            inner,
+            Expr::Ident(name)
+                if self
+                    .binding(name)
+                    .is_ok_and(|binding| binding.role == BindingRole::ProcessHandle)
+        );
         let promise_kind = match inner {
             Expr::Call { callee, args }
                 if matches!(
@@ -144,10 +150,7 @@ impl Lowerer {
                 lowered,
             )))));
         }
-        if matches!(
-            &lowered,
-            LashExpr::Variable(name) if self.process_handle_bindings.contains(name.as_str())
-        ) {
+        if process_handle {
             return Ok(LashExpr::ResultUnwrap(Box::new(LashExpr::Await(Box::new(
                 lowered,
             )))));
