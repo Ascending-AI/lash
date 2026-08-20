@@ -486,9 +486,25 @@ impl RuntimeHandle {
         observation: &RuntimeObservation,
     ) -> (SessionObservation, LiveReplayGap) {
         let latest_revision = observation.session_revision();
-        let latest_cursor = self
+        let observation_cursor = observation.cursor();
+        let current_cursor = self
             .live_replay_store
             .current_cursor(observation.session_id(), latest_revision);
+        let latest_cursor = match (
+            requested_cursor.parse_for_session(observation.session_id()),
+            observation_cursor.parse_for_session(observation.session_id()),
+            current_cursor.parse_for_session(observation.session_id()),
+        ) {
+            (Ok(requested), Ok(observation), Ok(current)) => [
+                (observation.live_position, observation_cursor.clone()),
+                (current.live_position, current_cursor),
+            ]
+            .into_iter()
+            .filter(|(position, _)| *position != requested.live_position)
+            .min_by_key(|(position, _)| *position)
+            .map_or_else(|| observation_cursor.clone(), |(_, cursor)| cursor),
+            _ => observation_cursor.clone(),
+        };
         (
             SessionObservation {
                 read_view: observation.read_view.clone(),
