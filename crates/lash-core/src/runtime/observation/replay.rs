@@ -290,6 +290,16 @@ impl LiveReplaySubscription {
             closed: false,
         }
     }
+
+    pub(super) fn contains_committed_at_or_after(&self, revision: SessionRevision) -> bool {
+        self.replay.iter().any(|event| {
+            event.revision >= revision
+                && matches!(
+                    &event.payload,
+                    SessionObservationEventPayload::Committed { .. }
+                )
+        })
+    }
 }
 
 async fn live_replay_recv(
