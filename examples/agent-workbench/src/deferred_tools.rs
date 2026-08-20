@@ -14,9 +14,9 @@ use async_trait::async_trait;
 use lash::sync::MutexExt;
 use lash::tools::{
     CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
-    LashlangToolBinding, SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider,
-    ToolCall, ToolContract, ToolDefinition, ToolDefinitionLashlangExt, ToolExecutionGrant, ToolId,
-    ToolManifest, ToolManifestLashlangExt, ToolOutcome, ToolPrepareCall, ToolProvider,
+    SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall,
+    ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolExecutionGrant, ToolId,
+    ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolPrepareCall, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -458,13 +458,13 @@ fn search_tool_definition() -> ToolDefinition {
     .with_examples(vec![
         "await tools.search({ query: \"text checksum\", limit: 3 })?".to_string(),
     ])
-    .with_lashlang_binding(LashlangToolBinding::new(["tools"], "search"))
+    .with_tool_binding(ToolBinding::new(["tools"], "search"))
 }
 
 fn deferred_call_path(definition: &ToolDefinition) -> String {
     definition
         .manifest()
-        .lashlang_binding()
+        .tool_binding()
         .expect("deferred binding serializes")
         .expect("deferred workbench tools have Lashlang bindings")
         .executable_for(definition.name())
@@ -580,7 +580,7 @@ fn utility_definition(
         "await {}.{}({{ /* matching arguments */ }})?",
         module[0], operation
     )])
-    .with_lashlang_binding(LashlangToolBinding::new(module, operation))
+    .with_tool_binding(ToolBinding::new(module, operation))
 }
 
 fn one_field_schema(field: &str, ty: &str) -> Value {

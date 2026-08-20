@@ -6,7 +6,7 @@ use lash_core::{
     EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
-use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt as _};
+use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt as _};
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
 mod support;
@@ -242,10 +242,7 @@ impl ProcessParentIntentTool {
             }),
             serde_json::json!({"type": "object"}),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(
-            ["tools"],
-            "pg_process_parent_intent",
-        ))
+        .with_tool_binding(ToolBinding::new(["tools"], "pg_process_parent_intent"))
     }
 }
 

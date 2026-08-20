@@ -140,9 +140,9 @@ fn budget_stack() -> lash::PluginStack {
 #[cfg(test)]
 mod asserted_examples {
     use lash::tools::{
-        LashlangToolBinding, ToolActivation, ToolArgumentProjectionPolicy, ToolContract,
-        ToolDefinition, ToolDefinitionLashlangExt, ToolManifest, ToolManifestLashlangExt,
-        ToolOutputContract, ToolRetryPolicy,
+        ToolActivation, ToolArgumentProjectionPolicy, ToolBinding, ToolContract, ToolDefinition,
+        ToolDefinitionBindingExt, ToolManifest, ToolManifestBindingExt, ToolOutputContract,
+        ToolRetryPolicy,
     };
     use schemars::JsonSchema;
 
@@ -177,7 +177,7 @@ mod asserted_examples {
             )
         );
 
-        let binding = LashlangToolBinding::new(["workspace", "files"], "write")
+        let binding = ToolBinding::new(["workspace", "files"], "write")
             .with_authority_type("WorkspaceAuthority")
             .with_aliases(["write_text"]);
         let definition: ToolDefinition = ToolDefinition::typed::<WriteArgs, WriteReceipt>(
@@ -202,7 +202,7 @@ mod asserted_examples {
             "provider:test",
             serde_json::json!({ "type": "object", "required": ["bytes_written"] }),
         )
-        .with_lashlang_binding(binding);
+        .with_tool_binding(binding);
 
         assert_eq!(ToolDefinition::id(&definition).as_str(), "tool:write_file");
         assert_eq!(ToolDefinition::name(&definition), "write_file");
@@ -244,7 +244,7 @@ mod asserted_examples {
             definition.manifest.argument_projection
         );
         assert!(manifest.bindings.contains_key("lashlang.tool"));
-        let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)
+        let decoded_binding = ToolManifestBindingExt::tool_binding(&manifest)
             .expect("the binding must decode")
             .expect("the binding must be present");
         assert_eq!(decoded_binding.module_path, ["workspace", "files"]);
@@ -255,11 +255,11 @@ mod asserted_examples {
         );
         assert_eq!(decoded_binding.aliases, ["write_text"]);
         let resolved_binding =
-            LashlangToolBinding::required_executable_for_remote(&decoded_binding, "write_file")
+            ToolBinding::required_executable_for_remote(&decoded_binding, "write_file")
                 .expect("a complete binding must resolve for remote execution");
         assert_eq!(resolved_binding.operation, "write");
         assert_eq!(
-            LashlangToolBinding::required_for_remote(&manifest)
+            ToolBinding::required_for_remote(&manifest)
                 .expect("the projected manifest must remain remotely executable"),
             resolved_binding
         );
@@ -612,7 +612,7 @@ mod asserted_examples {
             ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["knowledge", "docs"], "search"));
+        .with_tool_binding(ToolBinding::new(["knowledge", "docs"], "search"));
         let fetch = ToolDefinition::raw(
             "tool:fetch_url",
             "fetch_url",
@@ -620,14 +620,14 @@ mod asserted_examples {
             ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["network", "http"], "fetch"));
+        .with_tool_binding(ToolBinding::new(["network", "http"], "fetch"));
         let manifests = [search.manifest(), fetch.manifest()];
 
         let direct = CataloguePreviewEntry::new(["workspace", "files"], "read");
         assert_eq!(direct.module_path, ["workspace", "files"]);
         assert_eq!(direct.call, "read");
         assert_eq!(direct.module_path_string(), "workspace.files");
-        let executable = LashlangToolBinding::new(["workspace", "files"], "write")
+        let executable = ToolBinding::new(["workspace", "files"], "write")
             .required_executable_for_remote("write_file")
             .expect("complete bindings must expose an executable call path");
         let executable_entry = CataloguePreviewEntry::from_lashlang_executable(executable);

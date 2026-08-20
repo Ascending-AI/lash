@@ -1,6 +1,6 @@
-use lash::tools::LashlangToolBinding;
+use lash::tools::ToolBinding;
 
-fn rlm_tool_types_are_nameable(binding: LashlangToolBinding) {
+fn rlm_tool_types_are_nameable(binding: ToolBinding) {
     let _ = binding;
 }
 

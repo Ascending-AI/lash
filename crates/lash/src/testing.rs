@@ -48,7 +48,7 @@ pub mod conformance {
     };
     use crate::testing::TestProvider;
     use futures_util::StreamExt as _;
-    use lash_lashlang_runtime::{LashlangArtifactStore, ToolDefinitionLashlangExt};
+    use lash_lashlang_runtime::{LashlangArtifactStore, ToolDefinitionBindingExt};
 
     /// Stores + registry for one run of the
     /// [`runtime_rebuild_and_worker_recovery`] suite.
@@ -252,7 +252,7 @@ finish "registered"
             serde_json::json!({ "type": "object", "additionalProperties": true }),
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
-        .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+        .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
             ["tools"],
             "rebuild_echo",
         ))

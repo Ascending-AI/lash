@@ -15,8 +15,8 @@ use lash::rlm::{
     TypeExpr, TypeField,
 };
 use lash::tools::{
-    LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition,
-    ToolDefinitionLashlangExt, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
+    ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
 };
 use lash_core::AwaitEventResolver as _;
 use lash_provider_openai::OpenAiCompatibleProvider;
@@ -865,7 +865,7 @@ fn e2e_tool_provider(
                     "required": ["key", "value", "worker_id"],
                     "additionalProperties": false
                 }),
-                LashlangToolBinding::new(["tools"], "app_lookup"),
+                ToolBinding::new(["tools"], "app_lookup"),
             ),
             e2e_tool_definition(
                 "tool:async_lookup",
@@ -891,7 +891,7 @@ fn e2e_tool_provider(
                     "required": ["key", "value", "worker_id", "async"],
                     "additionalProperties": false
                 }),
-                LashlangToolBinding::new(["tools"], "async_lookup"),
+                ToolBinding::new(["tools"], "async_lookup"),
             ),
             e2e_tool_definition(
                 "tool:make_attachment",
@@ -917,7 +917,7 @@ fn e2e_tool_provider(
                     "required": ["id", "mime", "filename", "byte_len"],
                     "additionalProperties": false
                 }),
-                LashlangToolBinding::new(["tools"], "make_attachment"),
+                ToolBinding::new(["tools"], "make_attachment"),
             ),
             e2e_tool_definition(
                 "tool:batch_side_effect",
@@ -943,7 +943,7 @@ fn e2e_tool_provider(
                     "required": ["key", "value", "worker_id"],
                     "additionalProperties": false
                 }),
-                LashlangToolBinding::new(["tools"], "batch_side_effect"),
+                ToolBinding::new(["tools"], "batch_side_effect"),
             ),
             e2e_tool_definition(
                 "tool:crash_once",
@@ -966,7 +966,7 @@ fn e2e_tool_provider(
                     "required": ["crashed", "worker_id"],
                     "additionalProperties": false
                 }),
-                LashlangToolBinding::new(["tools"], "crash_once"),
+                ToolBinding::new(["tools"], "crash_once"),
             ),
             e2e_tool_definition(
                 "tool:durable_input_request",
@@ -992,7 +992,7 @@ fn e2e_tool_provider(
                     "required": ["request_id", "answer", "worker_id"],
                     "additionalProperties": false
                 }),
-                LashlangToolBinding::new(["tools"], "durable_input_request"),
+                ToolBinding::new(["tools"], "durable_input_request"),
             ),
             e2e_tool_definition(
                 "tool:cancel_gate",
@@ -1007,7 +1007,7 @@ fn e2e_tool_provider(
                     "additionalProperties": false
                 }),
                 serde_json::json!({ "type": "object" }),
-                LashlangToolBinding::new(["tools"], "cancel_gate"),
+                ToolBinding::new(["tools"], "cancel_gate"),
             ),
         ],
         E2eTools {
@@ -1025,10 +1025,10 @@ fn e2e_tool_definition(
     description: &'static str,
     input_schema: serde_json::Value,
     output_schema: serde_json::Value,
-    surface: LashlangToolBinding,
+    surface: ToolBinding,
 ) -> ToolDefinition {
     ToolDefinition::raw(id, name, description, input_schema, output_schema)
-        .with_lashlang_binding(surface)
+        .with_tool_binding(surface)
 }
 
 #[derive(Clone)]

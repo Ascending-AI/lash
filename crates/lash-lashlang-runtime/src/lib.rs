@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 mod error;
-pub use error::{LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError};
+pub use error::{
+    LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError, ToolBindingError,
+};
 mod process_identity;
 pub use process_identity::deterministic_lashlang_process_id;
 mod typescript_runtime;
@@ -58,7 +60,7 @@ impl LashlangSurfaceContribution {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct LashlangToolBinding {
+pub struct ToolBinding {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub module_path: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,7 +71,7 @@ pub struct LashlangToolBinding {
     pub aliases: Vec<String>,
 }
 
-impl LashlangToolBinding {
+impl ToolBinding {
     pub fn new(
         module_path: impl IntoIterator<Item = impl Into<String>>,
         operation: impl Into<String>,
@@ -92,25 +94,21 @@ impl LashlangToolBinding {
         self
     }
 
-    pub fn executable_for(
-        &self,
-        tool_name: &str,
-    ) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
+    pub fn executable_for(&self, tool_name: &str) -> Result<ResolvedToolBinding, ToolBindingError> {
         if self.module_path.is_empty() {
-            return Err(LashlangRuntimeError::MissingToolModulePath {
+            return Err(ToolBindingError::MissingModulePath {
                 tool: tool_name.to_string(),
             });
         }
         for segment in &self.module_path {
             validate_lashlang_identifier(tool_name, "module path segment", segment)?;
         }
-        let operation = self
-            .operation
-            .as_deref()
-            .filter(|operation| !operation.trim().is_empty())
-            .ok_or_else(|| LashlangRuntimeError::MissingToolOperation {
-                tool: tool_name.to_string(),
-            })?;
+        let operation =
+            self.operation
+                .as_deref()
+                .ok_or_else(|| ToolBindingError::MissingOperation {
+                    tool: tool_name.to_string(),
+                })?;
         validate_lashlang_identifier(tool_name, "operation name", operation)?;
         let authority_type = self
             .authority_type
@@ -118,7 +116,7 @@ impl LashlangToolBinding {
             .filter(|authority_type| !authority_type.trim().is_empty())
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| default_authority_type(&self.module_path));
-        Ok(ResolvedLashlangToolBinding {
+        Ok(ResolvedToolBinding {
             module_path: self.module_path.clone(),
             operation: operation.to_string(),
             authority_type,
@@ -128,27 +126,27 @@ impl LashlangToolBinding {
 
     pub fn required_for_remote(
         manifest: &lash_core::ToolManifest,
-    ) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
+    ) -> Result<ResolvedToolBinding, ToolBindingError> {
         required_tool_lashlang_executable(manifest)
     }
 
     pub fn required_executable_for_remote(
         &self,
         tool_name: &str,
-    ) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
+    ) -> Result<ResolvedToolBinding, ToolBindingError> {
         self.executable_for(tool_name)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedLashlangToolBinding {
+pub struct ResolvedToolBinding {
     pub module_path: Vec<String>,
     pub operation: String,
     pub authority_type: String,
     pub aliases: Vec<String>,
 }
 
-impl ResolvedLashlangToolBinding {
+impl ResolvedToolBinding {
     pub fn module_path_string(&self) -> String {
         self.module_path.join(".")
     }
@@ -173,143 +171,143 @@ fn default_authority_type(module_path: &[String]) -> String {
 
 fn validate_lashlang_identifier(
     tool_name: &str,
-    label: &str,
+    label: &'static str,
     value: &str,
-) -> Result<(), LashlangRuntimeError> {
+) -> Result<(), ToolBindingError> {
     let value = value.trim();
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
-        return Err(LashlangRuntimeError::EmptyIdentifier {
+        return Err(ToolBindingError::InvalidIdentifier {
             tool: tool_name.to_string(),
-            label: label.to_string(),
+            part: label,
+            value: "<empty>".to_string(),
         });
     };
     if !(first == '_' || first.is_ascii_alphabetic()) {
-        return Err(LashlangRuntimeError::InvalidIdentifier {
+        return Err(ToolBindingError::InvalidIdentifier {
             tool: tool_name.to_string(),
-            label: label.to_string(),
+            part: label,
             value: value.to_string(),
         });
     }
     if !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) {
-        return Err(LashlangRuntimeError::InvalidIdentifier {
+        return Err(ToolBindingError::InvalidIdentifier {
             tool: tool_name.to_string(),
-            label: label.to_string(),
+            part: label,
             value: value.to_string(),
         });
     }
     Ok(())
 }
 
-pub fn tool_lashlang_binding(
-    manifest: &lash_core::ToolManifest,
-) -> Result<Option<LashlangToolBinding>, LashlangRuntimeError> {
-    manifest
-        .bindings
-        .get(LASHLANG_TOOL_BINDING_KEY)
-        .cloned()
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|source| LashlangRuntimeError::InvalidToolBinding {
-            tool: manifest.name.clone(),
-            source,
-        })
-}
-
 pub fn required_tool_lashlang_binding(
     manifest: &lash_core::ToolManifest,
-) -> Result<LashlangToolBinding, LashlangRuntimeError> {
-    tool_lashlang_binding(manifest)?.ok_or_else(|| LashlangRuntimeError::MissingToolBinding {
-        tool: manifest.name.clone(),
+) -> Result<ToolBinding, ToolBindingError> {
+    ToolManifestBindingExt::tool_binding(manifest)?.ok_or_else(|| {
+        ToolBindingError::MissingBinding {
+            tool: manifest.name.clone(),
+            binding_key: LASHLANG_TOOL_BINDING_KEY,
+        }
     })
 }
 
 pub fn required_tool_lashlang_executable(
     manifest: &lash_core::ToolManifest,
-) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
+) -> Result<ResolvedToolBinding, ToolBindingError> {
     required_tool_lashlang_binding(manifest)?.executable_for(&manifest.name)
 }
 
 pub fn required_tool_typescript_executable(
     manifest: &lash_core::ToolManifest,
-) -> Result<ResolvedLashlangToolBinding, LashlangRuntimeError> {
+) -> Result<ResolvedToolBinding, ToolBindingError> {
     let binding = manifest
         .bindings
         .get(TYPESCRIPT_TOOL_BINDING_KEY)
         .cloned()
-        .map(serde_json::from_value::<LashlangToolBinding>)
+        .map(serde_json::from_value::<ToolBinding>)
         .transpose()
-        .map_err(
-            |source| LashlangRuntimeError::InvalidTypescriptToolBinding {
-                tool: manifest.name.clone(),
-                source,
-            },
-        )?
-        .ok_or_else(|| LashlangRuntimeError::MissingTypescriptToolBinding {
+        .map_err(|source| ToolBindingError::MalformedPayload {
             tool: manifest.name.clone(),
+            binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
+            source,
+        })?
+        .ok_or_else(|| ToolBindingError::MissingBinding {
+            tool: manifest.name.clone(),
+            binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
         })?;
     binding.executable_for(&manifest.name)
 }
 
-pub trait ToolManifestLashlangExt {
-    fn lashlang_binding(&self) -> Result<Option<LashlangToolBinding>, serde_json::Error>;
+pub trait ToolManifestBindingExt {
+    /// Read the binding stored under the `lashlang.tool` wire key.
+    fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError>;
 }
 
-impl ToolManifestLashlangExt for lash_core::ToolManifest {
-    fn lashlang_binding(&self) -> Result<Option<LashlangToolBinding>, serde_json::Error> {
+impl ToolManifestBindingExt for lash_core::ToolManifest {
+    fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
         self.bindings
             .get(LASHLANG_TOOL_BINDING_KEY)
             .cloned()
             .map(serde_json::from_value)
             .transpose()
+            .map_err(|source| ToolBindingError::MalformedPayload {
+                tool: self.name.clone(),
+                binding_key: LASHLANG_TOOL_BINDING_KEY,
+                source,
+            })
     }
 }
 
-pub trait ToolDefinitionLashlangExt {
-    fn with_lashlang_binding(self, lashlang_binding: LashlangToolBinding) -> Self;
+pub trait ToolDefinitionBindingExt {
+    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
 }
 
-impl ToolDefinitionLashlangExt for lash_core::ToolDefinition {
-    fn with_lashlang_binding(mut self, lashlang_binding: LashlangToolBinding) -> Self {
-        let value = serde_json::to_value(&lashlang_binding)
-            .expect("lashlang tool binding must serialize to JSON");
+impl ToolDefinitionBindingExt for lash_core::ToolDefinition {
+    fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
+        let value =
+            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
         self.manifest
             .bindings
             .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
         self.manifest.bindings.insert(
             TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(lashlang_binding)
+            serde_json::to_value(tool_binding)
                 .expect("typescript tool binding must serialize to JSON"),
         );
         self
     }
 }
 
-pub trait RemoteToolGrantLashlangExt {
-    fn with_lashlang_binding(self, lashlang_binding: LashlangToolBinding) -> Self;
-    fn lashlang_binding(&self) -> Result<Option<LashlangToolBinding>, serde_json::Error>;
+pub trait RemoteToolGrantBindingExt {
+    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
+    fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError>;
 }
 
-impl RemoteToolGrantLashlangExt for lash_remote_protocol::RemoteToolGrant {
-    fn with_lashlang_binding(mut self, lashlang_binding: LashlangToolBinding) -> Self {
-        let value = serde_json::to_value(&lashlang_binding)
-            .expect("lashlang tool binding must serialize to JSON");
+impl RemoteToolGrantBindingExt for lash_remote_protocol::RemoteToolGrant {
+    fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
+        let value =
+            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
         self.bindings
             .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
         self.bindings.insert(
             TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(lashlang_binding)
+            serde_json::to_value(tool_binding)
                 .expect("typescript tool binding must serialize to JSON"),
         );
         self
     }
 
-    fn lashlang_binding(&self) -> Result<Option<LashlangToolBinding>, serde_json::Error> {
+    fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
         self.bindings
             .get(LASHLANG_TOOL_BINDING_KEY)
             .cloned()
             .map(serde_json::from_value)
             .transpose()
+            .map_err(|source| ToolBindingError::MalformedPayload {
+                tool: self.name.clone(),
+                binding_key: LASHLANG_TOOL_BINDING_KEY,
+                source,
+            })
     }
 }
 
@@ -376,7 +374,7 @@ impl LashlangSurface {
     pub fn host_environment(
         &self,
         catalog: &lash_core::ToolCatalog,
-    ) -> Result<LashlangHostEnvironment, LashlangRuntimeError> {
+    ) -> Result<LashlangHostEnvironment, ToolBindingError> {
         lashlang_host_environment_from_tool_catalog(
             catalog,
             self.abilities,
@@ -391,7 +389,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
     abilities: LashlangAbilities,
     language_features: LashlangLanguageFeatures,
     host_resources: LashlangHostCatalog,
-) -> Result<LashlangHostEnvironment, LashlangRuntimeError> {
+) -> Result<LashlangHostEnvironment, ToolBindingError> {
     let mut resources = lashlang_resources_from_tool_catalog(catalog)?;
     resources.extend(host_resources);
     for (operation, host_operation) in [
@@ -421,7 +419,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
 
 pub fn lashlang_resources_from_tool_catalog(
     catalog: &lash_core::ToolCatalog,
-) -> Result<LashlangHostCatalog, LashlangRuntimeError> {
+) -> Result<LashlangHostCatalog, ToolBindingError> {
     let mut host_catalog = LashlangHostCatalog::new();
     // Every externally activated catalog member is callable. Internal members
     // remain registry-resolvable for runtime-owned process bodies only.

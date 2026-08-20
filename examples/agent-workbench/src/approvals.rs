@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use lash::tools::{
-    LashlangToolBinding, PendingCompletion, ToolCall, ToolContract, ToolDefinition,
-    ToolDefinitionLashlangExt, ToolManifest, ToolOutcome, ToolProvider,
+    PendingCompletion, ToolBinding, ToolCall, ToolContract, ToolDefinition,
+    ToolDefinitionBindingExt, ToolManifest, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -214,8 +214,8 @@ impl ApprovalToolProvider {
                 "additionalProperties": false
             }),
         )
-        .with_lashlang_binding(
-            LashlangToolBinding::new(["ops"], "apply_change").with_authority_type("Ops"),
+        .with_tool_binding(
+            ToolBinding::new(["ops"], "apply_change").with_authority_type("Ops"),
         )
     }
 }

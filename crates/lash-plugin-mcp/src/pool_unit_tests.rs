@@ -585,7 +585,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
 
     async fn dispatch(pool: &McpConnectionPool, operation: &str) -> Option<lash_core::ToolOutcome> {
         let definition = pool.advertised_tools().into_iter().find(|definition| {
-            lash_lashlang_runtime::tool_lashlang_binding(&definition.manifest)
+            lash_lashlang_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
                 .ok()
                 .flatten()
                 .and_then(|binding| binding.operation)

@@ -250,7 +250,7 @@ impl lash_core::ToolProvider for CompileSurfaceToolProvider {
 
 #[cfg(feature = "rlm")]
 fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefinition {
-    test_tool_definition_with_lashlang_binding(lash_core::ToolDefinition::raw(
+    test_tool_definition_with_tool_binding(lash_core::ToolDefinition::raw(
         format!("tool:{name}"),
         name.to_string(),
         "Compile-surface test tool.",

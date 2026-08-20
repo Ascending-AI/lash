@@ -26,7 +26,7 @@
 use super::*;
 use crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
 use crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY;
-use lash_lashlang_runtime::ToolDefinitionLashlangExt as _;
+use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
 
 /// The authored example corpus, as the shipped tools spell it.
 ///
@@ -165,10 +165,7 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
         r#"await web.fetch({ url: "https://example.test/" })?"#.to_string(),
         "page = await web.fetch({ url: \"https://example.test/\" })?\nfinish page".to_string(),
     ])
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["web"],
-        "fetch",
-    ));
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["web"], "fetch"));
     // A second member whose *shapes* are collections of records, like
     // `processes.list`. The first fixture's schema is one string field, so the
     // tool-docs fragment never rendered a collection or record type label and
@@ -208,7 +205,7 @@ fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, St
     .with_examples(vec![
         r#"await processes.list({ status: "any" })?"#.to_string(),
     ])
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["processes"],
         "list",
     ));

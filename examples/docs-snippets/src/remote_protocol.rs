@@ -1066,9 +1066,8 @@ mod asserted_tool_examples {
     };
     use lash::remote::{REMOTE_PROTOCOL_VERSION, RemoteProtocolError};
     use lash::tools::{
-        DeferredToolGrant as ToolGrant, LASHLANG_TOOL_BINDING_KEY, LashlangToolBinding,
-        PLUGIN_TOOL_SOURCE_ID, RemoteToolGrantLashlangExt, ToolDefinition, ToolExecutionGrant,
-        ToolId,
+        DeferredToolGrant as ToolGrant, LASHLANG_TOOL_BINDING_KEY, PLUGIN_TOOL_SOURCE_ID,
+        RemoteToolGrantBindingExt, ToolBinding, ToolDefinition, ToolExecutionGrant, ToolId,
     };
 
     #[derive(Clone)]
@@ -1124,8 +1123,8 @@ mod asserted_tool_examples {
 
     #[test]
     fn remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants() {
-        let binding = LashlangToolBinding::new(["knowledge", "docs"], "search");
-        let grant = remote_grant("search_docs", "search").with_lashlang_binding(binding);
+        let binding = ToolBinding::new(["knowledge", "docs"], "search");
+        let grant = remote_grant("search_docs", "search").with_tool_binding(binding);
         assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);
         assert_eq!(grant.id, "remote-tool:search_docs");
         assert_eq!(grant.name, "search_docs");
@@ -1160,7 +1159,7 @@ mod asserted_tool_examples {
         assert_eq!(input_field, "result_schema");
         assert_eq!(default_schema.as_ref().unwrap()["type"], "array");
         assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));
-        let decoded_binding = RemoteToolGrantLashlangExt::lashlang_binding(&grant)
+        let decoded_binding = RemoteToolGrantBindingExt::tool_binding(&grant)
             .expect("the binding must decode")
             .expect("the binding must be present");
         assert_eq!(decoded_binding.module_path, ["knowledge", "docs"]);
@@ -1185,7 +1184,7 @@ mod asserted_tool_examples {
 
         let changed = ExampleRegistry(vec![
             remote_grant("search_docs", "lookup")
-                .with_lashlang_binding(LashlangToolBinding::new(["knowledge", "docs"], "lookup")),
+                .with_tool_binding(ToolBinding::new(["knowledge", "docs"], "lookup")),
         ]);
         let mismatch = assert_remote_tool_registry_reopenable(&registry, &changed)
             .expect_err("a changed call path must fail reopen validation");

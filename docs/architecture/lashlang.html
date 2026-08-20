@@ -50,7 +50,7 @@
           </div>
           <dl class="def-list">
             <dt>Tool operations</dt>
-            <dd>Callable tools become receiver operations through explicit <code>LashlangToolBinding</code> metadata. A tool declared with <code>LashlangToolBinding::new(["board"], "play")</code> appears to Lashlang as <code>await board.play({ cell: 4 })?</code>, while the host still dispatches the underlying tool name such as <code>play_move</code>. Tools without an explicit lashlang binding are ordinary model tools, not Lashlang module operations.</dd>
+            <dd>Callable tools become receiver operations through explicit <code>ToolBinding</code> metadata. A tool declared with <code>ToolBinding::new(["board"], "play")</code> appears to Lashlang as <code>await board.play({ cell: 4 })?</code>, while the host still dispatches the underlying tool name such as <code>play_move</code>. Tools without an explicit lashlang binding are ordinary model tools, not Lashlang module operations.</dd>
             <dt>Module authorities</dt>
             <dd>A module path resolves to a typed authority value such as <code>Board</code>, <code>Web</code>, or <code>Agents</code>. Named processes receive those authorities explicitly: <code>process notify(mail: Gmail) { await mail.send({ body: body })? finish true }</code>, then <code>start notify(mail: gmail.work)</code>. This keeps process authority visible in the process signature instead of hidden in globals.</dd>
             <dt>Value constructors</dt>
@@ -62,7 +62,7 @@
           </dl>
           <pre><code>// Host/tool declaration.
 ToolDefinition::raw("tool:play_move", "play_move", "...", input, output)
-  .with_lashlang_binding(LashlangToolBinding::new(["board"], "play"));
+  .with_tool_binding(ToolBinding::new(["board"], "play"));
 
 // Lashlang authored by the model.
 board = await board.read({})?

@@ -70,8 +70,8 @@
             <p>Lashlang does not ship a global tool namespace. The Lashlang runtime builds the effective language surface from the current turn's <code>RuntimeExecutionContext</code>: it translates callable <code>ToolCatalog</code> entries into module operations and extends that catalog with plugin-provided Lashlang resources. Linking and prompt rendering both use this surface, so examples in the prompt are executable against the same host contract.</p>
           </div>
           <dl class="def-list">
-            <dt><code>LashlangToolBinding</code></dt>
-            <dd>Tool manifests choose the authored call path. <code>LashlangToolBinding::new(["board"], "play")</code> maps the tool to <code>board.play</code>. Every callable catalog tool needs an explicit binding: a tool with no binding, or one whose module path is empty, is rejected when the tool catalog is built. Module path segments must be ASCII identifiers, and duplicate callable paths are rejected.</dd>
+            <dt><code>ToolBinding</code></dt>
+            <dd>Tool manifests choose the authored call path. <code>ToolBinding::new(["board"], "play")</code> maps the tool to <code>board.play</code>. Every callable catalog tool needs an explicit binding: a tool with no binding, or one whose module path is empty, is rejected when the tool catalog is built. Module path segments must be ASCII identifiers, and duplicate callable paths are rejected.</dd>
             <dt><code>LashlangHostCatalog</code></dt>
             <dd>The catalog records module instances, resource authority types, receiver operations, pure constructors, named host data types, and trigger-source event metadata. Trigger and trigger payloads are validated named object types such as <code>cron.Tick</code>; source values such as <code>cron.Schedule</code> remain opaque host identities.</dd>
             <dt><code>PluginFactory::extension_contributions</code></dt>
@@ -83,7 +83,7 @@
           </dl>
           <pre><code>fn read_board_tool() -&gt; ToolDefinition {
   ToolDefinition::raw("tool:read_board", "read_board", "...", input, output)
-    .with_lashlang_binding(LashlangToolBinding::new(["board"], "read"))
+    .with_tool_binding(ToolBinding::new(["board"], "read"))
 }
 
 fn extension_contributions(&self) -&gt; Vec&lt;PluginExtensionContribution&gt; {

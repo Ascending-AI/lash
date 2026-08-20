@@ -9,7 +9,7 @@ use lash_core::{
     facade_support::DirectRole, facade_support::PluginSpec, facade_support::PluginSpecFactory,
 };
 use lash_tool_support::{
-    LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt,
+    StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
 };
 use serde_json::{Value, json};
 
@@ -180,7 +180,7 @@ pub fn llm_query_tool_definition() -> ToolDefinition {
             r#"claims = await llm.query({ task: "Extract the key claim from each supplied chunk", inputs: { chunks: chunks }, output: { claims: "list[str]" } })?"#.into(),
         ],
     )
-    .with_lashlang_binding(LashlangToolBinding::new(["llm"], "query"))
+    .with_tool_binding(ToolBinding::new(["llm"], "query"))
     .with_output_from_input_schema("output", Some(json!({ "type": "string" })))
 }
 
@@ -451,7 +451,7 @@ mod tests {
             json!({ "type": "object" }),
             json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["probe"], "probe"));
+        .with_tool_binding(ToolBinding::new(["probe"], "probe"));
         assert_eq!(
             manifests[0].bindings.keys().collect::<Vec<_>>(),
             probe.manifest().bindings.keys().collect::<Vec<_>>(),

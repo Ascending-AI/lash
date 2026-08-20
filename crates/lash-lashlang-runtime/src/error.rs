@@ -1,5 +1,44 @@
 use thiserror::Error;
 
+/// A failure while decoding or resolving a tool binding.
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub enum ToolBindingError {
+    /// A tool manifest omits the binding required by a dialect.
+    #[error("tool `{tool}` is missing an explicit `{binding_key}` binding")]
+    MissingBinding {
+        tool: String,
+        binding_key: &'static str,
+    },
+    /// A tool binding payload cannot be decoded.
+    #[error("tool `{tool}` has malformed `{binding_key}` binding payload: {source}")]
+    MalformedPayload {
+        tool: String,
+        binding_key: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+    /// A tool binding omits its module path.
+    #[error("tool `{tool}` is missing an explicit tool-binding module path")]
+    MissingModulePath { tool: String },
+    /// A tool binding omits its operation name.
+    #[error("tool `{tool}` is missing an explicit tool-binding operation name")]
+    MissingOperation { tool: String },
+    /// A tool binding contains an identifier that cannot be projected into a dialect.
+    #[error("tool `{tool}` has invalid tool-binding {part} `{value}`")]
+    InvalidIdentifier {
+        tool: String,
+        part: &'static str,
+        value: String,
+    },
+    /// Two bindings project incompatible entries into the host catalog.
+    #[error("conflicting tool bindings: {source}")]
+    ConflictingBinding {
+        #[from]
+        source: lashlang::LashlangHostCatalogError,
+    },
+}
+
 /// A failure while preparing or executing the Lashlang process runtime.
 #[non_exhaustive]
 #[derive(Debug, Error)]
@@ -10,42 +49,6 @@ pub enum LashlangRuntimeError {
         #[from]
         source: lashlang::LashlangHostCatalogError,
     },
-    /// A tool definition omits its Lashlang module path.
-    #[error("tool `{tool}` is missing an explicit Lashlang module path")]
-    MissingToolModulePath { tool: String },
-    /// A tool definition omits its Lashlang operation name.
-    #[error("tool `{tool}` is missing an explicit Lashlang operation name")]
-    MissingToolOperation { tool: String },
-    /// A tool definition contains an empty Lashlang identifier.
-    #[error("tool `{tool}` has an empty Lashlang {label}")]
-    EmptyIdentifier { tool: String, label: String },
-    /// A tool definition contains an invalid Lashlang identifier.
-    #[error("tool `{tool}` has invalid Lashlang {label} `{value}`")]
-    InvalidIdentifier {
-        tool: String,
-        label: String,
-        value: String,
-    },
-    /// A tool's `lashlang.tool` binding cannot be decoded.
-    #[error("tool `{tool}` has invalid `lashlang.tool` binding: {source}")]
-    InvalidToolBinding {
-        tool: String,
-        #[source]
-        source: serde_json::Error,
-    },
-    /// A tool definition omits its required `lashlang.tool` binding.
-    #[error("tool `{tool}` is missing an explicit `lashlang.tool` binding")]
-    MissingToolBinding { tool: String },
-    /// A tool's `typescript.tool` binding cannot be decoded.
-    #[error("tool `{tool}` has invalid `typescript.tool` binding: {source}")]
-    InvalidTypescriptToolBinding {
-        tool: String,
-        #[source]
-        source: serde_json::Error,
-    },
-    /// A tool definition omits its required `typescript.tool` binding.
-    #[error("tool `{tool}` is missing an explicit `typescript.tool` binding")]
-    MissingTypescriptToolBinding { tool: String },
     /// The `lashlang.surface` extension payload cannot be decoded.
     #[error("invalid `lashlang.surface` extension payload: {source}")]
     InvalidSurfaceExtension {

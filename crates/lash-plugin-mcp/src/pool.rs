@@ -40,7 +40,7 @@ use lash_core::{
     AttachmentCreateMeta, AttemptContext, MediaType, ToolCallOutput, ToolDefinition, ToolFailure,
     ToolFailureClass, ToolFailureSource, ToolOutcome, ToolRetryStatus, ToolValue,
 };
-use lash_tool_support::ToolDefinitionLashlangExt;
+use lash_tool_support::ToolDefinitionBindingExt;
 
 #[cfg(test)]
 use crate::config::McpCallPolicy;
@@ -1056,7 +1056,7 @@ fn import_tools(
                     input_schema,
                     output_schema,
                 )
-                .with_lashlang_binding(lashlang_binding),
+                .with_tool_binding(lashlang_binding),
             },
         );
     }

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
     object_schema, require_str, retryable_io_failure,
 };
 
@@ -151,7 +151,7 @@ fn web_search_tool_definition() -> ToolDefinition {
                 "await web.search({ query: \"latest Rust release notes\", limit: 5 })?".into(),
             ])
             .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 250, 1000))
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["web"],
                 "search",
                 &["web_search"],

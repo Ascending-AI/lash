@@ -39,7 +39,7 @@ use lash_core::{
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
-use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
+use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use lash_sansio::sync::{MutexExt, RwLockExt};
 use restate_sdk::context::{ContextClient, RequestTarget, RunRetryPolicy, WorkflowContext};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -8476,7 +8476,7 @@ impl ReplayScalarPendingTools {
                 "additionalProperties": false
             }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "replay_scalar_counter"))
+        .with_tool_binding(ToolBinding::new(["tools"], "replay_scalar_counter"))
     }
 
     fn pending_definition() -> lash_core::ToolDefinition {
@@ -8496,7 +8496,7 @@ impl ReplayScalarPendingTools {
                 "additionalProperties": true
             }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "replay_pending_input"))
+        .with_tool_binding(ToolBinding::new(["tools"], "replay_pending_input"))
     }
 }
 
@@ -10952,7 +10952,7 @@ impl RecoveryProcessTool {
             }),
             serde_json::json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "recovery_echo"))
+        .with_tool_binding(ToolBinding::new(["tools"], "recovery_echo"))
     }
 }
 
@@ -11025,7 +11025,7 @@ impl SnapshotRecoveryTool {
             }),
             serde_json::json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "snapshot_echo"))
+        .with_tool_binding(ToolBinding::new(["tools"], "snapshot_echo"))
     }
 }
 
@@ -11154,7 +11154,7 @@ impl ProcessParentIntentTool {
             }),
             serde_json::json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "process_parent_intent"))
+        .with_tool_binding(ToolBinding::new(["tools"], "process_parent_intent"))
     }
 }
 
@@ -12301,7 +12301,7 @@ impl CountingProcessTool {
             }),
             serde_json::json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["tools"], "recovery_count"))
+        .with_tool_binding(ToolBinding::new(["tools"], "recovery_count"))
     }
 }
 

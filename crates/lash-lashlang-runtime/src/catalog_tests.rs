@@ -10,9 +10,7 @@ fn conflicting_tool_catalog_lashlang_bindings_return_an_error() {
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::Value::Null,
         )
-        .with_lashlang_binding(
-            LashlangToolBinding::new(["shared"], "run").with_authority_type("Shared"),
-        )
+        .with_tool_binding(ToolBinding::new(["shared"], "run").with_authority_type("Shared"))
     };
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
         tool("tool:native/first", "native_first", "first native tool"),
@@ -24,7 +22,7 @@ fn conflicting_tool_catalog_lashlang_bindings_return_an_error() {
 
     assert!(matches!(
         error,
-        LashlangRuntimeError::HostCatalog {
+        ToolBindingError::ConflictingBinding {
             source: lashlang::LashlangHostCatalogError::ConflictingModuleOperation {
                 module,
                 operation,

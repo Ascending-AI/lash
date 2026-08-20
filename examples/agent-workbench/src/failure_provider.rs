@@ -203,7 +203,7 @@ finish("started deterministic failing process");"#,
 
     pub(crate) fn tool_provider(self) -> Option<Arc<dyn lash::tools::ToolProvider>> {
         (self == Self::ToolValue).then(|| {
-            use lash::tools::ToolDefinitionLashlangExt as _;
+            use lash::tools::ToolDefinitionBindingExt as _;
 
             let definition = lash::tools::ToolDefinition::raw(
                 "tool:workbench_tool_value",
@@ -216,7 +216,7 @@ finish("started deterministic failing process");"#,
                 }),
                 serde_json::json!({ "type": "object" }),
             )
-            .with_lashlang_binding(lash::tools::LashlangToolBinding::new(
+            .with_tool_binding(lash::tools::ToolBinding::new(
                 ["workbench_surface"],
                 "terminal",
             ));

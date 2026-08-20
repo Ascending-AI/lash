@@ -5,7 +5,7 @@ use std::path::Path;
 use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, display_relative,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, display_relative,
     execute_typed_tool_result, io_failure, non_empty_string, resolve_under, run_blocking,
 };
 
@@ -53,7 +53,7 @@ fn write_tool_definition() -> ToolDefinition {
             r#"await files.write({ path: "hello.txt", content: "hello\n" })?"#.into(),
             r#"await files.write({ path: "src/main.rs", content: "fn main() {}\n" })?"#.into(),
         ])
-        .with_lashlang_binding(lash_tool_support::lashlang_binding(
+        .with_tool_binding(lash_tool_support::tool_binding(
             ["files"],
             "write",
             &["write_file"],

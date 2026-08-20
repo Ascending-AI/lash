@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use lash_tool_support::LashlangToolBinding;
+use lash_tool_support::ToolBinding;
 
 /// Normalise a server name or raw MCP tool name to lowercase ASCII
 /// alphanumeric and underscore. Collapses runs of non-alphanumeric characters
@@ -58,7 +58,7 @@ pub fn build_prefixed_name(
     server_name: &str,
     original_tool_name: &str,
     used_names: &mut BTreeSet<String>,
-) -> (String, LashlangToolBinding) {
+) -> (String, ToolBinding) {
     let server_prefix = normalize_identifier(server_name);
     let normalized_tool = normalize_identifier(original_tool_name);
     let prefixed = unique_prefixed_name(
@@ -69,8 +69,8 @@ pub fn build_prefixed_name(
         .rsplit_once("__")
         .map(|(_, operation)| operation)
         .expect("prefixed MCP tool name contains the module separator");
-    let lashlang_binding = LashlangToolBinding::new([server_prefix], operation)
-        .with_aliases([original_tool_name.to_string()]);
+    let lashlang_binding =
+        ToolBinding::new([server_prefix], operation).with_aliases([original_tool_name.to_string()]);
     (prefixed, lashlang_binding)
 }
 

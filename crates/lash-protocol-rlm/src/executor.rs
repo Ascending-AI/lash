@@ -1028,7 +1028,7 @@ mod tests {
         flow_to_json_value, projected_index,
     };
     use lash_core::ProcessRegistry;
-    use lash_lashlang_runtime::ToolDefinitionLashlangExt;
+    use lash_lashlang_runtime::ToolDefinitionBindingExt;
     use lash_rlm_types::PROJECTED_JSON_TAG;
     use lash_sansio::sync::MutexExt;
     use lashlang::{
@@ -1492,10 +1492,7 @@ mod tests {
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
-        .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-            ["web"],
-            "fetch",
-        ))
+        .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["web"], "fetch"))
     }
 
     #[async_trait::async_trait]
@@ -2025,7 +2022,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "string" }),
         )
-        .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+        .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
             ["status_tool"],
             "inspect",
         ))

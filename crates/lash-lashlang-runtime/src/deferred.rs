@@ -20,7 +20,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    LashlangHostEnvironment, LashlangRuntimeError, lashlang_tool_contract_types,
+    LashlangHostEnvironment, ToolBindingError, lashlang_tool_contract_types,
     required_tool_lashlang_executable,
 };
 
@@ -184,7 +184,7 @@ impl DeferredResolutionRecord {
 fn fold_grant(
     host_environment: &mut LashlangHostEnvironment,
     grant: &ToolGrant,
-) -> Result<(), LashlangRuntimeError> {
+) -> Result<(), ToolBindingError> {
     let binding = required_tool_lashlang_executable(&grant.definition.manifest)?;
     let operation_binding = lashlang_tool_contract_types(&grant.definition.contract);
     host_environment.resources.add_module_operation_binding(
@@ -288,7 +288,7 @@ pub async fn link_with_deferred_resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LashlangSurface, LashlangToolBinding, ToolDefinitionLashlangExt};
+    use crate::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
     use lash_sansio::sync::MutexExt;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -301,7 +301,7 @@ mod tests {
             lash_core::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new([module], operation));
+        .with_tool_binding(ToolBinding::new([module], operation));
         ToolGrant::new(definition).with_execution_binding(serde_json::json!({ "account": name }))
     }
 
@@ -384,9 +384,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "boolean" }),
         )
-        .with_lashlang_binding(
-            LashlangToolBinding::new(["web"], "fetch").with_authority_type("Web"),
-        );
+        .with_tool_binding(ToolBinding::new(["web"], "fetch").with_authority_type("Web"));
         let grant = ToolGrant::new(definition);
         let mut environment = empty_host_environment();
 

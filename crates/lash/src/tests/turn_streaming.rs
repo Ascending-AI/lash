@@ -136,7 +136,7 @@ fn frame_state_probe_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["fixture"],
         "probe",
     ))

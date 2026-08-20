@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use lash_core::{PromptContribution, ToolManifest};
 use serde_json::Value;
 
-use crate::{LASHLANG_TOOL_BINDING_KEY, LashlangToolBinding, ResolvedLashlangToolBinding};
+use crate::{LASHLANG_TOOL_BINDING_KEY, ResolvedToolBinding, ToolBinding};
 
 pub const DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT: usize = 100;
 pub const DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT: usize = 50;
@@ -34,7 +34,7 @@ impl CataloguePreviewEntry {
         }
     }
 
-    pub fn from_lashlang_executable(executable: ResolvedLashlangToolBinding) -> Self {
+    pub fn from_lashlang_executable(executable: ResolvedToolBinding) -> Self {
         let call = executable.call_path();
         Self {
             module_path: executable.module_path,
@@ -199,7 +199,7 @@ pub fn catalogue_preview_entry_from_manifest(
         .bindings
         .get(LASHLANG_TOOL_BINDING_KEY)
         .cloned()
-        .and_then(|value| serde_json::from_value::<LashlangToolBinding>(value).ok())?;
+        .and_then(|value| serde_json::from_value::<ToolBinding>(value).ok())?;
     let executable = binding.executable_for(&manifest.name).ok()?;
     Some(CataloguePreviewEntry::from_lashlang_executable(executable))
 }
@@ -207,7 +207,7 @@ pub fn catalogue_preview_entry_from_manifest(
 pub fn catalogue_preview_entry_from_catalog_record(raw: &Value) -> Option<CataloguePreviewEntry> {
     let obj = raw.as_object()?;
     let name = obj.get("name")?.as_str()?;
-    let binding: LashlangToolBinding = obj
+    let binding: ToolBinding = obj
         .get("bindings")
         .and_then(|bindings| bindings.get(LASHLANG_TOOL_BINDING_KEY))
         .cloned()
@@ -219,7 +219,7 @@ pub fn catalogue_preview_entry_from_catalog_record(raw: &Value) -> Option<Catalo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ToolDefinitionLashlangExt;
+    use crate::ToolDefinitionBindingExt;
     use serde_json::json;
 
     fn catalog_record(name: &str, module_path: &[&str], operation: &str) -> Value {
@@ -230,10 +230,7 @@ mod tests {
             lash_core::ToolDefinition::default_input_schema(),
             json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(
-            module_path.iter().copied(),
-            operation,
-        ));
+        .with_tool_binding(ToolBinding::new(module_path.iter().copied(), operation));
         let manifest = definition.manifest();
         json!({
             "id": manifest.id,
@@ -286,7 +283,7 @@ mod tests {
             lash_core::ToolDefinition::default_input_schema(),
             json!({ "type": "object" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["calendar", "work"], "create"));
+        .with_tool_binding(ToolBinding::new(["calendar", "work"], "create"));
         let manifest = definition.manifest();
 
         let contribution = catalogue_preview_contribution_for_manifests([&manifest])

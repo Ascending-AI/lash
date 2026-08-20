@@ -447,9 +447,10 @@ mod tests {
         assert_eq!(defs[0].name(), "mcp__docs__search_docs");
         #[cfg(feature = "lashlang")]
         {
-            let binding = lash_lashlang_runtime::tool_lashlang_binding(&defs[0].manifest)
-                .expect("valid lashlang binding")
-                .expect("mcp tool has lashlang binding");
+            let binding =
+                lash_lashlang_runtime::ToolManifestBindingExt::tool_binding(&defs[0].manifest)
+                    .expect("valid lashlang binding")
+                    .expect("mcp tool has lashlang binding");
             assert_eq!(binding.module_path, vec!["docs".to_string()]);
             assert_eq!(binding.operation.as_deref(), Some("search_docs"));
             assert_eq!(binding.aliases, vec!["search-docs".to_string()]);
