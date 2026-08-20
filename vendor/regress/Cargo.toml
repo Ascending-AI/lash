@@ -10,8 +10,6 @@ keywords = ["regex", "regexp"]
 edition = "2024"
 readme = "README.md"
 
-[workspace]
-
 [features]
 default = ["backend-pikevm", "std"]
 

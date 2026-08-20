@@ -1,7 +1,20 @@
 <!-- Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation. -->
 # regress - REGex in Rust with EcmaScript Syntax
 
-oh no why
+## Lash vendor provenance
+
+This fork is pinned to upstream commit
+`7e64ad5e6807b5503e5cc97a79e0f129b23c556b`. All 10 upstream integration test
+files are carried byte-for-byte. Stable workspace runs exercise 9 of those
+files, comprising 522 tests with the nextest filter `-E 'package(regress)'`.
+`pattern_tests.rs` is carried byte-for-byte but remains inert because it is
+gated by the nightly-only `pattern` feature, pending stabilization of Rust's
+pattern API.
+
+The crate keeps upstream's `clippy::all` warning group suppressed for carried
+vendored sources so compiler upgrades do not require local rewrites. Rust
+compiler warnings and the workspace's non-Clippy gates remain enforced.
+
 
 ## Introduction
 

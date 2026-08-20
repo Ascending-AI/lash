@@ -1,4 +1,4 @@
-// Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation.
+// Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation; crate-root clippy allow (vendored code is tested, not linted).
 /*!
 
 # regress - REGex in Rust with EcmaScript Syntax
@@ -141,7 +141,6 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 - **pattern**. When enabled (nightly only), implements the `std::str::pattern::Pattern` trait for `Regex`, allowing it to be used with standard string methods like `str::find`, `str::contains`, `str::split`, etc.
 
 */
-
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "pattern", feature(pattern))]
 #![warn(clippy::all)]
@@ -153,6 +152,9 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 )]
 // Clippy's manual_range_contains suggestion produces worse codegen.
 #![allow(clippy::manual_range_contains)]
+// Vendored code is tested, not linted: silence upstream's clippy::all group so
+// toolchain bumps cannot fail the workspace gate inside upstream sources.
+#![allow(clippy::all)]
 
 #[cfg(not(feature = "std"))]
 #[macro_use]
