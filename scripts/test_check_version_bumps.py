@@ -478,6 +478,93 @@ class VersionBumpFixtureTest(unittest.TestCase):
             with self.subTest(attribute=attribute):
                 self.assertEqual(MODULE._test_only_cfg(attribute), expected)
 
+    def test_malformed_test_module_keeps_serde_shapes_in_sweep(self) -> None:
+        cases = (
+            (
+                "comment-split test predicate",
+                r"""
+                #[cfg(te /* boundary */ st)]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct CommentSplitShape;
+                }
+                """,
+                "CommentSplitShape",
+            ),
+            (
+                "invalid pub restriction",
+                r"""
+                #[cfg(test)]
+                pub() mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct InvalidVisibilityShape;
+                }
+                """,
+                "InvalidVisibilityShape",
+            ),
+            (
+                "invalid cfg string escape",
+                r'''
+                #[cfg(all(test, feature = "bad\qescape"))]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct InvalidEscapeShape;
+                }
+                ''',
+                "InvalidEscapeShape",
+            ),
+            (
+                "unterminated string before derive",
+                r'''
+                #[cfg(test)]
+                mod tests {
+                    const BROKEN: &str = "unterminated
+                    #[derive(Serialize, Deserialize)]
+                    struct AfterUnterminatedString;
+                }
+                ''',
+                "AfterUnterminatedString",
+            ),
+            (
+                "unterminated block comment before derive",
+                r"""
+                #[cfg(test)]
+                mod tests {
+                    /* unterminated
+                    #[derive(Serialize, Deserialize)]
+                    struct AfterUnterminatedComment;
+                }
+                """,
+                "AfterUnterminatedComment",
+            ),
+            (
+                "malformed cfg predicate",
+                r"""
+                #[cfg(all(test feature = "testing"))]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct MalformedCfgShape;
+                }
+                """,
+                "MalformedCfgShape",
+            ),
+            (
+                "unbalanced module body",
+                r"""
+                #[cfg(test)]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct UnbalancedBodyShape;
+                """,
+                "UnbalancedBodyShape",
+            ),
+        )
+        for name, source, shape in cases:
+            with self.subTest(name=name):
+                shapes = MODULE.serde_shapes(textwrap.dedent(source))
+
+                self.assertIn(shape, shapes)
+
     def test_trace_event_multiline_attribute_is_detected(self) -> None:
         shapes = MODULE.serde_shapes(textwrap.dedent(TRACE_EVENT_BASE))
 

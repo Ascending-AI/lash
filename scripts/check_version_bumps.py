@@ -621,6 +621,23 @@ def rust_attribute_end(text: str, start: int) -> int:
     raise CheckError("unterminated Rust outer attribute")
 
 
+def _raw_outer_attribute_ranges(text: str, start: int) -> tuple[tuple[int, int], ...]:
+    """Conservatively recover attributes after malformed Rust trivia."""
+    ranges: list[tuple[int, int]] = []
+    cursor = start
+    while True:
+        attribute_start = text.find("#[", cursor)
+        if attribute_start < 0:
+            return tuple(ranges)
+        try:
+            attribute_end = rust_attribute_end(text, attribute_start)
+        except CheckError:
+            cursor = attribute_start + 2
+        else:
+            ranges.append((attribute_start, attribute_end))
+            cursor = attribute_end
+
+
 def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
     """Find outer attributes while ignoring attribute-looking text in trivia."""
     ranges: list[tuple[int, int]] = []
@@ -635,6 +652,7 @@ def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
             newline = text.find("\n", index + 2)
             index = len(text) if newline < 0 else newline + 1
         elif text[index] == "/" and following == "*":
+            malformed_start = index + 2
             index += 2
             block_depth = 1
             while index < len(text) and block_depth:
@@ -646,16 +664,20 @@ def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
                     index += 2
                 else:
                     index += 1
+            if block_depth:
+                ranges.extend(_raw_outer_attribute_ranges(text, malformed_start))
+                return tuple(ranges)
         elif raw := _raw_string_start(text, index):
             content_start, closer = raw
             closing = text.find(closer, content_start)
             if closing < 0:
-                raise CheckError(
-                    "unterminated Rust raw string while finding outer attributes"
-                )
+                ranges.extend(_raw_outer_attribute_ranges(text, content_start))
+                return tuple(ranges)
             index = closing + len(closer)
         elif text[index] == '"' or (text[index] == "b" and following == '"'):
+            malformed_start = index + (2 if text[index] == "b" else 1)
             index += 2 if text[index] == "b" else 1
+            closed = False
             while index < len(text):
                 if text[index] == "\\":
                     index += 2
@@ -663,7 +685,11 @@ def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
                     closing = text[index] == '"'
                     index += 1
                     if closing:
+                        closed = True
                         break
+            if not closed:
+                ranges.extend(_raw_outer_attribute_ranges(text, malformed_start))
+                return tuple(ranges)
         elif char_end := _char_literal_end(text, index):
             index = char_end
         else:
@@ -699,37 +725,76 @@ RUST_SERDE_SHAPE = re.compile(
     r"(?:struct|enum)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 RUST_INLINE_MODULE = re.compile(
-    r"(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{"
+    r"(?:pub(?:\s*\(\s*(?:crate|self|super|in\s+(?:crate|self|super)"
+    r"(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*\))?\s+)?"
+    r"mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{"
 )
 
 
+def _rust_space_end(text: str, start: int) -> int:
+    cursor = start
+    while cursor < len(text) and text[cursor].isspace():
+        cursor += 1
+    return cursor
+
+
+def _rust_string_end(text: str, start: int) -> int | None:
+    """Return one valid cooked Rust string's end, rejecting invalid escapes."""
+    if start >= len(text) or text[start] != '"':
+        return None
+    cursor = start + 1
+    while cursor < len(text):
+        char = text[cursor]
+        if char == '"':
+            return cursor + 1
+        if char in "\r\n":
+            return None
+        if char != "\\":
+            cursor += 1
+            continue
+        cursor += 1
+        if cursor >= len(text):
+            return None
+        escape = text[cursor]
+        if escape in {'"', "'", "\\", "n", "r", "t", "0"}:
+            cursor += 1
+        elif escape == "x":
+            digits = text[cursor + 1 : cursor + 3]
+            if len(digits) != 2 or re.fullmatch(r"[0-9A-Fa-f]{2}", digits) is None:
+                return None
+            cursor += 3
+        elif escape == "u":
+            unicode_escape = re.match(
+                r"u\{[0-9A-Fa-f](?:_?[0-9A-Fa-f]){0,5}\}", text[cursor:]
+            )
+            if unicode_escape is None:
+                return None
+            cursor += len(unicode_escape.group(0))
+        else:
+            return None
+    return None
+
+
 def _cfg_predicate(text: str, start: int = 0) -> tuple[int, bool] | None:
-    """Parse enough cfg grammar to prove that a predicate requires `test`."""
-    identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[start:])
+    """Strictly parse enough cfg grammar to prove a predicate requires `test`."""
+    cursor = _rust_space_end(text, start)
+    identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[cursor:])
     if identifier is None:
         return None
     name = identifier.group(0)
-    cursor = start + len(name)
+    cursor = _rust_space_end(text, cursor + len(name))
     if cursor == len(text) or text[cursor] in ",)":
         return cursor, name == "test"
     if text[cursor] == "=":
-        cursor += 1
-        if cursor >= len(text) or text[cursor] != '"':
+        cursor = _rust_space_end(text, cursor + 1)
+        string_end = _rust_string_end(text, cursor)
+        if string_end is None:
             return None
-        cursor += 1
-        while cursor < len(text):
-            if text[cursor] == "\\":
-                cursor += 2
-            else:
-                closing = text[cursor] == '"'
-                cursor += 1
-                if closing:
-                    return cursor, False
-        return None
+        return _rust_space_end(text, string_end), False
     if text[cursor] != "(" or name not in {"all", "any", "not"}:
         return None
 
-    cursor += 1
+    cursor = _rust_space_end(text, cursor + 1)
     children: list[bool] = []
     while cursor < len(text) and text[cursor] != ")":
         child = _cfg_predicate(text, cursor)
@@ -738,7 +803,7 @@ def _cfg_predicate(text: str, start: int = 0) -> tuple[int, bool] | None:
         cursor, test_only = child
         children.append(test_only)
         if cursor < len(text) and text[cursor] == ",":
-            cursor += 1
+            cursor = _rust_space_end(text, cursor + 1)
         elif cursor >= len(text) or text[cursor] != ")":
             return None
     if cursor >= len(text) or text[cursor] != ")":
@@ -755,12 +820,30 @@ def _cfg_predicate(text: str, start: int = 0) -> tuple[int, bool] | None:
 
 
 def _test_only_cfg(attribute: str) -> bool:
-    compact = strip_rust_trivia(attribute)
-    if not compact.startswith("#[cfg(") or not compact.endswith(")]"):
+    cursor = _rust_space_end(attribute, 0)
+    if cursor >= len(attribute) or attribute[cursor] != "#":
         return False
-    predicate = compact[6:-2]
-    parsed = _cfg_predicate(predicate)
-    return parsed is not None and parsed == (len(predicate), True)
+    cursor = _rust_space_end(attribute, cursor + 1)
+    if cursor >= len(attribute) or attribute[cursor] != "[":
+        return False
+    cursor = _rust_space_end(attribute, cursor + 1)
+    cfg = re.match(r"cfg\b", attribute[cursor:])
+    if cfg is None:
+        return False
+    cursor = _rust_space_end(attribute, cursor + len(cfg.group(0)))
+    if cursor >= len(attribute) or attribute[cursor] != "(":
+        return False
+    parsed = _cfg_predicate(attribute, cursor + 1)
+    if parsed is None:
+        return False
+    cursor, test_only = parsed
+    if cursor >= len(attribute) or attribute[cursor] != ")":
+        return False
+    cursor = _rust_space_end(attribute, cursor + 1)
+    if cursor >= len(attribute) or attribute[cursor] != "]":
+        return False
+    cursor = _rust_space_end(attribute, cursor + 1)
+    return cursor == len(attribute) and test_only
 
 
 def _rust_trivia_end(text: str, start: int) -> int | None:
