@@ -18,6 +18,12 @@ inferred category would read a renamed or relocated constant as brand new and
 silently un-guard a live surface for one change; a pinned key and fingerprint
 cannot be reached by any refactor.
 
+Renaming identifiers across a guarded surface without moving the format it
+versions is the other burned one-time baseline, ``IDENTIFIER_RENAME_BASELINES``,
+pinned the same way: the guards project guarded text, so a retyped variant reads
+as a shape change even when the serialized bytes are identical, and only a
+reviewer can say which it was.
+
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.  Pull-request CI passes the PR merge-base explicitly.
 """
@@ -64,6 +70,38 @@ REGISTRATION_BASELINES = {
     # shape gained its schema_version stamp in the same change.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
         "sha256:bcb22b869fe0b86eb9a507b5f1841b733360cfba1164a407d189648998cf1dc9"
+    ),
+}
+
+# Burned one-time proofs that a change moved Rust identifiers across a guarded
+# surface without moving the format the surface versions. The guards project
+# the TEXT of the guarded items, identifiers included, so a rename of a type or
+# a variant reads as a shape change even when every serde name, wire tag, and
+# emitted fingerprint string is byte-identical on both sides -- and a version
+# bump for that would publish a false incompatibility to peers and stored data.
+#
+# The exemption is granted the same way a registration is, and for the same
+# reason: only to these exact surface keys carrying these exact guarded bytes,
+# pinned to the head signature the reviewer read. There is no inferred
+# "identifier-only" category and there must never be one, because the check
+# cannot see whether a rename reached the serialized bytes; a human reads that
+# and burns the answer here. Entries stay after the change lands as
+# dead-but-honest history.
+IDENTIFIER_RENAME_BASELINES = {
+    # FIG-1036, one time only: the outcome-suffix vocabulary rename retyped
+    # Rust identifiers across these three surfaces while leaving every serde
+    # field name, variant name, and emitted fingerprint tag byte-identical, so
+    # REMOTE_PROTOCOL_VERSION stays 41, SESSION_NODE_BODY_SCHEMA_VERSION stays
+    # 1, and PROCESS_REGISTRATION_FAMILY_VERSION stays 4.
+    "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
+        "sha256:35bf1df42914317cac344d2c979fad7ba889e034abf8472f3c3f95ea5729d328"
+    ),
+    "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
+        "sha256:6b74366597e750eba28ae339771f9641f15bc78295cb3fcc00712d3e89899d02"
+    ),
+    "crates/lash-core/src/runtime/process/validation.rs:"
+    "PROCESS_REGISTRATION_FAMILY_VERSION": (
+        "sha256:fd2a5cd3cc916b265166f95f896524883c047382634e959d152df48e860f9ed7"
     ),
 }
 
@@ -147,6 +185,7 @@ class Failure:
     base_version: int
     head_version: int
     changed_guards: tuple[str, ...]
+    fingerprint: str = ""
 
 
 @dataclass(frozen=True)
@@ -176,6 +215,7 @@ class CheckResult:
     errors: tuple[SurfaceError, ...]
     registrations: tuple[Surface, ...] = ()
     unregistered: tuple[Unregistered, ...] = ()
+    identifier_renames: tuple[Surface, ...] = ()
 
 
 class CheckError(RuntimeError):
@@ -865,6 +905,7 @@ def check_surfaces(
     errors: list[SurfaceError] = []
     registrations: list[Surface] = []
     unregistered: list[Unregistered] = []
+    identifier_renames: list[Surface] = []
     for surface in surfaces:
         try:
             head_version = version_at(view, head_revision, surface)
@@ -927,12 +968,20 @@ def check_surfaces(
             )
             continue
         if head_version <= base_version:
+            # The guarded text moved. A burned identifier-rename baseline is a
+            # reviewer's signed answer that the format underneath it did not,
+            # and it holds only for the exact guarded bytes it pinned.
+            fingerprint = surface_fingerprint(head_entries)
+            if IDENTIFIER_RENAME_BASELINES.get(surface.key) == fingerprint:
+                identifier_renames.append(surface)
+                continue
             failures.append(
                 Failure(
                     surface=surface,
                     base_version=base_version,
                     head_version=head_version,
                     changed_guards=tuple(dict.fromkeys(changed_guards)),
+                    fingerprint=fingerprint,
                 )
             )
     return CheckResult(
@@ -940,6 +989,7 @@ def check_surfaces(
         tuple(errors),
         tuple(registrations),
         tuple(unregistered),
+        tuple(identifier_renames),
     )
 
 
@@ -1035,7 +1085,12 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"- {failure.surface.constant} is {failure.head_version}; merge-base "
                 f"value is {failure.base_version}. Guarded shape changed ({paths}). Bump "
-                f"{failure.surface.constant} strictly past {failure.base_version}.",
+                f"{failure.surface.constant} strictly past {failure.base_version}. "
+                f"If the change only retyped Rust identifiers and a reviewer has "
+                f"confirmed the serialized bytes are identical on both sides, burn "
+                f"that reading once by adding {failure.surface.key!r}: "
+                f"{failure.fingerprint!r} to IDENTIFIER_RENAME_BASELINES in "
+                f"scripts/check_version_bumps.py.",
                 file=sys.stderr,
             )
     if result.errors:
@@ -1047,9 +1102,13 @@ def main(argv: list[str] | None = None) -> int:
     if result.registrations:
         names = ", ".join(surface.key for surface in result.registrations)
         registered = f"; registered by this change: {names}"
+    renamed = ""
+    if result.identifier_renames:
+        names = ", ".join(surface.key for surface in result.identifier_renames)
+        renamed = f"; identifier-rename baseline honoured for: {names}"
     print(
         f"version-bump check passed: {len(surfaces)} surfaces against "
-        f"merge-base {base[:12]}{registered}"
+        f"merge-base {base[:12]}{registered}{renamed}"
     )
     return 0
 

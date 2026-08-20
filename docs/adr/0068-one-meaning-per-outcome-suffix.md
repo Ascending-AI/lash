@@ -145,6 +145,21 @@ host configured, the status is where one failure's retries actually stand.
   both vocabularies alive, which is the state this ADR exists to end.
 * No serialized payload changes. The wave is type identifiers only, so a store
   written before it reads identically after it.
+* No versioned surface is bumped, and the version-bump gate says so by name.
+  `REMOTE_PROTOCOL_VERSION` stays 41, `SESSION_NODE_BODY_SCHEMA_VERSION` stays
+  1, and `PROCESS_REGISTRATION_FAMILY_VERSION` stays 4: the renames leave every
+  serde field name, variant name, and emitted fingerprint tag byte-identical, so
+  a bump on any of the three would publish an incompatibility that does not
+  exist — on the remote protocol it would tell peers to refuse each other over a
+  wire neither of them changed. The gate still sees a change, because it
+  projects the text of the guarded items and identifiers are part of that text,
+  so this wave is excused by three burned entries in
+  `IDENTIFIER_RENAME_BASELINES` in `scripts/check_version_bumps.py`. Each entry
+  pins a surface key to the sha256 of that surface's guard signature at this
+  diff's head, in the same idiom as the registration baselines beside it: the
+  exemption is reachable only by these exact guarded bytes, so no later refactor
+  — not even another identifier-only one — inherits it, and the next real shape
+  change on any of the three owes its bump as before.
 * New exports are held to the rule at review. A type ending in `Result`,
   `Summary`, or `Disposition` is a review finding; a type ending in `Report`
   that describes one item is the same finding.

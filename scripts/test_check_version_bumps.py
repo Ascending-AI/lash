@@ -696,6 +696,89 @@ class VersionBumpFixtureTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("Bump WIRE_VERSION strictly past 1", result.stderr)
 
+    def renamed_check(
+        self, fixture: FixtureRepository, base: str, head: str, baselines: dict[str, str]
+    ):
+        surfaces = MODULE.load_config(fixture.root / "surface.toml")
+        with unittest.mock.patch.dict(
+            MODULE.IDENTIFIER_RENAME_BASELINES, baselines, clear=True
+        ):
+            return MODULE.check_surfaces(fixture.root, base, head, surfaces)
+
+    def identifier_rename_fixture(self) -> tuple[FixtureRepository, str, str]:
+        """A variant renamed with no bump: guarded text moves, format does not."""
+        fixture = self.fixture()
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("base")
+        fixture.write(LIB_V1, WIRE_BASE.replace("Existing", "Present"))
+        head = fixture.commit("rename a wire variant without bumping")
+        return fixture, base, head
+
+    def test_an_identifier_rename_without_a_burned_baseline_fails(self) -> None:
+        fixture, base, head = self.identifier_rename_fixture()
+
+        result = self.renamed_check(fixture, base, head, {})
+
+        self.assertEqual(result.identifier_renames, ())
+        self.assertEqual(len(result.failures), 1)
+
+        cli = self.check_cli(fixture, base, head)
+        self.assertEqual(cli.returncode, 1)
+        self.assertIn("Bump WIRE_VERSION strictly past 1", cli.stderr)
+        self.assertIn("'src/lib.rs:WIRE_VERSION': 'sha256:", cli.stderr)
+
+    def test_an_identifier_rename_with_its_burned_baseline_needs_no_bump(self) -> None:
+        fixture, base, head = self.identifier_rename_fixture()
+
+        unburned = self.renamed_check(fixture, base, head, {})
+
+        result = self.renamed_check(
+            fixture,
+            base,
+            head,
+            {"src/lib.rs:WIRE_VERSION": unburned.failures[0].fingerprint},
+        )
+
+        self.assertEqual(result.failures, ())
+        self.assertEqual(result.errors, ())
+        self.assertEqual(
+            tuple(surface.key for surface in result.identifier_renames),
+            ("src/lib.rs:WIRE_VERSION",),
+        )
+
+    def test_a_burned_rename_baseline_does_not_cover_a_later_change(self) -> None:
+        """The single-use property: the baseline pins one head shape, not a surface.
+
+        A second change to the same guarded shape — even another rename — computes
+        a different fingerprint, so the burned entry stops answering for it.
+        """
+        fixture, base, head = self.identifier_rename_fixture()
+        burned = self.renamed_check(fixture, base, head, {}).failures[0].fingerprint
+
+        fixture.write(LIB_V1, WIRE_BASE.replace("Existing", "Current"))
+        later = fixture.commit("rename the same variant again")
+
+        result = self.renamed_check(
+            fixture, base, later, {"src/lib.rs:WIRE_VERSION": burned}
+        )
+
+        self.assertEqual(result.identifier_renames, ())
+        self.assertEqual(len(result.failures), 1)
+        self.assertNotEqual(result.failures[0].fingerprint, burned)
+
+    def test_a_rename_baseline_for_another_surface_excuses_nothing(self) -> None:
+        fixture, base, head = self.identifier_rename_fixture()
+
+        result = self.renamed_check(
+            fixture,
+            base,
+            head,
+            {"src/other_version.rs:OTHER_VERSION": "sha256:" + "0" * 64},
+        )
+
+        self.assertEqual(result.identifier_renames, ())
+        self.assertEqual(len(result.failures), 1)
+
     def test_an_unreadable_base_inventory_checks_every_surface(self) -> None:
         fixture = self.fixture()
         fixture.write(LIB_V1, WIRE_BASE)
