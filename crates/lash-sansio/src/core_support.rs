@@ -85,7 +85,18 @@ impl ModelEffortValidationCategoryCoreSupport for ModelEffortValidationCategory 
     }
 }
 
+pub trait MessageCoreSupport {
+    fn content_equals(&self, other: &Message) -> bool;
+}
+
+impl MessageCoreSupport for Message {
+    fn content_equals(&self, other: &Message) -> bool {
+        crate::session_model::message::message_content_equal(self, other)
+    }
+}
+
 pub trait MessageSequenceCoreSupport {
+    fn preserved_extension_delta<'a>(&self, next: &'a MessageSequence) -> Option<&'a [Message]>;
     fn from_owned(messages: Vec<Message>) -> Self;
     fn from_base(base: Arc<Vec<Message>>) -> Self;
     fn from_base_and_delta(base: Arc<Vec<Message>>, delta: Vec<Message>) -> Self;
@@ -96,6 +107,10 @@ pub trait MessageSequenceCoreSupport {
 }
 
 impl MessageSequenceCoreSupport for MessageSequence {
+    fn preserved_extension_delta<'a>(&self, next: &'a MessageSequence) -> Option<&'a [Message]> {
+        MessageSequence::preserved_extension_delta(self, next)
+    }
+
     fn from_owned(messages: Vec<Message>) -> Self {
         MessageSequence::from_owned(messages)
     }

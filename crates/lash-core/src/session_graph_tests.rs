@@ -544,3 +544,42 @@ fn graph_writers_keep_payload_kind_out_of_draft_identity() {
         assert!(node.node_id.starts_with("draft-node/v2/"), "{:?}", node);
     }
 }
+
+/// The turn projection decides prefix agreement by comparing the `Arc` a read
+/// model handed out, so two reads of the same frame on an unchanged graph must
+/// hand out the *same* `Arc`, not two equal ones. Rebuilding the frame
+/// projection per call is what forced the projection onto its whole-window
+/// fallback on every turn boundary (FIG-1637).
+#[test]
+fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
+    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+    ));
+    let mut graph = SessionGraph::default();
+    let frame = frame_node_id("session", "frame");
+    assert!(graph.append_frame_open_with_id_at(
+        frame.clone(),
+        "frame".to_string(),
+        crate::AgentFrameReason::initial(),
+        assignment,
+        crate::ProtocolTurnOptions::default(),
+        "2026-08-19T00:00:00Z".to_string(),
+    ));
+    graph.append_message(text_message("m1", MessageRole::User, "first"));
+
+    let first = graph.read_model_for_frame(&frame);
+    let second = graph.read_model_for_frame(&frame);
+    assert!(
+        Arc::ptr_eq(&first.messages, &second.messages),
+        "repeated reads of one frame share the projected messages by identity"
+    );
+    assert!(Arc::ptr_eq(&first.active_events, &second.active_events));
+
+    graph.append_message(text_message("m2", MessageRole::User, "second"));
+    let after_append = graph.read_model_for_frame(&frame);
+    assert!(
+        !Arc::ptr_eq(&first.messages, &after_append.messages),
+        "an append to the active path retires the memoized projection"
+    );
+    assert_eq!(after_append.messages.len(), 2);
+}
