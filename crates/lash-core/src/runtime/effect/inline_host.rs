@@ -160,6 +160,9 @@ impl RuntimeEffectController for InlineEffectHost {
             .await
     }
 
+    // The group methods below must stay forwarded, never trait-defaulted:
+    // supports_effect_groups() would otherwise advertise a capability the
+    // defaults refuse.
     fn supports_effect_groups(&self) -> bool {
         self.controller.supports_effect_groups()
     }
