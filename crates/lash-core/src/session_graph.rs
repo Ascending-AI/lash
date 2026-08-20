@@ -418,7 +418,6 @@ pub(crate) struct ActiveReadProjection {
     pub(crate) active_messages: Vec<Message>,
 }
 
-#[derive(Clone, Debug)]
 pub(crate) struct ActiveReadPrefix<'a> {
     retained_nodes: Vec<&'a SessionNodeRecord>,
     retained_message_count: usize,

@@ -136,6 +136,11 @@ impl TurnGraphEditor {
             );
         }
 
+        // This message-only fallback cannot use `active_read_prefix`: this
+        // method must reject a shorter `next` after matching all of its
+        // messages (`current.next().is_none()`), while the graph resolver
+        // intentionally stops when target messages are exhausted so it can
+        // retain graph nodes, including protocol nodes, for projection.
         let mut current = self.active_messages.iter();
         let mut appended = Vec::new();
         for message in next.iter().filter(|message| !message.is_transient()) {

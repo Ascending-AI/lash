@@ -41,22 +41,34 @@ pub(crate) struct MessageContentRef<'a> {
 
 impl<'a> From<&'a Message> for MessageContentRef<'a> {
     fn from(message: &'a Message) -> Self {
+        let Message {
+            id,
+            role,
+            parts,
+            origin,
+        } = message;
         Self {
-            id: message.id.as_str(),
-            role: message.role,
-            parts: &message.parts,
-            origin: message.origin.as_ref(),
+            id: id.as_str(),
+            role: *role,
+            parts,
+            origin: origin.as_ref(),
         }
     }
 }
 
 impl<'a> From<&'a super::ConversationRecord> for MessageContentRef<'a> {
     fn from(record: &'a super::ConversationRecord) -> Self {
+        let super::ConversationRecord {
+            id,
+            role,
+            parts,
+            origin,
+        } = record;
         Self {
-            id: record.id.as_str(),
-            role: record.role,
-            parts: &record.parts,
-            origin: record.origin.as_ref(),
+            id: id.as_str(),
+            role: *role,
+            parts,
+            origin: origin.as_ref(),
         }
     }
 }
