@@ -233,12 +233,12 @@ PostgreSQL tables. The operations runbook reset consequently clears
 
 Figments coordination is one Lash revision. SQLite durable-core schema <span data-format-version="SQLITE_SCHEMA_VERSION">37</span> includes
 the keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">55</span> includes those cutovers,
+immutable graph-generation cutover. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">56</span> includes those cutovers,
 the indexed recovery worklist, the session-metadata payload cutover, the
 durable effect-group journal, and the loser drain's unsettled-children index
 over it. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> adds atomic pending
 process-parent teardown to the v3 process-environment reference cutover; trigger
-schema <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">5</span> carries its existing contract. Effect schema <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span> carries the
+schema <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span> carries durable trigger-occurrence reclaim eligibility. Effect schema <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span> carries the
 agent-frame-key and recorded tool-intent cutovers plus the effect-group journal,
 which SQLite reaches by reject-and-recreate.
 Development/test stores must be recreated.

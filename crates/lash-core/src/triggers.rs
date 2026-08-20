@@ -1332,6 +1332,50 @@ pub struct TriggerDeliveryRetentionCandidate {
     pub process_id: String,
 }
 
+/// Outcome counters from one host-invoked trigger-occurrence reclaim pass.
+///
+/// Occurrences enter the reclaimable set only at ingest accounting for a
+/// zero-match fan-out or when deletion of the final delivery severs a matched
+/// fan-out. `cutoff_epoch_ms` on
+/// [`TriggerStore::reclaim_trigger_occurrences`] can defer those armed rows;
+/// it never makes a live fan-out reclaimable.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerOccurrenceReclamationReport {
+    /// Occurrences observed across the completely enumerated scope.
+    pub inspected_occurrence_count: usize,
+    /// Armed occurrences physically deleted, with their deliveries removed by
+    /// the existing cascade (normally zero deliveries remain at this point).
+    pub reclaimed_occurrence_count: usize,
+    /// Occurrences whose delivery fan-out is still live and therefore has not
+    /// armed reclaim eligibility.
+    pub live_fan_out_count: usize,
+    /// Armed occurrences whose eligibility time is newer than the host cutoff.
+    pub grace_deferred_count: usize,
+}
+
+impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
+    fn reclaimed_count(&self) -> usize {
+        self.reclaimed_occurrence_count
+    }
+
+    fn sweep(&self) -> crate::store::MaintenanceSweep {
+        if self.live_fan_out_count > 0 || self.grace_deferred_count > 0 {
+            crate::store::MaintenanceSweep::Incomplete
+        } else if self.reclaimed_occurrence_count > 0 {
+            crate::store::MaintenanceSweep::Swept
+        } else {
+            crate::store::MaintenanceSweep::NothingToDo
+        }
+    }
+}
+
+/// A trigger-occurrence reclaim pass either completes with its counters or
+/// fails honestly with the counters accumulated before the failing delete.
+pub type TriggerOccurrenceReclamationResult = Result<
+    TriggerOccurrenceReclamationReport,
+    crate::store::MaintenanceFailure<TriggerOccurrenceReclamationReport, Box<PluginError>>,
+>;
+
 /// Orders delivery starts by the stable subscription identity fields captured
 /// in each reservation snapshot.
 ///
@@ -1466,6 +1510,23 @@ pub trait TriggerStore: Send + Sync {
         &self,
         candidates: &[TriggerDeliveryRetentionCandidate],
     ) -> Result<usize, PluginError>;
+
+    /// Reclaim terminal trigger occurrences armed no later than a host cutoff.
+    ///
+    /// This is a host-invoked maintenance lever, never a timer or background
+    /// task. A zero-match occurrence is armed atomically with ingest accounting;
+    /// a matched occurrence is armed atomically when deletion of its last
+    /// delivery severs the fan-out. The cutoff may defer an armed row but can
+    /// never initiate eligibility for a live one. Hosts that do not invoke this
+    /// method simply have not run occurrence maintenance.
+    ///
+    /// The implementation enumerates the complete occurrence scope before the
+    /// first destructive step. Enumeration failure is an error, and a later
+    /// delete failure carries the partial report accumulated so far.
+    async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> TriggerOccurrenceReclamationResult;
 
     /// Low-level primitive for dropping mutation idempotency receipts older
     /// than an explicit cutoff. Process retention never prunes these receipts,

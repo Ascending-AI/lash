@@ -150,6 +150,21 @@ const RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL: &str = r#"CREATE INDEX IF
             ON lash_runtime_effect_replay(group_key, replay_key)
             WHERE group_key IS NOT NULL AND settlement_seq IS NULL"#;
 
+const TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL: &str = r#"ALTER TABLE lash_trigger_occurrences
+            ADD COLUMN IF NOT EXISTS reclaimable_at_ms BIGINT"#;
+
+const TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL: &str = r#"DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM lash_trigger_occurrences) THEN
+                RAISE EXCEPTION 'component 56 requires an empty lash_trigger_occurrences table; recreate the store so reclaim eligibility is armed only by terminal transitions';
+            END IF;
+        END
+        $$"#;
+
+const TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_reclaimable
+            ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
+            WHERE reclaimable_at_ms IS NOT NULL"#;
+
 const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
     table: "lash_runtime_effect_replay",
     columns: &["group_key", "settlement_seq"],
@@ -173,21 +188,47 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    // The nullable arm records only future fan-out terminal transitions. The
+    // migration admits an empty occurrence scope only: carrying old rows
+    // forward unarmed would leak zero-match rows, while deriving eligibility
+    // during migration would let a scan initiate reclaim.
+    SchemaMigration {
+        from: 55,
+        to: 56,
+        source_missing_tables: &[],
+        source_missing_columns: &[("lash_trigger_occurrences", "reclaimable_at_ms")],
+        source_missing_guards: &[],
+        introduced_relations: &["idx_lash_trigger_occurrences_reclaimable"],
+        statements: &[
+            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
+            r#"UPDATE lash_schema_versions
+               SET version = 56
+             WHERE component = 'lash-postgres-store' AND version = 55"#,
+        ],
+    },
     // The 55 generation adds one index and nothing else: the drain's
     // unsettled-children read, which layer 2.5 deferred (FIG-1564) and the
     // drain (FIG-1536) makes a hot path. No table, no column, no guard — so the
     // source shape a 54 store must present is the current one.
     SchemaMigration {
         from: 54,
-        to: 55,
+        to: 56,
         source_missing_tables: &[],
-        source_missing_columns: &[],
+        source_missing_columns: &[("lash_trigger_occurrences", "reclaimable_at_ms")],
         source_missing_guards: &[],
-        introduced_relations: &["idx_lash_runtime_effect_replay_group_unsettled"],
+        introduced_relations: &[
+            "idx_lash_runtime_effect_replay_group_unsettled",
+            "idx_lash_trigger_occurrences_reclaimable",
+        ],
         statements: &[
+            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 55
+               SET version = 56
              WHERE component = 'lash-postgres-store' AND version = 54"#,
         ],
     },
@@ -196,11 +237,12 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 55,
+        to: 56,
         source_missing_tables: &["lash_runtime_effect_group"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
+            ("lash_trigger_occurrences", "reclaimable_at_ms"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
@@ -209,8 +251,10 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL,
             RUNTIME_EFFECT_REPLAY_SETTLEMENT_SEQ_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_SEQ_INDEX_DDL,
@@ -218,18 +262,21 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 55
+               SET version = 56
              WHERE component = 'lash-postgres-store' AND version = 53"#,
         ],
     },
     SchemaMigration {
         from: 52,
-        to: 55,
+        to: 56,
         source_missing_tables: &["lash_runtime_effect_group"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
+            ("lash_trigger_occurrences", "reclaimable_at_ms"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
@@ -240,8 +287,10 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
             PENDING_TURN_INPUT_ORDER_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL,
@@ -251,18 +300,21 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 55
+               SET version = 56
              WHERE component = 'lash-postgres-store' AND version = 52"#,
         ],
     },
     SchemaMigration {
         from: 51,
-        to: 55,
+        to: 56,
         source_missing_tables: &["lash_attachment_condemnations", "lash_runtime_effect_group"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
+            ("lash_trigger_occurrences", "reclaimable_at_ms"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
@@ -274,8 +326,10 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             ATTACHMENT_CONDEMNATIONS_DDL,
             QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL,
             PENDING_TURN_INPUT_ORDER_INDEX_DDL,
@@ -286,8 +340,10 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 55
+               SET version = 56
              WHERE component = 'lash-postgres-store' AND version = 51"#,
         ],
     },
@@ -295,7 +351,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 55,
+        to: 56,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
@@ -305,6 +361,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
+            ("lash_trigger_occurrences", "reclaimable_at_ms"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
@@ -319,8 +376,10 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_runtime_effect_group_scope",
             "uq_lash_runtime_effect_replay_group_seq",
             "idx_lash_runtime_effect_replay_group_unsettled",
+            "idx_lash_trigger_occurrences_reclaimable",
         ],
         statements: &[
+            TRIGGER_OCCURRENCES_EMPTY_MIGRATION_GUARD_DDL,
             PROCESS_PARENT_END_PLANS_DDL,
             TOOL_INTENT_SUBMISSIONS_DDL,
             TOOL_INTENT_SUBMISSIONS_INDEX_DDL,
@@ -334,8 +393,10 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL,
             RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL,
             RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
+            TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
             r#"UPDATE lash_schema_versions
-               SET version = 55
+               SET version = 56
              WHERE component = 'lash-postgres-store' AND version = 50"#,
         ],
     },
@@ -905,7 +966,7 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is normally a reject-and-recreate boundary. This build has \
          explicit Lash-managed migrations from the published component-50, component-51, \
-         component-52, component-53, and component-54 shapes to 55; they run only under \
+         component-52, component-53, component-54, and component-55 shapes to 56; they run only under \
          SchemaCheck::Enforce \
          after an exact \
          source-shape preflight. This mismatch \
@@ -922,7 +983,7 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
 mod tests {
     use super::*;
 
-    /// The declared 53 -> 55 migration, which every case below perturbs.
+    /// The declared 53 -> 56 migration, which every case below perturbs.
     fn migration() -> &'static SchemaMigration {
         SCHEMA_MIGRATIONS
             .iter()
@@ -961,7 +1022,7 @@ mod tests {
     fn report(findings: Vec<SchemaFinding>) -> SchemaReport {
         SchemaReport {
             schema: Some("public".to_string()),
-            expected_version: 55,
+            expected_version: 56,
             found_version: Some(53),
             findings,
         }
@@ -972,7 +1033,7 @@ mod tests {
     fn published_53_findings() -> Vec<SchemaFinding> {
         vec![
             SchemaFinding::VersionMismatch {
-                expected: 55,
+                expected: 56,
                 found: Some(53),
             },
             SchemaFinding::MissingTable {
@@ -985,6 +1046,15 @@ mod tests {
             SchemaFinding::MissingColumn {
                 table: "lash_runtime_effect_replay".to_string(),
                 expected: column("settlement_seq", true, ColumnValueSource::Supplied),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_trigger_occurrences".to_string(),
+                expected: ColumnShape {
+                    name: "reclaimable_at_ms".to_string(),
+                    sql_type: "bigint".to_string(),
+                    nullable: true,
+                    value_source: ColumnValueSource::Supplied,
+                },
             },
             SchemaFinding::MissingUniqueGuard {
                 table: "lash_runtime_effect_replay".to_string(),

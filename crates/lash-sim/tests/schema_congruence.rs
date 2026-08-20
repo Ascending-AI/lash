@@ -13,6 +13,7 @@ const SHAPE_CHANGED_TABLES: &[(&str, &str)] = &[
     ("attachment_condemnations", "lash_attachment_condemnations"),
     ("runtime_effect_replay", "lash_runtime_effect_replay"),
     ("runtime_effect_group", "lash_runtime_effect_group"),
+    ("trigger_occurrences", "lash_trigger_occurrences"),
 ];
 
 fn consume_keyword<'a>(source: &'a str, keyword: &str) -> Option<&'a str> {

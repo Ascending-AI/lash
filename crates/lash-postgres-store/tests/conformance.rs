@@ -122,6 +122,39 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset postgres process change clock");
 }
 
+struct PostgresTriggerOccurrenceRetentionFaultInjector {
+    pool: sqlx::PgPool,
+}
+
+#[async_trait::async_trait]
+impl lash_core::testing::conformance::TriggerOccurrenceRetentionFaultInjector
+    for PostgresTriggerOccurrenceRetentionFaultInjector
+{
+    async fn fail_occurrence_delete(&self, occurrence_id: &str) {
+        sqlx::query(
+            "CREATE OR REPLACE FUNCTION lash_fig1507_fail_occurrence_delete()
+             RETURNS TRIGGER LANGUAGE plpgsql AS $$
+             BEGIN
+                 RAISE EXCEPTION 'injected FIG-1507 occurrence delete failure';
+             END;
+             $$",
+        )
+        .execute(&self.pool)
+        .await
+        .expect("create Postgres occurrence delete failure function");
+        let occurrence_id = occurrence_id.replace('\'', "''");
+        sqlx::query(&format!(
+            "CREATE TRIGGER fail_fig1507_occurrence_delete
+             BEFORE DELETE ON lash_trigger_occurrences
+             FOR EACH ROW WHEN (OLD.occurrence_id = '{occurrence_id}')
+             EXECUTE FUNCTION lash_fig1507_fail_occurrence_delete()"
+        ))
+        .execute(&self.pool)
+        .await
+        .expect("install Postgres occurrence delete failure trigger");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_fence_integrity_conformance_when_configured() {
     let Some(database_url) = database_url() else {
@@ -2245,6 +2278,31 @@ async fn postgres_trigger_store_satisfies_conformance_when_configured() {
         })
     })
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_trigger_occurrence_retention_failure_is_not_laundered_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres trigger occurrence retention failure law: database is not configured"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
+    let fault = PostgresTriggerOccurrenceRetentionFaultInjector { pool: pool.clone() };
+    lash_core::testing::conformance::trigger_occurrence_retention_failure_law(store, &fault).await;
+    sqlx::query(
+        "DROP TRIGGER IF EXISTS fail_fig1507_occurrence_delete ON lash_trigger_occurrences",
+    )
+    .execute(&pool)
+    .await
+    .expect("drop Postgres occurrence delete failure trigger");
+    sqlx::query("DROP FUNCTION IF EXISTS lash_fig1507_fail_occurrence_delete()")
+        .execute(&pool)
+        .await
+        .expect("drop Postgres occurrence delete failure function");
 }
 
 /// Drive one process into `waiting` and assert the retention contract: live rows

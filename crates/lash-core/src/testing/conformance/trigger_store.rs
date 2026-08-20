@@ -26,8 +26,65 @@ where
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
     occurrence_time_bounds_match_the_rust_predicate(make()).await;
+    zero_match_occurrence_is_immediately_reclaimable(make()).await;
+    matched_occurrence_waits_for_terminal_deliveries(make()).await;
+    cutoff_defers_but_never_initiates_occurrence_reclaim(make()).await;
     null_source_occurrence_replay_is_idempotent(make()).await;
     first_ingress_and_replay_share_canonical_subscription_order(make()).await;
+}
+
+/// Arms a backend failure on the delete of one exact occurrence.
+#[async_trait::async_trait]
+pub trait TriggerOccurrenceRetentionFaultInjector: Send + Sync {
+    async fn fail_occurrence_delete(&self, occurrence_id: &str);
+}
+
+/// Proves that a mid-pass delete failure is `Err` with completed work in its
+/// partial report, never a forged `NothingToDo` success.
+pub async fn trigger_occurrence_retention_failure_law(
+    store: Arc<dyn crate::TriggerStore>,
+    fault: &dyn TriggerOccurrenceRetentionFaultInjector,
+) {
+    for key in ["failure-a", "failure-b"] {
+        store
+            .ingest_occurrence(button_occurrence("no-matching-subscription", key))
+            .await
+            .expect("ingest zero-match occurrence for failure law");
+    }
+    let mut occurrence_ids = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("enumerate failure-law occurrences")
+        .into_iter()
+        .map(|occurrence| occurrence.occurrence_id)
+        .collect::<Vec<_>>();
+    occurrence_ids.sort();
+    fault.fail_occurrence_delete(&occurrence_ids[1]).await;
+
+    let failure = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect_err("the injected delete must fail the reclaim pass");
+    assert!(
+        matches!(failure.stop, crate::MaintenanceStop::Failed(_)),
+        "a backend delete failure must use the failed arm: {failure:?}"
+    );
+    assert_eq!(failure.partial.inspected_occurrence_count, 2);
+    assert_eq!(
+        failure.partial.reclaimed_occurrence_count, 1,
+        "the first committed delete must survive in the partial report"
+    );
+    assert_eq!(
+        crate::MaintenanceReport::sweep(&failure.partial),
+        crate::MaintenanceSweep::Swept,
+        "the partial report names completed work; it is never forged as NothingToDo"
+    );
+    let remaining = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("inspect state after injected failure");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].occurrence_id, occurrence_ids[1]);
 }
 
 pub async fn trigger_store_reopenable<F>(make: F)
@@ -937,6 +994,173 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
     assert_eq!(
         replay.reservations[0].reservation_status,
         crate::TriggerDeliveryReservationOutcome::AlreadyReserved
+    );
+}
+
+/// Law: ingest accounting arms a zero-match fan-out immediately, so the host
+/// lever can reclaim it without any timer or delivery transition.
+async fn zero_match_occurrence_is_immediately_reclaimable(store: Arc<dyn crate::TriggerStore>) {
+    let ingress = store
+        .ingest_occurrence(button_occurrence(
+            "zero-match-source",
+            "zero-match-immediate-eligibility",
+        ))
+        .await
+        .expect("ingest zero-match occurrence");
+    assert!(ingress.reservations.is_empty());
+
+    let report = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("reclaim armed zero-match occurrence");
+    assert_eq!(report.inspected_occurrence_count, 1);
+    assert_eq!(report.reclaimed_occurrence_count, 1);
+    assert_eq!(report.live_fan_out_count, 0);
+    assert_eq!(report.grace_deferred_count, 0);
+    assert_eq!(
+        crate::MaintenanceReport::sweep(&report),
+        crate::MaintenanceSweep::Swept
+    );
+    assert!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list after zero-match reclaim")
+            .is_empty()
+    );
+}
+
+/// Law and negative proof: even the widest possible cutoff cannot reach a
+/// matched occurrence while its delivery fan-out remains live. Deleting the
+/// final terminal delivery arms the parent, after which the same host lever can
+/// reclaim it.
+async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::TriggerStore>) {
+    mutate(
+        &store,
+        "matched-retention-register",
+        register_command(
+            "matched-retention-session",
+            sample_draft(
+                "matched-retention-session",
+                "matched-retention-key",
+                "matched-retention-source",
+                "matched-retention-worker",
+            ),
+        ),
+    )
+    .await;
+    let ingress = store
+        .ingest_occurrence(button_occurrence(
+            "matched-retention-source",
+            "matched-retention-occurrence",
+        ))
+        .await
+        .expect("ingest matched occurrence");
+    assert_eq!(ingress.reservations.len(), 1);
+
+    let blocked = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("live fan-out is a reported blocker, not a backend failure");
+    assert_eq!(blocked.inspected_occurrence_count, 1);
+    assert_eq!(blocked.reclaimed_occurrence_count, 0);
+    assert_eq!(blocked.live_fan_out_count, 1);
+    assert_eq!(blocked.grace_deferred_count, 0);
+    assert_eq!(
+        crate::MaintenanceReport::sweep(&blocked),
+        crate::MaintenanceSweep::Incomplete
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("matched occurrence survives ancient cutoff")
+            .len(),
+        1,
+        "a cutoff must never initiate reclaim for a live fan-out"
+    );
+
+    let reservation = &ingress.reservations[0];
+    let terminal_delivery = crate::TriggerDeliveryRetentionCandidate {
+        occurrence_id: ingress.occurrence.occurrence_id.clone(),
+        subscription_id: reservation.subscription.subscription_id.clone(),
+        process_id: reservation.process_id.clone(),
+    };
+    assert_eq!(
+        store
+            .delete_delivery_retention_candidates(&[terminal_delivery])
+            .await
+            .expect("delete the final terminal delivery"),
+        1
+    );
+    let reclaimed = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("reclaim occurrence armed by final delivery terminality");
+    assert_eq!(reclaimed.reclaimed_occurrence_count, 1);
+    assert_eq!(reclaimed.live_fan_out_count, 0);
+}
+
+/// Law: the cutoff delays eligibility that was already armed. Moving the
+/// cutoff forward can reclaim that row, but still cannot arm a live fan-out.
+async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn crate::TriggerStore>) {
+    store
+        .ingest_occurrence(button_occurrence(
+            "cutoff-zero-match",
+            "cutoff-zero-match-occurrence",
+        ))
+        .await
+        .expect("ingest cutoff-deferred zero-match occurrence");
+    mutate(
+        &store,
+        "cutoff-live-register",
+        register_command(
+            "cutoff-live-session",
+            sample_draft(
+                "cutoff-live-session",
+                "cutoff-live-key",
+                "cutoff-live-source",
+                "cutoff-live-worker",
+            ),
+        ),
+    )
+    .await;
+    store
+        .ingest_occurrence(button_occurrence(
+            "cutoff-live-source",
+            "cutoff-live-occurrence",
+        ))
+        .await
+        .expect("ingest cutoff-proof live occurrence");
+
+    let deferred = store
+        .reclaim_trigger_occurrences(0)
+        .await
+        .expect("old cutoff completes with typed blockers");
+    assert_eq!(deferred.inspected_occurrence_count, 2);
+    assert_eq!(deferred.reclaimed_occurrence_count, 0);
+    assert_eq!(deferred.grace_deferred_count, 1);
+    assert_eq!(deferred.live_fan_out_count, 1);
+
+    let advanced = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("advanced cutoff reclaims only the armed occurrence");
+    assert_eq!(advanced.inspected_occurrence_count, 2);
+    assert_eq!(advanced.reclaimed_occurrence_count, 1);
+    assert_eq!(advanced.live_fan_out_count, 1);
+    assert_eq!(advanced.grace_deferred_count, 0);
+    assert_eq!(
+        crate::MaintenanceReport::sweep(&advanced),
+        crate::MaintenanceSweep::Incomplete
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("only live occurrence remains")
+            .len(),
+        1
     );
 }
 

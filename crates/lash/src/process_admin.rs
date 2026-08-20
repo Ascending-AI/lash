@@ -154,6 +154,15 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
         Ok(deleted)
     }
 
+    async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> lash_core::TriggerOccurrenceReclamationResult {
+        self.inner
+            .reclaim_trigger_occurrences(cutoff_epoch_ms)
+            .await
+    }
+
     async fn prune_mutation_receipts(
         &self,
         cutoff_epoch_ms: u64,
