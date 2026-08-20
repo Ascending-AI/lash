@@ -37,7 +37,7 @@ pub(crate) fn accepts_instance_method(method: &str) -> bool {
 }
 
 pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
-    stdlib::INSTANCE_STDLIB_METHODS
+    stdlib::instance_stdlib_methods()
 }
 
 /// Every binding the lowerer generates carries this prefix, which the dialect

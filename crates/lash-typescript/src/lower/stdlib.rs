@@ -108,101 +108,18 @@ pub(super) fn is_static_stdlib_method(owner: &str, method: &str) -> bool {
 
 /// Every instance standard-library method the lowerer accepts.
 ///
-/// This is the one list. The predicate below reads it and so does the
-/// register's pin, so the allowlist cannot grow without the documented
-/// inventory growing with it — the drift that shipped a register nine methods
-/// behind the lowerer was possible only while the two were separate.
-pub(super) const INSTANCE_STDLIB_METHODS: &[&str] = &[
-    "at",
-    "concat",
-    "charAt",
-    "charCodeAt",
-    "codePointAt",
-    "append",
-    "add",
-    "clear",
-    "delete",
-    "entries",
-    "exec",
-    "endsWith",
-    "filter",
-    "fill",
-    "find",
-    "findIndex",
-    "findLast",
-    "findLastIndex",
-    "flat",
-    "flatMap",
-    "forEach",
-    "get",
-    "getAll",
-    "has",
-    "includes",
-    "indexOf",
-    "join",
-    "lastIndexOf",
-    "map",
-    "match",
-    "matchAll",
-    "every",
-    "padEnd",
-    "padStart",
-    "repeat",
-    "replace",
-    "replaceAll",
-    "reduce",
-    "reduceRight",
-    "reverse",
-    "slice",
-    "sort",
-    "some",
-    "splice",
-    "push",
-    "pop",
-    "shift",
-    "unshift",
-    "split",
-    "search",
-    "startsWith",
-    "substring",
-    "toExponential",
-    "toFixed",
-    "toPrecision",
-    "toReversed",
-    "toSorted",
-    "toSpliced",
-    "set",
-    "keys",
-    "toLowerCase",
-    "toUpperCase",
-    "toString",
-    "trim",
-    "trimEnd",
-    "trimStart",
-    "test",
-    "valueOf",
-    "values",
-    "with",
-    "hasOwnProperty",
-    "union",
-    "intersection",
-    "difference",
-    "symmetricDifference",
-    "isSubsetOf",
-    "isSupersetOf",
-    "isDisjointFrom",
-    "toJSON",
-    "getTime",
-    "getUTCFullYear",
-    "getUTCMonth",
-    "getUTCDate",
-    "getUTCDay",
-    "getUTCHours",
-    "getUTCMinutes",
-    "getUTCSeconds",
-    "getUTCMilliseconds",
-    "toISOString",
-];
+/// Projected off [`crate::signatures::INSTANCE_STDLIB_SIGNATURES`] so the
+/// inventory cannot drift between the signature table, the lowerer's allowlist,
+/// and external consumers.
+pub(super) fn instance_stdlib_methods() -> &'static [&'static str] {
+    static METHODS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        crate::signatures::INSTANCE_STDLIB_SIGNATURES
+            .iter()
+            .map(|signature| signature.method)
+            .collect()
+    });
+    &METHODS
+}
 
 pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
     crate::signatures::INSTANCE_STDLIB_SIGNATURES
