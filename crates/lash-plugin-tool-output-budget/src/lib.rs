@@ -43,38 +43,13 @@ impl Default for ToolOutputBudgetConfig {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectionDirection {
+pub(crate) enum TruncationDirection {
     Head,
     Tail,
 }
 
-/// Which end of the output a windowed truncation keeps.
-///
-/// `Head` keeps the leading lines (the common case); `Tail` keeps the
-/// trailing lines (used for streaming command output where the end is
-/// the interesting part). This is the public mirror of the budget
-/// plugin's internal `ProjectionDirection`, exported so other plugins
-/// (e.g. rolling-history) can share the one canonical truncation core
-/// instead of forking it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TruncationDirection {
-    Head,
-    Tail,
-}
-
-impl From<ProjectionDirection> for TruncationDirection {
-    fn from(direction: ProjectionDirection) -> Self {
-        match direction {
-            ProjectionDirection::Head => TruncationDirection::Head,
-            ProjectionDirection::Tail => TruncationDirection::Tail,
-        }
-    }
-}
-
-/// The unit reported in the `...N <unit> truncated...` marker when a
-/// windowed truncation hits its byte budget (rather than its line cap).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TruncationUnit {
+pub(crate) enum TruncationUnit {
     /// Report removed *characters*, labelled `bytes`.
     Bytes,
     /// Report an approximate removed *token* count, labelled `tokens`.
@@ -90,23 +65,49 @@ impl TruncationUnit {
     }
 }
 
-/// Parameters for [`truncate_windowed`], the single canonical
-/// head/tail-window + byte-cap truncation implementation shared by the
-/// tool-output-budget projector and the rolling-history compaction
-/// plugin.
 #[derive(Clone, Copy, Debug)]
-pub struct WindowedTruncation<'a> {
-    /// Maximum number of lines retained in the preview window.
+pub(crate) struct WindowedTruncation<'a> {
     pub max_lines: usize,
-    /// Maximum number of bytes retained in the preview window.
     pub max_bytes: usize,
-    /// Which end of the output to keep.
     pub direction: TruncationDirection,
-    /// The unit reported in the byte-budget truncation marker.
     pub unit: TruncationUnit,
-    /// Trailing hint text appended to (Head) / prepended to (Tail) the
-    /// preview, explaining the truncation and where the full output is.
     pub hint: &'a str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Budget {
+    pub max_bytes: usize,
+    pub max_lines: usize,
+    pub unit: TruncationUnit,
+}
+
+impl Budget {
+    pub fn from_config(config: &ToolOutputBudgetConfig) -> Self {
+        let (max_bytes, unit) = match config.mode {
+            ToolOutputBudgetMode::Bytes => (config.limit, TruncationUnit::Bytes),
+            ToolOutputBudgetMode::Tokens => (
+                config.limit.saturating_mul(APPROX_BYTES_PER_TOKEN),
+                TruncationUnit::Tokens,
+            ),
+        };
+        Self {
+            max_bytes,
+            max_lines: config.max_lines,
+            unit,
+        }
+    }
+}
+
+impl From<&ToolOutputBudgetConfig> for Budget {
+    fn from(config: &ToolOutputBudgetConfig) -> Self {
+        Self::from_config(config)
+    }
+}
+
+impl From<ToolOutputBudgetConfig> for Budget {
+    fn from(config: ToolOutputBudgetConfig) -> Self {
+        Self::from_config(&config)
+    }
 }
 
 /// The canonical head/tail-window + byte-cap truncation core.
@@ -119,7 +120,7 @@ pub struct WindowedTruncation<'a> {
 /// A single line that is itself larger than `max_bytes` is truncated at
 /// a UTF-8 char boundary rather than dropped, so over-long lines never
 /// silently disappear and the function never panics on multi-byte text.
-pub fn truncate_windowed(text: &str, opts: &WindowedTruncation) -> String {
+pub(crate) fn truncate_windowed(text: &str, opts: &WindowedTruncation) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let total_bytes = text.len();
     if lines.len() <= opts.max_lines && total_bytes <= opts.max_bytes {
@@ -217,12 +218,14 @@ fn char_floor(text: &str, max: usize) -> usize {
 }
 
 pub struct ToolOutputBudgetPluginFactory {
-    config: ToolOutputBudgetConfig,
+    budget: Budget,
 }
 
 impl ToolOutputBudgetPluginFactory {
     pub fn new(config: ToolOutputBudgetConfig) -> Self {
-        Self { config }
+        Self {
+            budget: Budget::from(config),
+        }
     }
 }
 
@@ -245,13 +248,13 @@ impl PluginFactory for ToolOutputBudgetPluginFactory {
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(ToolOutputBudgetPlugin {
-            config: self.config.clone(),
+            budget: self.budget,
         }))
     }
 }
 
 struct ToolOutputBudgetPlugin {
-    config: ToolOutputBudgetConfig,
+    budget: Budget,
 }
 
 impl SessionPlugin for ToolOutputBudgetPlugin {
@@ -260,26 +263,18 @@ impl SessionPlugin for ToolOutputBudgetPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        register_projector(reg, &self.config)
+        register_projector(reg, self.budget)
     }
 }
 
-fn register_projector(
-    reg: &mut PluginRegistrar,
-    config: &ToolOutputBudgetConfig,
-) -> Result<(), PluginError> {
-    let config = config.clone();
+fn register_projector(reg: &mut PluginRegistrar, budget: Budget) -> Result<(), PluginError> {
     reg.tool_results().projector(Arc::new(move |ctx| {
-        let config = config.clone();
-        Box::pin(async move { Ok(project_tool_result(&config, ctx)) })
+        Box::pin(async move { Ok(project_tool_result(&budget, ctx)) })
     }))
 }
 
-fn project_tool_result(
-    config: &ToolOutputBudgetConfig,
-    ctx: ToolResultProjectionContext,
-) -> ModelToolReturn {
-    let parts = project_model_parts(config, &ctx);
+fn project_tool_result(budget: &Budget, ctx: ToolResultProjectionContext) -> ModelToolReturn {
+    let parts = project_model_parts(budget, &ctx);
     ModelToolReturn {
         call_id: ctx.call_id.clone(),
         tool_name: ctx.tool_name.clone(),
@@ -287,37 +282,27 @@ fn project_tool_result(
     }
 }
 
-/// Project a tool result into the rendered model-facing text using the
-/// canonical projector — including the structure-aware `batch` path that
-/// recurses into each child result with the correct per-child truncation
-/// direction.
-///
-/// Exposed so other plugins (e.g. rolling-history) can reuse the one
-/// canonical batch/structured projection instead of flattening batched
-/// output to an opaque string and tail-truncating it (which cuts JSON
-/// mid-structure and loses per-child windowing). Attachments are rendered
-/// inline using the same `[Attachment: …]` placeholder the budget plugin
-/// uses internally.
-pub fn project_tool_result_text(
-    config: &ToolOutputBudgetConfig,
+#[allow(dead_code)]
+pub(crate) fn project_tool_result_text(
+    budget: &Budget,
     ctx: ToolResultProjectionContext,
 ) -> String {
-    render_model_return_parts(&project_tool_result(config, ctx).parts)
+    render_model_return_parts(&project_tool_result(budget, ctx).parts)
 }
 
 fn project_model_parts(
-    config: &ToolOutputBudgetConfig,
+    budget: &Budget,
     ctx: &ToolResultProjectionContext,
 ) -> Vec<ModelToolReturnPart> {
     if ctx.tool_name == "batch" {
-        let value = project_batch_value(config, ctx);
+        let value = project_batch_value(budget, ctx);
         return vec![ModelToolReturnPart::text(render_projected_model_value(
             &value,
         ))];
     }
 
     match &ctx.output.outcome {
-        ToolCallOutcome::Success(value) => project_tool_value_parts(config, ctx, value),
+        ToolCallOutcome::Success(value) => project_tool_value_parts(budget, ctx, value),
         ToolCallOutcome::Failure(failure) => {
             let mut parts = vec![ModelToolReturnPart::text(
                 lash_core::session_model::format_tool_output_content(&ctx.output),
@@ -355,14 +340,14 @@ fn render_projected_model_value(value: &serde_json::Value) -> String {
 }
 
 fn project_tool_value_parts(
-    config: &ToolOutputBudgetConfig,
+    budget: &Budget,
     ctx: &ToolResultProjectionContext,
     value: &ToolValue,
 ) -> Vec<ModelToolReturnPart> {
     let mut parts = Vec::new();
     match value {
         ToolValue::String(text) => {
-            parts.push(ModelToolReturnPart::text(project_text(text, config, ctx)))
+            parts.push(ModelToolReturnPart::text(project_text(text, budget, ctx)))
         }
         ToolValue::Attachment(reference) => {
             parts.push(ModelToolReturnPart::Attachment(reference.clone()));
@@ -372,7 +357,7 @@ fn project_tool_value_parts(
         | ToolValue::Number(_)
         | ToolValue::Array(_)
         | ToolValue::Object(_) => {
-            push_projected_tool_value_parts(value, &mut parts, config, ctx);
+            push_projected_tool_value_parts(value, &mut parts, budget, ctx);
         }
     }
     parts
@@ -381,7 +366,7 @@ fn project_tool_value_parts(
 fn push_projected_tool_value_parts(
     value: &ToolValue,
     parts: &mut Vec<ModelToolReturnPart>,
-    config: &ToolOutputBudgetConfig,
+    budget: &Budget,
     ctx: &ToolResultProjectionContext,
 ) {
     match value {
@@ -390,7 +375,7 @@ fn push_projected_tool_value_parts(
         ToolValue::Number(value) => push_text_part(parts, value.to_string()),
         ToolValue::String(text) => push_text_part(
             parts,
-            serde_json::to_string(&project_text(text, config, ctx))
+            serde_json::to_string(&project_text(text, budget, ctx))
                 .unwrap_or_else(|_| "\"\"".to_string()),
         ),
         ToolValue::Attachment(reference) => {
@@ -402,7 +387,7 @@ fn push_projected_tool_value_parts(
                 if index > 0 {
                     push_text_part(parts, ",");
                 }
-                push_projected_tool_value_parts(item, parts, config, ctx);
+                push_projected_tool_value_parts(item, parts, budget, ctx);
             }
             push_text_part(parts, "]");
         }
@@ -417,7 +402,7 @@ fn push_projected_tool_value_parts(
                     serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string()),
                 );
                 push_text_part(parts, ":");
-                push_projected_tool_value_parts(value, parts, config, ctx);
+                push_projected_tool_value_parts(value, parts, budget, ctx);
             }
             push_text_part(parts, "}");
         }
@@ -436,100 +421,67 @@ fn push_text_part(parts: &mut Vec<ModelToolReturnPart>, text: impl Into<String>)
     }
 }
 
-fn project_text(
-    text: &str,
-    config: &ToolOutputBudgetConfig,
-    ctx: &ToolResultProjectionContext,
-) -> String {
-    if !needs_truncation(text, config) {
+fn project_text(text: &str, budget: &Budget, ctx: &ToolResultProjectionContext) -> String {
+    if !needs_truncation(text, budget) {
         return text.to_string();
     }
     truncate_text(
         text,
-        config,
+        budget,
         tool_projection_direction(&ctx.tool_name),
         Some(ctx),
     )
 }
 
-fn needs_truncation(text: &str, config: &ToolOutputBudgetConfig) -> bool {
-    if text.lines().count() > config.max_lines {
-        return true;
-    }
-    match config.mode {
-        ToolOutputBudgetMode::Bytes => text.len() > config.limit,
-        ToolOutputBudgetMode::Tokens => approx_token_count(text) > config.limit,
-    }
+fn needs_truncation(text: &str, budget: &Budget) -> bool {
+    text.lines().count() > budget.max_lines || text.len() > budget.max_bytes
 }
 
 fn truncate_text(
     text: &str,
-    config: &ToolOutputBudgetConfig,
-    direction: ProjectionDirection,
+    budget: &Budget,
+    direction: TruncationDirection,
     ctx: Option<&ToolResultProjectionContext>,
 ) -> String {
-    truncate_text_with_hint(text, config, direction, truncation_hint(ctx, text))
+    truncate_text_with_hint(text, budget, direction, truncation_hint(ctx, text))
 }
 
 fn truncate_text_with_hint(
     text: &str,
-    config: &ToolOutputBudgetConfig,
-    direction: ProjectionDirection,
+    budget: &Budget,
+    direction: TruncationDirection,
     hint: String,
 ) -> String {
     if text.is_empty() {
         return String::new();
     }
-    let max_bytes = match config.mode {
-        ToolOutputBudgetMode::Bytes => config.limit,
-        ToolOutputBudgetMode::Tokens => approx_bytes_for_tokens(config.limit),
-    };
-    if max_bytes == 0 {
-        return format_truncation_marker(
-            config.mode,
-            removed_units(config.mode, text.len(), text.chars().count()),
-        );
+    if budget.max_bytes == 0 {
+        return format_zero_budget_marker(budget.unit, text);
     }
-    if !needs_truncation(text, config) {
+    if !needs_truncation(text, budget) {
         return text.to_string();
     }
     truncate_windowed(
         text,
         &WindowedTruncation {
-            max_lines: config.max_lines,
-            max_bytes,
-            direction: direction.into(),
-            unit: match config.mode {
-                ToolOutputBudgetMode::Bytes => TruncationUnit::Bytes,
-                ToolOutputBudgetMode::Tokens => TruncationUnit::Tokens,
-            },
+            max_lines: budget.max_lines,
+            max_bytes: budget.max_bytes,
+            direction,
+            unit: budget.unit,
             hint: &hint,
         },
     )
 }
 
-fn format_truncation_marker(mode: ToolOutputBudgetMode, removed: u64) -> String {
-    match mode {
-        ToolOutputBudgetMode::Bytes => format!("…{removed} chars truncated…"),
-        ToolOutputBudgetMode::Tokens => format!("…{removed} tokens truncated…"),
+fn format_zero_budget_marker(unit: TruncationUnit, text: &str) -> String {
+    let removed = match unit {
+        TruncationUnit::Bytes => u64::try_from(text.chars().count()).unwrap_or(u64::MAX),
+        TruncationUnit::Tokens => approx_tokens_from_byte_count(text.len()),
+    };
+    match unit {
+        TruncationUnit::Bytes => format!("…{removed} chars truncated…"),
+        TruncationUnit::Tokens => format!("…{removed} tokens truncated…"),
     }
-}
-
-fn removed_units(mode: ToolOutputBudgetMode, removed_bytes: usize, removed_chars: usize) -> u64 {
-    match mode {
-        ToolOutputBudgetMode::Bytes => u64::try_from(removed_chars).unwrap_or(u64::MAX),
-        ToolOutputBudgetMode::Tokens => approx_tokens_from_byte_count(removed_bytes),
-    }
-}
-
-fn approx_token_count(text: &str) -> usize {
-    text.len()
-        .saturating_add(APPROX_BYTES_PER_TOKEN.saturating_sub(1))
-        / APPROX_BYTES_PER_TOKEN
-}
-
-fn approx_bytes_for_tokens(tokens: usize) -> usize {
-    tokens.saturating_mul(APPROX_BYTES_PER_TOKEN)
 }
 
 fn approx_tokens_from_byte_count(bytes: usize) -> u64 {
@@ -538,10 +490,10 @@ fn approx_tokens_from_byte_count(bytes: usize) -> u64 {
         / (APPROX_BYTES_PER_TOKEN as u64)
 }
 
-fn tool_projection_direction(tool_name: &str) -> ProjectionDirection {
+fn tool_projection_direction(tool_name: &str) -> TruncationDirection {
     match tool_name {
-        "exec_command" | "write_stdin" => ProjectionDirection::Tail,
-        _ => ProjectionDirection::Head,
+        "exec_command" | "write_stdin" => TruncationDirection::Tail,
+        _ => TruncationDirection::Head,
     }
 }
 
@@ -610,13 +562,10 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn project_batch_value(
-    config: &ToolOutputBudgetConfig,
-    ctx: &ToolResultProjectionContext,
-) -> serde_json::Value {
+fn project_batch_value(budget: &Budget, ctx: &ToolResultProjectionContext) -> serde_json::Value {
     let value = ctx.output.value_for_projection();
     let Some(map) = value.as_object() else {
-        return project_json_value(&value, config, ctx);
+        return project_json_value(&value, budget, ctx);
     };
 
     let mut projected = serde_json::Map::new();
@@ -628,7 +577,7 @@ fn project_batch_value(
             items
                 .iter()
                 .enumerate()
-                .map(|(index, item)| project_batch_child_value(index, item, config, ctx))
+                .map(|(index, item)| project_batch_child_value(index, item, budget, ctx))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -639,11 +588,11 @@ fn project_batch_value(
 fn project_batch_child_value(
     index: usize,
     item: &serde_json::Value,
-    config: &ToolOutputBudgetConfig,
+    budget: &Budget,
     ctx: &ToolResultProjectionContext,
 ) -> serde_json::Value {
     let Some(map) = item.as_object() else {
-        return project_json_value(item, config, ctx);
+        return project_json_value(item, budget, ctx);
     };
 
     let tool_name = map
@@ -670,10 +619,10 @@ fn project_batch_child_value(
     let child_args = batch_child_args(&ctx.args, index);
 
     let projected_child = if tool_name == "batch" || !success {
-        project_json_value(&child_value, config, ctx)
+        project_json_value(&child_value, budget, ctx)
     } else {
         let model_return = project_tool_result(
-            config,
+            budget,
             ToolResultProjectionContext {
                 session_id: ctx.session_id.clone(),
                 call_id: format!("{}.{}", ctx.call_id, index),
@@ -736,22 +685,22 @@ fn render_model_return_parts(parts: &[ModelToolReturnPart]) -> String {
 
 fn project_json_value(
     value: &serde_json::Value,
-    config: &ToolOutputBudgetConfig,
+    budget: &Budget,
     ctx: &ToolResultProjectionContext,
 ) -> serde_json::Value {
     match value {
         serde_json::Value::String(text) => {
-            serde_json::Value::String(project_text(text, config, ctx))
+            serde_json::Value::String(project_text(text, budget, ctx))
         }
         serde_json::Value::Array(items) => serde_json::Value::Array(
             items
                 .iter()
-                .map(|item| project_json_value(item, config, ctx))
+                .map(|item| project_json_value(item, budget, ctx))
                 .collect(),
         ),
         serde_json::Value::Object(map) => serde_json::Value::Object(
             map.iter()
-                .map(|(key, value)| (key.clone(), project_json_value(value, config, ctx)))
+                .map(|(key, value)| (key.clone(), project_json_value(value, budget, ctx)))
                 .collect(),
         ),
         other => other.clone(),
@@ -851,7 +800,7 @@ mod tests {
         };
         let got = project_text(
             "this is an example of a long output that should be truncated",
-            &config,
+            &Budget::from(&config),
             &ToolResultProjectionContext {
                 session_id: "root".to_string(),
                 call_id: "call".to_string(),
@@ -872,7 +821,7 @@ mod tests {
             ..ToolOutputBudgetConfig::default()
         };
         let projected = project_tool_result(
-            &config,
+            &Budget::from(&config),
             ToolResultProjectionContext {
                 session_id: "root".to_string(),
                 call_id: "call".to_string(),
@@ -897,7 +846,7 @@ mod tests {
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
         };
         let projected = project_tool_result(
-            &config,
+            &Budget::from(&config),
             ToolResultProjectionContext {
                 session_id: "root".to_string(),
                 call_id: "call".to_string(),
@@ -913,9 +862,26 @@ mod tests {
     }
 
     #[test]
+    fn project_tool_result_text_renders_string() {
+        let budget = Budget::from(ToolOutputBudgetConfig::default());
+        let text = project_tool_result_text(
+            &budget,
+            ToolResultProjectionContext {
+                session_id: "root".to_string(),
+                call_id: "call".to_string(),
+                tool_name: "read_file".to_string(),
+                args: json!({}),
+                output: lash_core::ToolCallOutput::success(json!("short output")),
+                duration_ms: 1,
+            },
+        );
+        assert_eq!(text, "short output");
+    }
+
+    #[test]
     fn batch_model_projection_preserves_projected_child_payloads() {
         let projected = project_tool_result(
-            &ToolOutputBudgetConfig::default(),
+            &Budget::from(ToolOutputBudgetConfig::default()),
             ToolResultProjectionContext {
                 session_id: "root".to_string(),
                 call_id: "call".to_string(),
@@ -947,10 +913,10 @@ mod tests {
     #[test]
     fn batch_history_projection_recursively_projects_child_payloads() {
         let projected = project_tool_result(
-            &ToolOutputBudgetConfig {
+            &Budget::from(ToolOutputBudgetConfig {
                 limit: 8,
                 ..ToolOutputBudgetConfig::default()
-            },
+            }),
             ToolResultProjectionContext {
                 session_id: "root".to_string(),
                 call_id: "call".to_string(),
@@ -978,5 +944,88 @@ mod tests {
             .unwrap_or_default();
         assert!(child_result.contains("truncated"));
         assert_eq!(details[1].get("error"), Some(&json!("boom")));
+    }
+
+    #[test]
+    fn zero_budget_returns_marker_only() {
+        let byte_config = ToolOutputBudgetConfig {
+            mode: ToolOutputBudgetMode::Bytes,
+            limit: 0,
+            max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+        };
+        let token_config = ToolOutputBudgetConfig {
+            mode: ToolOutputBudgetMode::Tokens,
+            limit: 0,
+            max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+        };
+        let ctx = ToolResultProjectionContext {
+            session_id: "root".to_string(),
+            call_id: "call".to_string(),
+            tool_name: "read_file".to_string(),
+            args: json!({}),
+            output: lash_core::ToolCallOutput::success(json!("unused")),
+            duration_ms: 1,
+        };
+
+        let byte_result = project_text("hello world", &Budget::from(&byte_config), &ctx);
+        assert_eq!(byte_result, "…11 chars truncated…");
+
+        let token_result = project_text("hello world", &Budget::from(&token_config), &ctx);
+        assert_eq!(token_result, "…3 tokens truncated…");
+    }
+
+    #[test]
+    fn byte_mode_vs_token_mode_equivalence_at_same_effective_max_bytes() {
+        // limit: 10 tokens == limit: 40 bytes (10 * 4 = 40)
+        let token_config = ToolOutputBudgetConfig {
+            mode: ToolOutputBudgetMode::Tokens,
+            limit: 10,
+            max_lines: 100,
+        };
+        let byte_config = ToolOutputBudgetConfig {
+            mode: ToolOutputBudgetMode::Bytes,
+            limit: 40,
+            max_lines: 100,
+        };
+
+        let token_budget = Budget::from(&token_config);
+        let byte_budget = Budget::from(&byte_config);
+
+        assert_eq!(token_budget.max_bytes, 40);
+        assert_eq!(byte_budget.max_bytes, 40);
+        assert_eq!(token_budget.max_lines, byte_budget.max_lines);
+
+        let ctx = ToolResultProjectionContext {
+            session_id: "root".to_string(),
+            call_id: "call".to_string(),
+            tool_name: "read_file".to_string(),
+            args: json!({}),
+            output: lash_core::ToolCallOutput::success(json!("unused")),
+            duration_ms: 1,
+        };
+
+        // Text within budget (<= 40 bytes) passes through untouched in both modes
+        let short_text = "short text well under forty bytes";
+        assert_eq!(project_text(short_text, &byte_budget, &ctx), short_text);
+        assert_eq!(project_text(short_text, &token_budget, &ctx), short_text);
+
+        // Text exactly at budget (40 bytes)
+        let exact_text = "a".repeat(40);
+        assert_eq!(project_text(&exact_text, &byte_budget, &ctx), exact_text);
+        assert_eq!(project_text(&exact_text, &token_budget, &ctx), exact_text);
+
+        // Text exceeding budget (100 bytes): preview portion must be identical
+        let long_text = "a".repeat(100);
+        let byte_projected = project_text(&long_text, &byte_budget, &ctx);
+        let token_projected = project_text(&long_text, &token_budget, &ctx);
+
+        let byte_preview = byte_projected.split("\n\n...").next().expect("preview");
+        let token_preview = token_projected.split("\n\n...").next().expect("preview");
+        assert_eq!(byte_preview, token_preview);
+        assert_eq!(byte_preview.len(), 40);
+
+        assert!(byte_projected.contains("...60 bytes truncated..."));
+        // 60 bytes / 4 = 15 tokens
+        assert!(token_projected.contains("...15 tokens truncated..."));
     }
 }
