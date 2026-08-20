@@ -406,7 +406,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                         observation_truncation: Vec::new(),
                         tool_calls: Vec::new(),
                         executed_calls: Vec::new(),
-                        images: Vec::new(),
                         printed_images: Vec::new(),
                         error: None,
                         duration_ms: 887,

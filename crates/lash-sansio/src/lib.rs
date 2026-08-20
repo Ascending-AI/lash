@@ -51,8 +51,7 @@ pub use schema_contract::{
     SchemaResolutionRequest, project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
-    ExecImage, ExecResponse, ExecutedCallOutcome, ExecutedCallRecord, PromptUsage,
-    TextProjectionMetadata,
+    ExecResponse, ExecutedCallOutcome, ExecutedCallRecord, PromptUsage, TextProjectionMetadata,
 };
 pub use session_model::message::MessageOrigin;
 pub use session_model::{

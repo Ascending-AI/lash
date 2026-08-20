@@ -55,9 +55,6 @@ fn record_effect<M: TurnProtocol>(transcript: &mut Transcript, actor: &str, effe
                     .attr(Attr::int("tools", request.tools.len() as u64)),
             );
         }
-        Effect::CancelLlm { .. } => {
-            transcript.record(Entry::new(Kind::Cancel, session(), "model.cancel"));
-        }
         Effect::ToolCalls { calls, .. } => {
             for call in calls {
                 transcript.record(

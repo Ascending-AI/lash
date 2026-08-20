@@ -164,8 +164,6 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         id: EffectId,
         request: Arc<LlmRequest>,
     },
-    /// Cancel an in-progress LLM stream.
-    CancelLlm { id: EffectId },
     /// Execute one or more driver-scheduled tool calls.
     ToolCalls {
         id: EffectId,
@@ -218,7 +216,6 @@ impl<M: TurnProtocol> Clone for Effect<M> {
                 id: *id,
                 request: Arc::clone(request),
             },
-            Self::CancelLlm { id } => Self::CancelLlm { id: *id },
             Self::ToolCalls { id, calls } => Self::ToolCalls {
                 id: *id,
                 calls: calls.clone(),
@@ -263,7 +260,6 @@ impl<M: TurnProtocol> Effect<M> {
         match self {
             Self::SyncExecutionEnvironment { id, .. }
             | Self::LlmCall { id, .. }
-            | Self::CancelLlm { id }
             | Self::ToolCalls { id, .. }
             | Self::ExecCode { id, .. }
             | Self::Checkpoint { id, .. } => Some(*id),
