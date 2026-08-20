@@ -908,6 +908,9 @@ fn language_execution_full_shape() {
             },
         },
     };
+    // This pin compares parsed `serde_json::Value`s and is key-order-insensitive.
+    // The envelope hoist moved the `kind` key from first to third while keeping
+    // identical keys and values; this `json!` literal is not a byte-level pin.
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
         json!({
