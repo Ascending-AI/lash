@@ -97,8 +97,8 @@ fn lashlang_identity() -> TraceLanguageExecutionIdentity {
 
 /// One representative of every [`TraceEvent`] variant. Paired with
 /// [`event_samples_cover_every_variant`], this fails until a new variant is
-/// given a sample, and [`TraceEvent::kind`] (exhaustive in the crate) fails to
-/// compile until the variant is given a tag.
+/// given a sample, and [`expected_event_kind`] is an exhaustive match that
+/// fails to compile until the variant is given a tag.
 fn event_samples() -> Vec<TraceEvent> {
     vec![
         TraceEvent::SessionStarted {
@@ -262,6 +262,37 @@ fn event_samples() -> Vec<TraceEvent> {
             duration_ms: 3,
             attempts: None,
         },
+        TraceEvent::JournaledEffectStarted {
+            effect_name: "lash:turn:llm:1".to_string(),
+            effect_kind: "llm_call".to_string(),
+        },
+        TraceEvent::JournaledEffectSettled {
+            effect_name: "lash:turn:llm:1".to_string(),
+            effect_kind: "llm_call".to_string(),
+            status: "completed".to_string(),
+        },
+        TraceEvent::DurableWaitParked {
+            wait_kind: "await_event".to_string(),
+        },
+        TraceEvent::DurableWaitResolved {
+            wait_kind: "await_event".to_string(),
+            resolution: "ok".to_string(),
+        },
+        TraceEvent::DurableTimerStarted { duration_ms: 250 },
+        TraceEvent::DurableTimerResolved {
+            duration_ms: 250,
+            status: "resolved".to_string(),
+        },
+        TraceEvent::DurableSegmentBoundary {
+            reason: "journal_budget".to_string(),
+            effects_executed: 10_000,
+            journaled_bytes_estimate: None,
+        },
+        TraceEvent::StoreErrorObserved {
+            operation: "session_restore".to_string(),
+            error_class: "StoredDataCorrupt".to_string(),
+            message: "stored SessionHeadMeta data is corrupt".to_string(),
+        },
         TraceEvent::ProtocolStep {
             plugin_id: "custom".to_string(),
             payload: json!({ "code": "print 1" }),
@@ -291,31 +322,58 @@ fn event_samples() -> Vec<TraceEvent> {
     ]
 }
 
-const ALL_TRACE_EVENT_KINDS: &[&str] = &[
-    "session_started",
-    "turn_started",
-    "prompt_built",
-    "composition_changed",
-    "rolling_history_compaction_needed",
-    "rolling_history_prompt_pruned",
-    "rolling_history_compaction_started",
-    "rolling_history_compaction_completed",
-    "llm_call_started",
-    "llm_call_completed",
-    "llm_call_failed",
-    "provider_request",
-    "provider_replay_dropped",
-    "effect_envelope_diff",
-    "provider_stream_event",
-    "runtime_stream_event",
-    "tool_call_started",
-    "tool_call_completed",
-    "protocol_step",
-    "token_usage",
-    "language_execution",
-    "turn_completed",
-    "custom",
-];
+macro_rules! trace_event_kinds {
+    ($( $variant:ident => $kind:literal, )*) => {
+        /// The expected event kind string for this variant. Exhaustive on purpose:
+        /// a new variant fails to compile here until it is mapped.
+        fn expected_event_kind(event: &TraceEvent) -> &'static str {
+            match event {
+                $( TraceEvent::$variant { .. } => $kind, )*
+            }
+        }
+
+        /// Canonical list of every trace event kind string. Paired with
+        /// [`event_samples_cover_every_variant`], this catches a variant that
+        /// gained a kind mapping but no pinned sample.
+        const ALL_TRACE_EVENT_KINDS: &[&str] = &[
+            $( $kind, )*
+        ];
+    };
+}
+
+trace_event_kinds! {
+    SessionStarted => "session_started",
+    TurnStarted => "turn_started",
+    PromptBuilt => "prompt_built",
+    CompositionChanged => "composition_changed",
+    RollingHistoryCompactionNeeded => "rolling_history_compaction_needed",
+    RollingHistoryCompactionStarted => "rolling_history_compaction_started",
+    RollingHistoryCompactionCompleted => "rolling_history_compaction_completed",
+    RollingHistoryPromptPruned => "rolling_history_prompt_pruned",
+    LlmCallStarted => "llm_call_started",
+    LlmCallCompleted => "llm_call_completed",
+    LlmCallFailed => "llm_call_failed",
+    ProviderRequest => "provider_request",
+    ProviderReplayDropped => "provider_replay_dropped",
+    EffectEnvelopeDiff => "effect_envelope_diff",
+    ProviderStreamEvent => "provider_stream_event",
+    RuntimeStreamEvent => "runtime_stream_event",
+    ToolCallStarted => "tool_call_started",
+    ToolCallCompleted => "tool_call_completed",
+    JournaledEffectStarted => "journaled_effect_started",
+    JournaledEffectSettled => "journaled_effect_settled",
+    DurableWaitParked => "durable_wait_parked",
+    DurableWaitResolved => "durable_wait_resolved",
+    DurableTimerStarted => "durable_timer_started",
+    DurableTimerResolved => "durable_timer_resolved",
+    DurableSegmentBoundary => "durable_segment_boundary",
+    StoreErrorObserved => "store_error_observed",
+    ProtocolStep => "protocol_step",
+    TokenUsage => "token_usage",
+    LanguageExecution => "language_execution",
+    TurnCompleted => "turn_completed",
+    Custom => "custom",
+}
 
 #[test]
 fn every_event_type_tag_matches_kind() {
@@ -325,6 +383,11 @@ fn every_event_type_tag_matches_kind() {
         assert_eq!(
             json["type"], kind,
             "serialized `type` disagrees with TraceEvent::kind() for `{kind}`"
+        );
+        assert_eq!(
+            expected_event_kind(&event),
+            kind,
+            "expected_event_kind disagrees with TraceEvent::kind() for `{kind}`"
         );
     }
 }

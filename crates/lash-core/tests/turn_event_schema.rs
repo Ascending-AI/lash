@@ -23,57 +23,46 @@ use lash_core::{
 };
 use serde_json::json;
 
-/// The `type` tag serde writes for this variant. Exhaustive on purpose: a new
-/// variant fails to compile until it is mapped, forcing the author here.
-fn expected_type_tag(event: &TurnEvent) -> &'static str {
-    match event {
-        TurnEvent::QueuedWorkStarted { .. } => "queued_work_started",
-        TurnEvent::ModelRequestStarted { .. } => "model_request_started",
-        TurnEvent::AssistantProseDelta { .. } => "assistant_prose_delta",
-        TurnEvent::ReasoningDelta { .. } => "reasoning_delta",
-        TurnEvent::ModelAttemptReset { .. } => "model_attempt_reset",
-        TurnEvent::ModelCallRecorded { .. } => "model_call_recorded",
-        TurnEvent::CodeBlockStarted { .. } => "code_block_started",
-        TurnEvent::CodeBlockCompleted { .. } => "code_block_completed",
-        TurnEvent::ToolCallStarted { .. } => "tool_call_started",
-        TurnEvent::ToolCallCompleted { .. } => "tool_call_completed",
-        TurnEvent::ToolIntentOutcome { .. } => "tool_intent_outcome",
-        TurnEvent::FinalValue { .. } => "final_value",
-        TurnEvent::ToolValue { .. } => "tool_value",
-        TurnEvent::Usage { .. } => "usage",
-        TurnEvent::ChildUsage { .. } => "child_usage",
-        TurnEvent::RetryStatus { .. } => "retry_status",
-        TurnEvent::PluginRuntime { .. } => "plugin_runtime",
-        TurnEvent::QueuedInputAccepted { .. } => "queued_input_accepted",
-        TurnEvent::QueuedMessagesCommitted { .. } => "queued_messages_committed",
-        TurnEvent::Error { .. } => "error",
-    }
+macro_rules! turn_event_tags {
+    ($( $variant:ident => $tag:literal, )*) => {
+        /// The `type` tag serde writes for this variant. Exhaustive on purpose: a new
+        /// variant fails to compile until it is mapped, forcing the author here.
+        fn expected_type_tag(event: &TurnEvent) -> &'static str {
+            match event {
+                $( TurnEvent::$variant { .. } => $tag, )*
+            }
+        }
+
+        /// Canonical list of every serialized tag. Paired with [`samples_cover_every_variant`],
+        /// this catches a variant that gained a tag mapping but no pinned sample.
+        const ALL_TURN_EVENT_TAGS: &[&str] = &[
+            $( $tag, )*
+        ];
+    };
 }
 
-/// Canonical list of every serialized tag. Paired with [`samples_cover_every_variant`],
-/// this catches a variant that gained a tag mapping but no pinned sample.
-const ALL_TURN_EVENT_TAGS: &[&str] = &[
-    "queued_work_started",
-    "model_request_started",
-    "assistant_prose_delta",
-    "reasoning_delta",
-    "model_attempt_reset",
-    "model_call_recorded",
-    "code_block_started",
-    "code_block_completed",
-    "tool_call_started",
-    "tool_call_completed",
-    "tool_intent_outcome",
-    "final_value",
-    "tool_value",
-    "usage",
-    "child_usage",
-    "retry_status",
-    "plugin_runtime",
-    "queued_input_accepted",
-    "queued_messages_committed",
-    "error",
-];
+turn_event_tags! {
+    QueuedWorkStarted => "queued_work_started",
+    ModelRequestStarted => "model_request_started",
+    AssistantProseDelta => "assistant_prose_delta",
+    ReasoningDelta => "reasoning_delta",
+    ModelAttemptReset => "model_attempt_reset",
+    ModelCallRecorded => "model_call_recorded",
+    CodeBlockStarted => "code_block_started",
+    CodeBlockCompleted => "code_block_completed",
+    ToolCallStarted => "tool_call_started",
+    ToolCallCompleted => "tool_call_completed",
+    ToolIntentOutcome => "tool_intent_outcome",
+    FinalValue => "final_value",
+    ToolValue => "tool_value",
+    Usage => "usage",
+    ChildUsage => "child_usage",
+    RetryStatus => "retry_status",
+    PluginRuntime => "plugin_runtime",
+    QueuedInputAccepted => "queued_input_accepted",
+    QueuedMessagesCommitted => "queued_messages_committed",
+    Error => "error",
+}
 
 fn token_usage_sample() -> TokenUsage {
     TokenUsage {
