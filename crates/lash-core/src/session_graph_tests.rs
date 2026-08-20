@@ -534,6 +534,90 @@ fn active_read_replacement_persists_messages_only() {
 }
 
 #[test]
+fn projection_and_replacement_retain_the_same_prefix() {
+    let first = text_message("m1", MessageRole::User, "first");
+    let second = text_message("m2", MessageRole::Assistant, "second");
+    let mut transient = text_message("mt", MessageRole::User, "transient");
+    transient.origin = Some(crate::MessageOrigin::Plugin {
+        plugin_id: "prefix-test".to_string(),
+        transient: true,
+    });
+
+    let mut graph = SessionGraph::default();
+    graph.append_message(first.clone());
+    graph.append_message(transient.clone());
+    graph.append_protocol_event(protocol_event());
+    graph.append_message(second.clone());
+    let existing_ids = graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<HashSet<_>>();
+    let current_parts = graph
+        .nodes
+        .iter()
+        .filter_map(|node| node.message().map(|message| message.parts))
+        .collect::<Vec<_>>();
+
+    let cases = [
+        (
+            "transient messages do not participate",
+            vec![first.clone(), transient, second.clone()],
+            2,
+        ),
+        (
+            "a divergent second message stops after the first",
+            vec![
+                first.clone(),
+                text_message("m2", MessageRole::Assistant, "changed"),
+            ],
+            1,
+        ),
+        (
+            "a divergent first message retains nothing",
+            vec![text_message("m1", MessageRole::User, "changed")],
+            0,
+        ),
+        (
+            "an exhausted target stops before the second message",
+            vec![first],
+            1,
+        ),
+    ];
+
+    for (case, messages, expected) in cases {
+        let replacement = build_active_read_replacement(
+            graph.nodes.iter(),
+            &existing_ids,
+            "active-read-prefix-differential-test",
+            &messages,
+            "2026-08-20T00:00:00Z".to_string(),
+        );
+        let projection = build_active_read_projection(graph.nodes.iter(), &messages);
+        let projection_retained_count = projection
+            .active_messages
+            .iter()
+            .filter(|message| {
+                current_parts
+                    .iter()
+                    .any(|parts| Arc::ptr_eq(parts, &message.parts))
+            })
+            .count();
+        let replacement_retained_prefix_len = messages
+            .iter()
+            .filter(|message| !message.is_transient())
+            .count()
+            - replacement.new_tail_nodes.len();
+
+        assert_eq!(projection_retained_count, expected, "{case}");
+        assert_eq!(
+            projection_retained_count, replacement_retained_prefix_len,
+            "{case}"
+        );
+    }
+}
+
+#[test]
 fn graph_writers_keep_payload_kind_out_of_draft_identity() {
     let mut graph = SessionGraph::default();
     graph.append_message(text_message("m1", MessageRole::User, "hello"));

@@ -191,7 +191,7 @@ impl TurnGraphEditor {
         for message in messages.iter().filter(|message| !message.is_transient()) {
             if let Some(durable_message) = durable_messages.get(&message.id) {
                 observation_only_messages += 1;
-                if !messages_structurally_equal(durable_message, message) {
+                if !durable_message.content_equals(message) {
                     id_mismatches.push(message.id.clone());
                 }
                 continue;
@@ -374,10 +374,6 @@ impl TurnGraphEditor {
             self.appended_nodes.push(node);
         }
     }
-}
-
-fn messages_structurally_equal(left: &Message, right: &Message) -> bool {
-    left.content_equals(right)
 }
 
 #[cfg(test)]
