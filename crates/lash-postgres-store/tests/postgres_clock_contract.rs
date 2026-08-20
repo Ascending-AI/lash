@@ -115,6 +115,22 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "async fn claim_ready_queued_work_postgres_tx(",
             "async fn defer_orphaned_active_turn_inputs_tx(",
         ),
+        // The checkpoint probe is a free function below the store impl. Keep
+        // its SQL decision on the PostgreSQL clock even though it has no
+        // injected clock parameter. The region runs through the empty-scan
+        // refusal helper so that clock-deciding neighbour is fenced too.
+        (
+            RUNTIME_PERSISTENCE_SOURCE,
+            "async fn checkpoint_work_pending_postgres(",
+            "async fn claim_ready_queued_work_postgres_tx(",
+        ),
+        // The orphaned-input repair runs inside the caller's transaction and
+        // must remain inside the same server-clock contract as its claim path.
+        (
+            RUNTIME_PERSISTENCE_SOURCE,
+            "async fn defer_orphaned_active_turn_inputs_tx(",
+            "async fn claim_pending_turn_inputs_postgres_tx(",
+        ),
         // The transaction-scoped pending-input claim copy. The public
         // `claim_pending_turn_inputs_postgres` caller is fenced below, but
         // this helper is far below the impl block and reads `now` and
