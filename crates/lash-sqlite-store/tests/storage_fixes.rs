@@ -189,7 +189,7 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     .releasing_session_execution_lease(session_lease.completion());
     let result = store.commit_runtime_state(commit).await.expect("commit");
 
-    let report = store.gc_unreachable().await;
+    let report = store.gc_unreachable().await.expect("gc sweeps");
     assert!(
         report.deleted_blob_count >= 1,
         "the orphan blob should be collected, report={report:?}"

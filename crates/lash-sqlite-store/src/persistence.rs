@@ -3024,14 +3024,12 @@ impl StoreMaintenance for Store {
             .map_err(sqlite_error)
     }
 
-    async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+    async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {
         // `deleted_sessions` is deliberately exempt: it is permanent identity
         // evidence and must survive every retention-pruning pass.
-        let session_id = self
-            .session_id
-            .get()
-            .cloned()
-            .ok_or(StoreError::SessionNotBound)?;
+        let session_id = self.session_id.get().cloned().ok_or_else(|| {
+            lash_core::MaintenanceFailure::failed_before_any_work(StoreError::SessionNotBound)
+        })?;
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self
             .conn
             .write(move |tx| {
@@ -3055,15 +3053,19 @@ impl StoreMaintenance for Store {
                 ))
             })
             .await
-            .map_err(sqlite_error)?;
+            // Both deletes ride in one transaction: a failure rolls them back,
+            // so no rows survived to report.
+            .map_err(|err| {
+                lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
+            })?;
         Ok(VacuumReport {
             removed_node_count,
             removed_pending_turn_input_tombstone_count,
         })
     }
 
-    async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
-        Ok(Store::gc_unreachable(self).await)
+    async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<GcReport> {
+        Store::gc_unreachable(self).await
     }
 }
 

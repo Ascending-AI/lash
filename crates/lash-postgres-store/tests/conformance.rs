@@ -694,6 +694,59 @@ async fn postgres_artifact_store_satisfies_conformance_when_configured() {
     .await;
 }
 
+/// Corrupt the live checkpoint manifest so the mark phase cannot decode the
+/// root it must follow, giving the sweep a real failure to report.
+struct PostgresCorruptRootedManifest {
+    storage: Arc<PostgresStorage>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::testing::conformance::StoreMaintenanceFaultInjector
+    for PostgresCorruptRootedManifest
+{
+    async fn break_gc_scope(&self, _session_id: &str) {
+        let corrupted = sqlx::query(
+            "UPDATE lash_blobs SET content = '\\xffffffff'::bytea
+             WHERE hash IN (SELECT checkpoint_ref FROM lash_sessions
+                            WHERE checkpoint_ref IS NOT NULL)",
+        )
+        .execute(self.storage.pool())
+        .await
+        .expect("corrupt the rooted checkpoint manifest")
+        .rows_affected();
+        assert!(
+            corrupted >= 1,
+            "the fault must corrupt at least one rooted manifest"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_store_satisfies_the_maintenance_outcome_contract_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres maintenance-outcome conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    let make_storage = Arc::clone(&storage);
+    lash_core::testing::conformance::store_maintenance_outcome_contract(
+        "postgres",
+        || {
+            let storage = Arc::clone(&make_storage);
+            sync_await(async move {
+                reset(&storage).await;
+                Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+            })
+        },
+        Some(Arc::new(PostgresCorruptRootedManifest {
+            storage: Arc::clone(&storage),
+        })),
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_session_store_factory_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {

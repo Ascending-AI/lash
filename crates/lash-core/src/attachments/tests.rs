@@ -349,6 +349,115 @@ async fn memory_store_lists_stored_blobs() {
     assert_eq!(listed.len(), 2);
 }
 
+struct DeleteFailingAttachmentStore {
+    inner: InMemoryAttachmentStore,
+}
+
+impl DeleteFailingAttachmentStore {
+    fn new() -> Self {
+        Self {
+            inner: InMemoryAttachmentStore::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AttachmentStore for DeleteFailingAttachmentStore {
+    async fn put(
+        &self,
+        bytes: Vec<u8>,
+        meta: AttachmentCreateMeta,
+    ) -> Result<AttachmentRef, AttachmentStoreError> {
+        self.inner.put(bytes, meta).await
+    }
+
+    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+        self.inner.get(id).await
+    }
+
+    async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+        Err(AttachmentStoreError::Backend(format!(
+            "scripted delete failure for {id}"
+        )))
+    }
+
+    async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
+        self.inner.list().await
+    }
+
+    async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
+        self.inner.head(id).await
+    }
+}
+
+#[tokio::test]
+async fn gc_all_deletes_failed_is_incomplete() {
+    let backend = DeleteFailingAttachmentStore::new();
+    let first = backend
+        .put(vec![1, 3, 3, 7], meta())
+        .await
+        .expect("put first deletion candidate");
+    let second = backend
+        .put(vec![2, 4, 4, 8], meta())
+        .await
+        .expect("put second deletion candidate");
+    let roots = RecordingRootSet { manifests: vec![] };
+
+    let report = reclaim_unreferenced_attachments(
+        &roots,
+        &backend,
+        AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
+        },
+    )
+    .await
+    .expect("per-item delete failures ride in a completed report");
+
+    assert_eq!(report.reclaimed_count, 0);
+    assert_eq!(
+        report.failed_ids.iter().cloned().collect::<BTreeSet<_>>(),
+        [first.id, second.id].into_iter().collect::<BTreeSet<_>>()
+    );
+    assert!(report.condemn_deferred_ids.is_empty());
+    assert_eq!(
+        crate::store::MaintenanceReport::sweep(&report),
+        crate::store::MaintenanceSweep::Incomplete,
+        "a pass whose every destructive step failed is incomplete, not empty"
+    );
+}
+
+#[tokio::test]
+async fn gc_empty_backend_reports_nothing_to_do_with_root_diagnostic() {
+    let backend = InMemoryAttachmentStore::new();
+
+    let report = reclaim_unreferenced_attachments(
+        &UnavailableRootSet,
+        &backend,
+        AttachmentReclamationPolicy {
+            grace_period_ms: 0,
+            empty_root_set: EmptyRootSetPolicy::Refuse,
+        },
+    )
+    .await
+    .expect("an enumerated empty backend has no destructive scope to refuse");
+
+    assert_eq!(report.scanned_blob_count, 0);
+    assert_eq!(report.reclaimed_count, 0);
+    assert!(report.failed_ids.is_empty());
+    assert!(report.condemn_deferred_ids.is_empty());
+    assert_eq!(
+        crate::store::MaintenanceReport::sweep(&report),
+        crate::store::MaintenanceSweep::NothingToDo
+    );
+    assert_eq!(
+        report.root_enumeration_failure.as_deref(),
+        Some(
+            "failed to enumerate live attachment refs: store backend error: root enumeration unavailable"
+        )
+    );
+}
+
 #[tokio::test]
 async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
     let backend = InMemoryAttachmentStore::new();
@@ -369,10 +478,13 @@ async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
     .await;
 
     let error = result.expect_err("empty roots must refuse deletion");
-    assert!(matches!(&error, AttachmentStoreError::EmptyRootSetRefused));
-    assert!(
-        error.to_string().contains("AuthorizeDeleteAll"),
-        "the typed refusal must name the explicit remedy: {error}"
+    assert_eq!(
+        error.refusal(),
+        Some(&crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized)
+    );
+    assert_eq!(
+        error.partial.scanned_blob_count, 1,
+        "the refusal must carry the report accumulated before it: {error:?}"
     );
     backend
         .get(&attachment.id)
@@ -435,7 +547,7 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
 }
 
 #[tokio::test]
-async fn gc_reports_root_enumeration_failure_when_every_blob_is_fresh() {
+async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protected() {
     let backend = InMemoryAttachmentStore::new();
     let attachment = backend
         .put(vec![4, 2, 4, 9], meta())
@@ -451,8 +563,15 @@ async fn gc_reports_root_enumeration_failure_when_every_blob_is_fresh() {
         },
     )
     .await
-    .expect("fresh-only backend has no deletion candidate");
+    .expect_err("an unenumerable root set cannot be reported as a healthy sweep");
 
+    assert_eq!(
+        report.refusal(),
+        Some(&crate::store::MaintenanceRefusal::UnwitnessedScope {
+            scope: "live attachment root set"
+        })
+    );
+    let report = report.partial;
     assert_eq!(report.scanned_blob_count, 1);
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(

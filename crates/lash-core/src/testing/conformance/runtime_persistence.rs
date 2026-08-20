@@ -2759,7 +2759,7 @@ async fn release_session_execution_lease_for_test(
         .expect("release session execution lease");
 }
 
-async fn commit_runtime_state_for_test(
+pub(super) async fn commit_runtime_state_for_test(
     store: &Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
     owner_id: &str,

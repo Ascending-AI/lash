@@ -148,6 +148,10 @@ struct SessionVacuumReport {
     session_id: String,
     removed_node_count: usize,
     removed_pending_turn_input_tombstone_count: usize,
+    /// Which arm of the maintenance outcome contract this pass landed on. Zero
+    /// counters alone cannot say whether the pass swept nothing because there
+    /// was nothing to sweep; the classification says it in one word.
+    sweep: SweepOutcome,
 }
 
 /// The whole of `lash::persistence::AttachmentReclamationReport`, projected to
@@ -161,11 +165,41 @@ struct SessionVacuumReport {
 struct AttachmentReclamationSummary {
     scanned_blob_count: usize,
     reclaimed_count: usize,
+    /// Number of blobs whose destructive step failed.
+    failed_count: usize,
     failed_ids: Vec<String>,
+    /// Number of condemnations deferred for a later pass.
+    condemn_deferred_count: usize,
     condemn_deferred_ids: Vec<String>,
     deleted_while_referenced: Vec<String>,
     root_enumeration_failure: Option<String>,
     fence: SweepFence,
+    /// Which arm of the maintenance outcome contract this pass landed on.
+    sweep: SweepOutcome,
+}
+
+/// `lash::persistence::MaintenanceSweep` on the wire: the success arm of the
+/// maintenance outcome contract, split into the three answers an operator has
+/// to tell apart. An incomplete pass completed its scope and remains a `200`,
+/// with its failure counts carried beside the classification. A refusal and a
+/// failure never reach this type — they come back as `409` and `500` instead of
+/// as a report with zeroes in it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SweepOutcome {
+    Swept,
+    Incomplete,
+    NothingToDo,
+}
+
+impl From<lash::persistence::MaintenanceSweep> for SweepOutcome {
+    fn from(sweep: lash::persistence::MaintenanceSweep) -> Self {
+        match sweep {
+            lash::persistence::MaintenanceSweep::Swept => Self::Swept,
+            lash::persistence::MaintenanceSweep::Incomplete => Self::Incomplete,
+            lash::persistence::MaintenanceSweep::NothingToDo => Self::NothingToDo,
+        }
+    }
 }
 
 /// `lash::persistence::AttachmentGcFence` on the wire.
@@ -373,8 +407,16 @@ async fn vacuum_bound_store(
         .await
         // Audited: session-scoped store maintenance reclaims rows that already
         // settled; it crosses no effect-controller boundary and produces no
-        // tombstone cause of its own.
-        .map_err(AppError::internal)
+        // tombstone cause of its own. The stop carries the rows already
+        // reclaimed, so the operator is told how far the pass got instead of
+        // having to guess.
+        .map_err(|failure| {
+            AppError::internal(format!(
+                "{failure}; reclaimed before the stop: {} node rows, {} pending-turn-input rows",
+                failure.partial.removed_node_count,
+                failure.partial.removed_pending_turn_input_tombstone_count
+            ))
+        })
 }
 
 /// Project one session's vacuum report onto the wire.
@@ -384,6 +426,7 @@ fn session_vacuum_report(
 ) -> SessionVacuumReport {
     SessionVacuumReport {
         session_id: session_id.to_string(),
+        sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),
         removed_node_count: report.removed_node_count,
         removed_pending_turn_input_tombstone_count: report
             .removed_pending_turn_input_tombstone_count,
@@ -437,17 +480,32 @@ async fn sweep_unreferenced_attachments(
 ) -> Result<AttachmentReclamationSummary, AppError> {
     let report =
         lash::persistence::reclaim_unreferenced_attachments(root_set, backend, policy).await;
-    let report = report.map_err(|error| match error {
-        lash::persistence::AttachmentStoreError::EmptyRootSetRefused => AppError::conflict(
+    let report = report.map_err(|failure| match failure.stop {
+        lash::persistence::MaintenanceStop::Refused(
+            lash::persistence::MaintenanceRefusal::EmptyRootSetUnauthorized,
+        ) => AppError::conflict(
             "attachment reclamation refused: the root authority enumerated zero live \
              attachment refs while a deletion-eligible blob was present, so proceeding \
              would have deleted every blob in the backend. Confirm the store factory is \
              the one that owns this deployment's sessions; re-send with \
              empty_root_set=authorize_delete_all only if deleting all of it is intended",
         ),
+        // The root set could not be enumerated at all, so its emptiness proves
+        // nothing and the sweep declined to act on it.
+        lash::persistence::MaintenanceStop::Refused(
+            lash::persistence::MaintenanceRefusal::UnwitnessedScope { scope },
+        ) => AppError::conflict(format!(
+            "attachment reclamation refused: `{scope}` could not be enumerated, so an \
+             empty root set could not be told apart from a blind one. The sweep deleted \
+             nothing: {}",
+            failure
+                .partial
+                .root_enumeration_failure
+                .unwrap_or_else(|| "no diagnostic reported".to_string())
+        )),
         // Audited: the content-addressed attachment backend has no session
         // identity or tombstone error variant.
-        other => AppError::internal(other),
+        lash::persistence::MaintenanceStop::Failed(other) => AppError::internal(other),
     })?;
     Ok(attachment_reclamation_summary(report))
 }
@@ -456,10 +514,15 @@ async fn sweep_unreferenced_attachments(
 fn attachment_reclamation_summary(
     report: lash::persistence::AttachmentReclamationReport,
 ) -> AttachmentReclamationSummary {
+    let failed_count = report.failed_ids.len();
+    let condemn_deferred_count = report.condemn_deferred_ids.len();
     AttachmentReclamationSummary {
+        sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),
         scanned_blob_count: report.scanned_blob_count,
         reclaimed_count: report.reclaimed_count,
+        failed_count,
         failed_ids: attachment_ids_to_strings(&report.failed_ids),
+        condemn_deferred_count,
         condemn_deferred_ids: attachment_ids_to_strings(&report.condemn_deferred_ids),
         deleted_while_referenced: attachment_ids_to_strings(&report.deleted_while_referenced),
         fence: SweepFence::from(report.fence),

@@ -83,6 +83,19 @@ async fn perf_store_keeps_same_host_distinct_executors_lane_less() {
     .await;
 }
 
+/// The perf store implements no reclamation. The maintenance outcome contract
+/// makes that a stated failure rather than an empty sweep, so a benchmark run
+/// can never read "nothing to reclaim" from a backend that never looked.
+#[tokio::test]
+async fn perf_store_reports_unimplemented_maintenance_levers() {
+    let store = RuntimePerfStore::default();
+    lash_core::testing::conformance::store_maintenance_unimplemented_levers_fail(
+        "lash-perf",
+        &store,
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn perf_store_enforces_core_lease_fence_authority() {
     let store = RuntimePerfStore::default();

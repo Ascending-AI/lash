@@ -777,12 +777,15 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     )
     .await;
 
-    assert!(
-        matches!(
-            result,
-            Err(lash_core::AttachmentStoreError::EmptyRootSetRefused)
-        ),
-        "an empty Postgres root database must refuse deletion: {result:?}"
+    let failure = result.expect_err("an empty Postgres root database must refuse deletion");
+    assert_eq!(
+        failure.refusal(),
+        Some(&lash_core::MaintenanceRefusal::EmptyRootSetUnauthorized),
+        "an empty Postgres root database must refuse deletion: {failure:?}"
+    );
+    assert_eq!(
+        failure.partial.scanned_blob_count, 1,
+        "the refusal must carry the report accumulated before it: {failure:?}"
     );
     lash_core::AttachmentStore::get(&backend, &attachment.id)
         .await

@@ -4837,11 +4837,11 @@ impl lash_core::StoreMaintenance for CommitRetryStore {
             .await
     }
 
-    async fn vacuum(&self) -> Result<lash_core::VacuumReport, lash_core::StoreError> {
+    async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
         self.inner.vacuum().await
     }
 
-    async fn gc_unreachable(&self) -> Result<lash_core::GcReport, lash_core::StoreError> {
+    async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<lash_core::GcReport> {
         self.inner.gc_unreachable().await
     }
 }

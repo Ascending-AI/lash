@@ -10,6 +10,7 @@ mod fork_plan;
 mod graph_commit;
 mod lease_timings;
 mod load;
+mod maintenance;
 mod preflight;
 pub mod queued_work;
 mod realization;
@@ -39,6 +40,10 @@ pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{
     LoadedPersistedSession, load_persisted_session, load_persisted_session_state,
     refresh_persisted_session_state,
+};
+pub use maintenance::{
+    GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
+    MaintenanceStop, MaintenanceSweep, VacuumReport,
 };
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
@@ -175,24 +180,6 @@ impl From<String> for BlobRef {
     fn from(value: String) -> Self {
         Self(value)
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct GcReport {
-    pub root_count: usize,
-    pub retained_blob_count: usize,
-    pub deleted_blob_count: usize,
-}
-
-/// Result of a `StoreMaintenance::vacuum()` call.
-/// `removed_node_count` counts the tombstoned graph-node rows that were
-/// physically deleted from the store. `removed_pending_turn_input_tombstone_count`
-/// counts terminal pending-input evidence rows pruned by host-scheduled
-/// retention. Returned so hosts can emit metrics.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct VacuumReport {
-    pub removed_node_count: usize,
-    pub removed_pending_turn_input_tombstone_count: usize,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1450,14 +1437,25 @@ pub trait StoreMaintenance: Send + Sync {
     /// reclaim tombstoned rows owned by already-deleted sessions too, still never
     /// catalog-wide: live sessions' rows wait for their own vacuum.
     ///
-    /// # Errors
+    /// # Outcome
     ///
-    /// Returns [`StoreError::SessionNotBound`] when invoked on an unbound store
-    /// handle that is not bound to a session.
-    async fn vacuum(&self) -> Result<VacuumReport, StoreError>;
+    /// Answers in the maintenance outcome contract ([`MaintenanceResult`]):
+    /// `Ok` with non-zero counters is a sweep, `Ok` with zero counters is a
+    /// witnessed nothing-to-do, and every stop — including
+    /// [`StoreError::SessionNotBound`] on an unbound handle — rides in a
+    /// [`MaintenanceFailure`] carrying the rows already reclaimed. A backend
+    /// must never absorb its own error into a zero report.
+    async fn vacuum(&self) -> MaintenanceResult<VacuumReport>;
 
     /// Delete blobs no longer reachable from any retained root.
-    async fn gc_unreachable(&self) -> Result<GcReport, StoreError>;
+    ///
+    /// A read-only-tier auditor with a destructive repair arm (ADR 0067 §1):
+    /// correctness never depends on it running. Same outcome contract as
+    /// [`Self::vacuum`] — a backend that cannot enumerate its roots refuses
+    /// with [`MaintenanceRefusal::UnwitnessedScope`] rather than reporting an
+    /// empty sweep, and a backend that does not implement the lever at all
+    /// fails with [`StoreError::UnsupportedStoreOperation`].
+    async fn gc_unreachable(&self) -> MaintenanceResult<GcReport>;
 
     /// Seed the exact session-owned trigger-manifest artifact-ref namespace for
     /// deletion conformance and differential tests.

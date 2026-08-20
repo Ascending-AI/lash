@@ -29,6 +29,55 @@ struct StoreMaintenanceFixture {
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }
 
+struct DeleteFailingWorkbenchAttachmentStore {
+    inner: Arc<dyn lash::persistence::AttachmentStore>,
+}
+
+#[async_trait]
+impl lash::persistence::AttachmentStore for DeleteFailingWorkbenchAttachmentStore {
+    fn persistence(&self) -> lash::persistence::AttachmentStorePersistence {
+        self.inner.persistence()
+    }
+
+    async fn put(
+        &self,
+        bytes: Vec<u8>,
+        meta: lash::attachments::AttachmentCreateMeta,
+    ) -> Result<lash::attachments::AttachmentRef, lash::persistence::AttachmentStoreError> {
+        self.inner.put(bytes, meta).await
+    }
+
+    async fn get(
+        &self,
+        id: &lash::attachments::AttachmentId,
+    ) -> Result<lash::persistence::StoredAttachment, lash::persistence::AttachmentStoreError> {
+        self.inner.get(id).await
+    }
+
+    async fn delete(
+        &self,
+        id: &lash::attachments::AttachmentId,
+    ) -> Result<(), lash::persistence::AttachmentStoreError> {
+        Err(lash::persistence::AttachmentStoreError::Backend(format!(
+            "scripted workbench delete failure for {id}"
+        )))
+    }
+
+    async fn list(
+        &self,
+    ) -> Result<Vec<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError> {
+        self.inner.list().await
+    }
+
+    async fn head(
+        &self,
+        id: &lash::attachments::AttachmentId,
+    ) -> Result<Option<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError>
+    {
+        self.inner.head(id).await
+    }
+}
+
 /// Build a durable workbench over SQLite with the store factory wired into both
 /// the core and `AppState`, so the maintenance route sweeps the same catalog the
 /// sessions live in.
@@ -404,6 +453,10 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
     assert_eq!(protected.scanned_blob_count, 2);
     // The retention window spared the unreferenced blob.
     assert_eq!(protected.reclaimed_count, 0);
+    // A pass that completes and reclaims nothing is a *witnessed* nothing-to-do,
+    // and the response says so rather than leaving the operator to infer it from
+    // a zero that a swallowed failure could also have produced.
+    assert_eq!(protected.sweep, SweepOutcome::NothingToDo);
     attachment_store
         .get(&orphan.id)
         .await
@@ -426,6 +479,8 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
     assert_eq!(summary.scanned_blob_count, 2);
     // Exactly the unreferenced blob was reclaimed; the root set spared the other.
     assert_eq!(summary.reclaimed_count, 1);
+    // The same pass classifies itself as a sweep, the other arm of the contract.
+    assert_eq!(summary.sweep, SweepOutcome::Swept);
     // The SQLite session store factory implements the condemnation CAS, so its
     // deletes are fenced against concurrent writers rather than best-effort.
     assert_eq!(summary.fence, SweepFence::Fenced);
@@ -454,6 +509,73 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
 
     drop(state);
     std::fs::remove_dir_all(&data_dir).expect("remove store-maintenance reclaim data dir");
+}
+
+#[test]
+fn store_maintenance_serves_incomplete_sweep_with_failure_counts() {
+    run_async_test_on_stack_budget("workbench-store-maintenance-incomplete", || {
+        store_maintenance_serves_incomplete_sweep_with_failure_counts_inner()
+    });
+}
+
+async fn store_maintenance_serves_incomplete_sweep_with_failure_counts_inner() {
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-store-maintenance-incomplete-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-store-maintenance")
+        .complete_error("the incomplete-sweep test must not call the provider")
+        .build()
+        .into_handle();
+    let fixture = store_maintenance_fixture(&data_dir, provider).await;
+    let inner = Arc::clone(&fixture.attachment_store);
+    let orphan = inner
+        .put(
+            b"workbench-incomplete-sweep".to_vec(),
+            lash::attachments::AttachmentCreateMeta::new(
+                lash::attachments::MediaType::parse("application/octet-stream")
+                    .expect("incomplete-sweep media type"),
+                None,
+                Some("incomplete-sweep-orphan".to_string()),
+            ),
+        )
+        .await
+        .expect("seed the deletion candidate");
+    let mut state = fixture.state;
+    state.attachment_store = Arc::new(DeleteFailingWorkbenchAttachmentStore {
+        inner: Arc::clone(&inner),
+    });
+    state.session_store_factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+
+    let Json(response) = run_store_maintenance(
+        State(state.clone()),
+        Json(reclaim_only_request(
+            TEST_ONLY_INSTANT_ELIGIBILITY_MS,
+            EmptyRootSetAuthorization::AuthorizeDeleteAll,
+        )),
+    )
+    .await
+    .expect("per-item failures complete the route as an incomplete sweep");
+    assert_eq!(
+        Json(response.clone()).into_response().status(),
+        StatusCode::OK,
+        "an incomplete sweep is a successful HTTP response"
+    );
+
+    let body = serde_json::to_value(response).expect("serialize maintenance response body");
+    let summary = &body["reclaimed_attachments"];
+    assert_eq!(summary["sweep"], "incomplete");
+    assert_eq!(summary["failed_count"], 1);
+    assert_eq!(summary["condemn_deferred_count"], 0);
+    assert_eq!(summary["failed_ids"], json!([orphan.id.to_string()]));
+    inner
+        .get(&orphan.id)
+        .await
+        .expect("the failed delete leaves the blob intact");
+
+    drop(state);
+    std::fs::remove_dir_all(&data_dir).expect("remove incomplete-sweep data dir");
 }
 
 #[test]

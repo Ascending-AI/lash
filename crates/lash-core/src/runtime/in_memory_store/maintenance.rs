@@ -24,7 +24,7 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
         Ok(Vec::new())
     }
 
-    async fn vacuum(&self) -> Result<crate::store::VacuumReport, crate::store::StoreError> {
+    async fn vacuum(&self) -> crate::store::MaintenanceResult<crate::store::VacuumReport> {
         // `deleted_session_ids` is deliberately exempt: it is permanent
         // identity evidence that prevents reuse after all other state is gone.
         // The binding is the only admissible scope source, matching the SQLite
@@ -34,7 +34,11 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
             .bound_session_id
             .lock_recover()
             .clone()
-            .ok_or(crate::store::StoreError::SessionNotBound)?;
+            .ok_or_else(|| {
+                crate::store::MaintenanceFailure::failed_before_any_work(
+                    crate::store::StoreError::SessionNotBound,
+                )
+            })?;
 
         let _transaction = self.write_transaction.lock_recover();
         let session_tombstones = {
@@ -64,7 +68,11 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                 .cloned()
                 .collect::<Vec<_>>();
             let removed_node_count = before.saturating_sub(nodes.len());
-            *graph = crate::SessionGraph::from_nodes(nodes, None)?;
+            *graph = crate::SessionGraph::from_nodes(nodes, None).map_err(|error| {
+                // Nothing was physically removed before this point: the node
+                // rebuild is the removal.
+                crate::store::MaintenanceFailure::failed_before_any_work(error)
+            })?;
             self.global_node_owners
                 .lock_recover()
                 .retain(|node_id, _| !session_tombstones.contains(node_id));
@@ -85,7 +93,62 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
         })
     }
 
-    async fn gc_unreachable(&self) -> Result<crate::store::GcReport, crate::store::StoreError> {
-        Ok(crate::store::GcReport::default())
+    /// Sweep the factory-global checkpoint blob map against the live root
+    /// edges every session's last commit recorded, plus the components every
+    /// node anchor holds.
+    ///
+    /// The root set is enumerated in full under the write transaction, so an
+    /// empty sweep here is witnessed emptiness and not a stand-in for "this
+    /// backend does not collect".
+    async fn gc_unreachable(&self) -> crate::store::MaintenanceResult<crate::store::GcReport> {
+        let _transaction = self.write_transaction.lock_recover();
+        let mut retained_refs = std::collections::HashSet::new();
+        let mut root_count = 0usize;
+        for session_roots in self.checkpoint_blob_roots.lock_recover().values() {
+            root_count += 1;
+            retained_refs.extend(session_roots.iter().cloned());
+        }
+        for (_, checkpoint, _) in self.node_anchors.lock_recover().values() {
+            root_count += 1;
+            retained_refs.extend(
+                checkpoint
+                    .components
+                    .values()
+                    .filter_map(|component| component.blob_ref().cloned()),
+            );
+        }
+        let mut blobs = self.checkpoint_component_blobs.lock_recover();
+        let before = blobs.len();
+        blobs.retain(|blob_ref, _| retained_refs.contains(blob_ref));
+        let retained_blob_count = blobs.len();
+        Ok(crate::store::GcReport {
+            root_count,
+            retained_blob_count,
+            deleted_blob_count: before.saturating_sub(retained_blob_count),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    /// The in-memory backend answers in the same maintenance outcome contract
+    /// as the durable ones. It used to return `GcReport::default()`
+    /// unconditionally, which is the "nothing to do" arm spelled without ever
+    /// looking.
+    #[tokio::test]
+    async fn in_memory_store_satisfies_the_maintenance_outcome_contract() {
+        crate::testing::conformance::store_maintenance_outcome_contract(
+            "in-memory",
+            || {
+                Arc::new(super::super::factory::InMemorySessionStoreFactory::new())
+                    as Arc<dyn crate::SessionStoreFactory>
+            },
+            // The in-memory sweep reads only process memory under the write
+            // transaction: it has no failure path to inject.
+            None,
+        )
+        .await;
     }
 }

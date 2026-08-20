@@ -1071,15 +1071,26 @@ async fn delete_session_from_catalog(root: &Path, session_id: &str) -> Result<()
              WHERE namespace = ?1 AND artifact_ref = ?2",
                 params![
                     attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
-                    lash_core::TriggerOwnerScope::session(session_id).namespace()
+                    lash_core::TriggerOwnerScope::session(&session_id).namespace()
                 ],
             )
             .map_err(sqlite_error)?;
-            // Session deletion used to unlink the whole per-session file. Preserve
-            // that reclaiming behavior for rows whose ownership is now explicit;
-            // global artifact refs above remain roots.
-            Store::gc_unreachable_in_tx(tx)
+            // Global artifact refs above remain roots.
+            // Session deletion used to unlink the whole per-session file; the
+            // inline sweep preserves that reclaim. Its outcome is surfaced, not
+            // discarded: a failure fails the delete (ADR 0067 §3), and the
+            // counters are traced so a delete that reclaimed nothing is
+            // distinguishable from one that never looked.
+            let report = Store::gc_unreachable_in_tx(tx)
                 .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
+            tracing::debug!(
+                session_id,
+                root_count = report.root_count,
+                retained_blob_count = report.retained_blob_count,
+                deleted_blob_count = report.deleted_blob_count,
+                sweep = ?lash_core::MaintenanceReport::sweep(&report),
+                "session delete reclaimed unreachable blobs"
+            );
             Ok(())
         })();
         Ok(match outcome {

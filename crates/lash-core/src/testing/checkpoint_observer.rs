@@ -916,11 +916,11 @@ impl StoreMaintenance for ObservedSessionStore {
             .await
     }
 
-    async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+    async fn vacuum(&self) -> crate::store::MaintenanceResult<VacuumReport> {
         self.inner.vacuum().await
     }
 
-    async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
+    async fn gc_unreachable(&self) -> crate::store::MaintenanceResult<GcReport> {
         self.inner.gc_unreachable().await
     }
 }

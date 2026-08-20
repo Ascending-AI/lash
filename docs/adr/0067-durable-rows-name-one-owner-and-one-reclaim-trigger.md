@@ -229,6 +229,13 @@ blocked channel as a typed reason naming the unproven source, so "process-owned
 rows were refused from this sweep" is a visible outcome rather than a sweep that
 looks clean while silently rooting those rows forever.
 
+**Amendment (2026-08-20):** A refusal is
+`Err(MaintenanceFailure { stop: Refused(..), partial })`, not an `Ok`-side
+counted reason. A refusal must be impossible to read as a healthy sweep, while
+the partial report preserves the earlier ruling that work already reported is
+not thrown away; this replaces section 4's `Ok(report)` blocked-channel
+placement for refusals without changing the typed refusal reason.
+
 ### 6. In-flight destruction: adoption-first, generation-fenced
 
 **A factory sweep begins by adopting the incomplete condemnations left by

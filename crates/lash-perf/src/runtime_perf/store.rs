@@ -1322,12 +1322,19 @@ impl StoreMaintenance for RuntimePerfStore {
         ))
     }
 
-    async fn vacuum(&self) -> Result<VacuumReport, store::StoreError> {
-        Err(unsupported_maintenance("vacuum"))
+    /// The perf store implements no reclamation, and says so: an unimplemented
+    /// lever fails rather than answering with an empty sweep it did not perform
+    /// (ADR 0067 §4).
+    async fn vacuum(&self) -> store::MaintenanceResult<VacuumReport> {
+        Err(store::MaintenanceFailure::failed_before_any_work(
+            unsupported_maintenance("vacuum"),
+        ))
     }
 
-    async fn gc_unreachable(&self) -> Result<GcReport, store::StoreError> {
-        Err(unsupported_maintenance("gc_unreachable"))
+    async fn gc_unreachable(&self) -> store::MaintenanceResult<GcReport> {
+        Err(store::MaintenanceFailure::failed_before_any_work(
+            unsupported_maintenance("gc_unreachable"),
+        ))
     }
 }
 
