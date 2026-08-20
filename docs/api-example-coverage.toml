@@ -44976,7 +44976,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:256#.with_deferred_tool_resolver(deferred_tools.resolver())"
+usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:250#.with_deferred_tool_resolver(deferred_tools.resolver())"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84128,6 +84128,15 @@ area = "protocol"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/execution_modes.rs:91#RlmDialect::ALL.map(RlmDialect::language_id),"
 assertion = "examples/docs-snippets/src/execution_modes.rs:91#RlmDialect::ALL.map(RlmDialect::language_id),"
+
+[[api]]
+symbol = "lash::rlm::RlmDialect::from_env"
+kind = "function"
+availability = "all-features"
+area = "protocol"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:61#let rlm_dialect = lash::rlm::RlmDialect::from_env()"
+reason = "Every shipped host resolves its ambient dialect through this one call at startup -- the agent-workbench anchor above, plus examples/agent-service/src/state.rs and runbooks/restate-postgres-workers/src/lib.rs. Observing its contract in an example would mean mutating the process environment, which no shipped host does, so the parse behind it is table-tested in the owning crate and this row reaches no executed assertion. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
 symbol = "lash::rlm::RlmDialect::from_language_id"

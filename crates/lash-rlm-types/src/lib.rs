@@ -218,6 +218,42 @@ impl RlmDialect {
             .collect::<Vec<_>>()
             .join(", ")
     }
+
+    /// Resolve the ambient dialect statement from `LASH_RUNBOOK_DIALECT`.
+    ///
+    /// Every shipped host reads the ambient dialect from the same variable, so
+    /// the parse and its refusal wording live here once: a host that spelled
+    /// its own copy would drift on the day a dialect is added, and the drift
+    /// shows up as one host accepting an id another refuses.
+    ///
+    /// `Ok(None)` is "the operator stated nothing". What that means is host
+    /// policy, spelled in one visible line at the call site, not a second copy
+    /// of this parse. An unregistered id is an `Err` carrying the operator-
+    /// facing refusal, never a silent substitution: the dialect is pinned for
+    /// the session's whole durable lifetime, so a typo that quietly selected a
+    /// dialect would pin the wrong one.
+    pub fn from_env() -> Result<Option<Self>, String> {
+        parse_dialect_env(std::env::var(DIALECT_ENV).ok().as_deref())
+    }
+}
+
+/// The environment variable every shipped host reads its ambient dialect from.
+const DIALECT_ENV: &str = "LASH_RUNBOOK_DIALECT";
+
+/// The parse behind [`RlmDialect::from_env`], split from the environment read
+/// so the table of answers is testable without mutating process state.
+fn parse_dialect_env(stated: Option<&str>) -> Result<Option<RlmDialect>, String> {
+    let Some(stated) = stated else {
+        return Ok(None);
+    };
+    RlmDialect::from_language_id(stated)
+        .map(Some)
+        .ok_or_else(|| {
+            format!(
+                "{DIALECT_ENV} must be a registered RLM language id ({}), got `{stated}`",
+                RlmDialect::registered_language_ids()
+            )
+        })
 }
 
 /// RLM protocol session config. Natural turns finish with prose-only model
@@ -477,6 +513,55 @@ impl TurnProtocol for RlmTurnProtocol {
     type Event = RlmProtocolEvent;
     type Termination = RlmTermination;
     type DriverState = serde_json::Value;
+}
+
+#[cfg(test)]
+mod dialect_env_tests {
+    use super::{DIALECT_ENV, RlmDialect, parse_dialect_env};
+
+    /// The whole answer table for the ambient variable, in one place.
+    ///
+    /// Absence is `None` — a statement of nothing that each host maps to its
+    /// own policy — every registered id resolves, and anything else refuses
+    /// with a message naming the variable and the ids that exist.
+    #[test]
+    fn the_ambient_variable_answers_one_table() {
+        assert_eq!(parse_dialect_env(None), Ok(None));
+        assert_eq!(
+            parse_dialect_env(Some("lashlang")),
+            Ok(Some(RlmDialect::Lashlang))
+        );
+        assert_eq!(
+            parse_dialect_env(Some("typescript")),
+            Ok(Some(RlmDialect::Typescript))
+        );
+        let refusal = parse_dialect_env(Some("lashscript")).expect_err("an unknown id refuses");
+        assert_eq!(
+            refusal,
+            "LASH_RUNBOOK_DIALECT must be a registered RLM language id \
+             (`lashlang`, `typescript`), got `lashscript`"
+        );
+    }
+
+    /// Every registered dialect is selectable by its own registered id: the
+    /// menu a host offers and the ids this parse accepts are one list.
+    #[test]
+    fn every_registered_dialect_resolves_from_its_language_id() {
+        for dialect in RlmDialect::ALL {
+            assert_eq!(
+                parse_dialect_env(Some(dialect.language_id())),
+                Ok(Some(dialect))
+            );
+        }
+    }
+
+    /// An empty variable is a value the operator set, not an absence, so it
+    /// refuses rather than resolving to the default.
+    #[test]
+    fn an_empty_ambient_value_refuses() {
+        let refusal = parse_dialect_env(Some("")).expect_err("an empty value refuses");
+        assert!(refusal.contains(DIALECT_ENV), "{refusal}");
+    }
 }
 
 #[cfg(test)]
