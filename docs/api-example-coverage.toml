@@ -71264,7 +71264,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-test-only"
-usage = "crates/lash-provider-openai/src/tests.rs:1107#lash_core::facade_support::ProviderSchemaCapabilities::bedrock_claude(),"
+usage = "crates/lash-provider-openai/src/tests.rs:1108#lash_core::facade_support::ProviderSchemaCapabilities::bedrock_claude(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -74618,7 +74618,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-test-only"
-usage = "crates/lash-provider-openai/src/tests.rs:1917#let visible = lash_core::facade_support::normalized_response_parts(&response);"
+usage = "crates/lash-provider-openai/src/tests/responses_text_slot_tests.rs:36#let visible = lash_core::facade_support::normalized_response_parts(&response);"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]

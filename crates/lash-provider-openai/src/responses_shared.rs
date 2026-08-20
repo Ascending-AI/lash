@@ -861,8 +861,6 @@ pub struct ResponsesStreamState {
     /// happens to carry a `response` snapshot.
     pub terminal_event_seen: bool,
     pub current_text_part: Option<usize>,
-    pub current_text_output_index: Option<usize>,
-    pub current_message_item_id: Option<String>,
     /// Maps a server output slot to the index of its `Text` part. Responses
     /// streams are ordered by `output_index`; ids may be absent or change
     /// across terminal snapshots.
@@ -874,7 +872,6 @@ pub struct ResponsesStreamState {
     /// server groups reasoning output into multiple "parts" (paragraphs); we
     /// keep one slot per part instead of merging into a single blob.
     pub current_reasoning_part: Option<usize>,
-    pub current_reasoning_output_index: Option<usize>,
     pub reasoning_parts_by_output: HashMap<usize, usize>,
     pub reasoning_deltas: Vec<String>,
     pub tool_calls: HashMap<usize, ResponsesStreamingToolCall>,
@@ -948,8 +945,6 @@ impl ResponsesStreamState {
         let meta = item.map(response_text_meta_from_message_item);
         let index = self.message_part_index(output_index, item_id.as_deref(), meta);
         self.current_text_part = Some(index);
-        self.current_text_output_index = output_index;
-        self.current_message_item_id = item_id;
     }
 
     pub fn finish_message(
@@ -970,8 +965,6 @@ impl ResponsesStreamState {
             finalized = self.parts.get(index).cloned();
         }
         self.current_text_part = None;
-        self.current_text_output_index = None;
-        self.current_message_item_id = None;
         finalized
     }
 
@@ -1098,24 +1091,40 @@ impl ResponsesStreamState {
             && let Some(index) = self.message_parts_by_output.get(&output_index).copied()
         {
             self.current_text_part = Some(index);
-            self.current_text_output_index = Some(output_index);
             return index;
         }
-        if let Some(index) = self.current_text_part {
-            return index;
-        }
-        if let Some(index) = self
+        let index = if let Some(index) = self.current_text_part {
+            index
+        } else if let Some(index) = self
             .parts
             .iter()
             .rposition(|part| matches!(part, LlmOutputPart::Text { .. }))
         {
-            return index;
+            index
+        } else {
+            let index = self.parts.len();
+            self.parts.push(LlmOutputPart::Text {
+                text: String::new(),
+                response_meta: None,
+            });
+            index
+        };
+        // A text delta can arrive before the slot's `output_item.added`. The
+        // part chosen above is the one receiving that slot's text, so bind the
+        // slot to it: otherwise the slot stays unregistered and the later
+        // `output_item.done` allocates a second part, emitting the same
+        // message twice. Skip the binding when another slot already owns this
+        // part — that is a mis-routed delta, and aliasing two slots onto one
+        // part would compound it rather than fix it.
+        if let Some(output_index) = output_index
+            && !self
+                .message_parts_by_output
+                .iter()
+                .any(|(slot, part)| *part == index && *slot != output_index)
+        {
+            self.message_parts_by_output.insert(output_index, index);
+            self.current_text_part = Some(index);
         }
-        let index = self.parts.len();
-        self.parts.push(LlmOutputPart::Text {
-            text: String::new(),
-            response_meta: None,
-        });
         index
     }
 
@@ -1219,7 +1228,6 @@ impl ResponsesStreamState {
             index
         };
         self.current_reasoning_part = Some(index);
-        self.current_reasoning_output_index = output_index;
     }
 
     pub fn push_reasoning_delta(&mut self, delta: &str, output_index: Option<usize>) {
@@ -1230,7 +1238,6 @@ impl ResponsesStreamState {
             && let Some(index) = self.reasoning_parts_by_output.get(&output_index).copied()
         {
             self.current_reasoning_part = Some(index);
-            self.current_reasoning_output_index = Some(output_index);
             index
         } else {
             match self.current_reasoning_part {
@@ -1262,7 +1269,6 @@ impl ResponsesStreamState {
                 *text = trimmed.to_string();
             }
         }
-        self.current_reasoning_output_index = None;
     }
 
     /// Populate the most recent reasoning part with the authoritative payload
