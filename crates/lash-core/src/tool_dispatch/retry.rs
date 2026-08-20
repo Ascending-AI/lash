@@ -7,6 +7,20 @@ use lash_sansio::core_support::*;
 
 use super::context::ToolDispatchContext;
 
+pub(crate) fn resolve_retry_policy(
+    context: &ToolDispatchContext<'_>,
+    tool_id: &crate::ToolId,
+    execution_grant: Option<&crate::ToolExecutionGrant>,
+) -> ToolRetryPolicy {
+    execution_grant
+        .map(|grant| grant.manifest.retry_policy)
+        .or_else(|| {
+            super::preparation::resolve_callable_manifest_by_id(context, tool_id)
+                .map(|manifest| manifest.retry_policy)
+        })
+        .unwrap_or(ToolRetryPolicy::Never)
+}
+
 pub(super) async fn execute_leaf_tool_attempt<'run>(
     context: &ToolDispatchContext<'run>,
     manifest: &ToolManifest,

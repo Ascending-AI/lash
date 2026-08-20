@@ -195,14 +195,8 @@ pub(crate) async fn coordinate_prepared_tool_call_launch_with_execution_context<
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     tool_context: ToolContext<'run>,
 ) -> ToolCallLaunch {
-    let retry_policy = execution_grant
-        .as_ref()
-        .map(|grant| grant.manifest.retry_policy)
-        .or_else(|| {
-            super::preparation::resolve_callable_manifest_by_id(context, &prepared.tool_id)
-                .map(|manifest| manifest.retry_policy)
-        })
-        .unwrap_or(crate::ToolRetryPolicy::Never);
+    let retry_policy =
+        super::retry::resolve_retry_policy(context, &prepared.tool_id, execution_grant.as_deref());
     let cancellation = tool_context.cancellation_token().cloned();
     let dispatch = Arc::new(context.clone());
     super::coordinate_tool_invocation(

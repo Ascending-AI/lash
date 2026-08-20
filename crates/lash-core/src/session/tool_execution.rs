@@ -887,12 +887,11 @@ impl RuntimeExecutionContext<'_> {
                             .await,
                         ))
                     } else {
-                        let retry_policy = crate::tool_dispatch::resolve_callable_manifest_by_id(
+                        let retry_policy = crate::tool_dispatch::resolve_retry_policy(
                             &dispatch,
                             &prepared.tool_id,
-                        )
-                        .map(|manifest| manifest.retry_policy)
-                        .unwrap_or(crate::ToolRetryPolicy::Never);
+                            None,
+                        );
                         let intent_trace_hook = child_execution_trace_hook.clone();
                         let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
                             child_execution_trace_hook
@@ -1094,6 +1093,11 @@ impl RuntimeExecutionContext<'_> {
         .await
         {
             ToolPreparationOutcome::Prepared(prepared) => {
+                let retry_policy = crate::tool_dispatch::resolve_retry_policy(
+                    &dispatch,
+                    &prepared.tool_id,
+                    Some(&grant),
+                );
                 let intent_trace_hook = child_execution_trace_hook.clone();
                 let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
                     child_execution_trace_hook
@@ -1103,7 +1107,7 @@ impl RuntimeExecutionContext<'_> {
                     &dispatch,
                     *prepared,
                     Some(Box::new(grant.clone())),
-                    grant.manifest.retry_policy,
+                    retry_policy,
                     ToolAttemptEffectIdentity::Scalar {
                         parent: parent_invocation.clone(),
                     },
