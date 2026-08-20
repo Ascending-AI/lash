@@ -4,11 +4,11 @@
 
 use crate::support::*;
 
-/// Pi-mono sentinel: Gemini 3 refuses to run when a function_call is
+/// Skip sentinel: Gemini 3 refuses to run when a function_call is
 /// replayed without a thoughtSignature. The server recognises this magic
 /// string and skips signature validation for the item, so lash can round-
 /// trip tool calls captured from non-Gemini models without crashing the
-/// turn. Matches `google-shared.ts:51`.
+/// turn.
 const SKIP_THOUGHT_SIGNATURE: &str = "skip_thought_signature_validator";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,7 +167,7 @@ impl GoogleOAuthProvider {
                         // from a thinking-enabled run is replayed without
                         // its original thoughtSignature. When we don't
                         // have the real signature (cross-model hop, older
-                        // session), drop in the pi sentinel.
+                        // session), drop in the skip sentinel.
                         let effective = replay
                             .as_ref()
                             .and_then(|meta| meta.opaque.clone())

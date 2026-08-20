@@ -65,3 +65,22 @@ land on the engine seam first, with the reference substrate implementing the
 same contract inline. When a bound, a wait, or a redrive path is proposed
 inside lash-core, the first question is whether it belongs to the substrate —
 the answer decided FIG-526, and it will decide the next one.
+
+## Considered and rejected: durable partial assistant streams (2026-08-20)
+
+A 2026-08 review of a peer harness design examined the alternative this
+document's floor forgoes: persist each streamed assistant delta as a compact
+durable frame under the in-flight effect's reserved identity, delete the
+frame list atomically at settlement, and reduce the committed prefix into an
+explicit unknown-outcome response after a crash. The frames are auxiliary by
+construction (never completion authority, never a restart point), so the
+model is coherent. It is still rejected for lash: one durable transaction
+per provider event prices per-token writes into Postgres- and journal-backed
+stores, against the commit-budget rule; a partial-stream archive in the
+session store contradicts the rule that the store records continuation
+state, not observation history; and the property it buys is reconnect
+display, not correctness. Hosts that want crash-surviving partials own that
+choice at the observation plane: the live-replay store is host-supplied, the
+streamed deltas already flow through it, and a durable implementation of it
+recovers the same evidence without touching the session store or this
+document's floor.

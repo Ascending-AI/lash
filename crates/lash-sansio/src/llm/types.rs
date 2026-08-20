@@ -370,8 +370,8 @@ pub enum LlmRole {
     System,
 }
 
-/// A structured content block inside an `LlmMessage`. Mirrors pi-mono's
-/// per-provider block types and maps cleanly onto each wire format so the
+/// A structured content block inside an `LlmMessage`. Kept close to the
+/// per-provider block shapes and maps cleanly onto each wire format so the
 /// adapters can emit the right shape without re-coalescing flat messages.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LlmContentBlock {

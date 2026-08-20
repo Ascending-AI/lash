@@ -14,8 +14,7 @@ use super::CodexProvider;
 
 impl CodexProvider {
     /// Translate a Codex error body into a user-friendly one-line message.
-    /// Mirrors pi-mono's `openai-codex-responses.ts:880-904`: for a
-    /// `usage_limit_reached`/`rate_limit_exceeded` code (or any 429),
+    /// For a `usage_limit_reached`/`rate_limit_exceeded` code (or any 429),
     /// parse the `plan_type` and `resets_at` epoch and render
     /// `"You have hit your ChatGPT usage limit (plus plan). Try again in
     /// ~12 min."`. Returns `None` when the body isn't parseable or the

@@ -71176,7 +71176,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-openai/src/codex/failure.rs:81#fn classify(&self, failure: ProviderFailure) -> ProviderFailure {"
+usage = "crates/lash-provider-openai/src/codex/failure.rs:80#fn classify(&self, failure: ProviderFailure) -> ProviderFailure {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProviderSchemaCapabilities"
