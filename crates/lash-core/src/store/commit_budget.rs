@@ -40,7 +40,9 @@ impl CommitBudgetLimit {
 pub struct CommitBudget {
     /// Aggregate logical persisted-payload byte limit.
     pub bytes: CommitBudgetLimit,
-    /// Rows written by one commit: graph nodes plus attachment-intent adoption.
+    /// Rows the commit writes as recorded by this attempt: graph nodes plus
+    /// attachment-intent adoption rows. A same-turn-id replay may stamp
+    /// prior-attempt rows beyond the count.
     pub nodes: CommitBudgetLimit,
 }
 

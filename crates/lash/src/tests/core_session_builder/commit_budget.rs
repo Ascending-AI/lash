@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> Result<()> {
-    const CONFIGURED_ROW_LIMIT: usize = 2;
+    const CONFIGURED_ROW_LIMIT: usize = 3;
     let provider = crate::testing::TestProvider::builder()
         .kind("adoption-row-budget")
         .complete(|_request| async move { Ok(text_response("assistant response")) })
@@ -19,8 +19,16 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("commit-adoption-row-budget-surface").open().await?;
 
+    core.session("commit-graph-only-budget-surface")
+        .open()
+        .await?
+        .turn(TurnInput::text("graph rows only"))
+        .turn_id("commit-graph-only-budget-turn")
+        .run()
+        .await?;
+
+    let session = core.session("commit-adoption-row-budget-surface").open().await?;
     let error = session
         .turn(TurnInput::text("adopt one attachment").with_attachment(
             lash_core::AttachmentSource::inline(

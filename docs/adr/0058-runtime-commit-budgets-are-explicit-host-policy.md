@@ -31,6 +31,13 @@ realization path, which validates that same carried value before a backend
 transaction starts. Adoption-row evidence is recorded during the turn and
 threaded into the commit; admission never queries the store.
 
+The turn-side `adopted_intent_rows` count has a replay residual: it is not
+guaranteed to equal the rows the adoption update stamps. A crash/replay reusing
+the same turn id can stamp prior-attempt, still-uncommitted turn-owned manifest
+rows that this process did not record, so validation can undercount. Cancelled
+or failed puts and already-committed explicit ids can overcount, which is the
+safe direction.
+
 The former 1 MiB byte limit and 512-node limit remain only a documented
 recommended starting point, with "node" now meaning a row written under that
 field's widened contract. Hosts tune them for their own backend latency and
@@ -91,6 +98,13 @@ commit still runs the production attachment-adoption statements.
 | rows_written | 512 | postgres | 524288 | 128 | 384 | 512 | 453500 | 51.167 | 56.087 | 21 |
 | rows_written | 640 | sqlite | 524288 | 160 | 480 | 640 | 436310 | 16.901 | 17.220 | 21 |
 | rows_written | 640 | postgres | 524288 | 160 | 480 | 640 | 435830 | 64.299 | 83.972 | 21 |
+
+Each per-point p95 uses nearest-rank at `n=21`, so it is the maximum sample.
+The PostgreSQL row curve is non-monotonic within noise (`58.101 ms` at 256
+rows versus `56.087 ms` at 512 rows). The joint recommended point (1 MiB and
+512 rows together) was not measured; the byte and row axes were varied one at
+a time. The 60 ms target's margin is therefore an axis-specific reference,
+not a measured joint margin.
 
 ## Consequences
 

@@ -174,7 +174,11 @@ mod store_commit_error_tests {
             node_error.code,
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded
         );
-        assert!(node_error.message.contains("writes 513 rows"));
+        assert!(
+            node_error
+                .message
+                .contains("records 513 rows for this attempt")
+        );
         assert!(
             node_error
                 .message
