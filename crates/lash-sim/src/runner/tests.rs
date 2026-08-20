@@ -2014,6 +2014,113 @@ fn runtime_completion_backend_mutation_idle_session_mutation_guard() {
 }
 
 #[test]
+fn runtime_completion_process_wake_and_observer_readiness_and_units() {
+    let wake = BoundaryEvent::new(
+        "session-001:process-wake:001",
+        "session-001",
+        BoundaryKind::ProcessWake,
+        1,
+        "process.wake",
+        json!({"session": "session-001"}),
+    );
+    let observer = BoundaryEvent::new(
+        "session-001:observer:001",
+        "session-001",
+        BoundaryKind::Observer,
+        2,
+        "observer.snapshot",
+        json!({"turn_index": 1}),
+    );
+    let mut state = RuntimeCompletionState::default();
+
+    assert!(
+        !runtime_completion_ready(&wake, &state),
+        "process wake must not run before its session opens"
+    );
+    assert!(
+        !runtime_completion_ready(&observer, &state),
+        "observer must not run before its session opens"
+    );
+
+    state.observe(&test_delivered(
+        0,
+        "session-001:ingress",
+        "session-001",
+        BoundaryKind::Ingress,
+        json!({}),
+    ));
+    assert!(
+        runtime_completion_ready(&wake, &state),
+        "process wake is ready once session is open and idle"
+    );
+    assert!(
+        !runtime_completion_ready(&observer, &state),
+        "observer is not ready until turn 1 completes"
+    );
+
+    state.provider_started("session-001");
+    assert!(
+        !runtime_completion_ready(&wake, &state),
+        "process wake is not ready while provider turn is active"
+    );
+
+    state.observe(&test_delivered(
+        1,
+        "session-001:provider:001",
+        "session-001",
+        BoundaryKind::Provider,
+        json!({}),
+    ));
+    assert!(
+        runtime_completion_ready(&wake, &state),
+        "process wake is ready again once provider turn settles"
+    );
+    assert!(
+        runtime_completion_ready(&observer, &state),
+        "observer is ready once turn 1 completes"
+    );
+
+    assert_eq!(runtime_completion_family(&wake), "process_wake");
+    assert_eq!(runtime_completion_family(&observer), "observer_snapshot");
+
+    let wake_units = runtime_completion_units(&wake).expect("wake units");
+    assert_eq!(wake_units.len(), 1);
+    assert_eq!(wake_units[0].unit, "runtime:process_wake_delivery");
+
+    let observer_units = runtime_completion_units(&observer).expect("observer units");
+    assert_eq!(observer_units.len(), 1);
+    assert_eq!(observer_units[0].unit, "runtime:observer_snapshot");
+}
+
+#[test]
+fn is_scheduler_owned_runtime_completion_matches_kinds() {
+    for kind in [
+        BoundaryKind::Ingress,
+        BoundaryKind::QueuedIngress,
+        BoundaryKind::Provider,
+        BoundaryKind::ProviderEvent,
+        BoundaryKind::Tool,
+        BoundaryKind::ExecCode,
+        BoundaryKind::DurableEffect,
+        BoundaryKind::ProcessWake,
+        BoundaryKind::ProcessLifecycle,
+        BoundaryKind::Worker,
+        BoundaryKind::Observer,
+        BoundaryKind::Cancellation,
+        BoundaryKind::Trigger,
+        BoundaryKind::BackendFailure,
+        BoundaryKind::ProviderMutation,
+        BoundaryKind::LeaseTime,
+    ] {
+        assert_eq!(
+            is_scheduler_owned_runtime_completion(kind),
+            SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS.contains(&kind),
+            "is_scheduler_owned_runtime_completion divergence for {kind:?}"
+        );
+    }
+}
+
+#[test]
 fn script_bundle_hash_is_stable_for_current_bundle() {
     let scripts = script_hash_manifest().expect("scripts");
     let hash = script_bundle_hash(&scripts);
