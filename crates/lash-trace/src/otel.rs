@@ -907,18 +907,18 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
 fn language_execution_attributes(
     attrs: &mut Vec<KeyValue>,
     language: &str,
-    event: &crate::TraceLanguageExecutionEvent,
+    event: &crate::TraceLanguageExecution,
 ) {
-    use crate::TraceLanguageExecutionEvent as Event;
+    use crate::TraceLanguageExecutionPayload as Payload;
 
-    let kind = match event {
-        Event::ExecutionStarted { .. } => "execution_started",
-        Event::ExecutionFinished { .. } => "execution_finished",
-        Event::NodeStarted { .. } => "node_started",
-        Event::NodeCompleted { .. } => "node_completed",
-        Event::NodeFailed { .. } => "node_failed",
-        Event::BranchSelected { .. } => "branch_selected",
-        Event::ChildStarted { .. } => "child_started",
+    let kind = match &event.payload {
+        Payload::ExecutionStarted { .. } => "execution_started",
+        Payload::ExecutionFinished { .. } => "execution_finished",
+        Payload::NodeStarted { .. } => "node_started",
+        Payload::NodeCompleted { .. } => "node_completed",
+        Payload::NodeFailed { .. } => "node_failed",
+        Payload::BranchSelected { .. } => "branch_selected",
+        Payload::ChildStarted { .. } => "child_started",
     };
     attrs.push(KeyValue::new(
         "lash.language_execution.language",
@@ -926,120 +926,82 @@ fn language_execution_attributes(
     ));
     attrs.push(KeyValue::new("lash.language_execution.kind", kind));
 
-    match event {
-        Event::ExecutionStarted {
-            event_key,
-            identity,
-            ..
-        }
-        | Event::ExecutionFinished {
-            event_key,
-            identity,
-            ..
-        }
-        | Event::NodeStarted {
-            event_key,
-            identity,
-            ..
-        }
-        | Event::NodeCompleted {
-            event_key,
-            identity,
-            ..
-        }
-        | Event::NodeFailed {
-            event_key,
-            identity,
-            ..
-        }
-        | Event::BranchSelected {
-            event_key,
-            identity,
-            ..
-        }
-        | Event::ChildStarted {
-            event_key,
-            identity,
-            ..
-        } => {
+    attrs.push(KeyValue::new(
+        "lash.language_execution.event_key",
+        event.event_key.clone(),
+    ));
+    attrs.push(KeyValue::new(
+        "lash.language_execution.graph_key",
+        event.identity.graph_key(),
+    ));
+    attrs.push(KeyValue::new(
+        "lash.language_execution.session_id",
+        event.identity.scope.session_id.clone(),
+    ));
+    if let Some(turn_id) = &event.identity.scope.turn_id {
+        attrs.push(KeyValue::new(
+            "lash.language_execution.turn_id",
+            turn_id.clone(),
+        ));
+    }
+    attrs.push(KeyValue::new(
+        "lash.language_execution.module_ref",
+        event.identity.module_ref.clone(),
+    ));
+    attrs.push(KeyValue::new(
+        "lash.language_execution.entry_kind",
+        event.identity.entry_kind.clone(),
+    ));
+    push_opt(
+        attrs,
+        "lash.language_execution.entry_ref",
+        &event.identity.entry_ref,
+    );
+    attrs.push(KeyValue::new(
+        "lash.language_execution.entry_name",
+        event.identity.entry_name.clone(),
+    ));
+    match &event.identity.subject {
+        crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.event_key",
-                event_key.clone(),
+                "lash.language_execution.subject_type",
+                "effect",
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.graph_key",
-                identity.graph_key(),
+                "lash.language_execution.effect_id",
+                effect_id.clone(),
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.session_id",
-                identity.scope.session_id.clone(),
+                "lash.language_execution.effect_kind",
+                kind.clone(),
             ));
-            if let Some(turn_id) = &identity.scope.turn_id {
-                attrs.push(KeyValue::new(
-                    "lash.language_execution.turn_id",
-                    turn_id.clone(),
-                ));
-            }
+        }
+        crate::TraceRuntimeSubject::Process { process_id } => {
             attrs.push(KeyValue::new(
-                "lash.language_execution.module_ref",
-                identity.module_ref.clone(),
+                "lash.language_execution.subject_type",
+                "process",
             ));
             attrs.push(KeyValue::new(
-                "lash.language_execution.entry_kind",
-                identity.entry_kind.clone(),
+                "lash.language_execution.process_id",
+                process_id.clone(),
             ));
-            push_opt(
-                attrs,
-                "lash.language_execution.entry_ref",
-                &identity.entry_ref,
-            );
-            attrs.push(KeyValue::new(
-                "lash.language_execution.entry_name",
-                identity.entry_name.clone(),
-            ));
-            match &identity.subject {
-                crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
-                    attrs.push(KeyValue::new(
-                        "lash.language_execution.subject_type",
-                        "effect",
-                    ));
-                    attrs.push(KeyValue::new(
-                        "lash.language_execution.effect_id",
-                        effect_id.clone(),
-                    ));
-                    attrs.push(KeyValue::new(
-                        "lash.language_execution.effect_kind",
-                        kind.clone(),
-                    ));
-                }
-                crate::TraceRuntimeSubject::Process { process_id } => {
-                    attrs.push(KeyValue::new(
-                        "lash.language_execution.subject_type",
-                        "process",
-                    ));
-                    attrs.push(KeyValue::new(
-                        "lash.language_execution.process_id",
-                        process_id.clone(),
-                    ));
-                }
-            }
         }
     }
 
-    match event {
-        Event::NodeStarted {
+    match &event.payload {
+        Payload::NodeStarted {
             node_id,
             node_kind,
             occurrence,
             ..
         }
-        | Event::NodeCompleted {
+        | Payload::NodeCompleted {
             node_id,
             node_kind,
             occurrence,
             ..
         }
-        | Event::NodeFailed {
+        | Payload::NodeFailed {
             node_id,
             node_kind,
             occurrence,
@@ -1058,7 +1020,7 @@ fn language_execution_attributes(
                 *occurrence as i64,
             ));
         }
-        Event::BranchSelected {
+        Payload::BranchSelected {
             node_id,
             occurrence,
             edge_id,
@@ -1082,7 +1044,7 @@ fn language_execution_attributes(
                 *occurrence as i64,
             ));
         }
-        Event::ChildStarted {
+        Payload::ChildStarted {
             parent_node_id,
             child,
             ..
@@ -1122,14 +1084,14 @@ fn language_execution_attributes(
                 }
             }
         }
-        Event::ExecutionFinished { status, error, .. } => {
+        Payload::ExecutionFinished { status, error, .. } => {
             attrs.push(KeyValue::new(
                 "lash.language_execution.status",
                 format!("{status:?}").to_ascii_lowercase(),
             ));
             push_opt(attrs, "lash.language_execution.error", error);
         }
-        Event::ExecutionStarted { execution_map, .. } => {
+        Payload::ExecutionStarted { execution_map, .. } => {
             attrs.push(KeyValue::new(
                 "lash.language_execution.node_count",
                 execution_map.nodes.len() as i64,

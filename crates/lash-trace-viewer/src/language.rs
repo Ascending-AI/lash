@@ -6,44 +6,37 @@
 //! than with the viewer.
 
 use lash_trace::{
-    TraceLanguageChildExecution, TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionStatus, TraceRuntimeSubject,
+    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceRuntimeSubject,
 };
 
-pub(crate) fn language_execution_title(
-    language: &str,
-    event: &TraceLanguageExecutionEvent,
-) -> String {
-    match event {
-        TraceLanguageExecutionEvent::ExecutionStarted { identity, .. } => {
-            format!("{} started", entry_name(language, identity))
+pub(crate) fn language_execution_title(language: &str, event: &TraceLanguageExecution) -> String {
+    match &event.payload {
+        TraceLanguageExecutionPayload::ExecutionStarted { .. } => {
+            format!("{} started", entry_name(language, &event.identity))
         }
-        TraceLanguageExecutionEvent::ExecutionFinished {
-            identity, status, ..
-        } => format!(
+        TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => format!(
             "{} {}",
-            entry_name(language, identity),
+            entry_name(language, &event.identity),
             language_execution_status_str(*status)
         ),
-        TraceLanguageExecutionEvent::NodeStarted { label, .. } => format!("{label} started"),
-        TraceLanguageExecutionEvent::NodeCompleted { label, .. } => format!("{label} completed"),
-        TraceLanguageExecutionEvent::NodeFailed { label, .. } => format!("{label} failed"),
-        TraceLanguageExecutionEvent::BranchSelected { selected, .. } => {
+        TraceLanguageExecutionPayload::NodeStarted { label, .. } => format!("{label} started"),
+        TraceLanguageExecutionPayload::NodeCompleted { label, .. } => format!("{label} completed"),
+        TraceLanguageExecutionPayload::NodeFailed { label, .. } => format!("{label} failed"),
+        TraceLanguageExecutionPayload::BranchSelected { selected, .. } => {
             format!("branch selected: {}", branch_selection_str(*selected))
         }
-        TraceLanguageExecutionEvent::ChildStarted {
-            identity, child, ..
-        } => format!(
+        TraceLanguageExecutionPayload::ChildStarted { child, .. } => format!(
             "{} started child {}",
-            entry_name(language, identity),
+            entry_name(language, &event.identity),
             child_label(child)
         ),
     }
 }
 
-pub(crate) fn language_execution_summary(event: &TraceLanguageExecutionEvent) -> String {
+pub(crate) fn language_execution_summary(event: &TraceLanguageExecution) -> String {
     let mut parts = Vec::new();
-    let identity = language_execution_identity(event);
+    let identity = &event.identity;
     if !identity.entry_name.is_empty() {
         parts.push(format!("entry {}", identity.entry_name));
     }
@@ -60,13 +53,13 @@ pub(crate) fn language_execution_summary(event: &TraceLanguageExecutionEvent) ->
     if !identity.module_ref.is_empty() {
         parts.push(format!("module {}", identity.module_ref));
     }
-    match event {
-        TraceLanguageExecutionEvent::NodeStarted {
+    match &event.payload {
+        TraceLanguageExecutionPayload::NodeStarted {
             node_id,
             occurrence,
             ..
         }
-        | TraceLanguageExecutionEvent::NodeCompleted {
+        | TraceLanguageExecutionPayload::NodeCompleted {
             node_id,
             occurrence,
             ..
@@ -74,7 +67,7 @@ pub(crate) fn language_execution_summary(event: &TraceLanguageExecutionEvent) ->
             parts.push(format!("node {node_id}"));
             parts.push(format!("occurrence {occurrence}"));
         }
-        TraceLanguageExecutionEvent::NodeFailed {
+        TraceLanguageExecutionPayload::NodeFailed {
             node_id,
             occurrence,
             error,
@@ -84,7 +77,7 @@ pub(crate) fn language_execution_summary(event: &TraceLanguageExecutionEvent) ->
             parts.push(format!("occurrence {occurrence}"));
             parts.push(format!("error {error}"));
         }
-        TraceLanguageExecutionEvent::BranchSelected {
+        TraceLanguageExecutionPayload::BranchSelected {
             node_id,
             occurrence,
             edge_id,
@@ -94,18 +87,18 @@ pub(crate) fn language_execution_summary(event: &TraceLanguageExecutionEvent) ->
             parts.push(format!("occurrence {occurrence}"));
             parts.push(format!("edge {edge_id}"));
         }
-        TraceLanguageExecutionEvent::ChildStarted {
+        TraceLanguageExecutionPayload::ChildStarted {
             occurrence, child, ..
         } => {
             parts.push(format!("occurrence {occurrence}"));
             parts.push(format!("child {}", subject_summary(&child.subject)));
         }
-        TraceLanguageExecutionEvent::ExecutionFinished { error, .. } => {
+        TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => {
             if let Some(error) = error {
                 parts.push(format!("error {error}"));
             }
         }
-        TraceLanguageExecutionEvent::ExecutionStarted { execution_map, .. } => {
+        TraceLanguageExecutionPayload::ExecutionStarted { execution_map, .. } => {
             parts.push(format!("{} nodes", execution_map.nodes.len()));
             parts.push(format!("{} edges", execution_map.edges.len()));
         }
@@ -113,29 +106,15 @@ pub(crate) fn language_execution_summary(event: &TraceLanguageExecutionEvent) ->
     parts.join("\n")
 }
 
-pub(crate) fn language_execution_failed(event: &TraceLanguageExecutionEvent) -> bool {
+pub(crate) fn language_execution_failed(event: &TraceLanguageExecution) -> bool {
     matches!(
-        event,
-        TraceLanguageExecutionEvent::NodeFailed { .. }
-            | TraceLanguageExecutionEvent::ExecutionFinished {
+        &event.payload,
+        TraceLanguageExecutionPayload::NodeFailed { .. }
+            | TraceLanguageExecutionPayload::ExecutionFinished {
                 status: TraceLanguageExecutionStatus::Failed,
                 ..
             }
     )
-}
-
-pub(crate) fn language_execution_identity(
-    event: &TraceLanguageExecutionEvent,
-) -> &TraceLanguageExecutionIdentity {
-    match event {
-        TraceLanguageExecutionEvent::ExecutionStarted { identity, .. }
-        | TraceLanguageExecutionEvent::ExecutionFinished { identity, .. }
-        | TraceLanguageExecutionEvent::NodeStarted { identity, .. }
-        | TraceLanguageExecutionEvent::NodeCompleted { identity, .. }
-        | TraceLanguageExecutionEvent::NodeFailed { identity, .. }
-        | TraceLanguageExecutionEvent::BranchSelected { identity, .. }
-        | TraceLanguageExecutionEvent::ChildStarted { identity, .. } => identity,
-    }
 }
 
 pub(crate) fn entry_name<'a>(

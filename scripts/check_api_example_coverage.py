@@ -298,7 +298,7 @@ DISPOSITION_TIERS = {
 #: change would otherwise fail the gate is the thing this constant exists to
 #: catch; the honest move there is to record the row's consumer in prose under
 #: an `unused-*` disposition and leave the pin.
-EXAMPLE_TEST_TIER_RATCHET = 1957
+EXAMPLE_TEST_TIER_RATCHET = 1955
 #: Module paths that put an item behind the `testing` feature, which is what
 #: makes a test-only consumer a home rather than an excuse.  `test_support` is
 #: the doc-hidden one lash-core relocates cross-crate test-only items into;

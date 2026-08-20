@@ -5,10 +5,11 @@ mod tests {
     include!("tests/support.rs");
     use lash::rlm::RlmTurnBuilderExt;
     use lash::tracing::{
-        TraceBranchSelection, TraceLanguageChildExecution, TraceLashlangEdgeSelection,
-        TraceLanguageExecutionEvent, TraceLanguageExecutionIdentity, TraceLashlangGraphChildLink,
-        TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionStatus,
-        TraceRuntimeScope, TraceRuntimeSubject,
+        TraceBranchSelection, TraceLanguageChildExecution, TraceLanguageExecution,
+        TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
+        TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+        TraceLashlangEdgeSelection, TraceLashlangGraphChildLink, TraceRuntimeScope,
+        TraceRuntimeSubject,
     };
     use std::future::Future;
     fn sync_await<T, F>(future: F) -> T
@@ -173,16 +174,18 @@ mod tests {
                 TraceContext::default().for_session(graph.scope.session_id.clone()),
                 TraceEvent::LanguageExecution {
                     language: "lashlang".to_string(),
-                    event: TraceLanguageExecutionEvent::ExecutionStarted {
+                    event: TraceLanguageExecution {
                         event_key: format!("{}:start", graph.graph_key),
                         identity,
-                        execution_map: TraceLanguageExecutionMap {
-                            module_ref: graph.module_ref.clone(),
-                            entry_kind: graph.entry_kind.clone(),
-                            entry_ref: graph.entry_ref.clone(),
-                            entry_name: graph.entry_name.clone(),
-                            nodes: Vec::new(),
-                            edges: Vec::new(),
+                        payload: TraceLanguageExecutionPayload::ExecutionStarted {
+                            execution_map: TraceLanguageExecutionMap {
+                                module_ref: graph.module_ref.clone(),
+                                entry_kind: graph.entry_kind.clone(),
+                                entry_ref: graph.entry_ref.clone(),
+                                entry_name: graph.entry_name.clone(),
+                                nodes: Vec::new(),
+                                edges: Vec::new(),
+                            },
                         },
                     },
                 },
@@ -283,7 +286,7 @@ mod tests {
             entry_ref: Some("r1:0".to_string()),
             entry_name: "main".to_string(),
         };
-        let append = |event: TraceLanguageExecutionEvent| {
+        let append = |event: TraceLanguageExecution| {
             store
                 .append(&TraceRecord::new(
                     context.clone(),
@@ -295,57 +298,63 @@ mod tests {
                 .expect("append tracking event");
         };
 
-        append(TraceLanguageExecutionEvent::ExecutionStarted {
+        append(TraceLanguageExecution {
             event_key: "p1:start".to_string(),
             identity: identity.clone(),
-            execution_map: TraceLanguageExecutionMap {
-                module_ref: "m1".to_string(),
-                entry_kind: "process".to_string(),
-                entry_ref: Some("r1:0".to_string()),
-                entry_name: "main".to_string(),
-                nodes: vec![TraceLanguageExecutionMapNode {
-                    id: "branch".to_string(),
-                    kind: "branch".to_string(),
-                    label: "if".to_string(),
-                    label_metadata: None,
-                }],
-                edges: vec![
-                    TraceLanguageExecutionMapEdge {
-                        id: "then-edge".to_string(),
-                        from: "branch".to_string(),
-                        to: "then".to_string(),
-                        label: "then".to_string(),
-                    },
-                    TraceLanguageExecutionMapEdge {
-                        id: "else-edge".to_string(),
-                        from: "branch".to_string(),
-                        to: "else".to_string(),
-                        label: "else".to_string(),
-                    },
-                ],
+            payload: TraceLanguageExecutionPayload::ExecutionStarted {
+                execution_map: TraceLanguageExecutionMap {
+                    module_ref: "m1".to_string(),
+                    entry_kind: "process".to_string(),
+                    entry_ref: Some("r1:0".to_string()),
+                    entry_name: "main".to_string(),
+                    nodes: vec![TraceLanguageExecutionMapNode {
+                        id: "branch".to_string(),
+                        kind: "branch".to_string(),
+                        label: "if".to_string(),
+                        label_metadata: None,
+                    }],
+                    edges: vec![
+                        TraceLanguageExecutionMapEdge {
+                            id: "then-edge".to_string(),
+                            from: "branch".to_string(),
+                            to: "then".to_string(),
+                            label: "then".to_string(),
+                        },
+                        TraceLanguageExecutionMapEdge {
+                            id: "else-edge".to_string(),
+                            from: "branch".to_string(),
+                            to: "else".to_string(),
+                            label: "else".to_string(),
+                        },
+                    ],
+                },
             },
         });
-        append(TraceLanguageExecutionEvent::BranchSelected {
+        append(TraceLanguageExecution {
             event_key: "p1:branch".to_string(),
             identity: identity.clone(),
-            node_id: "branch".to_string(),
-            occurrence: 1,
-            edge_id: "then-edge".to_string(),
-            selected: TraceBranchSelection::Then,
+            payload: TraceLanguageExecutionPayload::BranchSelected {
+                node_id: "branch".to_string(),
+                occurrence: 1,
+                edge_id: "then-edge".to_string(),
+                selected: TraceBranchSelection::Then,
+            },
         });
-        append(TraceLanguageExecutionEvent::ChildStarted {
+        append(TraceLanguageExecution {
             event_key: "p1:child".to_string(),
             identity,
-            parent_node_id: "branch".to_string(),
-            occurrence: 1,
-            child: TraceLanguageChildExecution {
-                scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: "p2".to_string(),
+            payload: TraceLanguageExecutionPayload::ChildStarted {
+                parent_node_id: "branch".to_string(),
+                occurrence: 1,
+                child: TraceLanguageChildExecution {
+                    scope: TraceRuntimeScope::new("s1"),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: "p2".to_string(),
+                    },
+                    module_ref: Some("m1".to_string()),
+                    entry_ref: Some("r2:1".to_string()),
+                    entry_name: Some("child".to_string()),
                 },
-                module_ref: Some("m1".to_string()),
-                entry_ref: Some("r2:1".to_string()),
-                entry_name: Some("child".to_string()),
             },
         });
 

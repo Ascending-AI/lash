@@ -5,9 +5,9 @@ use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    TraceEvent, TraceLabelMetadata, TraceLanguageExecutionEvent as LanguageEvent,
+    TraceEvent, TraceLabelMetadata, TraceLanguageExecution,
     TraceLanguageExecutionIdentity as LanguageIdentity,
-    TraceLanguageExecutionMap as LanguageExecutionMap,
+    TraceLanguageExecutionMap as LanguageExecutionMap, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord, TraceRuntimeScope,
     TraceRuntimeSubject, TraceSink, TraceSinkError,
 };
@@ -178,7 +178,7 @@ impl TraceSink for TraceLashlangGraphStore {
         // session. The filter existed when `lashlang` was the only value this
         // field could take.
         let _ = language;
-        let event_key = lashlang_execution_event_key(event);
+        let event_key = &event.event_key;
         let mut state = self.inner.lock_recover();
         if !state.seen_event_keys.insert(event_key.to_string()) {
             return Ok(());
@@ -224,27 +224,22 @@ impl TraceLashlangGraphAccumulator {
 
 fn reduce_lashlang_execution_event(
     state: &mut TraceLashlangGraphState,
-    event: &LanguageEvent,
+    event: &TraceLanguageExecution,
     timestamp: &str,
 ) {
-    match event {
-        LanguageEvent::ExecutionStarted {
-            identity,
-            execution_map,
-            ..
-        } => seed_lashlang_graph(graph_mut(state, identity), execution_map),
-        LanguageEvent::ExecutionFinished {
-            identity, status, ..
-        } => {
+    let identity = &event.identity;
+    match &event.payload {
+        TraceLanguageExecutionPayload::ExecutionStarted { execution_map } => {
+            seed_lashlang_graph(graph_mut(state, identity), execution_map)
+        }
+        TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => {
             graph_mut(state, identity).status = *status;
         }
-        LanguageEvent::NodeStarted {
-            identity,
+        TraceLanguageExecutionPayload::NodeStarted {
             node_id,
             node_kind,
             label,
             occurrence,
-            ..
         } => {
             let node = node_mut(
                 state,
@@ -262,13 +257,11 @@ fn reduce_lashlang_execution_event(
             node.status = TraceLashlangNodeStatus::Running;
             node.occurrence = Some(*occurrence);
         }
-        LanguageEvent::NodeCompleted {
-            identity,
+        TraceLanguageExecutionPayload::NodeCompleted {
             node_id,
             node_kind,
             label,
             occurrence,
-            ..
         } => {
             let node = node_mut(
                 state,
@@ -284,14 +277,12 @@ fn reduce_lashlang_execution_event(
             node.status = TraceLashlangNodeStatus::Completed;
             node.occurrence = Some(*occurrence);
         }
-        LanguageEvent::NodeFailed {
-            identity,
+        TraceLanguageExecutionPayload::NodeFailed {
             node_id,
             node_kind,
             label,
             occurrence,
             error,
-            ..
         } => {
             let node = node_mut(
                 state,
@@ -308,8 +299,7 @@ fn reduce_lashlang_execution_event(
             node.latest_error = Some(error.clone());
             node.occurrence = Some(*occurrence);
         }
-        LanguageEvent::BranchSelected {
-            identity,
+        TraceLanguageExecutionPayload::BranchSelected {
             node_id,
             occurrence,
             edge_id,
@@ -351,8 +341,7 @@ fn reduce_lashlang_execution_event(
                 }
             }
         }
-        LanguageEvent::ChildStarted {
-            identity,
+        TraceLanguageExecutionPayload::ChildStarted {
             parent_node_id,
             child,
             ..
@@ -440,18 +429,6 @@ fn node_mut<'a>(
         })
 }
 
-fn lashlang_execution_event_key(event: &LanguageEvent) -> &str {
-    match event {
-        LanguageEvent::ExecutionStarted { event_key, .. }
-        | LanguageEvent::ExecutionFinished { event_key, .. }
-        | LanguageEvent::NodeStarted { event_key, .. }
-        | LanguageEvent::NodeCompleted { event_key, .. }
-        | LanguageEvent::NodeFailed { event_key, .. }
-        | LanguageEvent::BranchSelected { event_key, .. }
-        | LanguageEvent::ChildStarted { event_key, .. } => event_key,
-    }
-}
-
 fn duration_ms(first: Option<&str>, last: Option<&str>) -> Option<i64> {
     let first = chrono::DateTime::parse_from_rfc3339(first?).ok()?;
     let last = chrono::DateTime::parse_from_rfc3339(last?).ok()?;
@@ -487,7 +464,7 @@ mod tests {
         }
     }
 
-    fn append_at(store: &TraceLashlangGraphStore, event: LanguageEvent, ms: i64) {
+    fn append_at(store: &TraceLashlangGraphStore, event: TraceLanguageExecution, ms: i64) {
         store
             .append(&TraceRecord::new_with_timestamp(
                 TraceContext::default().for_session("session-1"),
@@ -500,72 +477,78 @@ mod tests {
             .expect("append lashlang execution event");
     }
 
-    fn started_event(event_key: &str) -> LanguageEvent {
-        LanguageEvent::ExecutionStarted {
+    fn started_event(event_key: &str) -> TraceLanguageExecution {
+        TraceLanguageExecution {
             event_key: event_key.to_string(),
             identity: identity(),
-            execution_map: LanguageExecutionMap {
-                module_ref: "module-1".to_string(),
-                entry_kind: "main".to_string(),
-                entry_ref: None,
-                entry_name: "main".to_string(),
-                nodes: vec![
-                    TraceLanguageExecutionMapNode {
-                        id: "branch".to_string(),
-                        kind: "branch".to_string(),
-                        label: "if ready".to_string(),
-                        label_metadata: None,
-                    },
-                    TraceLanguageExecutionMapNode {
-                        id: "then".to_string(),
-                        kind: "branch_arm".to_string(),
-                        label: "then".to_string(),
-                        label_metadata: None,
-                    },
-                    TraceLanguageExecutionMapNode {
-                        id: "else".to_string(),
-                        kind: "branch_arm".to_string(),
-                        label: "else".to_string(),
-                        label_metadata: None,
-                    },
-                ],
-                edges: vec![
-                    TraceLanguageExecutionMapEdge {
-                        id: "then-edge".to_string(),
-                        from: "branch".to_string(),
-                        to: "then".to_string(),
-                        label: "then".to_string(),
-                    },
-                    TraceLanguageExecutionMapEdge {
-                        id: "else-edge".to_string(),
-                        from: "branch".to_string(),
-                        to: "else".to_string(),
-                        label: "else".to_string(),
-                    },
-                ],
+            payload: TraceLanguageExecutionPayload::ExecutionStarted {
+                execution_map: LanguageExecutionMap {
+                    module_ref: "module-1".to_string(),
+                    entry_kind: "main".to_string(),
+                    entry_ref: None,
+                    entry_name: "main".to_string(),
+                    nodes: vec![
+                        TraceLanguageExecutionMapNode {
+                            id: "branch".to_string(),
+                            kind: "branch".to_string(),
+                            label: "if ready".to_string(),
+                            label_metadata: None,
+                        },
+                        TraceLanguageExecutionMapNode {
+                            id: "then".to_string(),
+                            kind: "branch_arm".to_string(),
+                            label: "then".to_string(),
+                            label_metadata: None,
+                        },
+                        TraceLanguageExecutionMapNode {
+                            id: "else".to_string(),
+                            kind: "branch_arm".to_string(),
+                            label: "else".to_string(),
+                            label_metadata: None,
+                        },
+                    ],
+                    edges: vec![
+                        TraceLanguageExecutionMapEdge {
+                            id: "then-edge".to_string(),
+                            from: "branch".to_string(),
+                            to: "then".to_string(),
+                            label: "then".to_string(),
+                        },
+                        TraceLanguageExecutionMapEdge {
+                            id: "else-edge".to_string(),
+                            from: "branch".to_string(),
+                            to: "else".to_string(),
+                            label: "else".to_string(),
+                        },
+                    ],
+                },
             },
         }
     }
 
-    fn node_started(event_key: &str, occurrence: u64) -> LanguageEvent {
-        LanguageEvent::NodeStarted {
+    fn node_started(event_key: &str, occurrence: u64) -> TraceLanguageExecution {
+        TraceLanguageExecution {
             event_key: event_key.to_string(),
             identity: identity(),
-            node_id: "branch".to_string(),
-            node_kind: "branch".to_string(),
-            label: "if ready".to_string(),
-            occurrence,
+            payload: TraceLanguageExecutionPayload::NodeStarted {
+                node_id: "branch".to_string(),
+                node_kind: "branch".to_string(),
+                label: "if ready".to_string(),
+                occurrence,
+            },
         }
     }
 
-    fn node_completed(event_key: &str, occurrence: u64) -> LanguageEvent {
-        LanguageEvent::NodeCompleted {
+    fn node_completed(event_key: &str, occurrence: u64) -> TraceLanguageExecution {
+        TraceLanguageExecution {
             event_key: event_key.to_string(),
             identity: identity(),
-            node_id: "branch".to_string(),
-            node_kind: "branch".to_string(),
-            label: "if ready".to_string(),
-            occurrence,
+            payload: TraceLanguageExecutionPayload::NodeCompleted {
+                node_id: "branch".to_string(),
+                node_kind: "branch".to_string(),
+                label: "if ready".to_string(),
+                occurrence,
+            },
         }
     }
 
@@ -613,7 +596,9 @@ mod tests {
     fn graph_store_preserves_static_label_metadata() {
         let store = TraceLashlangGraphStore::default();
         let mut event = started_event("start");
-        if let LanguageEvent::ExecutionStarted { execution_map, .. } = &mut event {
+        if let TraceLanguageExecutionPayload::ExecutionStarted { execution_map, .. } =
+            &mut event.payload
+        {
             execution_map.nodes[0].label_metadata = Some(TraceLabelMetadata {
                 title: "Choose path".to_string(),
                 description: Some("Branch detail".to_string()),
@@ -670,13 +655,15 @@ mod tests {
         append_at(&store, started_event("start"), 1_000);
         append_at(
             &store,
-            LanguageEvent::BranchSelected {
+            TraceLanguageExecution {
                 event_key: "branch".to_string(),
                 identity: identity(),
-                node_id: "branch".to_string(),
-                occurrence: 1,
-                edge_id: "then-edge".to_string(),
-                selected: TraceBranchSelection::Then,
+                payload: TraceLanguageExecutionPayload::BranchSelected {
+                    node_id: "branch".to_string(),
+                    occurrence: 1,
+                    edge_id: "then-edge".to_string(),
+                    selected: TraceBranchSelection::Then,
+                },
             },
             1_100,
         );
@@ -708,19 +695,21 @@ mod tests {
 
         append_at(
             &store,
-            LanguageEvent::ChildStarted {
+            TraceLanguageExecution {
                 event_key: "child".to_string(),
                 identity: identity(),
-                parent_node_id: "spawn".to_string(),
-                occurrence: 1,
-                child: TraceLanguageChildExecution {
-                    scope: TraceRuntimeScope::new("session-1"),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: "process:child".to_string(),
+                payload: TraceLanguageExecutionPayload::ChildStarted {
+                    parent_node_id: "spawn".to_string(),
+                    occurrence: 1,
+                    child: TraceLanguageChildExecution {
+                        scope: TraceRuntimeScope::new("session-1"),
+                        subject: TraceRuntimeSubject::Process {
+                            process_id: "process:child".to_string(),
+                        },
+                        module_ref: Some("module-1".to_string()),
+                        entry_ref: Some("process:0".to_string()),
+                        entry_name: Some("child".to_string()),
                     },
-                    module_ref: Some("module-1".to_string()),
-                    entry_ref: Some("process:0".to_string()),
-                    entry_name: Some("child".to_string()),
                 },
             },
             1_000,

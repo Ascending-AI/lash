@@ -107,6 +107,11 @@ IDENTIFIER_RENAME_BASELINES = {
     "PROCESS_REGISTRATION_FAMILY_VERSION": (
         "sha256:fd2a5cd3cc916b265166f95f896524883c047382634e959d152df48e860f9ed7"
     ),
+    # FIG-1623: hoist the trace language-execution envelope while keeping
+    # serde output wire-identical (flattened payload), so TRACE_SCHEMA_VERSION stays 7.
+    "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
+        "sha256:587b0088e2344437aeeff0446339baca01ef0a2f3fa5b054f41581717eda7e0a"
+    ),
 }
 
 
