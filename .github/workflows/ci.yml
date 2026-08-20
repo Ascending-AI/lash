@@ -106,15 +106,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-tags: true
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
 
       - name: Restore cargo cache
@@ -127,7 +134,7 @@ jobs:
           shared-key: linux-debug
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -204,15 +211,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-tags: true
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
@@ -222,7 +236,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -283,13 +297,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
@@ -299,7 +322,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -323,13 +346,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
@@ -339,7 +371,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -403,13 +435,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
@@ -419,7 +460,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -475,13 +516,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Install Node for browser projection gates
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -500,7 +550,7 @@ jobs:
           save-if: false
 
       - name: Install protoc and nextest
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc,nextest
 
@@ -535,9 +585,20 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune origin "+refs/heads/*:refs/remotes/origin/*"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --force --tags origin
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Check and preview PR release notes
         if: github.event_name == 'pull_request'
@@ -596,7 +657,7 @@ jobs:
           "${RUNNER_TEMP}/actionlint" -no-color
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
         with:
           components: clippy, rustfmt
 
@@ -612,7 +673,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -748,13 +809,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
 
       - name: Restore cargo cache
@@ -765,7 +835,7 @@ jobs:
           save-if: false
 
       - name: Install protoc and nextest
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc,nextest
 
@@ -796,7 +866,16 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Download confidence fast shard artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -858,10 +937,19 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
@@ -871,7 +959,7 @@ jobs:
           save-if: false
 
       - name: Install protoc and nextest
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc,nextest
 
@@ -880,7 +968,7 @@ jobs:
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
-        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+        uses: ./.github/actions/setup-mold
 
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
@@ -920,10 +1008,19 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
@@ -933,7 +1030,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -942,7 +1039,7 @@ jobs:
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
-        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+        uses: ./.github/actions/setup-mold
 
       - name: Start MinIO and create test bucket
         run: |
@@ -990,10 +1087,19 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
@@ -1003,7 +1109,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -1012,7 +1118,7 @@ jobs:
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
-        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+        uses: ./.github/actions/setup-mold
 
       - name: Enforce stack budget
         run: bash scripts/ci-stack-budget.sh
@@ -1045,13 +1151,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
 
       - name: Restore cargo cache
@@ -1063,7 +1178,7 @@ jobs:
           shared-key: linux-release
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -1130,13 +1245,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
 
       - name: Restore cargo cache
@@ -1147,7 +1271,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -1156,7 +1280,7 @@ jobs:
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
-        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+        uses: ./.github/actions/setup-mold
 
       - name: Install Node
         if: matrix.node
@@ -1174,12 +1298,12 @@ jobs:
         if: matrix.browser
         run: uv run --with playwright==1.62.0 playwright install --with-deps chromium
 
-      # taiki-e/install-action resolves tools from vendored manifests instead of
-      # the GitHub releases API; merge-queue trains fan out enough jobs that the
-      # API-listing path (extractions/setup-just) hit rate limits and ejected
-      # whole trains.
+      # The repo-local installer uses checksum-pinned release archives instead
+      # of the GitHub releases API; merge-queue trains fan out enough jobs that
+      # the API-listing path (extractions/setup-just) hit rate limits and
+      # ejected whole trains.
       - name: Install just
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: just
 
@@ -1218,13 +1342,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git checkout --force --detach FETCH_HEAD
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        uses: ./.github/actions/rust-toolchain
 
       # The e2e binaries are built on the host by the just recipe and
       # bind-mounted into the compose services, so the build reuses the
@@ -1239,7 +1372,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
@@ -1248,7 +1381,7 @@ jobs:
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
-        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+        uses: ./.github/actions/setup-mold
 
       - name: Run distributed backend E2E
         run: bash scripts/restate-postgres-workers-e2e.sh

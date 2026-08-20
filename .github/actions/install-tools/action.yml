@@ -1,0 +1,88 @@
+# Vendored from https://github.com/taiki-e/install-action at 82cd3e7658a6f96c86c0234aeeda1748937cb0a1.
+# SPDX-License-Identifier: MIT OR Apache-2.0
+name: Install CI tools
+description: Install the repository's pinned CI tools without downloading a remote action package.
+
+inputs:
+  tool:
+    description: Comma-separated tools; supported values are protoc, nextest, and just.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install tools
+      shell: bash
+      env:
+        TOOLS: ${{ inputs.tool }}
+      run: |
+        set -euo pipefail
+
+        bin_dir="${HOME}/.local/bin"
+        include_dir="${HOME}/.local/share/protoc/include"
+        install_tmp="$(mktemp -d "${RUNNER_TEMP}/lash-install-tools.XXXXXX")"
+        trap 'rm -rf "${install_tmp}"' EXIT
+        mkdir -p "${bin_dir}"
+
+        download() {
+          local url="$1"
+          local checksum="$2"
+          local archive="$3"
+          curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused \
+            --location --silent --show-error --fail --output "${archive}" "${url}"
+          printf '%s  %s\n' "${checksum}" "${archive}" | sha256sum --check --status
+        }
+
+        install_protoc() {
+          local archive="${install_tmp}/protoc.zip"
+          local unpacked="${install_tmp}/protoc"
+          download \
+            https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protoc-35.1-linux-x86_64.zip \
+            6930ebf62bd4ea607b98fff052596c6ee564b9835b4ce172c75a3f53ae9d91b7 \
+            "${archive}"
+          mkdir -p "${unpacked}" "${include_dir}"
+          unzip -q "${archive}" -d "${unpacked}"
+          install -m 0755 "${unpacked}/bin/protoc" "${bin_dir}/protoc"
+          cp -R "${unpacked}/include/." "${include_dir}/"
+          echo "PROTOC=${bin_dir}/protoc" >> "${GITHUB_ENV}"
+        }
+
+        install_nextest() {
+          local archive="${install_tmp}/nextest.tar.gz"
+          local unpacked="${install_tmp}/nextest"
+          download \
+            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz \
+            66786b9abe23920d022a182d1416b1bbc8130dd4872a9553d76985a1708dcd1e \
+            "${archive}"
+          mkdir -p "${unpacked}"
+          tar -xzf "${archive}" -C "${unpacked}"
+          install -m 0755 "$(find "${unpacked}" -type f -name cargo-nextest -print -quit)" "${bin_dir}/cargo-nextest"
+        }
+
+        install_just() {
+          local archive="${install_tmp}/just.tar.gz"
+          local unpacked="${install_tmp}/just"
+          download \
+            https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz \
+            4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d \
+            "${archive}"
+          mkdir -p "${unpacked}"
+          tar -xzf "${archive}" -C "${unpacked}"
+          install -m 0755 "$(find "${unpacked}" -type f -name just -print -quit)" "${bin_dir}/just"
+        }
+
+        IFS=',' read -ra requested_tools <<< "${TOOLS}"
+        for requested_tool in "${requested_tools[@]}"; do
+          requested_tool="${requested_tool// /}"
+          case "${requested_tool}" in
+            protoc) install_protoc ;;
+            nextest) install_nextest ;;
+            just) install_just ;;
+            *)
+              echo "Unsupported vendored tool: ${requested_tool}" >&2
+              exit 1
+              ;;
+          esac
+        done
+
+        echo "${bin_dir}" >> "${GITHUB_PATH}"
