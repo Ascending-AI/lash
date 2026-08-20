@@ -7,7 +7,7 @@ use std::path::Path;
 use lash_core::{ToolCall, ToolDefinition, ToolOutcome, ToolRetryPolicy};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execute_typed_tool_result,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execute_typed_tool_result,
     execution_failure, invalid_request_failure, invalid_tool_args, io_failure, non_empty_string,
     resolve_under, run_blocking_value,
 };
@@ -122,7 +122,7 @@ fn read_file_tool_definition() -> ToolDefinition {
                 r#"await files.read({ path: "Cargo.toml" })?"#.into(),
                 r#"await files.read({ path: "src/main.rs", offset: 1, limit: 120 })?"#.into(),
             ])
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["files"],
                 "read",
                 &["cat", "view_file"],

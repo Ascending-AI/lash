@@ -113,7 +113,7 @@ finish { reviewed: len(batch), by_owner: by_owner, errors: errors }
             <table>
               <thead><tr><th>Lashlang operation</th><th>Runtime path</th></tr></thead>
               <tbody>
-                <tr><td><code>await board.play({ ... })?</code></td><td><code>LashlangToolBinding</code> maps <code>board.play</code> to a host tool name such as <code>play_move</code>; <code>HostBridge</code> calls <code>RuntimeExecutionContext::call_tool</code> through the active <code>ToolDispatchContext</code>.</td></tr>
+                <tr><td><code>await board.play({ ... })?</code></td><td><code>ToolBinding</code> maps <code>board.play</code> to a host tool name such as <code>play_move</code>; <code>HostBridge</code> calls <code>RuntimeExecutionContext::call_tool</code> through the active <code>ToolDispatchContext</code>.</td></tr>
                 <tr><td><code>cron.Schedule({ ... })</code></td><td>A plugin-provided <code>LashlangHostCatalog</code> entry lowers this to a host descriptor with type metadata. It is pure VM data until code passes it to <code>triggers.register</code>.</td></tr>
                 <tr><td><code>await triggers.register({ source, target, inputs })?</code></td><td>The trigger host operation is routed to the runtime trigger store. Registration validates the source event type against every <code>trigger.event</code> input, computes the source key, and stores a durable subscription from source type/key to process definition plus a fixed/event input template.</td></tr>
                 <tr><td><code>start name(...)</code></td><td>The compiled effect creates one process run from the named process definition and returns a run handle.</td></tr>

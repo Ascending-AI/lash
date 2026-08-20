@@ -6,7 +6,7 @@ use unicode_normalization::UnicodeNormalization;
 use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, compact_diff,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, compact_diff,
     display_relative, execute_typed_tool_result, invalid_request_failure, invalid_tool_args,
     io_failure, non_empty_string, resolve_under, run_blocking,
 };
@@ -77,7 +77,7 @@ fn edit_tool_definition() -> ToolDefinition {
             r#"await files.edit({ path: "src/main.rs", edits: [{ oldText: "old();", newText: "new();" }] })?"#.into(),
             r#"await files.edit({ path: "README.md", edits: [{ oldText: "alpha", newText: "ALPHA" }, { oldText: "omega", newText: "OMEGA" }] })?"#.into(),
         ])
-        .with_lashlang_binding(lash_tool_support::lashlang_binding(
+        .with_tool_binding(lash_tool_support::tool_binding(
             ["files"],
             "edit",
             &["replace", "edit_file"],

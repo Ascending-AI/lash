@@ -153,7 +153,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 mod catalogue_tests {
     use super::*;
     use lash_core::ToolActivation;
-    use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
+    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     fn tool(
         name: &str,
@@ -172,7 +172,7 @@ mod catalogue_tests {
             serde_json::json!({ "type": "string" }),
         )
         .with_activation(ToolActivation::Always)
-        .with_lashlang_binding(LashlangToolBinding::new([module], operation))
+        .with_tool_binding(ToolBinding::new([module], operation))
     }
 
     #[test]

@@ -14,7 +14,7 @@ use lash_core::plugin::{
 };
 use lash_core::{ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
 use lash_tool_support::{
-    LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt,
+    StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
 };
 
 /// Plugin factory for process-control tools.
@@ -155,7 +155,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
         r#"await processes.list({ status: "any" })?"#.into(),
         "await processes.list({ definition: on_button })?".into(),
     ])
-    .with_lashlang_binding(LashlangToolBinding::new(["processes"], "list"))
+    .with_tool_binding(ToolBinding::new(["processes"], "list"))
 }
 
 fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinition> {
@@ -199,7 +199,7 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
         r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
         r#"await processes.cancel({ process_id: "subagent:session-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
     ])
-    .with_lashlang_binding(LashlangToolBinding::new(["processes"], "cancel"))
+    .with_tool_binding(ToolBinding::new(["processes"], "cancel"))
 }
 
 pub async fn execute_process_list_tool_call(

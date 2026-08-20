@@ -188,7 +188,7 @@ fn typescript_prompt_programs() -> Vec<String> {
 /// The trigger sources and their event types come from the Workbench's own
 /// declaration (`workbench_lashlang_resources`), so a change there is a change
 /// here. The tool modules are stated at the paths the real bindings produce —
-/// `with_lashlang_binding` writes the same binding under both dialect keys, so
+/// `with_tool_binding` writes the same binding under both dialect keys, so
 /// a TypeScript call path is the Lashlang one.
 fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = workbench_lashlang_resources();

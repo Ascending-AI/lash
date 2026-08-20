@@ -35,7 +35,7 @@ impl lash::tools::StaticToolExecute for WorkbenchControlTools {
 }
 
 fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
-    use lash::tools::ToolDefinitionLashlangExt as _;
+    use lash::tools::ToolDefinitionBindingExt as _;
 
     let empty_input = json!({
         "type": "object",
@@ -50,7 +50,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             empty_input.clone(),
             json!({ "type": "object" }),
         )
-        .with_lashlang_binding(lash::tools::LashlangToolBinding::new(
+        .with_tool_binding(lash::tools::ToolBinding::new(
             ["workbench_control"],
             "cancel",
         )),
@@ -61,7 +61,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             empty_input.clone(),
             json!({ "type": "object" }),
         )
-        .with_lashlang_binding(lash::tools::LashlangToolBinding::new(
+        .with_tool_binding(lash::tools::ToolBinding::new(
             ["workbench_control"],
             "finish",
         )),
@@ -72,7 +72,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             empty_input,
             json!({ "type": "object" }),
         )
-        .with_lashlang_binding(lash::tools::LashlangToolBinding::new(
+        .with_tool_binding(lash::tools::ToolBinding::new(
             ["workbench_control"],
             "fail",
         )),

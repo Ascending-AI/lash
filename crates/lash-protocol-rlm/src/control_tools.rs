@@ -3,7 +3,7 @@ use lash_core::{
     ToolArgumentProjectionPolicy, ToolCall, ToolContract, ToolControl, ToolDefinition,
     ToolManifest, ToolOutcome, ToolProvider,
 };
-use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
+use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -51,7 +51,7 @@ pub(crate) fn continue_as_tool_definition_for(
         continue_as_output_schema(),
     )
     .with_examples(vec![vocabulary.continue_as_example.into()])
-    .with_lashlang_binding(LashlangToolBinding::new(["control"], "continue_as"))
+    .with_tool_binding(ToolBinding::new(["control"], "continue_as"))
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
         "seed",
     ))

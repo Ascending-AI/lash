@@ -411,7 +411,7 @@ mod tests {
         ToolContract, ToolDefinition, facade_support::build_tool_catalog,
         test_support::ToolCatalogBuildInput,
     };
-    use lash_lashlang_runtime::{LashlangSurface, LashlangToolBinding, ToolDefinitionLashlangExt};
+    use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
     use serde_json::json;
     use std::sync::Arc;
 
@@ -436,7 +436,7 @@ mod tests {
                 ToolContract::default_input_schema(),
                 json!({ "type": "string" }),
             )
-            .with_lashlang_binding(LashlangToolBinding::new(["web"], "fetch")),
+            .with_tool_binding(ToolBinding::new(["web"], "fetch")),
             ToolDefinition::raw(
                 "tool:test/read_file",
                 "read_file",
@@ -444,7 +444,7 @@ mod tests {
                 ToolContract::default_input_schema(),
                 json!({ "type": "string" }),
             )
-            .with_lashlang_binding(LashlangToolBinding::new(["files"], "read")),
+            .with_tool_binding(ToolBinding::new(["files"], "read")),
         ];
         let contracts: std::collections::BTreeMap<_, _> = tools
             .iter()
@@ -552,7 +552,7 @@ mod tests {
                 ToolContract::default_input_schema(),
                 json!({ "type": "string" }),
             )
-            .with_lashlang_binding(LashlangToolBinding::new([module], "run"));
+            .with_tool_binding(ToolBinding::new([module], "run"));
 
             let err = rlm_tool_catalog(
                 ToolCatalogContext {
@@ -592,7 +592,7 @@ mod tests {
             ToolContract::default_input_schema(),
             json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["plan"], "update"));
+        .with_tool_binding(ToolBinding::new(["plan"], "update"));
         missing
             .manifest
             .bindings
@@ -644,7 +644,7 @@ mod tests {
             }),
             json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["plan"], "update"));
+        .with_tool_binding(ToolBinding::new(["plan"], "update"));
 
         let contracts: std::collections::BTreeMap<_, _> = [update_plan.clone()]
             .iter()
@@ -729,7 +729,7 @@ mod tests {
             input_schema,
             json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["agents"], "spawn"))
+        .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
     }
 
     #[derive(Clone, Copy)]
@@ -893,7 +893,7 @@ mod tests {
                 }
             }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["processes"], "list"));
+        .with_tool_binding(ToolBinding::new(["processes"], "list"));
 
         let err = catalog_registration(tool).expect_err("both leaks must be reported");
         let message = err.to_string();
@@ -962,7 +962,7 @@ mod tests {
             }),
             json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["agents"], "spawn"));
+        .with_tool_binding(ToolBinding::new(["agents"], "spawn"));
         let err = catalog_registration(deep_input).expect_err("a token nowhere is a defect");
         let message = err.to_string();
         assert!(
@@ -985,7 +985,7 @@ mod tests {
                 }
             }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["agents"], "spawn"));
+        .with_tool_binding(ToolBinding::new(["agents"], "spawn"));
         catalog_registration(deep_output).expect("a rendered output field resolves its token");
     }
 
@@ -1013,7 +1013,7 @@ mod tests {
             }),
             json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["processes"], "list"));
+        .with_tool_binding(ToolBinding::new(["processes"], "list"));
         let err = catalog_registration(leaked).expect_err("an enum value names a dialect");
         assert!(
             err.to_string().contains("names the `lashlang` dialect"),
@@ -1032,7 +1032,7 @@ mod tests {
             }),
             json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["processes"], "list"));
+        .with_tool_binding(ToolBinding::new(["processes"], "list"));
         let err = catalog_registration(tokenized).expect_err("a literal never resolves a token");
         assert!(
             err.to_string()

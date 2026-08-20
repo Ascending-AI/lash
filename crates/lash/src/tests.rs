@@ -13,7 +13,7 @@ use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
 #[cfg(feature = "rlm")]
-use lash_lashlang_runtime::ToolDefinitionLashlangExt;
+use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
 static TEST_SESSION_LEASE_TOKEN: AtomicUsize = AtomicUsize::new(1);
@@ -1468,7 +1468,7 @@ impl ToolProvider for RetryingDirectTools {
 
 #[cfg(feature = "rlm")]
 fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_lashlang_binding(
+    test_tool_definition_with_tool_binding(
         lash_core::ToolDefinition::raw(
             "tool:retrying_direct",
             "retrying_direct",
@@ -1557,7 +1557,7 @@ impl ToolProvider for DurableInputTools {
 
 #[cfg(feature = "rlm")]
 fn durable_input_tool_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_lashlang_binding(
+    test_tool_definition_with_tool_binding(
         lash_core::ToolDefinition::raw(
             "tool:mock_input_request",
             "mock_input_request",
@@ -1633,7 +1633,7 @@ fn agent_frame_switch_tool_definition() -> lash_core::ToolDefinition {
 }
 
 fn app_tool_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_lashlang_binding(
+    test_tool_definition_with_tool_binding(
         lash_core::ToolDefinition::raw(
             "tool:app_lookup",
             "app_lookup",
@@ -1667,7 +1667,7 @@ impl ToolProvider for LongTextTools {
 }
 
 fn long_text_tool_definition() -> lash_core::ToolDefinition {
-    test_tool_definition_with_lashlang_binding(
+    test_tool_definition_with_tool_binding(
         lash_core::ToolDefinition::raw(
             "tool:app_lookup",
             "app_lookup",
@@ -1684,18 +1684,15 @@ fn long_text_tool_definition() -> lash_core::ToolDefinition {
 }
 
 #[cfg(feature = "rlm")]
-fn test_tool_definition_with_lashlang_binding(
+fn test_tool_definition_with_tool_binding(
     definition: lash_core::ToolDefinition,
     name: impl Into<String>,
 ) -> lash_core::ToolDefinition {
-    definition.with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["tools"],
-        name,
-    ))
+    definition.with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], name))
 }
 
 #[cfg(not(feature = "rlm"))]
-fn test_tool_definition_with_lashlang_binding(
+fn test_tool_definition_with_tool_binding(
     definition: lash_core::ToolDefinition,
     _name: impl Into<String>,
 ) -> lash_core::ToolDefinition {

@@ -3,7 +3,7 @@ use serde_json::json;
 use lash_core::{ToolCall, ToolDefinition, ToolFailure, ToolFailureClass, ToolOutcome, ToolValue};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
     object_schema, require_str, retryable_io_failure,
 };
 
@@ -136,7 +136,7 @@ fn fetch_url_tool_definition() -> ToolDefinition {
             )
             .with_examples(vec!["await web.fetch({ url: \"https://www.rust-lang.org/\" })?".into()])
             .with_retry_policy(lash_core::ToolRetryPolicy::safe(2, 250, 1000))
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["web"],
                 "fetch",
                 &["fetch", "open_url"],

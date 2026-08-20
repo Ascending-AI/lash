@@ -200,10 +200,13 @@ fn missing_tool_binding_is_not_fabricated() {
     let err = required_tool_lashlang_executable(&tool.manifest)
         .expect_err("missing explicit binding should fail");
 
-    assert!(
-        err.to_string()
-            .contains("missing an explicit `lashlang.tool` binding")
-    );
+    assert!(matches!(
+        err,
+        ToolBindingError::MissingBinding {
+            tool,
+            binding_key: LASHLANG_TOOL_BINDING_KEY,
+        } if tool == "read_file"
+    ));
 }
 
 #[test]
@@ -215,8 +218,8 @@ fn explicit_tool_binding_attaches_lashlang_and_typescript_metadata() {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::Value::Null,
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["fs"], "read")
+    .with_tool_binding(
+        ToolBinding::new(["fs"], "read")
             .with_authority_type("Filesystem")
             .with_aliases(["cat"]),
     );
@@ -235,6 +238,52 @@ fn explicit_tool_binding_attaches_lashlang_and_typescript_metadata() {
         tool.manifest
             .bindings
             .contains_key(TYPESCRIPT_TOOL_BINDING_KEY)
+    );
+}
+
+#[test]
+fn pre_rename_manifest_binding_payload_round_trips_identically() {
+    let legacy_bindings = serde_json::json!({
+        "lashlang.tool": {
+            "module_path": ["workspace", "files"],
+            "operation": "write",
+            "authority_type": "Filesystem",
+            "aliases": ["write_text"]
+        },
+        "typescript.tool": {
+            "module_path": ["workspace", "files"],
+            "operation": "write",
+            "authority_type": "Filesystem",
+            "aliases": ["write_text"]
+        }
+    });
+    let mut legacy_manifest = lash_core::ToolDefinition::raw(
+        "tool:test/write_file",
+        "write_file",
+        "write a file",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::Value::Null,
+    )
+    .manifest;
+    legacy_manifest.bindings =
+        serde_json::from_value(legacy_bindings.clone()).expect("legacy bindings decode");
+
+    let binding = legacy_manifest
+        .tool_binding()
+        .expect("legacy binding payload decodes")
+        .expect("legacy binding is present");
+    let rewritten = lash_core::ToolDefinition::raw(
+        "tool:test/write_file",
+        "write_file",
+        "write a file",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::Value::Null,
+    )
+    .with_tool_binding(binding);
+
+    assert_eq!(
+        serde_json::to_value(&rewritten.manifest.bindings).expect("rewritten bindings encode"),
+        legacy_bindings
     );
 }
 
@@ -258,9 +307,7 @@ fn tool_catalog_imports_declared_static_schema_types() {
             "items": { "type": ["string", "null"] }
         }),
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["fs"], "read").with_authority_type("Filesystem"),
-    );
+    .with_tool_binding(ToolBinding::new(["fs"], "read").with_authority_type("Filesystem"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
 
     let resources = lashlang_resources_from_tool_catalog(&catalog).expect("tool schemas import");
@@ -307,9 +354,7 @@ fn from_input_schema_tool_imports_contract_marker_and_default() {
         serde_json::json!({ "type": "string" }),
     )
     .with_output_from_input_schema("schema", Some(serde_json::json!({ "type": "string" })))
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["generate"], "run").with_authority_type("Generator"),
-    );
+    .with_tool_binding(ToolBinding::new(["generate"], "run").with_authority_type("Generator"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
 
     let resources = lashlang_resources_from_tool_catalog(&catalog).expect("tool schemas import");
@@ -364,15 +409,19 @@ fn dotted_operation_names_are_rejected() {
         lash_core::ToolDefinition::default_input_schema(),
         serde_json::Value::Null,
     )
-    .with_lashlang_binding(LashlangToolBinding::new(["tools"], "update.plan"));
+    .with_tool_binding(ToolBinding::new(["tools"], "update.plan"));
 
     let err = required_tool_lashlang_executable(&tool.manifest)
         .expect_err("dotted operation cannot compile as one Lashlang operation");
 
-    assert!(
-        err.to_string()
-            .contains("invalid Lashlang operation name `update.plan`")
-    );
+    assert!(matches!(
+        err,
+        ToolBindingError::InvalidIdentifier {
+            tool,
+            part: "operation name",
+            value,
+        } if tool == "update_plan" && value == "update.plan"
+    ));
 }
 
 #[test]
@@ -385,7 +434,7 @@ fn manifest_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
         serde_json::Value::Null,
     )
     .manifest;
-    assert_eq!(manifest.lashlang_binding().expect("absent binding"), None);
+    assert_eq!(manifest.tool_binding().expect("absent binding"), None);
 
     manifest.bindings.insert(
         LASHLANG_TOOL_BINDING_KEY.to_string(),
@@ -395,7 +444,7 @@ fn manifest_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
         }),
     );
     let binding = manifest
-        .lashlang_binding()
+        .tool_binding()
         .expect("valid binding")
         .expect("present binding");
     assert_eq!(binding.module_path, vec!["fs"]);
@@ -405,17 +454,17 @@ fn manifest_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
         LASHLANG_TOOL_BINDING_KEY.to_string(),
         serde_json::json!({ "module_path": "fs" }),
     );
-    assert!(manifest.lashlang_binding().is_err());
+    assert!(manifest.tool_binding().is_err());
 }
 
 #[test]
 fn remote_grant_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
     let grant = remote_tool_grant("read_file");
-    assert_eq!(grant.lashlang_binding().expect("absent binding"), None);
+    assert_eq!(grant.tool_binding().expect("absent binding"), None);
 
-    let grant = grant.with_lashlang_binding(LashlangToolBinding::new(["fs"], "read"));
+    let grant = grant.with_tool_binding(ToolBinding::new(["fs"], "read"));
     let binding = grant
-        .lashlang_binding()
+        .tool_binding()
         .expect("valid binding")
         .expect("present binding");
     assert_eq!(binding.module_path, vec!["fs"]);
@@ -426,7 +475,7 @@ fn remote_grant_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
         LASHLANG_TOOL_BINDING_KEY.to_string(),
         serde_json::json!({ "module_path": "fs" }),
     );
-    assert!(malformed.lashlang_binding().is_err());
+    assert!(malformed.tool_binding().is_err());
 }
 
 #[test]

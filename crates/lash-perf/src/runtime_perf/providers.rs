@@ -19,7 +19,7 @@ use lash_core::{
 };
 #[cfg(test)]
 use lash_lashlang_runtime::tool_lashlang_binding;
-use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
+use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::scenarios::RuntimePerfScenario;
 
@@ -472,9 +472,7 @@ fn benchmark_mail_tool_definition(account: &str, operation: &str) -> ToolDefinit
         input_schema,
         output_schema,
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["inbox", account], operation).with_authority_type("Inbox"),
-    )
+    .with_tool_binding(ToolBinding::new(["inbox", account], operation).with_authority_type("Inbox"))
 }
 
 async fn execute_benchmark_echo(call: lash_core::ToolCall<'_>) -> ToolOutcome {
@@ -569,9 +567,7 @@ fn benchmark_echo_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["tools"], "benchmark_echo").with_authority_type("Tools"),
-    )
+    .with_tool_binding(ToolBinding::new(["tools"], "benchmark_echo").with_authority_type("Tools"))
 }
 
 fn benchmark_slow_tool_definition() -> ToolDefinition {
@@ -597,8 +593,8 @@ fn benchmark_slow_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["tools"], "benchmark_slow").with_authority_type("Tools"),
+    .with_tool_binding(
+        ToolBinding::new(["tools"], "benchmark_slow").with_authority_type("Tools"),
     )
 }
 
@@ -627,9 +623,7 @@ fn benchmark_async_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["tools"], "benchmark_async").with_authority_type("Tools"),
-    )
+    .with_tool_binding(ToolBinding::new(["tools"], "benchmark_async").with_authority_type("Tools"))
 }
 
 fn benchmark_oblique_tool_definitions() -> Vec<ToolDefinition> {
@@ -672,8 +666,8 @@ fn benchmark_oblique_search_tool_definition() -> ToolDefinition {
         }),
         oblique_search_output_schema(),
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["obliq"], "search").with_authority_type("Obliq"),
+    .with_tool_binding(
+        ToolBinding::new(["obliq"], "search").with_authority_type("Obliq"),
     )
 }
 
@@ -712,9 +706,7 @@ fn benchmark_oblique_judge_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["obliq"], "judge_candidates").with_authority_type("Obliq"),
-    )
+    .with_tool_binding(ToolBinding::new(["obliq"], "judge_candidates").with_authority_type("Obliq"))
 }
 
 fn benchmark_oblique_list_handles_tool_definition() -> ToolDefinition {
@@ -738,8 +730,8 @@ fn benchmark_oblique_list_handles_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     )
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["obliq"], "list_async_handles").with_authority_type("Obliq"),
+    .with_tool_binding(
+        ToolBinding::new(["obliq"], "list_async_handles").with_authority_type("Obliq"),
     )
 }
 
@@ -955,8 +947,8 @@ fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
             r#"call {name} {{ user_id: "me", query: "from:alerts@example.com newer_than:7d", limit: 25 }}"#
         ),
     ])
-    .with_lashlang_binding(
-        LashlangToolBinding::new(
+    .with_tool_binding(
+        ToolBinding::new(
             ["gmail"],
             name.trim_start_matches("GMAIL_").to_ascii_lowercase(),
         )

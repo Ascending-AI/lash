@@ -23,8 +23,8 @@ use lash::provider::{
     ReasoningSelection, SamplingCapability,
 };
 use lash::tools::{
-    LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition,
-    ToolDefinitionLashlangExt as _, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
+    ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
 };
 use lash::tracing::{JsonlTraceSink, TraceLevel};
 use lash::{LashCore, ModelSpec, TurnInput};
@@ -1018,19 +1018,19 @@ fn swap_tools(
             "read_channel",
             "Read the shared channel oldest-first. Use this to obtain the peer's published nonce.",
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["channel"], "history")),
+        .with_tool_binding(ToolBinding::new(["channel"], "history")),
         ToolDefinition::typed::<PostMessageArgs, PostMessageOutput>(
             "tool:slack_clone.live.post_channel_message",
             "post_channel_message",
             "Post to the shared channel. Publish your own nonce verbatim here.",
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["channel"], "post")),
+        .with_tool_binding(ToolBinding::new(["channel"], "post")),
         ToolDefinition::typed::<SubmitNonceArgs, SubmitNonceOutput>(
             "tool:slack_clone.live.submit_peer_nonce",
             "submit_peer_nonce",
             "Submit the peer nonce after reading it from the shared channel. Exact value only.",
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["exchange"], "submit")),
+        .with_tool_binding(ToolBinding::new(["exchange"], "submit")),
     ];
     Arc::new(StaticToolProvider::new(
         definitions,

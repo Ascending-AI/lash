@@ -1,5 +1,5 @@
 use lash_core::ToolDefinition;
-use lash_tool_support::{LashlangToolBinding, ToolDefinitionLashlangExt};
+use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
 pub fn batch_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
@@ -31,7 +31,7 @@ pub fn batch_tool_definition() -> ToolDefinition {
     .with_examples(vec![
             r#"await tools.batch({ tool_calls: [{ tool: "read_file", parameters: { path: "src/main.rs" } }, { tool: "grep", parameters: { query: "ToolProvider crates/lash/src/" } }] })?"#.to_string(),
         ])
-    .with_lashlang_binding(LashlangToolBinding::new(["tools"], "batch"))
+    .with_tool_binding(ToolBinding::new(["tools"], "batch"))
 }
 
 fn batch_output_schema() -> serde_json::Value {

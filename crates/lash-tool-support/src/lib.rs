@@ -13,15 +13,15 @@ use std::path::{Component, Path, PathBuf};
 
 mod static_provider;
 #[cfg(feature = "lashlang")]
-pub use lash_lashlang_runtime::LashlangToolBinding;
+pub use lash_lashlang_runtime::ToolBinding;
 pub use static_provider::{StaticToolExecute, StaticToolProvider};
 
 #[cfg(not(feature = "lashlang"))]
 #[derive(Clone, Debug, Default)]
-pub struct LashlangToolBinding;
+pub struct ToolBinding;
 
 #[cfg(not(feature = "lashlang"))]
-impl LashlangToolBinding {
+impl ToolBinding {
     pub fn new(
         module_path: impl IntoIterator<Item = impl Into<String>>,
         operation: impl Into<String>,
@@ -45,23 +45,20 @@ impl LashlangToolBinding {
     }
 }
 
-pub trait ToolDefinitionLashlangExt {
-    fn with_lashlang_binding(self, lashlang_binding: LashlangToolBinding) -> Self;
+pub trait ToolDefinitionBindingExt {
+    fn with_tool_binding(self, lashlang_binding: ToolBinding) -> Self;
 }
 
 #[cfg(feature = "lashlang")]
-impl ToolDefinitionLashlangExt for ToolDefinition {
-    fn with_lashlang_binding(self, lashlang_binding: LashlangToolBinding) -> Self {
-        lash_lashlang_runtime::ToolDefinitionLashlangExt::with_lashlang_binding(
-            self,
-            lashlang_binding,
-        )
+impl ToolDefinitionBindingExt for ToolDefinition {
+    fn with_tool_binding(self, lashlang_binding: ToolBinding) -> Self {
+        lash_lashlang_runtime::ToolDefinitionBindingExt::with_tool_binding(self, lashlang_binding)
     }
 }
 
 #[cfg(not(feature = "lashlang"))]
-impl ToolDefinitionLashlangExt for ToolDefinition {
-    fn with_lashlang_binding(self, _lashlang_binding: LashlangToolBinding) -> Self {
+impl ToolDefinitionBindingExt for ToolDefinition {
+    fn with_tool_binding(self, _lashlang_binding: ToolBinding) -> Self {
         self
     }
 }
@@ -392,12 +389,12 @@ pub fn object_schema(properties: serde_json::Value, required: &[&str]) -> serde_
     })
 }
 
-pub fn lashlang_binding(
+pub fn tool_binding(
     module_path: impl IntoIterator<Item = impl Into<String>>,
     operation: impl Into<String>,
     aliases: &[&str],
-) -> LashlangToolBinding {
-    LashlangToolBinding::new(module_path, operation).with_aliases(aliases.iter().copied())
+) -> ToolBinding {
+    ToolBinding::new(module_path, operation).with_aliases(aliases.iter().copied())
 }
 
 /// Run blocking filesystem work off the async runtime.

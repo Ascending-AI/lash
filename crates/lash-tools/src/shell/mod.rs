@@ -26,7 +26,7 @@ use lash_core::{
 };
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, execution_failure,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
     invalid_request_failure, object_schema, parse_optional_bool, parse_optional_usize_arg,
     require_str,
 };
@@ -725,7 +725,7 @@ impl StandardShell {
                 r#"probe = await shell.exec({ cmd: "test -f Cargo.lock" })?
 finish probe.exit_code == 0"#.into(),
             ])
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["shell"],
                 "exec",
                 &["shell", "bash"],
@@ -749,7 +749,7 @@ finish probe.exit_code == 0"#.into(),
                 r#"await shell.start({ cmd: "python -m http.server 8000" })?"#.into(),
                 r#"await shell.start({ cmd: "nohup ./daemon --serve", detach: true })?"#.into(),
             ])
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["shell"],
                 "start",
                 &["long_running_command", "pty"],
@@ -783,7 +783,7 @@ finish probe.exit_code == 0"#.into(),
                 r#"await shell.write({ process_id: "call-shell-1", chars: "status\n" })?"#.into(),
                 r#"await shell.write({ process_id: "call-shell-1", chars: "", close_stdin: true })?"#.into(),
             ])
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["shell"],
                 "write",
                 &["send_stdin", "poll_command"],
@@ -801,7 +801,7 @@ finish probe.exit_code == 0"#.into(),
                 shell_start_output_schema(),
             )
             .with_activation(lash_core::ToolActivation::Internal)
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["shell"],
                 "run_start_command",
                 &[],

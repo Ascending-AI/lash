@@ -7,8 +7,8 @@ use lash::{
     plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},
     prompt::PromptContribution,
     tools::{
-        LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition,
-        ToolDefinitionLashlangExt, ToolOutcome,
+        StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
+        ToolDefinitionBindingExt, ToolOutcome,
     },
 };
 use serde_json::json;
@@ -130,7 +130,7 @@ fn read_board_tool() -> ToolDefinition {
         }),
         json!({ "type": "object" }),
     )
-    .with_lashlang_binding(LashlangToolBinding::new(["board"], "read"))
+    .with_tool_binding(ToolBinding::new(["board"], "read"))
 }
 
 fn play_move_tool() -> ToolDefinition {
@@ -146,7 +146,7 @@ fn play_move_tool() -> ToolDefinition {
         }),
         json!({ "type": "object" }),
     )
-    .with_lashlang_binding(LashlangToolBinding::new(["board"], "play"))
+    .with_tool_binding(ToolBinding::new(["board"], "play"))
 }
 
 fn load_chat_board_for_plugin(

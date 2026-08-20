@@ -27,9 +27,9 @@ use std::{
 use crate::MAIL_RECEIVED_SOURCE_TYPE;
 use async_trait::async_trait;
 use lash::tools::{
-    EmitTriggerIntent, LashlangToolBinding, ToolAttemptOutcome, ToolCall, ToolContract,
-    ToolDefinition, ToolDefinitionLashlangExt, ToolIntent, ToolIntents, ToolManifest, ToolOutcome,
-    ToolOutcomeDone, ToolProvider, ToolRetryPolicy,
+    EmitTriggerIntent, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
+    ToolDefinitionBindingExt, ToolIntent, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
+    ToolProvider, ToolRetryPolicy,
 };
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use serde::{Deserialize, Serialize};
@@ -404,9 +404,7 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
         json!({ "type": "object" }),
     )
     .with_retry_policy(retry_policy)
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"),
-    )
+    .with_tool_binding(ToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"))
 }
 
 /// Dynamic provider: one `Inbox` authority per account, three operations each.

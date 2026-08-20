@@ -432,7 +432,7 @@ fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
             "additionalProperties": false
         }),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tools"],
         "app_lookup",
     ))
@@ -546,7 +546,7 @@ fn contract_durable_input_definition() -> lash_core::ToolDefinition {
             "additionalProperties": true
         }),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tools"],
         "mock_input_request",
     ))

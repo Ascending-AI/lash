@@ -178,7 +178,7 @@ impl BatchEnvelopeProbeTools {
             }),
             json!({ "type": "object" }),
         )
-        .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+        .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
             ["tools"],
             "envelope_probe",
         ))

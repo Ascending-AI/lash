@@ -11,7 +11,7 @@ use lash_core::{
     ToolCall, ToolDefinition, ToolOutcome, ToolPrepareContext, facade_support::SessionSpec,
     sansio::PendingToolCall,
 };
-use lash_lashlang_runtime::ToolDefinitionLashlangExt;
+use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use lash_tool_support::{StaticToolExecute, StaticToolProvider};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -337,10 +337,7 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     .with_argument_projection(
         ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["agents"],
-        "spawn",
-    ))
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["agents"], "spawn"))
     .with_output_from_input_schema("output", None)
 }
 

@@ -636,7 +636,7 @@ impl RlmDialectSession for TypescriptDialectSession {
 mod tests {
     use super::*;
     use lash_core::plugin::ToolCatalogContext;
-    use lash_lashlang_runtime::{LashlangToolBinding, ToolDefinitionLashlangExt};
+    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     /// Both shipped dialects, the way a session registers them.
     fn test_dialect_registry() -> crate::dialect::RlmDialectRegistry {
@@ -783,7 +783,7 @@ mod tests {
             }),
             serde_json::json!({ "type": "string" }),
         )
-        .with_lashlang_binding(LashlangToolBinding::new(["web"], "fetch"));
+        .with_tool_binding(ToolBinding::new(["web"], "fetch"));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
         let section = dialect
             .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
@@ -1170,10 +1170,7 @@ mod tests {
                 }),
                 serde_json::json!({ "type": "string" }),
             )
-            .with_lashlang_binding(LashlangToolBinding::new(
-                modules.clone(),
-                operation.as_str(),
-            ));
+            .with_tool_binding(ToolBinding::new(modules.clone(), operation.as_str()));
             let registration = crate::tool_catalog::rlm_tool_catalog(
                 ToolCatalogContext {
                     session_id: "session".to_string(),

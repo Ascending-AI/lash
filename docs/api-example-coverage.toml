@@ -5905,7 +5905,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBudget", "lash_core::TurnBudget"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1331#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1330#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5915,7 +5915,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBudget::Bounded", "lash_core::TurnBudget::Bounded"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1331#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1330#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5925,8 +5925,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBudget::Bounded::0", "lash_core::TurnBudget::Bounded::0"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1331#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1331#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1330#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1330#lash::TurnBudget::Bounded(limit) if limit.get() == 8"
 
 [[api]]
 symbol = "lash::TurnBudget::Unbounded"
@@ -5945,7 +5945,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnBudget::bounded", "lash_core::TurnBudget::bounded"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1328#let core_budget = lash::TurnBudget::bounded(8);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1327#let core_budget = lash::TurnBudget::bounded(8);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -14388,8 +14388,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PersistedSessionConfig::prompt"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1337#prompt: Some(lash::prompt::PromptLayer::new()),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1341#assert!(encoded.get(\"prompt\").is_some());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1336#prompt: Some(lash::prompt::PromptLayer::new()),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1340#assert!(encoded.get(\"prompt\").is_some());"
 
 [[api]]
 symbol = "lash::persistence::PersistedSessionConfig::provider_id"
@@ -14407,8 +14407,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PersistedSessionConfig::turn_budget"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1336#turn_budget: core_budget,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1339#assert_eq!(persisted.turn_budget, core_budget);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1335#turn_budget: core_budget,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1338#assert_eq!(persisted.turn_budget, core_budget);"
 
 [[api]]
 symbol = "lash::persistence::PersistedSessionRead"
@@ -21421,7 +21421,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::Runtime"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1354#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1353#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -21431,8 +21431,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::Runtime::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1354#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1354#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1353#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1353#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
 
 [[api]]
 symbol = "lash::plugins::PluginError::RuntimeEffectController"
@@ -33252,8 +33252,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1220#assert!(message.contains(\"id cannot be empty\"));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1220#assert!(message.contains(\"id cannot be empty\"));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1219#assert!(message.contains(\"id cannot be empty\"));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert!(message.contains(\"id cannot be empty\"));"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -33262,8 +33262,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1213#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1220#assert!(message.contains(\"id cannot be empty\"));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1212#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert!(message.contains(\"id cannot be empty\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`before_call_paths,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `message.contains(\"id cannot be empty\")` holds."
 
 [[api]]
@@ -33272,8 +33272,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1213#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1220#assert!(message.contains(\"id cannot be empty\"));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1212#let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert!(message.contains(\"id cannot be empty\"));"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`before_call_paths,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `message.contains(\"id cannot be empty\")` holds."
 
 [[api]]
@@ -33378,8 +33378,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1209#assert_eq!(binding, \"missing.binding\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1209#assert_eq!(binding, \"missing.binding\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1208#assert_eq!(binding, \"missing.binding\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1208#assert_eq!(binding, \"missing.binding\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -33388,8 +33388,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1203#.binding_call_path(\"missing.binding\")"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1209#assert_eq!(binding, \"missing.binding\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1202#.binding_call_path(\"missing.binding\")"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1208#assert_eq!(binding, \"missing.binding\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_remote_tool_registry_reopenable(&registry, &registry)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`before_call_paths,` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `binding` equals `\"missing.binding\"`."
 
 [[api]]
@@ -33398,8 +33398,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1205#let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1209#assert_eq!(binding, \"missing.binding\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1204#let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1208#assert_eq!(binding, \"missing.binding\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let RemoteProtocolError::MissingToolBinding { tool_name, binding } = missing else {` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `binding` equals `\"missing.binding\"`."
 
 [[api]]
@@ -33424,7 +33424,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1192#let RemoteProtocolError::RemoteToolRegistryReopenMismatch {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1191#let RemoteProtocolError::RemoteToolRegistryReopenMismatch {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -33433,8 +33433,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1200#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1200#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1199#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1199#assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -33443,7 +33443,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1193#before_call_paths,"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1192#before_call_paths,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only destructures a field; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -34588,8 +34588,8 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1382#RemoteLlmRequest::decode_json(&request_wire).expect(\"current request decodes\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1383#assert_eq!(decoded.request_id, \"request-version-first\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1381#RemoteLlmRequest::decode_json(&request_wire).expect(\"current request decodes\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1382#assert_eq!(decoded.request_id, \"request-version-first\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmRequest::attachments"
@@ -37429,8 +37429,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1326#assert_eq!(minimal_env.policy.turn_budget, remote_budget);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1326#assert_eq!(minimal_env.policy.turn_budget, remote_budget);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1325#assert_eq!(minimal_env.policy.turn_budget, remote_budget);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1325#assert_eq!(minimal_env.policy.turn_budget, remote_budget);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -37505,8 +37505,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1323#assert_eq!(minimal_policy.turn_budget, remote_budget);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1323#assert_eq!(minimal_policy.turn_budget, remote_budget);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1322#assert_eq!(minimal_policy.turn_budget, remote_budget);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1322#assert_eq!(minimal_policy.turn_budget, remote_budget);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -37545,8 +37545,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1323#assert_eq!(minimal_policy.turn_budget, remote_budget);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1323#assert_eq!(minimal_policy.turn_budget, remote_budget);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1322#assert_eq!(minimal_policy.turn_budget, remote_budget);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1322#assert_eq!(minimal_policy.turn_budget, remote_budget);"
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessExternalRef"
@@ -39709,8 +39709,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1313#assert_eq!(serde_json::to_value(class).unwrap(), \"io\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1313#assert_eq!(serde_json::to_value(class).unwrap(), \"io\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1312#assert_eq!(serde_json::to_value(class).unwrap(), \"io\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1312#assert_eq!(serde_json::to_value(class).unwrap(), \"io\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -40175,8 +40175,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1136#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1136#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1135#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1135#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -40185,7 +40185,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1255#serde_json::to_value([RemoteToolActivation::Always, RemoteToolActivation::Internal,])"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1254#serde_json::to_value([RemoteToolActivation::Always, RemoteToolActivation::Internal,])"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40194,8 +40194,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1136#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1135#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(grant.description, \"Search the host knowledge base.\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert!(message.contains(\"id cannot be empty\"));` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40204,7 +40204,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1140#RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1139#RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40213,7 +40213,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1261#RemoteToolArgumentProjectionPolicy::MaterializeProjectedValues,"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1260#RemoteToolArgumentProjectionPolicy::MaterializeProjectedValues,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40222,7 +40222,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1140#RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1139#RemoteToolArgumentProjectionPolicy::PreserveProjectedRefsInField {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40231,8 +40231,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1141#field: \"query\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1140#field: \"query\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert!(message.contains(\"id cannot be empty\"));` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40241,7 +40241,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1177#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1176#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40250,8 +40250,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1136#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1135#assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"max_attempts\": 3,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40260,8 +40260,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1138#grant.argument_projection,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1137#grant.argument_projection,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"max_delay_ms\": 250`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40270,8 +40270,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1169#grant.binding_call_path(LASHLANG_TOOL_BINDING_KEY).unwrap(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1168#grant.binding_call_path(LASHLANG_TOOL_BINDING_KEY).unwrap(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`base_delay_ms: 25,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40280,8 +40280,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1162#assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1161#assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`grant.retry_policy,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40290,8 +40290,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1173#grant.call_path_bindings().unwrap(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1172#grant.call_path_bindings().unwrap(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let RemoteToolOutputContract::FromInputSchema {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40300,8 +40300,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1132#assert_eq!(grant.description, \"Search the host knowledge base.\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1131#assert_eq!(grant.description, \"Search the host knowledge base.\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"field\": \"query\"`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40310,8 +40310,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1135#assert_eq!(grant.examples.len(), 1);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1134#assert_eq!(grant.examples.len(), 1);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(grant.name, \"search_docs\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert!(message.contains(\"id cannot be empty\"));` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40320,8 +40320,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1130#assert_eq!(grant.id, \"remote-tool:search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1129#assert_eq!(grant.id, \"remote-tool:search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"argument_projection\": {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40330,8 +40330,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1133#assert_eq!(grant.input_schema.canonical[\"required\"][0], \"query\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1132#assert_eq!(grant.input_schema.canonical[\"required\"][0], \"query\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"base_delay_ms\": 25,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40340,8 +40340,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1131#assert_eq!(grant.name, \"search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1130#assert_eq!(grant.name, \"search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"kind\": \"preserve_projected_refs_in_field\",`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40350,8 +40350,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1156#} = &grant.output_contract"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1155#} = &grant.output_contract"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(grant.activation, Some(RemoteToolActivation::Internal));`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40360,8 +40360,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1134#assert_eq!(grant.output_schema.canonical[\"required\"][0], \"matches\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1133#assert_eq!(grant.output_schema.canonical[\"required\"][0], \"matches\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"retry_policy\": {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40370,8 +40370,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1129#assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1128#assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert!(message.contains(\"id cannot be empty\"));` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40380,8 +40380,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1146#grant.retry_policy,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1145#grant.retry_policy,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40390,8 +40390,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1177#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1176#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`else {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40400,8 +40400,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1177#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1176#RemoteToolGrant::validate_all(std::slice::from_ref(&grant))"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`else {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40410,7 +40410,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1153#let RemoteToolOutputContract::FromInputSchema {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1152#let RemoteToolOutputContract::FromInputSchema {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40419,7 +40419,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1153#let RemoteToolOutputContract::FromInputSchema {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1152#let RemoteToolOutputContract::FromInputSchema {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40428,7 +40428,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1155#default_schema,"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1154#default_schema,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only destructures a field; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40437,7 +40437,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1154#input_field,"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1153#input_field,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only destructures a field; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40446,7 +40446,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1274#RemoteToolOutputContract::Static,"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1273#RemoteToolOutputContract::Static,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40455,8 +40455,8 @@ kind = "trait"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1182#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1182#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1181#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1181#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -40465,8 +40465,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1182#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1181#assert_eq!(RemoteToolRegistry::grants(&registry).len(), 1);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40475,8 +40475,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1181#RemoteToolRegistry::validate_registry(&registry).expect(\"the registry must validate\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1180#RemoteToolRegistry::validate_registry(&registry).expect(\"the registry must validate\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(default_schema.as_ref().unwrap()[\"type\"], \"array\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40485,7 +40485,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1147#Some(RemoteToolRetryPolicy::Safe {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1146#Some(RemoteToolRetryPolicy::Safe {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40494,7 +40494,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1294#RemoteToolRetryPolicy::Idempotent {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1293#RemoteToolRetryPolicy::Idempotent {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40503,8 +40503,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1296#base_delay_ms: 20,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1295#base_delay_ms: 20,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`input_field: \"schema\".to_string(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40513,8 +40513,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1295#max_attempts: 4,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1294#max_attempts: 4,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`base_delay_ms: 10,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert!(message.contains(\"id cannot be empty\"));` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40523,8 +40523,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1297#max_delay_ms: 200,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1296#max_delay_ms: 200,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`default_schema: Some(serde_json::json!({ \"type\": \"string\" })),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40533,7 +40533,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1288#RemoteToolRetryPolicy::Never,"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1287#RemoteToolRetryPolicy::Never,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40542,7 +40542,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1147#Some(RemoteToolRetryPolicy::Safe {"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1146#Some(RemoteToolRetryPolicy::Safe {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -40551,8 +40551,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1291#base_delay_ms: 10,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1290#base_delay_ms: 10,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`RemoteToolOutputContract::FromInputSchema {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40561,8 +40561,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1290#max_attempts: 2,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1289#max_attempts: 2,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`RemoteToolOutputContract::Static,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40571,8 +40571,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1292#max_delay_ms: 100,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1291#max_delay_ms: 100,"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
@@ -40581,9 +40581,9 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1183#assert_remote_tool_registry_reopenable(&registry, &registry)"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let decoded_binding = RemoteToolGrantLashlangExt::lashlang_binding(&grant)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
+usage = "examples/docs-snippets/src/remote_protocol.rs:1182#assert_remote_tool_registry_reopenable(&registry, &registry)"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let decoded_binding = RemoteToolGrantBindingExt::tool_binding(&grant)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerDeliveryEmitOutcome"
@@ -48512,7 +48512,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::into_trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2615#.into_trigger()?"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2612#.into_trigger()?"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48923,7 +48923,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2618#Ok(lash_core::RuntimeEffectOutcome::Trigger {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2615#Ok(lash_core::RuntimeEffectOutcome::Trigger {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48933,7 +48933,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger::result"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2619#result: Box::new(result),"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2616#result: Box::new(result),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -50059,8 +50059,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1347#assert!(cap_code.is_retryable());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1347#assert!(cap_code.is_retryable());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1346#assert!(cap_code.is_retryable());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1346#assert!(cap_code.is_retryable());"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -56067,12 +56067,12 @@ kind = "constant"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1162#assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1161#assert!(grant.bindings.contains_key(LASHLANG_TOOL_BINDING_KEY));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding"
+symbol = "lash::tools::ToolBinding"
 kind = "struct"
 availability = "all-features"
 area = "plugins"
@@ -56082,7 +56082,7 @@ assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::aliases"
+symbol = "lash::tools::ToolBinding::aliases"
 kind = "field"
 availability = "all-features"
 area = "plugins"
@@ -56092,7 +56092,7 @@ assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`ToolDefinition::output_summary(&definition),`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(ToolDefinition::parameter_metadata(&definition).len(), 2);` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::authority_type"
+symbol = "lash::tools::ToolBinding::authority_type"
 kind = "field"
 availability = "all-features"
 area = "plugins"
@@ -56102,16 +56102,16 @@ assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`decoded_binding.authority_type.as_deref(),`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(resolved_binding.operation, \"write\");` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::executable_for"
+symbol = "lash::tools::ToolBinding::executable_for"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:738#.executable_for(&manifest.name)"
-assertion = "examples/agent-workbench/src/mail.rs:740#assert_eq!(surface.call_path(), \"inbox.work.send\");"
+usage = "examples/agent-workbench/src/mail.rs:736#.executable_for(&manifest.name)"
+assertion = "examples/agent-workbench/src/mail.rs:738#assert_eq!(surface.call_path(), \"inbox.work.send\");"
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::module_path"
+symbol = "lash::tools::ToolBinding::module_path"
 kind = "field"
 availability = "all-features"
 area = "plugins"
@@ -56121,16 +56121,16 @@ assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(ToolDefinition::parameter_metadata(&definition).len(), 2);` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::new"
+symbol = "lash::tools::ToolBinding::new"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:180#let binding = LashlangToolBinding::new([\"workspace\", \"files\"], \"write\")"
+usage = "examples/docs-snippets/src/plugins_tools.rs:180#let binding = ToolBinding::new([\"workspace\", \"files\"], \"write\")"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::operation"
+symbol = "lash::tools::ToolBinding::operation"
 kind = "field"
 availability = "all-features"
 area = "plugins"
@@ -56140,27 +56140,27 @@ assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`ToolDefinition::description(&definition),`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(ToolDefinition::parameter_metadata(&definition).len(), 2);` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::required_executable_for_remote"
+symbol = "lash::tools::ToolBinding::required_executable_for_remote"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:258#LashlangToolBinding::required_executable_for_remote(&decoded_binding, \"write_file\")"
+usage = "examples/docs-snippets/src/plugins_tools.rs:258#ToolBinding::required_executable_for_remote(&decoded_binding, \"write_file\")"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`LashlangToolBinding::required_executable_for_remote(&decoded_binding, \"write_file\")`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(resolved_binding.operation, \"write\");` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`ToolBinding::required_executable_for_remote(&decoded_binding, \"write_file\")`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(resolved_binding.operation, \"write\");` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::required_for_remote"
+symbol = "lash::tools::ToolBinding::required_for_remote"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:262#LashlangToolBinding::required_for_remote(&manifest)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:262#ToolBinding::required_for_remote(&manifest)"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:260#assert_eq!(resolved_binding.operation, \"write\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`LashlangToolBinding::required_for_remote(&manifest)`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(resolved_binding.operation, \"write\");` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`ToolBinding::required_for_remote(&manifest)`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(resolved_binding.operation, \"write\");` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `resolved_binding.operation` equals `\"write\"`."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::with_aliases"
+symbol = "lash::tools::ToolBinding::with_aliases"
 kind = "function"
 availability = "all-features"
 area = "plugins"
@@ -56169,12 +56169,12 @@ usage = "examples/docs-snippets/src/plugins_tools.rs:182#.with_aliases([\"write_
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::tools::LashlangToolBinding::with_authority_type"
+symbol = "lash::tools::ToolBinding::with_authority_type"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:408#LashlangToolBinding::new([\"inbox\", slug], operation).with_authority_type(\"Inbox\"),"
+usage = "examples/agent-workbench/src/mail.rs:407#ToolBinding::new([\"inbox\", slug], operation).with_authority_type(\"Inbox\"))"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56184,8 +56184,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1224#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1237#assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Assertion relationship: the reanchored executed use participates in the same example contract whose recorded assertion observes its value, validation result, projection, or serialized outcome."
 
 [[api]]
@@ -56417,30 +56417,30 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash::tools::RemoteToolGrantLashlangExt"
+symbol = "lash::tools::RemoteToolGrantBindingExt"
 kind = "trait"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1163#let decoded_binding = RemoteToolGrantLashlangExt::lashlang_binding(&grant)"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1162#let decoded_binding = RemoteToolGrantBindingExt::tool_binding(&grant)"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::tools::RemoteToolGrantLashlangExt::lashlang_binding"
+symbol = "lash::tools::RemoteToolGrantBindingExt::tool_binding"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1163#let decoded_binding = RemoteToolGrantLashlangExt::lashlang_binding(&grant)"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1162#let decoded_binding = RemoteToolGrantBindingExt::tool_binding(&grant)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::tools::RemoteToolGrantLashlangExt::with_lashlang_binding"
+symbol = "lash::tools::RemoteToolGrantBindingExt::with_tool_binding"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1128#let grant = remote_grant(\"search_docs\", \"search\").with_lashlang_binding(binding);"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1127#let grant = remote_grant(\"search_docs\", \"search\").with_tool_binding(binding);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -56669,7 +56669,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCall"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/demo_plugin.rs:10#LashlangToolBinding, StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition,"
+usage = "examples/agent-service/src/demo_plugin.rs:10#StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,"
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57294,7 +57294,7 @@ area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/plugins_tools.rs:288#contract.output_schema.projection.overrides[0].dialect,"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`\"catalogs cap examples by default\"` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`let decoded_binding = ToolManifestBindingExt::tool_binding(&manifest)`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`\"catalogs cap examples by default\"` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
 symbol = "lash::tools::ToolContract::output_summary"
@@ -57316,7 +57316,7 @@ area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/plugins_tools.rs:303#assert_eq!(ToolContract::parameter_metadata(&contract).len(), 2);"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:267#assert_eq!(contract.examples.len(), 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`LashlangToolBinding::required_for_remote(&manifest)`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`\"catalogs cap examples by default\"` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`ToolBinding::required_for_remote(&manifest)`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`\"catalogs cap examples by default\"` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `contract.examples.len()` equals `3`."
 
 [[api]]
 symbol = "lash::tools::ToolControl"
@@ -57690,22 +57690,22 @@ usage = "examples/docs-snippets/src/plugins_tools.rs:195#.with_retry_policy(Tool
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::tools::ToolDefinitionLashlangExt"
+symbol = "lash::tools::ToolDefinitionBindingExt"
 kind = "trait"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:205#.with_lashlang_binding(binding);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:205#.with_tool_binding(binding);"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:246#assert!(manifest.bindings.contains_key(\"lashlang.tool\"));"
-reason = "Assertion relationship: with_lashlang_binding is the extension-trait call that writes the binding asserted on the manifest."
+reason = "Assertion relationship: with_tool_binding is the extension-trait call that writes the binding asserted on the manifest."
 
 [[api]]
-symbol = "lash::tools::ToolDefinitionLashlangExt::with_lashlang_binding"
+symbol = "lash::tools::ToolDefinitionBindingExt::with_tool_binding"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:205#.with_lashlang_binding(binding);"
+usage = "examples/docs-snippets/src/plugins_tools.rs:205#.with_tool_binding(binding);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57715,7 +57715,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1242#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57725,8 +57725,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1242#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1252#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let definition = ToolDefinition::try_from(&grant)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -57736,8 +57736,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::execution_binding"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1252#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1252#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -57747,8 +57747,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::from_definition"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1252#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1252#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -57758,8 +57758,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::manifest"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1242#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1252#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let definition = ToolDefinition::try_from(&grant)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -57769,7 +57769,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1242#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57779,8 +57779,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::source_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1249#execution_grant.source_id.as_deref(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1252#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1248#execution_grant.source_id.as_deref(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -57790,7 +57790,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::with_execution_binding"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1236#.with_execution_binding(serde_json::json!({ \"tenant\": \"acme\" }));"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1235#.with_execution_binding(serde_json::json!({ \"tenant\": \"acme\" }));"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -57800,7 +57800,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::with_source_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1235#.with_source_id(PLUGIN_TOOL_SOURCE_ID)"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1234#.with_source_id(PLUGIN_TOOL_SOURCE_ID)"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58119,8 +58119,8 @@ kind = "struct"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58129,8 +58129,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1237#assert_eq!(tool_grant.definition.name(), \"search_docs\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1236#assert_eq!(tool_grant.definition.name(), \"search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.with_source_id(PLUGIN_TOOL_SOURCE_ID)` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -58139,8 +58139,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(tool_name, \"search_docs\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(tool_name, \"search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -58149,8 +58149,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58159,8 +58159,8 @@ kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1237#assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let definition = ToolDefinition::try_from(&grant)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(tool_name, \"search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `tool_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
 
 [[api]]
@@ -58169,8 +58169,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58179,8 +58179,8 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1239#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1238#assert_eq!(tool_grant.execution_binding[\"tenant\"], \"acme\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58190,8 +58190,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolId"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1233#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1233#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58201,8 +58201,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolId::as_str"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1233#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1233#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let RemoteProtocolError::InvalidToolGrant { tool_name, message } = invalid` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `ToolId::as_str(&tool_id)` equals `definition.id().as_str()`."
 
 [[api]]
@@ -58212,8 +58212,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolId::new"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1233#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1233#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1232#assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58316,21 +58316,21 @@ assertion = "examples/docs-snippets/src/plugins_tools.rs:233#assert_eq!(manifest
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(manifest.retry_policy, ToolRetryPolicy::safe(3, 25, 100));`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts#`assert_eq!(manifest.id.as_str(), \"tool:write_file\");` in `tool_authoring_projects_one_definition_into_catalog_docs_and_runtime_contracts` observes that `manifest.id.as_str()` equals `\"tool:write_file\"`."
 
 [[api]]
-symbol = "lash::tools::ToolManifestLashlangExt"
+symbol = "lash::tools::ToolManifestBindingExt"
 kind = "trait"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:247#let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:247#let decoded_binding = ToolManifestBindingExt::tool_binding(&manifest)"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::tools::ToolManifestLashlangExt::lashlang_binding"
+symbol = "lash::tools::ToolManifestBindingExt::tool_binding"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:247#let decoded_binding = ToolManifestLashlangExt::lashlang_binding(&manifest)"
+usage = "examples/docs-snippets/src/plugins_tools.rs:247#let decoded_binding = ToolManifestBindingExt::tool_binding(&manifest)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58530,7 +58530,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolProvider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:32#ToolOutcomeDone, ToolProvider, ToolRetryPolicy,"
+usage = "examples/agent-workbench/src/mail.rs:32#ToolProvider, ToolRetryPolicy,"
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -58988,8 +58988,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Never"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:704#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
-assertion = "examples/agent-workbench/src/mail.rs:704#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+usage = "examples/agent-workbench/src/mail.rs:702#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
+assertion = "examples/agent-workbench/src/mail.rs:702#assert_eq!(send.retry_policy, ToolRetryPolicy::Never);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -58999,7 +58999,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolRetryPolicy::Safe"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/mail.rs:711#ToolRetryPolicy::Safe {"
+usage = "examples/agent-workbench/src/mail.rs:709#ToolRetryPolicy::Safe {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59010,7 +59010,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::base_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:394#base_delay_ms: 25,"
-assertion = "examples/agent-workbench/src/mail.rs:698#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:696#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_attempts"
@@ -59020,7 +59020,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::max_attempts"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:393#max_attempts: 3,"
-assertion = "examples/agent-workbench/src/mail.rs:698#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:696#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::Safe::max_delay_ms"
@@ -59030,7 +59030,7 @@ aliases = ["lash_core::ToolRetryPolicy::Safe::max_delay_ms"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:395#max_delay_ms: 250,"
-assertion = "examples/agent-workbench/src/mail.rs:698#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:696#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolRetryPolicy::safe"
@@ -59040,7 +59040,7 @@ aliases = ["lash_core::ToolRetryPolicy::safe"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:391#\"list\" => ToolRetryPolicy::safe(3, 25, 250),"
-assertion = "examples/agent-workbench/src/mail.rs:698#assert_eq!(names.len(), 6);"
+assertion = "examples/agent-workbench/src/mail.rs:696#assert_eq!(names.len(), 6);"
 
 [[api]]
 symbol = "lash::tools::ToolSourceHandle"
@@ -78507,8 +78507,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDefinition::contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:473#definition_for(&slug, &summary.display_name, operation).contract(),"
-assertion = "examples/agent-workbench/src/mail.rs:729#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
+usage = "examples/agent-workbench/src/mail.rs:471#definition_for(&slug, &summary.display_name, operation).contract(),"
+assertion = "examples/agent-workbench/src/mail.rs:727#assert!(provider.resolve_contract(\"inbox__work__delete\").is_some());"
 
 [[api]]
 symbol = "lash::tools::ToolDefinition::manifest"
@@ -80481,8 +80481,8 @@ aliases = ["lash_core::EmitTriggerIntent"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:642#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
-assertion = "examples/agent-workbench/src/mail.rs:641#assert_eq!(declared.session_id, \"session-1\");"
+usage = "examples/agent-workbench/src/mail.rs:640#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:639#assert_eq!(declared.session_id, \"session-1\");"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80493,7 +80493,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:268#request: TriggerOccurrenceRequest::new("
-assertion = "examples/agent-workbench/src/mail.rs:642#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:640#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80504,7 +80504,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:267#session_id: session_id.to_string(),"
-assertion = "examples/agent-workbench/src/mail.rs:641#assert_eq!(declared.session_id, \"session-1\");"
+assertion = "examples/agent-workbench/src/mail.rs:639#assert_eq!(declared.session_id, \"session-1\");"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80823,8 +80823,8 @@ aliases = ["lash_core::ToolIntent::EmitTrigger"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:637#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
-assertion = "examples/agent-workbench/src/mail.rs:642#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+usage = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:640#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -80835,7 +80835,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/mail.rs:266#let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {"
-assertion = "examples/agent-workbench/src/mail.rs:642#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
+assertion = "examples/agent-workbench/src/mail.rs:640#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -81243,8 +81243,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:637#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
-assertion = "examples/agent-workbench/src/mail.rs:637#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+usage = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
@@ -82893,8 +82893,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1413#let reasoning_route = reasoning.origin.as_ref().expect(\"reasoning route\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.provider, \"anthropic\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1412#let reasoning_route = reasoning.origin.as_ref().expect(\"reasoning route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1413#assert_eq!(reasoning_route.provider, \"anthropic\");"
 reason = "The compiled remote-protocol example observes the complete typed minting route."
 
 [[api]]
@@ -82903,8 +82903,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::kind"
@@ -82912,8 +82912,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::minting_route"
@@ -82921,8 +82921,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::reason"
@@ -82930,8 +82930,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::serving_route"
@@ -82939,8 +82939,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDropReason"
@@ -82948,8 +82948,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDropReason::ForeignRoute"
@@ -82957,8 +82957,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDropReason::Unstamped"
@@ -82966,8 +82966,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind"
@@ -82975,8 +82975,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind::Reasoning"
@@ -82984,8 +82984,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind::ResponseText"
@@ -82993,8 +82993,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind::ToolCall"
@@ -83002,8 +83002,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1449#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1449#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayMeta::origin"
@@ -83011,8 +83011,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1418#assert_eq!(tool_route.provider, \"google_oauth\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1418#assert_eq!(tool_route.provider, \"google_oauth\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1417#assert_eq!(tool_route.provider, \"google_oauth\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1417#assert_eq!(tool_route.provider, \"google_oauth\");"
 reason = "The compiled remote-protocol example observes the tool replay minting route."
 
 [[api]]
@@ -83021,8 +83021,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1415#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1415#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderRouteIdentity::endpoint"
@@ -83030,8 +83030,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1388#endpoint: \"https://api.anthropic.com\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1415#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1387#endpoint: \"https://api.anthropic.com\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
 reason = "The compiled remote-protocol example observes the normalized route endpoint."
 
 [[api]]
@@ -83040,8 +83040,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1389#model: \"claude-sonnet-4-6\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1416#assert_eq!(reasoning_route.model, \"claude-sonnet-4-6\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1388#model: \"claude-sonnet-4-6\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1415#assert_eq!(reasoning_route.model, \"claude-sonnet-4-6\");"
 reason = "The compiled remote-protocol example observes the route model."
 
 [[api]]
@@ -83050,8 +83050,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1387#provider: \"anthropic\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.provider, \"anthropic\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1386#provider: \"anthropic\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1413#assert_eq!(reasoning_route.provider, \"anthropic\");"
 reason = "The compiled remote-protocol example observes the route provider."
 
 [[api]]
@@ -83060,8 +83060,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1419#let response_route = response.origin.as_ref().expect(\"response route\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1420#assert_eq!(response_route.model, \"gpt-5.4\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1418#let response_route = response.origin.as_ref().expect(\"response route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1419#assert_eq!(response_route.model, \"gpt-5.4\");"
 reason = "The compiled remote-protocol example observes the response-item minting route."
 
 [[api]]

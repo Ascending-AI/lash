@@ -5,7 +5,7 @@ use lash_core::{ToolCall, ToolDefinition, ToolOutcome, ToolRetryPolicy};
 
 use lash_tool_support::{
     FS_DEFAULTS_PREAMBLE, OptionalUsizeArg, StaticToolExecute, StaticToolProvider,
-    ToolDefinitionLashlangExt, TruncationMeta, default_glob_limit, default_path_dot,
+    ToolDefinitionBindingExt, TruncationMeta, default_glob_limit, default_path_dot,
     execute_typed_tool, execution_failure, invalid_request_failure, io_failure, non_empty_string,
     resolve_under, rg_file_list, run_blocking_value,
 };
@@ -156,7 +156,7 @@ fn glob_tool_definition() -> ToolDefinition {
                 r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#.into(),
                 r#"await files.glob({ pattern: "**/Cargo.toml", path: "." })?"#.into(),
             ])
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(lash_tool_support::tool_binding(
                 ["files"],
                 "glob",
                 &["find_files"],

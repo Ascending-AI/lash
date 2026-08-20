@@ -6,7 +6,7 @@ use lash_core::{
     facade_support::SessionSpec, facade_support::TurnFinish, facade_support::TurnOutcome,
     facade_support::TurnStop,
 };
-use lash_lashlang_runtime::ToolDefinitionLashlangExt;
+use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use serde_json::{Value, json};
 
 use crate::capability::{CapabilityRegistry, SubagentSpawnContext};
@@ -228,7 +228,7 @@ pub(crate) fn submit_error_tool_definition() -> ToolDefinition {
         }),
         submit_error_output_schema(),
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["task"],
         "fail",
     ))
