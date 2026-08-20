@@ -28,16 +28,14 @@ use restate_sdk::serde::Json;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
-    RestateAwaitEventRaceOutcome, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
-    RestateDurableWaitAwakeableKind, RestateDurableWaitAwakeableRequest,
-    RestateDurableWaitRegistration, RestateDurableWaitResolveRequest, RestateProcessAwaitWake,
-    RestateSleepRaceOutcome, RestateTurnAwaitEventWaitRequest, durable_wait_index_object_key,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
+    RestateTurnAwaitEventWaitRequest, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
+    RestateTurnCancelWake, durable_wait_index_object_key, register_turn_cancel_gate,
+    retire_turn_cancel_gate,
 };
 use crate::process::{
     RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessWorkflowInput,
 };
-
-use super::RestateProcessAwaitRaceOutcome;
 
 /// Fuse a Restate context future across both of its terminal poll shapes.
 ///
@@ -349,7 +347,13 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         duration: Duration,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
-    ) -> Pin<Box<dyn Future<Output = Result<RestateSleepRaceOutcome, TerminalError>> + Send + 'run>>
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<RestateTurnCancelRaceOutcome<()>, TerminalError>>
+                + Send
+                + 'run,
+        >,
+    >
     where
         'ctx: 'run,
     {
@@ -357,22 +361,22 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
             let Some(turn_cancel) = turn_cancel else {
                 return tokio::select! {
                     result = self.sleep_send(duration) => {
-                        result.map(|()| RestateSleepRaceOutcome::Slept)
+                        result.map(RestateTurnCancelRaceOutcome::Completed)
                     }
-                    _ = cancellation.cancelled() => Ok(RestateSleepRaceOutcome::Cancelled),
+                    _ = cancellation.cancelled() => Ok(RestateTurnCancelRaceOutcome::TurnCancelled),
                 };
             };
             tokio::select! {
                 result = self.sleep_send(duration) => {
-                    result.map(|()| RestateSleepRaceOutcome::Slept)
+                    result.map(RestateTurnCancelRaceOutcome::Completed)
                 }
                 result = self.await_event(
                     turn_cancel,
                     tokio_util::sync::CancellationToken::new(),
                 ) => {
-                    result.map(|_| RestateSleepRaceOutcome::Cancelled)
+                    result.map(|_| RestateTurnCancelRaceOutcome::TurnCancelled)
                 }
-                _ = cancellation.cancelled() => Ok(RestateSleepRaceOutcome::Cancelled),
+                _ = cancellation.cancelled() => Ok(RestateTurnCancelRaceOutcome::TurnCancelled),
             }
         })
     }
@@ -417,7 +421,11 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Pin<
-        Box<dyn Future<Output = Result<RestateAwaitEventRaceOutcome, TerminalError>> + Send + 'run>,
+        Box<
+            dyn Future<Output = Result<RestateTurnCancelRaceOutcome<Resolution>, TerminalError>>
+                + Send
+                + 'run,
+        >,
     >
     where
         'ctx: 'run,
@@ -427,17 +435,17 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
                 return self
                     .await_event(request, cancellation)
                     .await
-                    .map(RestateAwaitEventRaceOutcome::Event);
+                    .map(RestateTurnCancelRaceOutcome::Completed);
             };
             tokio::select! {
                 result = self.await_event(request, cancellation.clone()) => {
-                    result.map(RestateAwaitEventRaceOutcome::Event)
+                    result.map(RestateTurnCancelRaceOutcome::Completed)
                 }
                 result = self.await_event(
                     turn_cancel,
                     tokio_util::sync::CancellationToken::new(),
                 ) => {
-                    result.map(|_| RestateAwaitEventRaceOutcome::TurnCancelled)
+                    result.map(|_| RestateTurnCancelRaceOutcome::TurnCancelled)
                 }
             }
         })
@@ -468,8 +476,12 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
     ) -> Pin<
         Box<
-            dyn Future<Output = Result<RestateProcessAwaitRaceOutcome, TerminalError>>
-                + Send
+            dyn Future<
+                    Output = Result<
+                        RestateTurnCancelRaceOutcome<Box<ProcessAwaitOutput>>,
+                        TerminalError,
+                    >,
+                > + Send
                 + 'run,
         >,
     >
@@ -481,7 +493,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
             self.await_process_terminal(process_id)
                 .await
                 .map(Box::new)
-                .map(RestateProcessAwaitRaceOutcome::Terminal)
+                .map(RestateTurnCancelRaceOutcome::Completed)
         })
     }
 
@@ -531,7 +543,14 @@ macro_rules! impl_restate_controller_context {
                     duration: Duration,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                     cancellation: tokio_util::sync::CancellationToken,
-                ) -> Pin<Box<dyn Future<Output = Result<RestateSleepRaceOutcome, TerminalError>> + Send + 'run>>
+                ) -> Pin<
+                    Box<
+                        dyn Future<
+                                Output = Result<RestateTurnCancelRaceOutcome<()>, TerminalError>,
+                            > + Send
+                            + 'run,
+                    >,
+                >
                 where
                     'ctx: 'run,
                 {
@@ -553,7 +572,7 @@ macro_rules! impl_restate_controller_context {
                                 // consume it before cancellation is polled.
                                 match timer.as_mut().poll(cx) {
                                     Poll::Ready(result) => Poll::Ready(
-                                        result.map(|()| RestateSleepRaceOutcome::Slept),
+                                        result.map(RestateTurnCancelRaceOutcome::Completed),
                                     ),
                                     Poll::Pending if timer.as_ref().get_ref().is_fused() => {
                                         Poll::Pending
@@ -568,7 +587,7 @@ macro_rules! impl_restate_controller_context {
                                             // engine kill before then exposes
                                             // it to replay.
                                             Poll::Ready(Ok(
-                                                RestateSleepRaceOutcome::Cancelled,
+                                                RestateTurnCancelRaceOutcome::TurnCancelled,
                                             ))
                                         }
                                         Poll::Pending => Poll::Pending,
@@ -583,53 +602,45 @@ macro_rules! impl_restate_controller_context {
                                 "turn cancellation gate is missing its session id",
                             ));
                         };
-                        let (awakeable_id, awakeable) = self.awakeable::<Json<Resolution>>();
-                        let registration_request = RestateDurableWaitAwakeableRequest {
-                            address: turn_cancel.address,
-                            awakeable_id,
-                            kind: RestateDurableWaitAwakeableKind::default(),
-                        };
-                        let register: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateDurableWaitAwakeableRequest>,
-                            Json<RestateDurableWaitRegistration>,
-                        > = ContextClient::request(
+                        // Journal order is the deployed contract: the awakeable,
+                        // then its registration, then the timer. The gate helpers
+                        // own the two index calls; the call site keeps ownership of
+                        // when each journaled command is emitted.
+                        let (awakeable_id, awakeable) =
+                            self.awakeable::<Json<RestateTurnCancelWake>>();
+                        let gate = match register_turn_cancel_gate(
                             self,
-                            RequestTarget::object(
-                                "LashDurableWaitIndex",
-                                session_id.clone(),
-                                "register_awakeable",
-                            ),
-                            Json(registration_request.clone()),
-                        );
-                        let Json(registration) = register.call().await?;
-                        if registration == RestateDurableWaitRegistration::Revoked {
-                            return Ok(RestateSleepRaceOutcome::Cancelled);
-                        }
+                            &session_id,
+                            turn_cancel.address,
+                            awakeable_id,
+                        )
+                        .await?
+                        {
+                            RestateTurnCancelGate::Registered(gate) => gate,
+                            RestateTurnCancelGate::Revoked => {
+                                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
+                                    session_id,
+                                });
+                            }
+                        };
 
                         let timer = restate_sdk::context::ContextTimers::sleep(self, duration);
                         restate_sdk::select! {
                             result = timer => {
                                 result?;
-                                let unregister: restate_sdk::context::Request<
-                                    '_,
-                                    Json<RestateDurableWaitAwakeableRequest>,
-                                    Json<()>,
-                                > = ContextClient::request(
-                                    self,
-                                    RequestTarget::object(
-                                        "LashDurableWaitIndex",
-                                        session_id,
-                                        "unregister_awakeable",
-                                    ),
-                                    Json(registration_request),
-                                );
-                                let Json(()) = unregister.call().await?;
-                                Ok(RestateSleepRaceOutcome::Slept)
+                                retire_turn_cancel_gate(self, &session_id, gate).await?;
+                                Ok(RestateTurnCancelRaceOutcome::Completed(()))
                             },
                             result = awakeable => {
-                                let _ = result?;
-                                Ok(RestateSleepRaceOutcome::Cancelled)
+                                let Json(wake) = result?;
+                                Ok(match wake {
+                                    RestateTurnCancelWake::TurnCancelled => {
+                                        RestateTurnCancelRaceOutcome::TurnCancelled
+                                    }
+                                    RestateTurnCancelWake::SessionRevoked => {
+                                        RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+                                    }
+                                })
                             }
                         }
                     })
@@ -800,8 +811,12 @@ macro_rules! impl_restate_controller_context {
                     cancellation: tokio_util::sync::CancellationToken,
                 ) -> Pin<
                     Box<
-                        dyn Future<Output = Result<RestateAwaitEventRaceOutcome, TerminalError>>
-                            + Send
+                        dyn Future<
+                                Output = Result<
+                                    RestateTurnCancelRaceOutcome<Resolution>,
+                                    TerminalError,
+                                >,
+                            > + Send
                             + 'run,
                     >,
                 >
@@ -813,14 +828,14 @@ macro_rules! impl_restate_controller_context {
                             return self
                                 .await_event(request, cancellation)
                                 .await
-                                .map(RestateAwaitEventRaceOutcome::Event);
+                                .map(RestateTurnCancelRaceOutcome::Completed);
                         };
 
                         let cancel_workflow_key = turn_cancel.address.workflow_key;
                         let race: restate_sdk::context::Request<
                             '_,
                             Json<RestateTurnAwaitEventWaitRequest>,
-                            Json<RestateAwaitEventRaceOutcome>,
+                            Json<RestateTurnCancelRaceOutcome<Resolution>>,
                         > = ContextClient::request(
                             self,
                             RequestTarget::workflow(
@@ -895,7 +910,10 @@ macro_rules! impl_restate_controller_context {
                 ) -> Pin<
                     Box<
                         dyn Future<
-                                Output = Result<RestateProcessAwaitRaceOutcome, TerminalError>,
+                                Output = Result<
+                                    RestateTurnCancelRaceOutcome<Box<ProcessAwaitOutput>>,
+                                    TerminalError,
+                                >,
                             > + Send
                             + 'run,
                     >,
@@ -909,7 +927,7 @@ macro_rules! impl_restate_controller_context {
                                 .await_process_terminal(process_id)
                                 .await
                                 .map(Box::new)
-                                .map(RestateProcessAwaitRaceOutcome::Terminal);
+                                .map(RestateTurnCancelRaceOutcome::Completed);
                         };
                         let Some(session_id) = turn_cancel.address.session_id.clone() else {
                             return Err(TerminalError::new(
@@ -937,57 +955,35 @@ macro_rules! impl_restate_controller_context {
                         );
                         let process = process.call();
                         let (awakeable_id, awakeable) =
-                            self.awakeable::<Json<RestateProcessAwaitWake>>();
-                        let registration_request = RestateDurableWaitAwakeableRequest {
-                            address: turn_cancel.address,
-                            awakeable_id,
-                            kind: RestateDurableWaitAwakeableKind::ProcessAwait,
-                        };
-                        let register: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateDurableWaitAwakeableRequest>,
-                            Json<RestateDurableWaitRegistration>,
-                        > = ContextClient::request(
+                            self.awakeable::<Json<RestateTurnCancelWake>>();
+                        let gate = match register_turn_cancel_gate(
                             self,
-                            RequestTarget::object(
-                                "LashDurableWaitIndex",
-                                session_id.clone(),
-                                "register_awakeable",
-                            ),
-                            Json(registration_request.clone()),
-                        );
-                        let Json(registration) = register.call().await?;
-                        if registration == RestateDurableWaitRegistration::Revoked {
-                            tracing::info!(
-                                target: "lash::restate",
-                                event = "restate.process_await_adjudicated",
-                                process_id = %process_id,
-                                registration_state = "revoked",
-                                winning_branch = "session_revoked",
-                                "Restate process-await adjudication"
-                            );
-                            return Ok(RestateProcessAwaitRaceOutcome::SessionRevoked {
-                                session_id,
-                            });
-                        }
+                            &session_id,
+                            turn_cancel.address,
+                            awakeable_id,
+                        )
+                        .await?
+                        {
+                            RestateTurnCancelGate::Registered(gate) => gate,
+                            RestateTurnCancelGate::Revoked => {
+                                tracing::info!(
+                                    target: "lash::restate",
+                                    event = "restate.process_await_adjudicated",
+                                    process_id = %process_id,
+                                    registration_state = "revoked",
+                                    winning_branch = "session_revoked",
+                                    "Restate process-await adjudication"
+                                );
+                                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
+                                    session_id,
+                                });
+                            }
+                        };
 
                         restate_sdk::select! {
                             result = process => {
                                 let Json(output) = result?;
-                                let unregister: restate_sdk::context::Request<
-                                    '_,
-                                    Json<RestateDurableWaitAwakeableRequest>,
-                                    Json<()>,
-                                > = ContextClient::request(
-                                    self,
-                                    RequestTarget::object(
-                                        "LashDurableWaitIndex",
-                                        session_id,
-                                        "unregister_awakeable",
-                                    ),
-                                    Json(registration_request),
-                                );
-                                let Json(()) = unregister.call().await?;
+                                retire_turn_cancel_gate(self, &session_id, gate).await?;
                                 tracing::info!(
                                     target: "lash::restate",
                                     event = "restate.process_await_adjudicated",
@@ -996,12 +992,12 @@ macro_rules! impl_restate_controller_context {
                                     winning_branch = "process_terminal",
                                     "Restate process-await adjudication"
                                 );
-                                Ok(RestateProcessAwaitRaceOutcome::Terminal(Box::new(output)))
+                                Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)))
                             },
                             result = awakeable => {
                                 let Json(wake) = result?;
                                 match wake {
-                                    RestateProcessAwaitWake::TurnCancelled => {
+                                    RestateTurnCancelWake::TurnCancelled => {
                                         tracing::info!(
                                             target: "lash::restate",
                                             event = "restate.process_await_adjudicated",
@@ -1010,9 +1006,9 @@ macro_rules! impl_restate_controller_context {
                                             winning_branch = "turn_cancelled",
                                             "Restate process-await adjudication"
                                         );
-                                        Ok(RestateProcessAwaitRaceOutcome::TurnCancelled)
+                                        Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
                                     }
-                                    RestateProcessAwaitWake::SessionRevoked => {
+                                    RestateTurnCancelWake::SessionRevoked => {
                                         tracing::info!(
                                             target: "lash::restate",
                                             event = "restate.process_await_adjudicated",
@@ -1021,7 +1017,7 @@ macro_rules! impl_restate_controller_context {
                                             winning_branch = "session_revoked",
                                             "Restate process-await adjudication"
                                         );
-                                        Ok(RestateProcessAwaitRaceOutcome::SessionRevoked {
+                                        Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
                                             session_id,
                                         })
                                     }

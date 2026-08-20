@@ -129,34 +129,21 @@ pub struct RestateDurableWaitSettleRequest {
     pub resolution: Resolution,
 }
 
+/// One turn-cancel gate entry: the awakeable the index resolves when this
+/// session's turn-control wait settles or the session is revoked.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateDurableWaitAwakeableRequest {
     pub address: RestateDurableWaitAddress,
     pub awakeable_id: String,
-    #[serde(
-        default,
-        skip_serializing_if = "RestateDurableWaitAwakeableKind::is_resolution"
-    )]
-    pub(crate) kind: RestateDurableWaitAwakeableKind,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum RestateDurableWaitAwakeableKind {
-    #[default]
-    Resolution,
-    ProcessAwait,
-}
-
-impl RestateDurableWaitAwakeableKind {
-    fn is_resolution(&self) -> bool {
-        *self == Self::Resolution
-    }
-}
-
+/// Why a registered turn-cancel gate awakeable fired.
+///
+/// Every gate — sleep, await-event, process await — takes this one payload, so
+/// the index resolves a gate entry without knowing which wait registered it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum RestateProcessAwaitWake {
+pub(crate) enum RestateTurnCancelWake {
     TurnCancelled,
     SessionRevoked,
 }
@@ -183,39 +170,30 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     #[serde(default)]
     awakeables: Vec<RestateDurableWaitAwakeableRequest>,
 }
+/// Fire a gate entry because the turn-control wait it guards has settled.
+///
+/// The wait's own `Resolution` is deliberately not forwarded: a gate entry only
+/// ever guards a turn-control address, so any settlement of it is the turn
+/// being cancelled, and the waiter needs no more than that.
 fn resolve_durable_wait_awakeable(
     ctx: &ObjectContext<'_>,
     request: &RestateDurableWaitAwakeableRequest,
-    resolution: Resolution,
 ) {
-    match request.kind {
-        RestateDurableWaitAwakeableKind::Resolution => {
-            ctx.resolve_awakeable(&request.awakeable_id, Json(resolution));
-        }
-        RestateDurableWaitAwakeableKind::ProcessAwait => {
-            ctx.resolve_awakeable(
-                &request.awakeable_id,
-                Json(RestateProcessAwaitWake::TurnCancelled),
-            );
-        }
-    }
+    ctx.resolve_awakeable(
+        &request.awakeable_id,
+        Json(RestateTurnCancelWake::TurnCancelled),
+    );
 }
 
+/// Fire a gate entry because the whole session was revoked out from under it.
 fn revoke_durable_wait_awakeable(
     ctx: &ObjectContext<'_>,
     request: &RestateDurableWaitAwakeableRequest,
 ) {
-    match request.kind {
-        RestateDurableWaitAwakeableKind::Resolution => {
-            ctx.resolve_awakeable(&request.awakeable_id, Json(Resolution::Cancelled));
-        }
-        RestateDurableWaitAwakeableKind::ProcessAwait => {
-            ctx.resolve_awakeable(
-                &request.awakeable_id,
-                Json(RestateProcessAwaitWake::SessionRevoked),
-            );
-        }
-    }
+    ctx.resolve_awakeable(
+        &request.awakeable_id,
+        Json(RestateTurnCancelWake::SessionRevoked),
+    );
 }
 pub(crate) fn restate_durable_wait_request(
     key: &AwaitEventKey,
@@ -231,23 +209,101 @@ pub(crate) fn restate_durable_wait_request(
         timeout_ms,
     }
 }
+/// How one wait raced against durable turn cancellation ended.
+///
+/// Every wait that can be cut short by turn cancellation — a timer, an
+/// await-event, a process terminal wait — reports through this one type, so a
+/// caller reads the same three answers whatever it was waiting on. `T` is
+/// whatever the wait produces when it wins its own race.
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug, Serialize, serde::Deserialize)]
-pub enum RestateSleepRaceOutcome {
-    Slept,
-    Cancelled,
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub enum RestateTurnCancelRaceOutcome<T> {
+    /// The wait completed on its own terms.
+    Completed(T),
+    /// The turn was cancelled while the wait was parked.
+    TurnCancelled,
+    /// The session was revoked, so the turn has no ground left to stand on.
+    SessionRevoked { session_id: String },
 }
 
-#[doc(hidden)]
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub enum RestateAwaitEventRaceOutcome {
-    Event(Resolution),
-    TurnCancelled,
+/// The verdict [`register_turn_cancel_gate`] returns for one gate entry.
+pub(crate) enum RestateTurnCancelGate {
+    /// The entry is live; retire it with [`retire_turn_cancel_gate`] if the
+    /// guarded wait wins.
+    Registered(RestateDurableWaitAwakeableRequest),
+    /// The session was already revoked, so no entry was created and the caller
+    /// must unwind instead of parking.
+    Revoked,
 }
-#[doc(hidden)]
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateTurnSleepWaitRequest {
-    duration_ms: u64,
+
+/// Register this invocation's turn-cancel gate entry against the session index.
+///
+/// `awakeable_id` is created by the caller, never here: the awakeable and the
+/// wait it guards are journaled commands whose relative order is part of the
+/// deployed journal shape (FIG-790), so only the call site may decide when each
+/// is emitted. This helper owns the one step that is identical everywhere —
+/// the `register_awakeable` call and its revocation verdict.
+pub(crate) async fn register_turn_cancel_gate<'ctx, C>(
+    context: &C,
+    session_id: &str,
+    address: RestateDurableWaitAddress,
+    awakeable_id: String,
+) -> Result<RestateTurnCancelGate, TerminalError>
+where
+    C: ContextClient<'ctx>,
+{
+    let entry = RestateDurableWaitAwakeableRequest {
+        address,
+        awakeable_id,
+    };
+    let register: restate_sdk::context::Request<
+        '_,
+        Json<RestateDurableWaitAwakeableRequest>,
+        Json<RestateDurableWaitRegistration>,
+    > = ContextClient::request(
+        context,
+        RequestTarget::object(
+            "LashDurableWaitIndex",
+            session_id.to_string(),
+            "register_awakeable",
+        ),
+        Json(entry.clone()),
+    );
+    let Json(registration) = register.call().await?;
+    Ok(match registration {
+        RestateDurableWaitRegistration::Revoked => RestateTurnCancelGate::Revoked,
+        RestateDurableWaitRegistration::Registered
+        | RestateDurableWaitRegistration::Resolved(_) => RestateTurnCancelGate::Registered(entry),
+    })
+}
+
+/// Drop a gate entry whose guarded wait won its race.
+///
+/// Leaving the entry behind would strand an awakeable the index still believes
+/// it owes a wake to, so every winning branch must retire its gate.
+pub(crate) async fn retire_turn_cancel_gate<'ctx, C>(
+    context: &C,
+    session_id: &str,
+    entry: RestateDurableWaitAwakeableRequest,
+) -> Result<(), TerminalError>
+where
+    C: ContextClient<'ctx>,
+{
+    let unregister: restate_sdk::context::Request<
+        '_,
+        Json<RestateDurableWaitAwakeableRequest>,
+        Json<()>,
+    > = ContextClient::request(
+        context,
+        RequestTarget::object(
+            "LashDurableWaitIndex",
+            session_id.to_string(),
+            "unregister_awakeable",
+        ),
+        Json(entry),
+    );
+    let Json(()) = unregister.call().await?;
+    Ok(())
 }
 
 #[doc(hidden)]
@@ -277,14 +333,9 @@ pub trait LashDurableWaitWorkflow {
     ) -> HandlerResult<Json<ResolveOutcome>>;
 
     #[shared]
-    async fn sleep_or_turn_cancel(
-        request: Json<RestateTurnSleepWaitRequest>,
-    ) -> HandlerResult<Json<RestateSleepRaceOutcome>>;
-
-    #[shared]
     async fn await_event_or_turn_cancel(
         request: Json<RestateTurnAwaitEventWaitRequest>,
-    ) -> HandlerResult<Json<RestateAwaitEventRaceOutcome>>;
+    ) -> HandlerResult<Json<RestateTurnCancelRaceOutcome<Resolution>>>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -400,33 +451,11 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         Ok(Json(ResolveOutcome::Accepted))
     }
 
-    async fn sleep_or_turn_cancel(
-        &self,
-        ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateTurnSleepWaitRequest>,
-    ) -> HandlerResult<Json<RestateSleepRaceOutcome>> {
-        let cancellation = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY);
-        let timer = restate_sdk::context::ContextTimers::sleep(
-            &ctx,
-            Duration::from_millis(request.duration_ms),
-        );
-        restate_sdk::select! {
-            result = cancellation => {
-                let _ = result?;
-                Ok(Json(RestateSleepRaceOutcome::Cancelled))
-            },
-            result = timer => {
-                result?;
-                Ok(Json(RestateSleepRaceOutcome::Slept))
-            }
-        }
-    }
-
     async fn await_event_or_turn_cancel(
         &self,
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<RestateTurnAwaitEventWaitRequest>,
-    ) -> HandlerResult<Json<RestateAwaitEventRaceOutcome>> {
+    ) -> HandlerResult<Json<RestateTurnCancelRaceOutcome<Resolution>>> {
         let event_address = request.event.address.clone();
         let event: restate_sdk::context::Request<
             '_,
@@ -446,7 +475,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let outcome = restate_sdk::select! {
             result = event => {
                 let Json(resolution) = result?;
-                RestateAwaitEventRaceOutcome::Event(resolution)
+                RestateTurnCancelRaceOutcome::Completed(resolution)
             },
             result = cancellation => {
                 let _ = result?;
@@ -468,7 +497,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
                     }),
                 );
                 let Json(_) = resolve.call().await?;
-                RestateAwaitEventRaceOutcome::TurnCancelled
+                RestateTurnCancelRaceOutcome::TurnCancelled
             }
         };
         Ok(Json(outcome))
@@ -704,11 +733,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if metadata.revoked {
             return Ok(Json(RestateDurableWaitRegistration::Revoked));
         }
-        if let Some(Json(resolution)) = ctx
+        if ctx
             .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&request.address))
             .await?
+            .is_some()
         {
-            resolve_durable_wait_awakeable(&ctx, &request, resolution);
+            resolve_durable_wait_awakeable(&ctx, &request);
             return Ok(Json(RestateDurableWaitRegistration::Registered));
         }
         let peek: restate_sdk::context::Request<'_, (), Json<Option<Resolution>>> =
@@ -722,8 +752,8 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
                 (),
             );
         let Json(resolution) = peek.call().await?;
-        if let Some(resolution) = resolution {
-            resolve_durable_wait_awakeable(&ctx, &request, resolution);
+        if resolution.is_some() {
+            resolve_durable_wait_awakeable(&ctx, &request);
         } else if !metadata
             .awakeables
             .iter()
@@ -785,7 +815,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         let mut retained = Vec::with_capacity(metadata.awakeables.len());
         for entry in std::mem::take(&mut metadata.awakeables) {
             if entry.address == request.address {
-                resolve_durable_wait_awakeable(&ctx, &entry, terminal.clone());
+                resolve_durable_wait_awakeable(&ctx, &entry);
             } else {
                 retained.push(entry);
             }
