@@ -406,7 +406,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")
 
-        self.assertIn("fetch-depth: 0", lint)
+        self.assertIn(
+            'git fetch \\\n'
+            '            --no-tags --prune origin "+refs/heads/*:refs/remotes/origin/*"',
+            lint,
+        )
+        self.assertIn(
+            'git fetch \\\n            --force --tags origin',
+            lint,
+        )
         self.assertIn("if: github.event_name == 'pull_request'", lint)
         self.assertIn('git merge-base "origin/${{ github.base_ref }}" HEAD', lint)
         self.assertIn("python3 scripts/release_notes.py check-pr", lint)
@@ -1594,7 +1602,12 @@ derive_mutation_jobs() {{
                     ),
                     f"{job_id} resolves the mold RUSTFLAGS without installing mold",
                 )
-        self.assertIn("rui314/setup-mold@", action_effects)
+        mold_steps = [
+            step
+            for step in action_steps
+            if step.get("uses") == "./.github/actions/setup-mold"
+        ]
+        self.assertEqual(len(mold_steps), 1)
 
     def test_linux_release_cache_stays_mold_free_across_workflows(self) -> None:
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))

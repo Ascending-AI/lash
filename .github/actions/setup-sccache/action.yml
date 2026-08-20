@@ -39,4 +39,4 @@ runs:
     # use, which is cheaper than making the install depend on a context a
     # composite action does not reliably see.
     - name: Install mold
-      uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444 # v1
+      uses: ./.github/actions/setup-mold

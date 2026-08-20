@@ -1,0 +1,57 @@
+# Vendored from https://github.com/rui314/setup-mold at 9c9c13bf4c3f1adef0cc596abc155580bcb04444.
+# SPDX-License-Identifier: MIT
+name: Setup mold
+description: Install mold as the default linker without downloading a remote action package.
+
+inputs:
+  mold-version:
+    description: The mold version to download.
+    required: false
+    default: 2.41.0
+  make-default:
+    description: Make mold the default linker.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install mold
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        MOLD_VERSION: ${{ inputs.mold-version }}
+        MAKE_DEFAULT: ${{ inputs.make-default }}
+      run: |
+        set -euo pipefail
+        architecture="$(uname -m)"
+        case "${MOLD_VERSION}-${architecture}" in
+          2.41.0-aarch64) mold_sha256=946de2774b06a71346bd59b55fddba610b65b8d93c3a4a1559cc84e103472710 ;;
+          2.41.0-arm) mold_sha256=19c877255b52c2d8060ca1229fe139d18ab31a1e5614079b853d3be16bdda647 ;;
+          2.41.0-loongarch64) mold_sha256=16b71ee699ffd6b3dc77bf28f954b50107ce6f16618e6b0725c31967af9f3445 ;;
+          2.41.0-ppc64le) mold_sha256=b1a045d9dcbdb1af523518beca9da38f3ee0f208964851831a0664cafaf9bc70 ;;
+          2.41.0-riscv64) mold_sha256=9e04298a0444a83fb9864ee8520e2730fb84e89c5617478b87396888a753fa41 ;;
+          2.41.0-s390x) mold_sha256=e5e42a2685967ad209d7568e29a0b2ea86ec9d462cbf5d4aa7398a8087ee1a9d ;;
+          2.41.0-x86_64) mold_sha256=a3696680d99e692970590a178bc3a33d78d60d1c6dc9db7a11b557b02b751f5d ;;
+          *)
+            echo "No pinned mold checksum for ${MOLD_VERSION}-${architecture}." >&2
+            exit 1
+            ;;
+        esac
+        install_tmp="$(mktemp -d "${RUNNER_TEMP}/lash-setup-mold.XXXXXX")"
+        trap 'rm -rf "${install_tmp}"' EXIT
+        archive="${install_tmp}/mold.tar.gz"
+        if [ "$(id -u)" -eq 0 ]; then
+          sudo_cmd=()
+        else
+          sudo_cmd=(sudo)
+        fi
+        curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused \
+          --location --silent --show-error --fail --output "${archive}" \
+          "https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/mold-${MOLD_VERSION}-${architecture}-linux.tar.gz"
+        printf '%s  %s\n' "${mold_sha256}" "${archive}" | sha256sum --check --status
+        "${sudo_cmd[@]}" tar -C /usr/local --strip-components=1 --no-overwrite-dir \
+          -xzf "${archive}"
+        if [ "${MAKE_DEFAULT}" = true ] && [ "$(realpath /usr/bin/ld)" != /usr/local/bin/mold ]; then
+          "${sudo_cmd[@]}" ln -sf /usr/local/bin/mold "$(realpath /usr/bin/ld)"
+        fi

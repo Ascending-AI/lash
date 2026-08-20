@@ -1,0 +1,70 @@
+# Vendored from https://github.com/dtolnay/rust-toolchain at 4360b52568e2003a75bf9bc1d59f33a8e3fc893c.
+# SPDX-License-Identifier: MIT
+name: Install Rust toolchain
+description: Install the requested rustup toolchain without downloading a remote action package.
+
+inputs:
+  toolchain:
+    description: Rust toolchain specification.
+    required: false
+    default: stable
+  targets:
+    description: Comma-separated target triples.
+    required: false
+    default: ""
+  target:
+    description: Alias for targets.
+    required: false
+    default: ""
+  components:
+    description: Comma-separated rustup components.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+        TARGETS: ${{ inputs.targets || inputs.target }}
+        COMPONENTS: ${{ inputs.components }}
+      run: |
+        set -euo pipefail
+
+        cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
+        echo "CARGO_HOME=${cargo_home}" >> "${GITHUB_ENV}"
+
+        if ! command -v rustup >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused \
+            --location --silent --show-error --fail https://sh.rustup.rs \
+            | sh -s -- --default-toolchain none --no-modify-path -y
+          echo "${cargo_home}/bin" >> "${GITHUB_PATH}"
+        fi
+
+        rustup_args=(toolchain install "${TOOLCHAIN}" --profile minimal --no-self-update)
+        IFS=',' read -ra target_list <<< "${TARGETS}"
+        for target in "${target_list[@]}"; do
+          if [ -n "${target}" ]; then
+            rustup_args+=(--target "${target}")
+          fi
+        done
+        IFS=',' read -ra component_list <<< "${COMPONENTS}"
+        for component in "${component_list[@]}"; do
+          component="${component// /}"
+          if [ -n "${component}" ]; then
+            rustup_args+=(--component "${component}")
+          fi
+        done
+
+        RUSTUP_PERMIT_COPY_RENAME=1 rustup "${rustup_args[@]}"
+        rustup default "${TOOLCHAIN}"
+        rustc "+${TOOLCHAIN}" --version --verbose
+
+        if [ -z "${CARGO_INCREMENTAL+x}" ]; then
+          echo "CARGO_INCREMENTAL=0" >> "${GITHUB_ENV}"
+        fi
+        if [ -z "${CARGO_TERM_COLOR+x}" ]; then
+          echo "CARGO_TERM_COLOR=always" >> "${GITHUB_ENV}"
+        fi
