@@ -36,9 +36,9 @@
 //! The Lashlang VM and RLM formats exist only when the `rlm` feature is on,
 //! because the crates that define them are optional dependencies. A build
 //! without `rlm` writes none of those formats, so [`durable_formats`] does not
-//! list them. Module artifacts are different: the artifact store is a
-//! non-optional durable dependency, and its identity-verified JSON is listed in
-//! every build.
+//! list them. Module artifacts are different: their durable surface and
+//! semantic identity are owned by non-optional `lash-sansio`, so the format is
+//! listed in every build even when the optional verifier is absent.
 
 pub use lash_core::store::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
@@ -49,7 +49,7 @@ pub use lash_core::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, SESSION_NODE_BODY_SCHE
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::RLM_SNAPSHOT_VERSION;
-pub use lashlang::LASHLANG_SEMANTIC_HASH_VERSION;
+pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 #[cfg(feature = "rlm")]
 pub use lashlang::{
     BYTECODE_FORMAT_VERSION, HEAP_SIZE_SCHEDULE_VERSION, LASHLANG_SNAPSHOT_VERSION,
@@ -195,7 +195,7 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
         DurableFormatEntry {
             format: DurableFormat::ModuleArtifact,
             version: FormatVersion::Identity(LASHLANG_SEMANTIC_HASH_VERSION),
-            owning_crate: "lashlang",
+            owning_crate: "lash-sansio",
             constant: "LASHLANG_SEMANTIC_HASH_VERSION",
             probe: FormatProbe::IdentityOnly,
         },

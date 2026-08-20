@@ -223,7 +223,7 @@ CONSTANTS: tuple[Constant, ...] = (
     ),
     Constant(
         name="LASHLANG_SEMANTIC_HASH_VERSION",
-        path="crates/lashlang/src/artifact.rs",
+        path="crates/lash-sansio/src/lib.rs",
         symbol="LASHLANG_SEMANTIC_HASH_VERSION",
         manifest=True,
         phrases=("module artifact", "semantic hash"),

@@ -484,7 +484,7 @@ mod tests {
         assert!(!needs_recompute(head));
 
         let module = durable_format(DurableFormat::ModuleArtifact).expect("a module format");
-        assert_eq!(module.owning_crate, "lashlang");
+        assert_eq!(module.owning_crate, "lash-sansio");
         assert_eq!(module.constant, "LASHLANG_SEMANTIC_HASH_VERSION");
         assert_eq!(module.probe, FormatProbe::IdentityOnly);
         assert_eq!(

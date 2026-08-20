@@ -31,7 +31,7 @@ use crate::trigger_manifest::{
     CurrentTriggerKeyManifest, TriggerKeyManifest, TriggerManifestReplacement,
 };
 
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v2";
+pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v6";
 

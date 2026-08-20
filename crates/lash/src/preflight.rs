@@ -248,6 +248,7 @@ impl Walk {
                 Extraction::Undecodable { format, reason } => {
                     self.tallies.entry(format).or_default().undecodable(reason);
                 }
+                #[cfg(feature = "rlm")]
                 Extraction::IdentityMismatch { format, detail } => {
                     self.tallies
                         .entry(format)
@@ -265,6 +266,7 @@ impl Walk {
                         detail: format!("{}: {detail}", owner(item)),
                     });
                 }
+                #[cfg(feature = "rlm")]
                 Extraction::IdentityMatch { format } => {
                     self.tallies.entry(format).or_default().identity_match();
                 }

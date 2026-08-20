@@ -299,6 +299,7 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
 }
 
 #[tokio::test]
+#[cfg(feature = "rlm")]
 async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
     let mut raw: serde_json::Value = serde_json::from_str(include_str!(
         "../../../lashlang/tests/fixtures/module-artifact-old.json"

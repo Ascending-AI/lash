@@ -750,7 +750,7 @@ must_cover = ["WorkflowNodeTypeFacets"]
 
 [[surface]]
 constant = "LASHLANG_SEMANTIC_HASH_VERSION"
-constant_path = "crates/lashlang/src/artifact.rs"
+constant_path = "crates/lash-sansio/src/lib.rs"
 version_regex = '\bLASHLANG_SEMANTIC_HASH_VERSION\b\s*:\s*&str\s*=\s*"lashlang-semantic-v([0-9]+)"'
 description = "identity-verified Lashlang and TypeScript module-artifact identity"
 
