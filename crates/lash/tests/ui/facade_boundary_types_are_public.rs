@@ -9,7 +9,8 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, OperationId,
+    CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity,
+    MaintenanceFailure, MaintenanceRefusal, MaintenanceResult, OperationId,
     OrphanedTurnInputScope, PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft,
     QueuedWorkBatch,
     QueuedWorkBatchDraft,
@@ -337,12 +338,17 @@ impl StoreMaintenance for FacadeStore {
         Ok(Vec::new())
     }
 
-    async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+    async fn vacuum(&self) -> MaintenanceResult<VacuumReport> {
         Ok(VacuumReport::default())
     }
 
-    async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
-        Ok(GcReport::default())
+    async fn gc_unreachable(&self) -> MaintenanceResult<GcReport> {
+        Err(MaintenanceFailure::refused(
+            MaintenanceRefusal::UnwitnessedScope {
+                scope: "facade boundary fixture",
+            },
+            GcReport::default(),
+        ))
     }
 }
 

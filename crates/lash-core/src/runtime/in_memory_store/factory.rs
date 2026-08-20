@@ -16,6 +16,9 @@ pub struct InMemorySessionStoreFactory {
     pub(super) fork_plans: Arc<Mutex<HashMap<String, crate::store::ForkPlan>>>,
     pub(super) node_anchors: InMemoryNodeAnchors,
     pub(super) checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
+    /// Factory-global session -> live checkpoint component edges; see
+    /// [`InMemorySessionStore::checkpoint_blob_roots`].
+    pub(super) checkpoint_blob_roots: super::SharedCheckpointBlobRoots,
     pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     pub(super) deleted_session_ids: Arc<Mutex<HashSet<String>>>,
     /// Factory-global attachment GC condemnation state: the digest is global to
@@ -40,6 +43,7 @@ impl InMemorySessionStoreFactory {
             fork_plans: Arc::new(Mutex::new(HashMap::new())),
             node_anchors: Arc::new(Mutex::new(HashMap::new())),
             checkpoint_component_blobs: Arc::new(Mutex::new(HashMap::new())),
+            checkpoint_blob_roots: Arc::new(Mutex::new(HashMap::new())),
             tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
             deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
             attachment_condemnations: Arc::new(Mutex::new(HashMap::new())),
@@ -102,6 +106,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     Arc::clone(&self.global_session_heads),
                     Arc::clone(&self.node_anchors),
                     Arc::clone(&self.checkpoint_component_blobs),
+                    Arc::clone(&self.checkpoint_blob_roots),
                     Arc::clone(&self.tombstoned_node_ids),
                     Arc::clone(&self.deleted_session_ids),
                     Arc::clone(&self.attachment_condemnations),
@@ -170,6 +175,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             store
                 .reclaim_history_for_delete(session_id)
                 .map_err(|error| error.to_string())?;
+            // The session's checkpoint edges die with it: the blobs they point
+            // at become unreachable unless another session or anchor holds
+            // them, which is exactly what `gc_unreachable` then observes.
+            self.checkpoint_blob_roots.lock_recover().remove(session_id);
             self.stores.lock_recover().remove(session_id);
             self.fork_plans.lock_recover().remove(session_id);
         }
@@ -436,12 +445,26 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.global_session_heads),
             Arc::clone(&self.node_anchors),
             Arc::clone(&self.checkpoint_component_blobs),
+            Arc::clone(&self.checkpoint_blob_roots),
             Arc::clone(&self.tombstoned_node_ids),
             Arc::clone(&self.deleted_session_ids),
             Arc::clone(&self.attachment_condemnations),
         ));
         *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
         *store.session_graph.lock_recover() = resident_graph.clone();
+        // The fork inherits its parent's checkpoint, so it is a *referrer* of
+        // those component blobs from the moment it exists — before it has
+        // committed anything of its own. Recording the edge here is what keeps
+        // `gc_unreachable` from reclaiming a live fork's components when the
+        // session it forked from is deleted.
+        self.checkpoint_blob_roots.lock_recover().insert(
+            request.session_id.clone(),
+            checkpoint
+                .components
+                .values()
+                .filter_map(|component| component.blob_ref().cloned())
+                .collect(),
+        );
         *store.checkpoint.lock_recover() = Some(checkpoint);
         *store.session_head_meta.lock_recover() = Some(crate::store::SessionHeadMeta::assemble(
             crate::store::SessionHeadPayload {

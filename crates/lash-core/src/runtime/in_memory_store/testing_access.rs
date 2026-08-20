@@ -348,7 +348,10 @@ mod tests {
             .await
             .expect_err("unbound vacuum must return SessionNotBound");
         assert!(
-            matches!(err, StoreError::SessionNotBound),
+            matches!(
+                err.stop,
+                crate::store::MaintenanceStop::Failed(StoreError::SessionNotBound)
+            ),
             "expected SessionNotBound, got {err:?}"
         );
     }

@@ -83,6 +83,8 @@ enum InMemoryQueuedWorkClaimKind {
 
 type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoint, String);
 type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
+/// Session id -> component blob refs its live checkpoint references.
+pub(crate) type SharedCheckpointBlobRoots = Arc<Mutex<HashMap<String, HashSet<crate::BlobRef>>>>;
 
 #[cfg(any(test, feature = "testing"))]
 pub type RawPendingTurnInputForTesting = (
@@ -144,6 +146,13 @@ pub struct InMemorySessionStore {
     deleted_session_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
     checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
+    /// Factory-global reference edges from a session to the component blobs its
+    /// *live* checkpoint holds. Edges, not counts (ADR 0067 §4): a commit
+    /// replaces its session's edge set, a delete drops it, and
+    /// `gc_unreachable` decides liveness by `NOT EXISTS` over the union. This
+    /// is what lets the in-memory backend witness its own root set instead of
+    /// reporting an unconditional empty sweep.
+    pub(crate) checkpoint_blob_roots: SharedCheckpointBlobRoots,
     pub(crate) usage_deltas: Mutex<Vec<crate::store::RuntimeUsageDelta>>,
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
@@ -233,6 +242,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashMap::new())),
@@ -248,6 +258,7 @@ impl InMemorySessionStore {
         global_session_heads: Arc<Mutex<HashMap<String, Option<String>>>>,
         node_anchors: InMemoryNodeAnchors,
         checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
+        checkpoint_blob_roots: SharedCheckpointBlobRoots,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
         deleted_session_ids: Arc<Mutex<HashSet<String>>>,
         attachment_condemnations: SharedAttachmentCondemnations,
@@ -267,6 +278,7 @@ impl InMemorySessionStore {
             deleted_session_ids,
             checkpoint: Mutex::new(None),
             checkpoint_component_blobs,
+            checkpoint_blob_roots,
             usage_deltas: Mutex::new(Vec::new()),
             runtime_commit_count: Mutex::new(0),
             runtime_turn_commits: Mutex::new(std::collections::HashMap::new()),
@@ -1364,14 +1376,20 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         // leaves.
         {
             let mut blobs = self.checkpoint_component_blobs.lock_recover();
+            let mut roots = HashSet::new();
             for component in hydrated_checkpoint.components.values() {
-                if let (Some(blob_ref), Some(body)) = (
-                    component.blob_ref().cloned(),
-                    component.body().map(<[u8]>::to_vec),
-                ) {
-                    blobs.insert(blob_ref, body);
+                if let Some(blob_ref) = component.blob_ref().cloned() {
+                    if let Some(body) = component.body().map(<[u8]>::to_vec) {
+                        blobs.insert(blob_ref.clone(), body);
+                    }
+                    roots.insert(blob_ref);
                 }
             }
+            // This commit's checkpoint is the session's only live one, so its
+            // component edges replace the superseded set wholesale.
+            self.checkpoint_blob_roots
+                .lock_recover()
+                .insert(commit.session_id.clone(), roots);
         }
         *self.checkpoint.lock_recover() = Some(hydrated_checkpoint);
         self.commit_attachment_refs_in_memory(

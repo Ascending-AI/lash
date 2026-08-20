@@ -369,7 +369,10 @@ pub(super) async fn session_store_factory_unbound_vacuum_is_typed_error(
         .await
         .expect_err("an unbound handle must refuse to vacuum");
     assert!(
-        matches!(error, crate::StoreError::SessionNotBound),
+        matches!(
+            error.stop,
+            crate::store::MaintenanceStop::Failed(crate::StoreError::SessionNotBound)
+        ),
         "expected StoreError::SessionNotBound, got {error:?}"
     );
 }

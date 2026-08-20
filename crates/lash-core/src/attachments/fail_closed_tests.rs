@@ -48,8 +48,8 @@ async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
     .expect_err("unsupported root enumeration must abort the sweep");
 
     assert!(matches!(
-        error,
-        AttachmentStoreError::Backend(message)
+        &error.stop,
+        crate::store::MaintenanceStop::Failed(AttachmentStoreError::Backend(message))
             if message.contains("failed to enumerate live attachment refs")
                 && message.contains("live_attachment_refs")
     ));

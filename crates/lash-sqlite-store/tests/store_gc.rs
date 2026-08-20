@@ -121,7 +121,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .await
         .expect("store orphan");
 
-    let report = store.gc_unreachable().await;
+    let report = store.gc_unreachable().await.expect("gc sweeps");
 
     assert_eq!(report.deleted_blob_count, 1);
     let checkpoint = store
@@ -842,7 +842,10 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
         .await
         .expect_err("unbound vacuum must return typed error");
     assert!(
-        matches!(err, StoreError::SessionNotBound),
+        matches!(
+            err.stop,
+            lash_core::MaintenanceStop::Failed(StoreError::SessionNotBound)
+        ),
         "expected SessionNotBound, got {err:?}"
     );
 

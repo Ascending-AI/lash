@@ -169,17 +169,24 @@ impl Store {
             .map_err(sqlite_error)
     }
 
-    pub async fn gc_unreachable(&self) -> GcReport {
-        match self.try_gc_unreachable().await {
-            Ok(report) => report,
-            Err(err) => {
-                // GC is best-effort space reclamation. A backend failure must
-                // never panic inside the commit and brick the store; log and
-                // leave every blob in place (the conservative outcome).
-                tracing::warn!(error = %err, "gc_unreachable failed; retaining all blobs");
-                GcReport::default()
-            }
-        }
+    /// Mark-and-sweep the blob table, answering in the maintenance outcome
+    /// contract (ADR 0067 §4).
+    ///
+    /// The whole sweep runs in one `BEGIN IMMEDIATE` transaction, so a backend
+    /// failure rolls every delete back and the partial report is empty *because
+    /// no work survived* — never because the failure was absorbed into a clean
+    /// zero report.
+    pub async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<GcReport> {
+        self.conn
+            .write(|tx| {
+                Self::gc_unreachable_in_tx(tx).map_err(|err| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                        err.to_string(),
+                    )))
+                })
+            })
+            .await
+            .map_err(|err| lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(err)))
     }
 
     /// Collect the checkpoint-manifest roots that must survive GC.
@@ -209,20 +216,7 @@ impl Store {
         Ok(roots)
     }
 
-    async fn try_gc_unreachable(&self) -> Result<GcReport, StoreError> {
-        self.conn
-            .write(|tx| {
-                Self::gc_unreachable_in_tx(tx).map_err(|err| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                        err.to_string(),
-                    )))
-                })
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
-    /// Synchronous body of [`try_gc_unreachable`], run on the connection thread
+    /// Synchronous body of [`Store::gc_unreachable`], run on the connection thread
     /// inside the `BEGIN IMMEDIATE` transaction so the mark/sweep is atomic and
     /// holds the write lock for its duration.
     pub(crate) fn gc_unreachable_in_tx(tx: &Transaction<'_>) -> Result<GcReport, StoreError> {

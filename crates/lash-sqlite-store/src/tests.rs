@@ -322,7 +322,16 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     .await;
 
     assert!(
-        matches!(result, Err(lash_core::AttachmentStoreError::Backend(ref message)) if message.contains("failed to enumerate live attachment refs")),
+        matches!(
+            &result,
+            Err(failure)
+                if matches!(
+                    &failure.stop,
+                    lash_core::MaintenanceStop::Failed(lash_core::AttachmentStoreError::Backend(
+                        message
+                    )) if message.contains("failed to enumerate live attachment refs")
+                )
+        ),
         "a missing catalog must abort GC even when delete-all is authorized: {result:?}"
     );
     lash_core::AttachmentStore::get(&backend, &attachment.id)

@@ -2759,7 +2759,7 @@ impl StoreMaintenance for PostgresSessionStore {
         .map_err(store_sqlx_error)
     }
 
-    async fn vacuum(&self) -> Result<VacuumReport, StoreError> {
+    async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
         // identity evidence and must survive every retention-pruning pass.
         let removed_node_count =
@@ -2767,8 +2767,13 @@ impl StoreMaintenance for PostgresSessionStore {
                 .bind(&self.session_id)
                 .execute(&self.pool)
                 .await
-                .map_err(store_sqlx_error)?
-                .rows_affected();
+                .map_err(|error| {
+                    lash_core::MaintenanceFailure::failed_before_any_work(store_sqlx_error(error))
+                })?
+                .rows_affected() as usize;
+        // The two deletes are separate statements, so the node delete has
+        // already committed by the time this one can fail: its count rides out
+        // with the failure rather than being lost.
         let removed_pending_turn_input_tombstone_count = sqlx::query(
             "DELETE FROM lash_pending_turn_inputs
              WHERE session_id = $1 AND state IN ($2, $3)",
@@ -2778,10 +2783,18 @@ impl StoreMaintenance for PostgresSessionStore {
         .bind(lash_core::TurnInputState::Completed.as_str())
         .execute(&self.pool)
         .await
-        .map_err(store_sqlx_error)?
+        .map_err(|error| {
+            lash_core::MaintenanceFailure::failed(
+                store_sqlx_error(error),
+                VacuumReport {
+                    removed_node_count,
+                    removed_pending_turn_input_tombstone_count: 0,
+                },
+            )
+        })?
         .rows_affected();
         Ok(VacuumReport {
-            removed_node_count: removed_node_count as usize,
+            removed_node_count,
             removed_pending_turn_input_tombstone_count: removed_pending_turn_input_tombstone_count
                 as usize,
         })
@@ -2795,7 +2808,17 @@ impl StoreMaintenance for PostgresSessionStore {
     /// Session-owned trigger-manifest rows are removed with their session; the
     /// other artifact rows are retained service roots, so GC does not touch
     /// this table.
-    async fn gc_unreachable(&self) -> Result<GcReport, StoreError> {
+    async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<GcReport> {
+        // One transaction: a failure rolls every delete back, so no work
+        // survived to report.
+        self.gc_unreachable_blobs()
+            .await
+            .map_err(lash_core::MaintenanceFailure::failed_before_any_work)
+    }
+}
+
+impl PostgresSessionStore {
+    async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // Serialize against concurrent checkpoint-blob writers. Every commit
         // INSERTs its new manifest into `lash_blobs` (holding a ROW EXCLUSIVE

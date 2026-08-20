@@ -65,10 +65,6 @@ pub enum AttachmentStoreError {
     #[error("attachment store backend failed: {0}")]
     Backend(String),
     #[error(
-        "attachment GC refused an empty live root set with a deletion-eligible blob; set `AttachmentReclamationPolicy::empty_root_set` to `EmptyRootSetPolicy::AuthorizeDeleteAll` only when deleting every unreferenced blob is intended"
-    )]
-    EmptyRootSetRefused,
-    #[error(
         "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; the fence clears when the sweep releases the digest. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
     )]
     ReclamationInFlight {
@@ -371,9 +367,15 @@ pub struct AttachmentReclamationReport {
     /// Blobs the sweep tried but failed to delete. The sweep continues past
     /// per-blob failures and reports them here rather than aborting.
     pub failed_ids: Vec<AttachmentId>,
-    /// Root-enumeration failure suppressed because the backend contained no
-    /// deletion-eligible blobs. The sweep deleted nothing. Hosts should expose
-    /// this diagnostic separately from a healthy empty sweep.
+    /// Why the live root set could not be enumerated. The sweep deleted
+    /// nothing: no blob was deletion-eligible, so nothing was at risk.
+    ///
+    /// It rides on an `Ok` report only when the backend itself held no blobs at
+    /// all — a fresh deployment or an operator reset, where no blob's fate ever
+    /// depended on the root set. With blobs present, the sweep refuses with
+    /// [`MaintenanceRefusal::UnwitnessedScope`](crate::store::MaintenanceRefusal::UnwitnessedScope)
+    /// and this diagnostic rides on the partial report instead: an unwitnessed
+    /// root set is never reported as a healthy empty sweep.
     pub root_enumeration_failure: Option<String>,
     /// Detection telemetry: blobs this sweep deleted that a live root existed
     /// for when the sweep probed again immediately afterwards.
@@ -401,6 +403,27 @@ pub struct AttachmentReclamationReport {
     /// [`AttachmentRootSet::release_attachment_condemnation`].
     pub condemn_deferred_ids: Vec<AttachmentId>,
 }
+
+impl crate::store::MaintenanceReport for AttachmentReclamationReport {
+    fn reclaimed_count(&self) -> usize {
+        self.reclaimed_count
+    }
+
+    fn sweep(&self) -> crate::store::MaintenanceSweep {
+        if !self.failed_ids.is_empty() || !self.condemn_deferred_ids.is_empty() {
+            crate::store::MaintenanceSweep::Incomplete
+        } else if self.reclaimed_count > 0 {
+            crate::store::MaintenanceSweep::Swept
+        } else {
+            crate::store::MaintenanceSweep::NothingToDo
+        }
+    }
+}
+
+/// An attachment sweep that stopped before completing its scope, carrying the
+/// partial report accumulated before the stop (ADR 0067 §4).
+pub type AttachmentReclamationFailure =
+    crate::store::MaintenanceFailure<AttachmentReclamationReport, AttachmentStoreError>;
 
 /// Host authorization for interpreting an empty attachment root set.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -433,8 +456,10 @@ pub struct AttachmentReclamationPolicy {
 /// An empty live root set refuses deletion by default; the host must explicitly
 /// authorize the destructive interpretation through [`EmptyRootSetPolicy`].
 /// This valve catches an empty root set, not a wrong store whose unrelated data
-/// makes its root set non-empty. A refusal returns an error and therefore does
-/// not return the partial report accumulated before the first eligible blob.
+/// makes its root set non-empty. A refusal is an
+/// [`AttachmentReclamationFailure`] carrying
+/// [`MaintenanceRefusal::EmptyRootSetUnauthorized`](crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized)
+/// and the partial report accumulated before the first eligible blob.
 /// Per-blob delete failures are collected into
 /// [`AttachmentReclamationReport::failed_ids`]; the sweep does not abort on the
 /// first failure.
@@ -526,7 +551,7 @@ pub async fn reclaim_unreferenced_attachments<R>(
     root_set: &R,
     backend: &dyn AttachmentStore,
     policy: AttachmentReclamationPolicy,
-) -> Result<AttachmentReclamationReport, AttachmentStoreError>
+) -> Result<AttachmentReclamationReport, AttachmentReclamationFailure>
 where
     R: AttachmentRootSet + ?Sized,
 {
@@ -534,7 +559,10 @@ where
     let grace_period_ms = policy.grace_period_ms;
     let intent_grace_cutoff = now.saturating_sub(grace_period_ms);
     let live = root_set.live_attachment_refs(intent_grace_cutoff).await;
-    let blobs = backend.list().await?;
+    let blobs = backend
+        .list()
+        .await
+        .map_err(AttachmentReclamationFailure::failed_before_any_work)?;
     let mut fence = root_set.fence();
     let mut report = AttachmentReclamationReport {
         scanned_blob_count: blobs.len(),
@@ -545,11 +573,19 @@ where
         Ok(live) => live,
         Err(err) => {
             let failure = format!("failed to enumerate live attachment refs: {err}");
+            // Enumeration failure deliberately splits by destructive scope. An
+            // eligible blob needed the unavailable roots to decide its fate,
+            // so that is a backend failure (`Failed`). Grace-protected blobs
+            // require no destructive step, but their scope remains unwitnessed,
+            // so that is a policy refusal (`Refused(UnwitnessedScope)`).
             if blobs
                 .iter()
                 .any(|blob| !within_grace(blob.last_modified_epoch_ms, now, grace_period_ms))
             {
-                return Err(AttachmentStoreError::Backend(failure));
+                return Err(AttachmentReclamationFailure::failed(
+                    AttachmentStoreError::Backend(failure),
+                    report,
+                ));
             }
             tracing::warn!(
                 scanned_blob_count = report.scanned_blob_count,
@@ -558,7 +594,24 @@ where
                 "attachment GC could not enumerate live roots but found no deletion-eligible blobs"
             );
             report.root_enumeration_failure = Some(failure);
-            return Ok(report);
+            if blobs.is_empty() {
+                // The backend itself enumerated completely and held nothing, so
+                // no blob's fate ever depended on the root set. That is a
+                // witnessed nothing-to-do — the case a fresh deployment or an
+                // operator reset lands in — and the enumeration diagnostic
+                // rides along on a report that is provably empty.
+                return Ok(report);
+            }
+            // Blobs exist and only the grace window spared them. Their liveness
+            // *would* have been decided by a root set nobody could enumerate, so
+            // this sweep refuses rather than reporting itself healthy; the
+            // diagnostic rides in the partial report (ADR 0067 §5).
+            return Err(AttachmentReclamationFailure::refused(
+                crate::store::MaintenanceRefusal::UnwitnessedScope {
+                    scope: "live attachment root set",
+                },
+                report,
+            ));
         }
     };
     if fence == AttachmentGcFence::BestEffort {
@@ -687,7 +740,12 @@ where
                 "attachment GC refused an empty live root set with a deletion-eligible blob"
             );
             release_condemnation(root_set, condemned, &blob.id).await;
-            return Err(AttachmentStoreError::EmptyRootSetRefused);
+            // The refusal carries the work already done — including any
+            // `deleted_while_referenced` detections — instead of discarding it.
+            return Err(AttachmentReclamationFailure::refused(
+                crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized,
+                report,
+            ));
         }
         // (c) Arm the delete: `Condemned -> Deleting`. A writer that took the
         // digest back while we were re-stating the blob has already removed the

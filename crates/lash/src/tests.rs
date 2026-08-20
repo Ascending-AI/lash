@@ -761,15 +761,11 @@ impl lash_core::StoreMaintenance for SnapshotStore {
         Ok(Vec::new())
     }
 
-    async fn vacuum(
-        &self,
-    ) -> std::result::Result<lash_core::VacuumReport, lash_core::store::StoreError> {
+    async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
         Ok(lash_core::VacuumReport::default())
     }
 
-    async fn gc_unreachable(
-        &self,
-    ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
+    async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<lash_core::GcReport> {
         Ok(lash_core::GcReport::default())
     }
 }
@@ -1161,15 +1157,11 @@ impl lash_core::StoreMaintenance for BoundSessionStore {
         Ok(Vec::new())
     }
 
-    async fn vacuum(
-        &self,
-    ) -> std::result::Result<lash_core::VacuumReport, lash_core::store::StoreError> {
+    async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
         Ok(lash_core::VacuumReport::default())
     }
 
-    async fn gc_unreachable(
-        &self,
-    ) -> std::result::Result<lash_core::GcReport, lash_core::store::StoreError> {
+    async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<lash_core::GcReport> {
         Ok(lash_core::GcReport::default())
     }
 }
