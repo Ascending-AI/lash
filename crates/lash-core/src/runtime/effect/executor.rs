@@ -69,6 +69,12 @@ pub struct RuntimeSleepOptions {
 // Local executor (per-effect borrowed runner state)
 // =============================================================================
 
+struct WaitControls {
+    cancellation: CancellationToken,
+    observe_turn_cancel: bool,
+    turn_cancel_scope: Option<crate::ExecutionScope>,
+}
+
 #[async_trait::async_trait]
 pub(crate) trait ProcessRunner: Send + Sync {
     async fn run_process(
@@ -186,25 +192,25 @@ struct TestingRuntimeEffectLocalRunner<'run> {
     run: Box<TestingRuntimeEffectLocalRunnerFn<'run>>,
 }
 
-enum RuntimeEffectLocalExecutorState<'run> {
+enum LocalTarget {
     Unavailable,
     SleepOnly {
-        cancellation: CancellationToken,
+        controls: WaitControls,
         clock: Arc<dyn crate::Clock>,
-        observe_turn_cancel: bool,
-        turn_cancel_scope: Option<crate::ExecutionScope>,
     },
     ExternalWaitOptions {
-        cancellation: CancellationToken,
+        controls: WaitControls,
         deadline: Option<Instant>,
         clock: Arc<dyn crate::Clock>,
-        observe_turn_cancel: bool,
-        turn_cancel_scope: Option<crate::ExecutionScope>,
     },
     Process(ProcessLocalExecution),
     Trigger(TriggerLocalExecution),
-    Runner(Box<dyn RuntimeEffectLocalRunner + Send + 'run>),
     OwnedRunner(Box<dyn RuntimeEffectLocalRunner + Send + 'static>),
+}
+
+enum RuntimeEffectLocalExecutorState<'run> {
+    Target(LocalTarget),
+    Runner(Box<dyn RuntimeEffectLocalRunner + Send + 'run>),
 }
 
 /// Scoped local executor provided to a [`RuntimeEffectController`] for one effect.
@@ -247,7 +253,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// Constructs a local path that rejects unavailable inline execution.
     pub fn unavailable() -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Unavailable,
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Unavailable),
             replay_trace: None,
         }
     }
@@ -261,12 +267,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// implementors testing deterministic deadline behavior.
     pub fn sleep_with_clock(cancellation: CancellationToken, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::SleepOnly {
-                cancellation,
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::SleepOnly {
+                controls: WaitControls {
+                    cancellation,
+                    observe_turn_cancel: true,
+                    turn_cancel_scope: None,
+                },
                 clock,
-                observe_turn_cancel: true,
-                turn_cancel_scope: None,
-            },
+            }),
             replay_trace: None,
         }
     }
@@ -285,29 +293,27 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::ExternalWaitOptions {
-                cancellation,
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
+                controls: WaitControls {
+                    cancellation,
+                    observe_turn_cancel: true,
+                    turn_cancel_scope: None,
+                },
                 deadline,
                 clock,
-                observe_turn_cancel: true,
-                turn_cancel_scope: None,
-            },
+            }),
             replay_trace: None,
         }
     }
 
     #[doc(hidden)]
     pub fn with_turn_cancel_observation(mut self, observe_turn_cancel: bool) -> Self {
-        match &mut self.state {
-            RuntimeEffectLocalExecutorState::SleepOnly {
-                observe_turn_cancel: current,
-                ..
-            }
-            | RuntimeEffectLocalExecutorState::ExternalWaitOptions {
-                observe_turn_cancel: current,
-                ..
-            } => *current = observe_turn_cancel,
-            _ => {}
+        if let RuntimeEffectLocalExecutorState::Target(
+            LocalTarget::SleepOnly { controls, .. }
+            | LocalTarget::ExternalWaitOptions { controls, .. },
+        ) = &mut self.state
+        {
+            controls.observe_turn_cancel = observe_turn_cancel;
         }
         self
     }
@@ -315,14 +321,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// Adds the turn execution scope that effect-host implementors use to distinguish turn
     /// cancellation from an ordinary wait cancellation.
     pub fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
-        match &mut self.state {
-            RuntimeEffectLocalExecutorState::SleepOnly {
-                turn_cancel_scope, ..
-            }
-            | RuntimeEffectLocalExecutorState::ExternalWaitOptions {
-                turn_cancel_scope, ..
-            } => *turn_cancel_scope = Some(scope),
-            _ => {}
+        if let RuntimeEffectLocalExecutorState::Target(
+            LocalTarget::SleepOnly { controls, .. }
+            | LocalTarget::ExternalWaitOptions { controls, .. },
+        ) = &mut self.state
+        {
+            controls.turn_cancel_scope = Some(scope);
         }
         self
     }
@@ -332,10 +336,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         mut self,
         turn_cancellation: ProcessTurnCancellation,
     ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
-            turn_cancellation: current,
-            ..
-        }) = &mut self.state
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
+            ProcessLocalExecution {
+                turn_cancellation: current,
+                ..
+            },
+        )) = &mut self.state
         {
             *current = Some(turn_cancellation);
         }
@@ -346,10 +352,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         mut self,
         controller: Arc<dyn RuntimeEffectController>,
     ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
-            effect_controller: current,
-            ..
-        }) = &mut self.state
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
+            ProcessLocalExecution {
+                effect_controller: current,
+                ..
+            },
+        )) = &mut self.state
         {
             *current = Some(controller);
         }
@@ -363,7 +371,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// embedder** seam. Panicking from the observer models a host crash in
     /// that exact interval.
     pub fn with_process_outcome_observer(mut self, observer: ProcessOutcomeObserver) -> Self {
-        if let RuntimeEffectLocalExecutorState::Process(execution) = &mut self.state {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
             execution.outcome_observer = Some(observer);
         }
         self
@@ -378,7 +388,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         mut self,
         store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> Self {
-        if let RuntimeEffectLocalExecutorState::Process(execution) = &mut self.state {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
             execution.process_env_store = Some(store);
         }
         self
@@ -391,7 +403,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// fault seam.
     pub fn take_process_outcome_observer(&mut self) -> Option<ProcessOutcomeObserver> {
         match &mut self.state {
-            RuntimeEffectLocalExecutorState::Process(execution) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) => {
                 execution.outcome_observer.take()
             }
             _ => None,
@@ -405,14 +417,16 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         process_work_driver: Option<crate::ProcessWorkDriver>,
     ) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Process(ProcessLocalExecution {
-                registry,
-                process_work_driver,
-                process_env_store: None,
-                turn_cancellation: None,
-                effect_controller: None,
-                outcome_observer: None,
-            }),
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
+                ProcessLocalExecution {
+                    registry,
+                    process_work_driver,
+                    process_env_store: None,
+                    turn_cancellation: None,
+                    effect_controller: None,
+                    outcome_observer: None,
+                },
+            )),
             replay_trace: None,
         }
     }
@@ -421,7 +435,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// bypassing the runtime-effect envelope.
     pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Trigger(TriggerLocalExecution { store }),
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(
+                TriggerLocalExecution { store },
+            )),
             replay_trace: None,
         }
     }
@@ -500,7 +516,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         };
         (
             RuntimeEffectLocalExecutor {
-                state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
+                state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                     LocalTurnEffectRunner {
                         driver: owned_driver,
                         protocol_iteration: machine.protocol_iteration(),
@@ -509,7 +525,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         cancellation,
                         update: Arc::clone(&update),
                     },
-                )),
+                ))),
                 replay_trace,
             },
             update,
@@ -522,12 +538,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                 LocalDirectEffectRunner {
                     provider,
                     attachment_store,
                 },
-            )),
+            ))),
             replay_trace,
         }
     }
@@ -540,13 +556,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         let replay_trace = context.replay_validation_trace();
         if let Some(context) = context.to_static() {
             return Self {
-                state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
+                state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                     LocalToolBatchEffectRunner {
                         context,
                         child_trace_hooks,
                         completion_key,
                     },
-                )),
+                ))),
                 replay_trace,
             };
         }
@@ -570,13 +586,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             (dispatch.to_static(), tool_context.to_static())
         {
             return Self {
-                state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
+                state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                     LocalPreparedToolAttemptEffectRunner {
                         dispatch: Arc::new(dispatch),
                         tool_context,
                         completion_key,
                     },
-                )),
+                ))),
                 replay_trace,
             };
         }
@@ -606,7 +622,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match self.state {
             RuntimeEffectLocalExecutorState::Runner(runner) => runner.execute(envelope).await,
-            RuntimeEffectLocalExecutorState::OwnedRunner(runner) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
                 if !runner.uses_task_boundary(&envelope.command) {
                     return runner.execute(envelope).await;
                 }
@@ -627,41 +643,46 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 abort.disarm();
                 result
             }
-            RuntimeEffectLocalExecutorState::SleepOnly {
-                cancellation,
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::SleepOnly {
+                controls: WaitControls { cancellation, .. },
                 clock,
+            }) => execute_local_sleep(envelope, cancellation, clock.as_ref()).await,
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
                 ..
-            } => execute_local_sleep(envelope, cancellation, clock.as_ref()).await,
-            RuntimeEffectLocalExecutorState::ExternalWaitOptions { .. } => {
+            }) => Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "local await-event options cannot execute {} command directly",
+                    envelope.command.kind().as_str()
+                ),
+            )),
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Unavailable) => {
                 Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                     format!(
-                        "local await-event options cannot execute {} command directly",
+                        "no local executor is available for {}",
                         envelope.command.kind().as_str()
                     ),
                 ))
             }
-            RuntimeEffectLocalExecutorState::Unavailable => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                format!(
-                    "no local executor is available for {}",
-                    envelope.command.kind().as_str()
-                ),
-            )),
-            RuntimeEffectLocalExecutorState::Process(_) => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                format!(
-                    "process executor cannot execute {} command directly",
-                    envelope.command.kind().as_str()
-                ),
-            )),
-            RuntimeEffectLocalExecutorState::Trigger(_) => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                format!(
-                    "trigger executor cannot execute {} command directly",
-                    envelope.command.kind().as_str()
-                ),
-            )),
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(_)) => {
+                Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    format!(
+                        "process executor cannot execute {} command directly",
+                        envelope.command.kind().as_str()
+                    ),
+                ))
+            }
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(_)) => {
+                Err(RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                    format!(
+                        "trigger executor cannot execute {} command directly",
+                        envelope.command.kind().as_str()
+                    ),
+                ))
+            }
         }
     }
 
@@ -669,7 +690,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// runtime effect.
     pub fn into_process(self) -> Result<ProcessLocalExecution, RuntimeEffectControllerError> {
         match self.state {
-            RuntimeEffectLocalExecutorState::Process(execution) => Ok(execution),
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) => {
+                Ok(execution)
+            }
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 "no process executor is available for process command",
@@ -695,8 +718,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 let (requests, request_rx) = mpsc::unbounded_channel();
                 (
                     RuntimeEffectLocalExecutor {
-                        state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
-                            RemoteEffectRunner { requests },
+                        state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
+                            Box::new(RemoteEffectRunner { requests }),
                         )),
                         replay_trace: replay_trace.clone(),
                     },
@@ -709,65 +732,29 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     )),
                 )
             }
-            RuntimeEffectLocalExecutorState::OwnedRunner(runner) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
                 let (requests, request_rx) = mpsc::unbounded_channel();
                 (
                     RuntimeEffectLocalExecutor {
-                        state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
-                            RemoteEffectRunner { requests },
+                        state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(
+                            Box::new(RemoteEffectRunner { requests }),
                         )),
                         replay_trace: replay_trace.clone(),
                     },
                     Some((
                         RuntimeEffectLocalExecutor {
-                            state: RuntimeEffectLocalExecutorState::OwnedRunner(runner),
+                            state: RuntimeEffectLocalExecutorState::Target(
+                                LocalTarget::OwnedRunner(runner),
+                            ),
                             replay_trace,
                         },
                         request_rx,
                     )),
                 )
             }
-            state => (
+            RuntimeEffectLocalExecutorState::Target(target) => (
                 RuntimeEffectLocalExecutor {
-                    state: match state {
-                        RuntimeEffectLocalExecutorState::Unavailable => {
-                            RuntimeEffectLocalExecutorState::Unavailable
-                        }
-                        RuntimeEffectLocalExecutorState::SleepOnly {
-                            cancellation,
-                            clock,
-                            observe_turn_cancel,
-                            turn_cancel_scope,
-                        } => RuntimeEffectLocalExecutorState::SleepOnly {
-                            cancellation,
-                            clock,
-                            observe_turn_cancel,
-                            turn_cancel_scope,
-                        },
-                        RuntimeEffectLocalExecutorState::ExternalWaitOptions {
-                            cancellation,
-                            deadline,
-                            clock,
-                            observe_turn_cancel,
-                            turn_cancel_scope,
-                        } => RuntimeEffectLocalExecutorState::ExternalWaitOptions {
-                            cancellation,
-                            deadline,
-                            clock,
-                            observe_turn_cancel,
-                            turn_cancel_scope,
-                        },
-                        RuntimeEffectLocalExecutorState::Process(execution) => {
-                            RuntimeEffectLocalExecutorState::Process(execution)
-                        }
-                        RuntimeEffectLocalExecutorState::Trigger(execution) => {
-                            RuntimeEffectLocalExecutorState::Trigger(execution)
-                        }
-                        RuntimeEffectLocalExecutorState::Runner(_)
-                        | RuntimeEffectLocalExecutorState::OwnedRunner(_) => {
-                            unreachable!("runner states are handled above")
-                        }
-                    },
+                    state: RuntimeEffectLocalExecutorState::Target(target),
                     replay_trace,
                 },
                 None,
@@ -807,7 +794,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// runtime effect.
     pub fn into_trigger(self) -> Result<TriggerLocalExecution, RuntimeEffectControllerError> {
         match self.state {
-            RuntimeEffectLocalExecutorState::Trigger(execution) => Ok(execution),
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
+                Ok(execution)
+            }
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
                 "no trigger executor is available for trigger command",
@@ -832,14 +821,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             })?
             .to_string();
         match self.state {
-            RuntimeEffectLocalExecutorState::Trigger(execution) => {
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
                 let result = execution.execute(&operation_id, command).await?;
                 Ok(RuntimeEffectOutcome::Trigger {
                     result: Box::new(result),
                 })
             }
             RuntimeEffectLocalExecutorState::Runner(runner)
-            | RuntimeEffectLocalExecutorState::OwnedRunner(runner) => {
+            | RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
                 runner
                     .execute(RuntimeEffectEnvelope::new(
                         invocation,
@@ -862,13 +851,16 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self,
     ) -> Result<RuntimeAwaitEventOptions, RuntimeEffectControllerError> {
         match self.state {
-            RuntimeEffectLocalExecutorState::ExternalWaitOptions {
-                cancellation,
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
+                controls:
+                    WaitControls {
+                        cancellation,
+                        observe_turn_cancel,
+                        turn_cancel_scope,
+                    },
                 deadline,
                 clock,
-                observe_turn_cancel,
-                turn_cancel_scope,
-            } => Ok(RuntimeAwaitEventOptions {
+            }) => Ok(RuntimeAwaitEventOptions {
                 cancellation,
                 deadline,
                 clock,
@@ -889,12 +881,15 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// the effect was configured for sleep.
     pub fn into_sleep_options(self) -> RuntimeSleepOptions {
         match self.state {
-            RuntimeEffectLocalExecutorState::SleepOnly {
-                cancellation,
-                observe_turn_cancel,
-                turn_cancel_scope,
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::SleepOnly {
+                controls:
+                    WaitControls {
+                        cancellation,
+                        observe_turn_cancel,
+                        turn_cancel_scope,
+                    },
                 ..
-            } => RuntimeSleepOptions {
+            }) => RuntimeSleepOptions {
                 cancellation,
                 observe_turn_cancel,
                 turn_cancel_scope,
@@ -1315,9 +1310,11 @@ mod task_boundary_tests {
     async fn owned_heavy_effect_runs_on_a_fresh_task() {
         let (observed_tx, observed_rx) = oneshot::channel();
         let executor = RuntimeEffectLocalExecutor {
-            state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(TaskIdentityRunner {
-                observed: observed_tx,
-            })),
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
+                TaskIdentityRunner {
+                    observed: observed_tx,
+                },
+            ))),
             replay_trace: None,
         };
         let parent = crate::task::spawn(async move {
@@ -1343,6 +1340,55 @@ mod task_boundary_tests {
         let child_id = observed_rx.await.expect("effect task id");
         let parent_id = parent.await.expect("parent task");
         assert_ne!(child_id, parent_id);
+    }
+
+    #[test]
+    fn sleep_wait_shape_round_trips_through_remote_execution() {
+        for observe_turn_cancel in [false, true] {
+            let cancellation = CancellationToken::new();
+            let scope = ExecutionScope::runtime_operation(format!(
+                "sleep-wait-shape-{observe_turn_cancel}"
+            ));
+            let (remote, local) = RuntimeEffectLocalExecutor::sleep(cancellation.clone())
+                .with_turn_cancel_observation(observe_turn_cancel)
+                .with_turn_cancel_scope(scope.clone())
+                .into_remote_execution();
+
+            assert!(local.is_none());
+            let options = remote.into_sleep_options();
+            assert_eq!(options.observe_turn_cancel, observe_turn_cancel);
+            assert_eq!(options.turn_cancel_scope, Some(scope));
+
+            cancellation.cancel();
+            assert!(options.cancellation.is_cancelled());
+        }
+    }
+
+    #[test]
+    fn external_wait_shape_round_trips_through_remote_execution() {
+        for observe_turn_cancel in [false, true] {
+            let cancellation = CancellationToken::new();
+            let deadline = Some(Instant::now() + std::time::Duration::from_secs(1));
+            let scope = ExecutionScope::runtime_operation(format!(
+                "external-wait-shape-{observe_turn_cancel}"
+            ));
+            let (remote, local) =
+                RuntimeEffectLocalExecutor::await_event(cancellation.clone(), deadline)
+                    .with_turn_cancel_observation(observe_turn_cancel)
+                    .with_turn_cancel_scope(scope.clone())
+                    .into_remote_execution();
+
+            assert!(local.is_none());
+            let options = remote
+                .into_await_event_options()
+                .expect("await-event options");
+            assert_eq!(options.observe_turn_cancel, observe_turn_cancel);
+            assert_eq!(options.turn_cancel_scope, Some(scope));
+            assert_eq!(options.deadline, deadline);
+
+            cancellation.cancel();
+            assert!(options.cancellation.is_cancelled());
+        }
     }
 
     #[tokio::test]
