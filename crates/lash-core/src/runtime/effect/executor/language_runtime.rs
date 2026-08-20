@@ -10,9 +10,9 @@ impl RuntimeEffectLocalExecutor<'_> {
         clock: Arc<dyn crate::Clock>,
     ) -> RuntimeEffectLocalExecutor<'static> {
         RuntimeEffectLocalExecutor {
-            state: RuntimeEffectLocalExecutorState::OwnedRunner(Box::new(
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                 LanguageRuntimeValueRunner { clock },
-            )),
+            ))),
             replay_trace: None,
         }
     }
