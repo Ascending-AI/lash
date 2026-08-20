@@ -4,9 +4,8 @@
 use serde::Serialize;
 
 use super::budgets::{
-    allocation_budget_bytes, phase_wall_clock_budget_ms, process_list_run_allocation_budget_bytes,
-    process_list_run_wall_clock_budget_ms, steady_state_turn_allocation_budget_bytes,
-    wall_clock_budget_ms,
+    GuardedSpan, allocation_budget_bytes, guarded_span, phase_wall_clock_budget_ms,
+    steady_state_turn_allocation_budget_bytes, wall_clock_budget_ms,
 };
 use super::{RuntimePerfScenario, RuntimePerfScenarioSummary};
 
@@ -192,30 +191,36 @@ pub(super) fn evaluate_budgets(
             );
         }
 
-        if *scenario == RuntimePerfScenario::ProcessListStress {
-            // The 1,537-row fixture is populated through TestLocalProcessRegistry,
-            // whose test-only map-clone writes are quadratic. Keep that separately
-            // reported setup span out of the product-facing release guard.
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "run_turn_alloc_bytes",
-                "median",
-                RuntimePerfGuardClass::Allocation,
-                summary.run_turn_alloc_bytes.median,
-                process_list_run_allocation_budget_bytes(),
-            );
-        } else {
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "total_alloc_bytes",
-                "median",
-                RuntimePerfGuardClass::Allocation,
-                summary.total_alloc_bytes.median,
-                allocation_budget_bytes(*scenario),
-            );
-        }
+        let (alloc_metric, alloc_actual, duration_metric, duration_actual) =
+            match guarded_span(*scenario) {
+                GuardedSpan::WholeRun => (
+                    "total_alloc_bytes",
+                    summary.total_alloc_bytes.median,
+                    "total_ms",
+                    summary.total_ms.median,
+                ),
+                GuardedSpan::RunTurn => {
+                    // The 1,537-row fixture is populated through TestLocalProcessRegistry,
+                    // whose test-only map-clone writes are quadratic. Keep that separately
+                    // reported setup span out of the product-facing release guard.
+                    (
+                        "run_turn_alloc_bytes",
+                        summary.run_turn_alloc_bytes.median,
+                        "run_turn_ms",
+                        summary.run_turn_ms.median,
+                    )
+                }
+            };
+
+        push_max_budget(
+            &mut budgets,
+            summary,
+            alloc_metric,
+            "median",
+            RuntimePerfGuardClass::Allocation,
+            alloc_actual,
+            allocation_budget_bytes(*scenario),
+        );
         push_max_budget(
             &mut budgets,
             summary,
@@ -225,27 +230,15 @@ pub(super) fn evaluate_budgets(
             steady_state_turn_alloc_bytes(summary),
             steady_state_turn_allocation_budget_bytes(*scenario),
         );
-        if *scenario == RuntimePerfScenario::ProcessListStress {
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "run_turn_ms",
-                "median",
-                RuntimePerfGuardClass::Duration,
-                summary.run_turn_ms.median,
-                process_list_run_wall_clock_budget_ms(),
-            );
-        } else {
-            push_max_budget(
-                &mut budgets,
-                summary,
-                "total_ms",
-                "median",
-                RuntimePerfGuardClass::Duration,
-                summary.total_ms.median,
-                wall_clock_budget_ms(*scenario),
-            );
-        }
+        push_max_budget(
+            &mut budgets,
+            summary,
+            duration_metric,
+            "median",
+            RuntimePerfGuardClass::Duration,
+            duration_actual,
+            wall_clock_budget_ms(*scenario),
+        );
     }
     budgets
 }

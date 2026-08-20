@@ -20,6 +20,19 @@ struct RuntimeBudgets {
     scenarios: BTreeMap<String, RuntimeScenarioBudget>,
 }
 
+/// Which span of scenario execution carries the guarded allocation and wall-clock ceilings.
+///
+/// For 38 scenarios this is `WholeRun` (comparing `total_alloc_bytes` and `total_ms`).
+/// For `ProcessListStress` this is `RunTurn` (comparing `run_turn_alloc_bytes` and
+/// `run_turn_ms`), keeping the test-only quadratic fixture population out of the
+/// release guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum GuardedSpan {
+    WholeRun,
+    RunTurn,
+}
+
 /// A runtime scenario's guard budgets, split by enforcement class.
 ///
 /// The split is the checked-in format, not a naming convention: allocation
@@ -30,6 +43,7 @@ struct RuntimeBudgets {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RuntimeScenarioBudget {
+    guarded_span: GuardedSpan,
     enforced_allocation: EnforcedAllocationBudget,
     advisory_duration: AdvisoryDurationBudget,
 }
@@ -37,20 +51,14 @@ struct RuntimeScenarioBudget {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EnforcedAllocationBudget {
-    #[serde(default)]
-    total_alloc_bytes_max: Option<f64>,
-    #[serde(default)]
-    run_turn_alloc_bytes_max: Option<f64>,
+    alloc_bytes_max: f64,
     steady_state_turn_alloc_bytes_max: f64,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AdvisoryDurationBudget {
-    #[serde(default)]
-    total_ms_max: Option<f64>,
-    #[serde(default)]
-    run_turn_ms_max: Option<f64>,
+    ms_max: f64,
     phases: BTreeMap<String, f64>,
 }
 
@@ -70,11 +78,14 @@ fn scenario_budget(scenario: RuntimePerfScenario) -> &'static RuntimeScenarioBud
         .unwrap_or_else(|| panic!("missing runtime budget for {}", scenario.name()))
 }
 
+pub(super) fn guarded_span(scenario: RuntimePerfScenario) -> GuardedSpan {
+    scenario_budget(scenario).guarded_span
+}
+
 pub(super) fn allocation_budget_bytes(scenario: RuntimePerfScenario) -> f64 {
     scenario_budget(scenario)
         .enforced_allocation
-        .total_alloc_bytes_max
-        .unwrap_or_else(|| panic!("missing total allocation budget for {}", scenario.name()))
+        .alloc_bytes_max
 }
 
 pub(super) fn steady_state_turn_allocation_budget_bytes(scenario: RuntimePerfScenario) -> f64 {
@@ -84,24 +95,7 @@ pub(super) fn steady_state_turn_allocation_budget_bytes(scenario: RuntimePerfSce
 }
 
 pub(super) fn wall_clock_budget_ms(scenario: RuntimePerfScenario) -> f64 {
-    scenario_budget(scenario)
-        .advisory_duration
-        .total_ms_max
-        .unwrap_or_else(|| panic!("missing total wall-clock budget for {}", scenario.name()))
-}
-
-pub(super) fn process_list_run_allocation_budget_bytes() -> f64 {
-    scenario_budget(RuntimePerfScenario::ProcessListStress)
-        .enforced_allocation
-        .run_turn_alloc_bytes_max
-        .expect("missing process-list run allocation budget")
-}
-
-pub(super) fn process_list_run_wall_clock_budget_ms() -> f64 {
-    scenario_budget(RuntimePerfScenario::ProcessListStress)
-        .advisory_duration
-        .run_turn_ms_max
-        .expect("missing process-list run wall-clock budget")
+    scenario_budget(scenario).advisory_duration.ms_max
 }
 
 pub(super) fn phase_wall_clock_budget_ms(
@@ -129,26 +123,168 @@ pub(super) fn configured_phase_names(
 #[cfg(test)]
 pub(super) fn assert_complete_runtime_budget(scenario: RuntimePerfScenario) {
     let budget = scenario_budget(scenario);
+    assert!(budget.enforced_allocation.alloc_bytes_max > 0.0);
     assert!(budget.enforced_allocation.steady_state_turn_alloc_bytes_max > 0.0);
-    if scenario == RuntimePerfScenario::ProcessListStress {
+    assert!(budget.advisory_duration.ms_max > 0.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_list_stress_is_the_only_run_turn_scenario() {
+        for scenario in RuntimePerfScenario::KNOWN {
+            let expected_span = if scenario == RuntimePerfScenario::ProcessListStress {
+                GuardedSpan::RunTurn
+            } else {
+                GuardedSpan::WholeRun
+            };
+            assert_eq!(
+                guarded_span(scenario),
+                expected_span,
+                "scenario {} has unexpected guarded span {:?}",
+                scenario.name(),
+                guarded_span(scenario),
+            );
+        }
+    }
+
+    #[test]
+    fn missing_guarded_span_fails_to_load() {
+        let json = r#"{
+            "enforced_allocation": {
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {}
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
-            budget
-                .enforced_allocation
-                .run_turn_alloc_bytes_max
-                .is_some()
+            err.to_string().contains("missing field `guarded_span`"),
+            "{err}"
         );
-        assert!(budget.advisory_duration.run_turn_ms_max.is_some());
-        assert!(budget.enforced_allocation.total_alloc_bytes_max.is_none());
-        assert!(budget.advisory_duration.total_ms_max.is_none());
-    } else {
-        assert!(budget.enforced_allocation.total_alloc_bytes_max.is_some());
-        assert!(budget.advisory_duration.total_ms_max.is_some());
+    }
+
+    #[test]
+    fn invalid_guarded_span_variant_fails_to_load() {
+        let json = r#"{
+            "guarded_span": "invalid_span",
+            "enforced_allocation": {
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {}
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
-            budget
-                .enforced_allocation
-                .run_turn_alloc_bytes_max
-                .is_none()
+            err.to_string().contains("unknown variant `invalid_span`"),
+            "{err}"
         );
-        assert!(budget.advisory_duration.run_turn_ms_max.is_none());
+    }
+
+    #[test]
+    fn missing_allocation_ceiling_fails_to_load() {
+        let json = r#"{
+            "guarded_span": "whole_run",
+            "enforced_allocation": {
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {}
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(
+            err.to_string().contains("missing field `alloc_bytes_max`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn missing_steady_state_turn_allocation_ceiling_fails_to_load() {
+        let json = r#"{
+            "guarded_span": "whole_run",
+            "enforced_allocation": {
+                "alloc_bytes_max": 1000.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {}
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing field `steady_state_turn_alloc_bytes_max`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn missing_advisory_duration_ceiling_fails_to_load() {
+        let json = r#"{
+            "guarded_span": "whole_run",
+            "enforced_allocation": {
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "phases": {}
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(err.to_string().contains("missing field `ms_max`"), "{err}");
+    }
+
+    #[test]
+    fn legacy_total_alloc_bytes_key_fails_to_load_under_deny_unknown_fields() {
+        let json = r#"{
+            "guarded_span": "whole_run",
+            "enforced_allocation": {
+                "total_alloc_bytes_max": 1000.0,
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {}
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `total_alloc_bytes_max`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn legacy_run_turn_keys_fail_to_load_under_deny_unknown_fields() {
+        let json = r#"{
+            "guarded_span": "run_turn",
+            "enforced_allocation": {
+                "run_turn_alloc_bytes_max": 1000.0,
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {}
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `run_turn_alloc_bytes_max`"),
+            "{err}"
+        );
     }
 }

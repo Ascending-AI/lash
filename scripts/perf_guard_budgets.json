@@ -9,12 +9,13 @@
   "runtime": {
     "scenarios": {
       "checkpoint_state_hot_paths": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 297865000,
+          "alloc_bytes_max": 297865000,
           "steady_state_turn_alloc_bytes_max": 15294000
         },
         "advisory_duration": {
-          "total_ms_max": 338.198,
+          "ms_max": 338.198,
           "phases": {
             "checkpoint_state.initial_capture": 5.96,
             "checkpoint_state.dirty_binding_update": 0.754,
@@ -27,12 +28,13 @@
         }
       },
       "deep_turn_composition": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 243329000,
+          "alloc_bytes_max": 243329000,
           "steady_state_turn_alloc_bytes_max": 16649000
         },
         "advisory_duration": {
-          "total_ms_max": 1242.768,
+          "ms_max": 1242.768,
           "phases": {
             "before_turn_hooks": 11.904,
             "committed_turn": 13.87,
@@ -65,44 +67,48 @@
         }
       },
       "direct_llm_client": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 553000,
+          "alloc_bytes_max": 553000,
           "steady_state_turn_alloc_bytes_max": 39000
         },
         "advisory_duration": {
-          "total_ms_max": 3.824,
+          "ms_max": 3.824,
           "phases": {
             "direct_llm_client.complete": 1.814
           }
         }
       },
       "embed_rlm": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 51323000,
+          "alloc_bytes_max": 51323000,
           "steady_state_turn_alloc_bytes_max": 4181000
         },
         "advisory_duration": {
-          "total_ms_max": 384.844,
+          "ms_max": 384.844,
           "phases": {}
         }
       },
       "embed_standard": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 17052000,
+          "alloc_bytes_max": 17052000,
           "steady_state_turn_alloc_bytes_max": 1377000
         },
         "advisory_duration": {
-          "total_ms_max": 114.874,
+          "ms_max": 114.874,
           "phases": {}
         }
       },
       "ingress_claim_projection": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 186530000,
+          "alloc_bytes_max": 186530000,
           "steady_state_turn_alloc_bytes_max": 14956000
         },
         "advisory_duration": {
-          "total_ms_max": 622.085,
+          "ms_max": 622.085,
           "phases": {
             "before_turn_hooks": 15.442,
             "committed_turn": 15.294,
@@ -124,12 +130,13 @@
         }
       },
       "live_replay_pressure": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 2381000,
+          "alloc_bytes_max": 2381000,
           "steady_state_turn_alloc_bytes_max": 193000
         },
         "advisory_duration": {
-          "total_ms_max": 35.531,
+          "ms_max": 35.531,
           "phases": {
             "live_replay.append": 28.142,
             "live_replay.current_cursor_parse": 0.822,
@@ -141,12 +148,13 @@
         }
       },
       "openai_compat_stream": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 142362000,
+          "alloc_bytes_max": 142362000,
           "steady_state_turn_alloc_bytes_max": 11223000
         },
         "advisory_duration": {
-          "total_ms_max": 443.28,
+          "ms_max": 443.28,
           "phases": {
             "before_turn_hooks": 4.426,
             "committed_turn": 5.798,
@@ -162,12 +170,13 @@
         }
       },
       "openai_responses_sse_parse": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 69643000,
+          "alloc_bytes_max": 69643000,
           "steady_state_turn_alloc_bytes_max": 4935000
         },
         "advisory_duration": {
-          "total_ms_max": 41.625,
+          "ms_max": 41.625,
           "phases": {
             "openai_responses_sse_parse.parse_payload": 30.16,
             "openai_responses_sse_parse.project_parts": 0.95
@@ -175,12 +184,13 @@
         }
       },
       "process_list_stress": {
+        "guarded_span": "run_turn",
         "enforced_allocation": {
-          "run_turn_alloc_bytes_max": 270544000,
+          "alloc_bytes_max": 270544000,
           "steady_state_turn_alloc_bytes_max": 22542000
         },
         "advisory_duration": {
-          "run_turn_ms_max": 2696.358,
+          "ms_max": 2696.358,
           "phases": {
             "process_list_stress.env_spec_hash": 4.764,
             "process_list_stress.list_all": 774.914,
@@ -194,12 +204,13 @@
         }
       },
       "queued_work_claim_stress": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 13833000,
+          "alloc_bytes_max": 13833000,
           "steady_state_turn_alloc_bytes_max": 611000
         },
         "advisory_duration": {
-          "total_ms_max": 44.025,
+          "ms_max": 44.025,
           "phases": {
             "queued_work.abandon_join_claim": 0.962,
             "queued_work.claim_exclusive_turn_work": 1.184,
@@ -216,12 +227,13 @@
         }
       },
       "rlm": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 121882000,
+          "alloc_bytes_max": 121882000,
           "steady_state_turn_alloc_bytes_max": 9356000
         },
         "advisory_duration": {
-          "total_ms_max": 506.07,
+          "ms_max": 506.07,
           "phases": {
             "before_turn_hooks": 31.992,
             "committed_turn": 10.45,
@@ -241,12 +253,13 @@
         }
       },
       "rlm_async_tool_completion": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 136583000,
+          "alloc_bytes_max": 136583000,
           "steady_state_turn_alloc_bytes_max": 10596000
         },
         "advisory_duration": {
-          "total_ms_max": 368.166,
+          "ms_max": 368.166,
           "phases": {
             "before_turn_hooks": 5.856,
             "committed_turn": 2.928,
@@ -266,12 +279,13 @@
         }
       },
       "rlm_globals": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 171063000,
+          "alloc_bytes_max": 171063000,
           "steady_state_turn_alloc_bytes_max": 12699000
         },
         "advisory_duration": {
-          "total_ms_max": 530.808,
+          "ms_max": 530.808,
           "phases": {
             "before_turn_hooks": 4.88,
             "committed_turn": 8.208,
@@ -291,12 +305,13 @@
         }
       },
       "rlm_large_print": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 645178000,
+          "alloc_bytes_max": 645178000,
           "steady_state_turn_alloc_bytes_max": 54370000
         },
         "advisory_duration": {
-          "total_ms_max": 657.999,
+          "ms_max": 657.999,
           "phases": {
             "before_turn_hooks": 11.63,
             "committed_turn": 9.404,
@@ -317,12 +332,13 @@
         }
       },
       "rlm_large_tool_catalog": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 1215717000,
+          "alloc_bytes_max": 1215717000,
           "steady_state_turn_alloc_bytes_max": 92089000
         },
         "advisory_duration": {
-          "total_ms_max": 3569.37,
+          "ms_max": 3569.37,
           "phases": {
             "before_turn_hooks": 5.572,
             "committed_turn": 12.27,
@@ -342,12 +358,13 @@
         }
       },
       "rlm_llm_query": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 137679000,
+          "alloc_bytes_max": 137679000,
           "steady_state_turn_alloc_bytes_max": 10663000
         },
         "advisory_duration": {
-          "total_ms_max": 415.388,
+          "ms_max": 415.388,
           "phases": {
             "before_turn_hooks": 4.352,
             "committed_turn": 7.538,
@@ -367,12 +384,13 @@
         }
       },
       "rlm_oblique_stack_mix": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 1870027000,
+          "alloc_bytes_max": 1870027000,
           "steady_state_turn_alloc_bytes_max": 159092000
         },
         "advisory_duration": {
-          "total_ms_max": 4176.246,
+          "ms_max": 4176.246,
           "phases": {
             "before_turn_hooks": 14.628,
             "committed_turn": 18.244,
@@ -405,12 +423,13 @@
         }
       },
       "rlm_process_async_tool_completion": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 273946000,
+          "alloc_bytes_max": 273946000,
           "steady_state_turn_alloc_bytes_max": 22080000
         },
         "advisory_duration": {
-          "total_ms_max": 646.499,
+          "ms_max": 646.499,
           "phases": {
             "before_turn_hooks": 3.926,
             "committed_turn": 10.824,
@@ -442,12 +461,13 @@
         }
       },
       "rlm_process_handles": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 368661000,
+          "alloc_bytes_max": 368661000,
           "steady_state_turn_alloc_bytes_max": 30102000
         },
         "advisory_duration": {
-          "total_ms_max": 831.291,
+          "ms_max": 831.291,
           "phases": {
             "before_turn_hooks": 3.97,
             "committed_turn": 8.024,
@@ -479,12 +499,13 @@
         }
       },
       "rlm_streamed_paired_lashlang": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 126817000,
+          "alloc_bytes_max": 126817000,
           "steady_state_turn_alloc_bytes_max": 9784000
         },
         "advisory_duration": {
-          "total_ms_max": 440.478,
+          "ms_max": 440.478,
           "phases": {
             "before_turn_hooks": 6.878,
             "committed_turn": 33.938,
@@ -504,12 +525,13 @@
         }
       },
       "rlm_subagent_spawn": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 500729000,
+          "alloc_bytes_max": 500729000,
           "steady_state_turn_alloc_bytes_max": 41226000
         },
         "advisory_duration": {
-          "total_ms_max": 1534.032,
+          "ms_max": 1534.032,
           "phases": {
             "before_turn_hooks": 4.558,
             "committed_turn": 15.144,
@@ -541,12 +563,13 @@
         }
       },
       "rlm_tool_calls": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 149458000,
+          "alloc_bytes_max": 149458000,
           "steady_state_turn_alloc_bytes_max": 11694000
         },
         "advisory_duration": {
-          "total_ms_max": 346.032,
+          "ms_max": 346.032,
           "phases": {
             "before_turn_hooks": 3.84,
             "committed_turn": 10.002,
@@ -566,12 +589,13 @@
         }
       },
       "rlm_trigger_mail_pipeline": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 234524000,
+          "alloc_bytes_max": 234524000,
           "steady_state_turn_alloc_bytes_max": 18470000
         },
         "advisory_duration": {
-          "total_ms_max": 680.127,
+          "ms_max": 680.127,
           "phases": {
             "before_turn_hooks": 9.57,
             "committed_turn": 11.536,
@@ -599,12 +623,13 @@
         }
       },
       "scoped_effect_controller": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 76832000,
+          "alloc_bytes_max": 76832000,
           "steady_state_turn_alloc_bytes_max": 5621000
         },
         "advisory_duration": {
-          "total_ms_max": 600.375,
+          "ms_max": 600.375,
           "phases": {
             "before_turn_hooks": 10.836,
             "committed_turn": 8.874,
@@ -620,12 +645,13 @@
         }
       },
       "sqlite_store_reopen": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 147720000,
+          "alloc_bytes_max": 147720000,
           "steady_state_turn_alloc_bytes_max": 6153000
         },
         "advisory_duration": {
-          "total_ms_max": 3538.362,
+          "ms_max": 3538.362,
           "phases": {
             "before_turn_hooks": 5.3,
             "committed_turn": 3.046,
@@ -642,12 +668,13 @@
         }
       },
       "standard": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 76696000,
+          "alloc_bytes_max": 76696000,
           "steady_state_turn_alloc_bytes_max": 5610000
         },
         "advisory_duration": {
-          "total_ms_max": 632.367,
+          "ms_max": 632.367,
           "phases": {
             "before_turn_hooks": 11.738,
             "committed_turn": 40.386,
@@ -663,12 +690,13 @@
         }
       },
       "standard_async_tool_completion": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 78761000,
+          "alloc_bytes_max": 78761000,
           "steady_state_turn_alloc_bytes_max": 5690000
         },
         "advisory_duration": {
-          "total_ms_max": 341.883,
+          "ms_max": 341.883,
           "phases": {
             "before_turn_hooks": 4.378,
             "committed_turn": 14.536,
@@ -684,12 +712,13 @@
         }
       },
       "standard_shell_output": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 79684000,
+          "alloc_bytes_max": 79684000,
           "steady_state_turn_alloc_bytes_max": 5743000
         },
         "advisory_duration": {
-          "total_ms_max": 405.115,
+          "ms_max": 405.115,
           "phases": {
             "before_turn_hooks": 8.584,
             "committed_turn": 3.304,
@@ -705,12 +734,13 @@
         }
       },
       "standard_tool_calls": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 81332000,
+          "alloc_bytes_max": 81332000,
           "steady_state_turn_alloc_bytes_max": 5689000
         },
         "advisory_duration": {
-          "total_ms_max": 240.849,
+          "ms_max": 240.849,
           "phases": {
             "before_turn_hooks": 3.448,
             "committed_turn": 3.86,
@@ -726,12 +756,13 @@
         }
       },
       "store_hardening_hot_paths": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 112802000,
+          "alloc_bytes_max": 112802000,
           "steady_state_turn_alloc_bytes_max": 9397000
         },
         "advisory_duration": {
-          "total_ms_max": 10918.108,
+          "ms_max": 10918.108,
           "phases": {
             "store_hardening.identity.process_registration": 23.56,
             "store_hardening.identity.trigger_occurrence": 1.492,
@@ -766,12 +797,13 @@
         }
       },
       "store_reopen": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 133502000,
+          "alloc_bytes_max": 133502000,
           "steady_state_turn_alloc_bytes_max": 5959000
         },
         "advisory_duration": {
-          "total_ms_max": 880.104,
+          "ms_max": 880.104,
           "phases": {
             "before_turn_hooks": 4.268,
             "committed_turn": 13.01,
@@ -790,12 +822,13 @@
         }
       },
       "tool_discovery_search": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 631530000,
+          "alloc_bytes_max": 631530000,
           "steady_state_turn_alloc_bytes_max": 46459000
         },
         "advisory_duration": {
-          "total_ms_max": 3621.198,
+          "ms_max": 3621.198,
           "phases": {
             "before_turn_hooks": 6.136,
             "committed_turn": 8.3,
@@ -811,12 +844,13 @@
         }
       },
       "trace_jsonl_extended": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 125258000,
+          "alloc_bytes_max": 125258000,
           "steady_state_turn_alloc_bytes_max": 9569000
         },
         "advisory_duration": {
-          "total_ms_max": 551.116,
+          "ms_max": 551.116,
           "phases": {
             "before_turn_hooks": 5.256,
             "committed_turn": 6.534,
@@ -837,12 +871,13 @@
         }
       },
       "trace_jsonl_standard": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 80074000,
+          "alloc_bytes_max": 80074000,
           "steady_state_turn_alloc_bytes_max": 5858000
         },
         "advisory_duration": {
-          "total_ms_max": 594.217,
+          "ms_max": 594.217,
           "phases": {
             "before_turn_hooks": 7.518,
             "committed_turn": 23.344,
@@ -859,12 +894,13 @@
         }
       },
       "turn_cancel_round_trip": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 71241000,
+          "alloc_bytes_max": 71241000,
           "steady_state_turn_alloc_bytes_max": 5155000
         },
         "advisory_duration": {
-          "total_ms_max": 450.278,
+          "ms_max": 450.278,
           "phases": {
             "before_turn_hooks": 4.29,
             "committed_turn": 12.76,
@@ -881,12 +917,13 @@
         }
       },
       "turn_checkpoint": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 15224000,
+          "alloc_bytes_max": 15224000,
           "steady_state_turn_alloc_bytes_max": 1256000
         },
         "advisory_duration": {
-          "total_ms_max": 84.378,
+          "ms_max": 84.378,
           "phases": {
             "rlm_exec_checkpoint": 34.432,
             "standard_llm_checkpoint": 22.902,
@@ -895,12 +932,13 @@
         }
       },
       "turn_input_ingress_interrupt": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 101560000,
+          "alloc_bytes_max": 101560000,
           "steady_state_turn_alloc_bytes_max": 8858000
         },
         "advisory_duration": {
-          "total_ms_max": 42.387,
+          "ms_max": 42.387,
           "phases": {
             "turn_input_ingress.abandon_active_claim": 0.932,
             "turn_input_ingress.abandon_next_claim": 5.166,
@@ -918,12 +956,13 @@
         }
       },
       "turn_start_gate": {
+        "guarded_span": "whole_run",
         "enforced_allocation": {
-          "total_alloc_bytes_max": 76832000,
+          "alloc_bytes_max": 76832000,
           "steady_state_turn_alloc_bytes_max": 5622000
         },
         "advisory_duration": {
-          "total_ms_max": 585.285,
+          "ms_max": 585.285,
           "phases": {
             "before_turn_hooks": 12.158,
             "committed_turn": 21.296,
