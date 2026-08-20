@@ -957,7 +957,7 @@ finish "done through route"
             AgentServiceDurability::Local,
             // The scripted provider answers with a `<lashlang>` cell, so this
             // fixture is Lashlang by construction rather than by omission.
-            Some(lash::rlm::RlmDialect::Lashlang),
+            lash::rlm::RlmDialect::Lashlang,
             None,
         );
         let chat = state

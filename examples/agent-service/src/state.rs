@@ -21,15 +21,17 @@ pub(crate) struct AppStateData {
     default_model_variant: Option<String>,
     #[cfg_attr(not(feature = "restate"), allow(dead_code))]
     durability: AgentServiceDurability,
-    /// The dialect the operator configured, if they configured one at all.
+    /// The dialect this service runs chats in.
     ///
-    /// `None` is "the operator said nothing", and it is a different instruction
-    /// from naming Lashlang: an unconfigured service states nothing about a
-    /// chat's dialect and runs whatever each chat recorded. Read once at
-    /// construction rather than from the environment on every session open, so
-    /// the value is injectable and a chat's dialect cannot change under it
-    /// mid-process.
-    rlm_dialect: Option<lash::rlm::RlmDialect>,
+    /// There is no "said nothing" state: an unset `LASH_RUNBOOK_DIALECT` is the
+    /// Lashlang default, and the service states it on every session open like
+    /// any named id. A service that stated nothing would serve each chat in
+    /// whatever it happened to record while the operator read one dialect off
+    /// the environment — the mislabeled evidence the parity matrix exists to
+    /// catch. Read once at construction rather than from the environment on
+    /// every session open, so the value is injectable and a chat's dialect
+    /// cannot change under it mid-process.
+    rlm_dialect: lash::rlm::RlmDialect,
     #[cfg(feature = "restate")]
     restate_ingress_url: Option<String>,
     #[cfg(feature = "restate")]
@@ -49,7 +51,7 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
-        rlm_dialect: Option<lash::rlm::RlmDialect>,
+        rlm_dialect: lash::rlm::RlmDialect,
         restate_ingress_url: Option<String>,
     ) -> Self {
         Self {
@@ -73,7 +75,7 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
-        rlm_dialect: Option<lash::rlm::RlmDialect>,
+        rlm_dialect: lash::rlm::RlmDialect,
     ) -> Self {
         Self {
             core,
@@ -123,28 +125,26 @@ impl AppStateData {
         chat_id: &str,
         model: ModelSpec,
     ) -> AppResult<LashSession> {
-        let mut builder = self
-            .core
-            .session(chat_id)
-            .session_spec(lash::SessionSpec::inherit().model(model))
-            .plugin::<DemoPlugin>(DemoPluginConfig {
-                db: Arc::clone(&self.db),
-            });
         // A durable fact is stated, not requested (ADR 0066). The statement is
         // a guarded set-if-unset write: it lands on a chat that recorded
         // nothing, is a no-op on a chat that recorded the same dialect, and
         // refuses on one that recorded another. The refusal reaches the
         // operator; there is no reopen path that quietly runs the chat in its
-        // old dialect. An unconfigured service states nothing at all.
-        if let Some(configured) = self.rlm_dialect {
-            builder = builder.plugin_option(
+        // old dialect. Every open states a dialect, the default included.
+        let builder = self
+            .core
+            .session(chat_id)
+            .session_spec(lash::SessionSpec::inherit().model(model))
+            .plugin::<DemoPlugin>(DemoPluginConfig {
+                db: Arc::clone(&self.db),
+            })
+            .plugin_option(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras {
-                    dialect: Some(configured),
+                    dialect: Some(self.rlm_dialect),
                     ..lash::rlm::RlmCreateExtras::default()
                 },
             )?;
-        }
         Ok(builder.open().await?)
     }
 
@@ -292,13 +292,16 @@ pub(crate) mod anyhow_like {
 
 /// The dialect new chat sessions are created with, from `LASH_RUNBOOK_DIALECT`.
 ///
-/// An unset variable is `None` — the operator stated nothing — rather than the
-/// Lashlang default, so an unconfigured service never asserts a dialect against
-/// a chat that recorded another one. Read once at startup so the value is
-/// injected into the state rather than consulted on every session open.
-pub(crate) fn rlm_dialect_from_env() -> Result<Option<lash::rlm::RlmDialect>, String> {
-    // Unset stays "the operator stated nothing" on this host.
-    lash::rlm::RlmDialect::from_env()
+/// An unset variable is the Lashlang default, stated on every session open like
+/// any named id — the same answer every other shipped host gives, so one
+/// environment produces one dialect everywhere. A chat that recorded another
+/// dialect therefore fails its open loudly instead of being served in its
+/// recorded dialect under a service that believes it is running Lashlang. Read
+/// once at startup so the value is injected into the state rather than
+/// consulted on every session open.
+pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
+    // The host's whole unset policy, in one line.
+    Ok(lash::rlm::RlmDialect::from_env()?.unwrap_or_default())
 }
 
 /// The dialect a turn actually resolved, for prompt copy that has to be written
@@ -316,4 +319,170 @@ pub(crate) fn rlm_dialect_from_turn_options(
         .ok()
         .and_then(|extras| extras.dialect)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod dialect_pin_tests {
+    use super::*;
+
+    fn mock_model_spec() -> ModelSpec {
+        ModelSpec::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("model spec")
+    }
+
+    async fn test_core(data_dir: &std::path::Path) -> LashCore {
+        let provider = lash::testing::TestProvider::builder()
+            .kind("agent-service-dialect-pin")
+            .build()
+            .into_handle();
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                lash_protocol_rlm::ExecutionBound::secs(30),
+                lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
+            ),
+            Arc::new(
+                lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
+                    .await
+                    .expect("artifact store"),
+            ),
+        );
+        LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .provider(provider)
+            .model(mock_model_spec())
+            .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                data_dir.join("lash-sessions"),
+            )))
+            .effect_host(Arc::new(
+                lash::durability::InlineEffectHost::default()
+                    .allow_process_lifetime_completion_keys(),
+            ))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .process_env_store(Arc::new(
+                lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
+                    .await
+                    .expect("process env store"),
+            ))
+            .trigger_store(Arc::new(
+                lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
+                    .await
+                    .expect("trigger store"),
+            ))
+            .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
+                data_dir.join("attachments"),
+            )))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "agent-service-dialect-pin",
+                "test",
+            ))
+            .expect("core")
+    }
+
+    fn state_with_dialect(
+        core: &LashCore,
+        db: AppDb,
+        rlm_dialect: lash::rlm::RlmDialect,
+    ) -> AppStateData {
+        #[cfg(feature = "restate")]
+        {
+            AppStateData::from_shared_db(
+                core.clone(),
+                core.turn_work_driver(),
+                Arc::new(Mutex::new(db)),
+                "mock-model".to_string(),
+                None,
+                AgentServiceDurability::Local,
+                rlm_dialect,
+                None,
+            )
+        }
+        #[cfg(not(feature = "restate"))]
+        {
+            AppStateData::new(
+                core.clone(),
+                core.turn_work_driver(),
+                db,
+                "mock-model".to_string(),
+                None,
+                AgentServiceDurability::Local,
+                rlm_dialect,
+            )
+        }
+    }
+
+    /// A chat that recorded one dialect refuses to reopen under another, and
+    /// the refusal reaches the caller instead of a quiet fallback.
+    ///
+    /// The second service here is the *unconfigured* one: `LASH_RUNBOOK_DIALECT`
+    /// unset now means the Lashlang default, stated on every open like a named
+    /// id. So a store carried over from a TypeScript run fails the open loudly
+    /// rather than being served in its recorded dialect under a service that
+    /// believes it is running Lashlang.
+    #[tokio::test]
+    async fn a_recorded_chat_refuses_to_reopen_under_another_dialect() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path();
+        let core = test_core(data_dir).await;
+
+        let typescript = state_with_dialect(
+            &core,
+            AppDb::open(&data_dir.join("app-typescript.db")).expect("app db"),
+            lash::rlm::RlmDialect::Typescript,
+        );
+        let session = typescript
+            .open_session("carried-over-chat", mock_model_spec())
+            .await
+            .expect("the first open pins the chat to TypeScript");
+        session.close().await.expect("close the pinned session");
+
+        let unconfigured = state_with_dialect(
+            &core,
+            AppDb::open(&data_dir.join("app-default.db")).expect("app db"),
+            lash::rlm::RlmDialect::default(),
+        );
+        let Err(error) = unconfigured
+            .open_session("carried-over-chat", mock_model_spec())
+            .await
+        else {
+            panic!("a recorded dialect cannot be reopened as another one");
+        };
+        assert!(
+            error.message.contains(
+                "RLM session dialect is durably pinned to `typescript` and cannot be set to `lashlang`"
+            ),
+            "the refusal must name both dialects: {error}"
+        );
+    }
+
+    /// A chat the service opens under its own dialect keeps opening.
+    ///
+    /// The guarded write is a no-op on agreement, so the default-stating
+    /// service reopens the chats it created without a second thought — the
+    /// refusal above is a disagreement, not a reopen tax.
+    #[tokio::test]
+    async fn a_chat_reopens_under_the_dialect_it_recorded() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path();
+        let core = test_core(data_dir).await;
+
+        let service = state_with_dialect(
+            &core,
+            AppDb::open(&data_dir.join("app.db")).expect("app db"),
+            lash::rlm::RlmDialect::default(),
+        );
+        let session = service
+            .open_session("own-chat", mock_model_spec())
+            .await
+            .expect("first open");
+        session.close().await.expect("close");
+
+        let reopened = service
+            .open_session("own-chat", mock_model_spec())
+            .await
+            .expect("a chat reopens under the dialect it recorded");
+        reopened.close().await.expect("close the reopened session");
+    }
 }
