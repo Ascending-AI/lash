@@ -273,6 +273,12 @@ fn instance_method_inventory_matches_the_lowerer() {
             "`{candidate}` is not documented, so it must not be accepted"
         );
     }
+    for method in lash_typescript::accepted_instance_methods() {
+        assert!(
+            lash_typescript::accepts_instance_method(method),
+            "`{method}` is accepted by the inventory, so `accepts_instance_method` must return true"
+        );
+    }
 }
 
 #[test]
