@@ -2126,12 +2126,12 @@ impl QueuedWorkStore for Store {
                                     owner.incarnation_id,
                                     owner_liveness_json,
                                     lease.lease_token,
-                                    sql_session_lease_generation(generation)?,
+                                    sql_session_lease_generation(lease.session_lease_generation)?,
                                     sql_fencing_token,
                                 ],
                             )
                             .map_err(sqlite_error)?;
-                        if changed != 1 {
+                        if changed == 0 {
                             return Ok(SelectedQueuedWorkClaimOutcome::new(
                                 None,
                                 already_satisfied_batch_ids,
