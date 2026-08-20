@@ -117,11 +117,12 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         ),
         // The checkpoint probe is a free function below the store impl. Keep
         // its SQL decision on the PostgreSQL clock even though it has no
-        // injected clock parameter.
+        // injected clock parameter. The region runs through the empty-scan
+        // refusal helper so that clock-deciding neighbour is fenced too.
         (
             RUNTIME_PERSISTENCE_SOURCE,
             "async fn checkpoint_work_pending_postgres(",
-            "async fn postgres_refusal_for_empty_scan(",
+            "async fn claim_ready_queued_work_postgres_tx(",
         ),
         // The orphaned-input repair runs inside the caller's transaction and
         // must remain inside the same server-clock contract as its claim path.
