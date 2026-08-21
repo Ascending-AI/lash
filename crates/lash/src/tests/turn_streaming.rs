@@ -335,7 +335,10 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
         lash_core::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }
 
-    async fn delete_session(&self, session_id: &str) -> std::result::Result<(), String> {
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
 }

@@ -576,8 +576,13 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         Ok(false)
     }
 
-    async fn delete_session(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        Err(lash_core::MaintenanceFailure::failed_before_any_work(
+            unsupported_maintenance("delete_session"),
+        ))
     }
 }
 

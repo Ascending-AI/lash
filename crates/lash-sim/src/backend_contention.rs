@@ -166,7 +166,10 @@ async fn run_factory_contention_scenario(
     factory: Arc<dyn SessionStoreFactory>,
 ) -> Result<BackendContentionScenario, String> {
     let session_id = format!("lash-sim-backend-contention-{backend}");
-    factory.delete_session(&session_id).await?;
+    factory
+        .delete_session(&session_id)
+        .await
+        .map_err(|error| error.to_string())?;
     let store = create_store(Arc::clone(&factory), &session_id).await?;
     let reopened = open_store(Arc::clone(&factory), &session_id).await?;
     let mut operations = Vec::new();

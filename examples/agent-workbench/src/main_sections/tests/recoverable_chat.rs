@@ -210,7 +210,7 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
             self.store_factory
                 .delete_session(&session_id)
                 .await
-                .map_err(lash::plugins::PluginError::Session)?;
+                .map_err(|error| lash::plugins::PluginError::Session(error.to_string()))?;
         }
         self.inner.list_subscriptions(filter).await
     }
@@ -378,7 +378,7 @@ impl lash::runtime::QueuedWorkRunHandle for RetiringQueuedWorkRunHandle {
                 .await
                 .map_err(|error| {
                     lash::runtime::QueuedWorkRunError::terminal(
-                        lash::plugins::PluginError::Session(error),
+                        lash::plugins::PluginError::Session(error.to_string()),
                     )
                 })?;
         }

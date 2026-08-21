@@ -25,6 +25,8 @@ pub struct InMemorySessionStoreFactory {
     /// the factory, so every store it creates shares this map and the writer's
     /// intent insert meets the sweeper's condemn CAS in one place.
     pub(super) attachment_condemnations: super::SharedAttachmentCondemnations,
+    #[cfg(any(test, feature = "testing"))]
+    fail_next_session_blob_delete: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl InMemorySessionStoreFactory {
@@ -47,7 +49,24 @@ impl InMemorySessionStoreFactory {
             tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
             deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
             attachment_condemnations: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(any(test, feature = "testing"))]
+            fail_next_session_blob_delete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Fail the next session-owner blob delete before any state is committed.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn fail_next_session_blob_delete_for_testing(&self) {
+        self.fail_next_session_blob_delete
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Observe the factory-global component map without invoking maintenance.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn checkpoint_blob_exists_for_testing(&self, blob_ref: &crate::BlobRef) -> bool {
+        self.checkpoint_component_blobs
+            .lock_recover()
+            .contains_key(blob_ref)
     }
 }
 
@@ -165,24 +184,80 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(self.deleted_session_ids.lock_recover().contains(session_id))
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         let _transaction = self.write_transaction.lock_recover();
         let store = self.stores.lock_recover().get(session_id).cloned();
         if let Some(store) = store {
+            let candidates = self
+                .checkpoint_blob_roots
+                .lock_recover()
+                .get(session_id)
+                .cloned()
+                .unwrap_or_default();
+            let mut surviving_refs = std::collections::HashSet::new();
+            for (owner, refs) in self.checkpoint_blob_roots.lock_recover().iter() {
+                if owner != session_id {
+                    surviving_refs.extend(refs.iter().cloned());
+                }
+            }
+            for (_, checkpoint, _) in self.node_anchors.lock_recover().values() {
+                surviving_refs.extend(
+                    checkpoint
+                        .components
+                        .values()
+                        .filter_map(|component| component.blob_ref().cloned()),
+                );
+            }
+            let retained_blob_count = candidates
+                .iter()
+                .filter(|blob_ref| surviving_refs.contains(*blob_ref))
+                .count();
+            let report = crate::store::SessionBlobReclaimReport {
+                enumerated_blob_count: candidates.len(),
+                retained_blob_count,
+                deleted_blob_count: candidates.len().saturating_sub(retained_blob_count),
+            };
+            #[cfg(any(test, feature = "testing"))]
+            if report.deleted_blob_count > 0
+                && self
+                    .fail_next_session_blob_delete
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                let mut partial = report;
+                partial.deleted_blob_count = 0;
+                return Err(crate::store::MaintenanceFailure::failed(
+                    crate::StoreError::Backend(
+                        "injected session-owner blob delete failure".to_string(),
+                    ),
+                    partial,
+                ));
+            }
+            store
+                .reclaim_history_for_delete(session_id)
+                .map_err(|error| {
+                    let mut partial = report.clone();
+                    partial.deleted_blob_count = 0;
+                    crate::store::MaintenanceFailure::failed(error, partial)
+                })?;
             self.deleted_session_ids
                 .lock_recover()
                 .insert(session_id.to_string());
-            store
-                .reclaim_history_for_delete(session_id)
-                .map_err(|error| error.to_string())?;
-            // The session's checkpoint edges die with it: the blobs they point
-            // at become unreachable unless another session or anchor holds
-            // them, which is exactly what `gc_unreachable` then observes.
+            // Sever exactly this session's component edges, then delete only
+            // candidates with no surviving session or anchor edge.
             self.checkpoint_blob_roots.lock_recover().remove(session_id);
+            self.checkpoint_component_blobs
+                .lock_recover()
+                .retain(|blob_ref, _| {
+                    !candidates.contains(blob_ref) || surviving_refs.contains(blob_ref)
+                });
             self.stores.lock_recover().remove(session_id);
             self.fork_plans.lock_recover().remove(session_id);
+            return Ok(report);
         }
-        Ok(())
+        Ok(crate::store::SessionBlobReclaimReport::default())
     }
 
     async fn pin(&self, node_id: &str) -> Result<crate::ForkPoint, crate::StoreError> {

@@ -14,6 +14,7 @@ const SHAPE_CHANGED_TABLES: &[(&str, &str)] = &[
     ("runtime_effect_replay", "lash_runtime_effect_replay"),
     ("runtime_effect_group", "lash_runtime_effect_group"),
     ("trigger_occurrences", "lash_trigger_occurrences"),
+    ("checkpoint_blob_refs", "lash_checkpoint_blob_refs"),
 ];
 
 fn consume_keyword<'a>(source: &'a str, keyword: &str) -> Option<&'a str> {
@@ -128,12 +129,12 @@ fn sqlite_and_postgres_table_sets_are_congruent() {
 
     assert_eq!(
         sqlite.len(),
-        40,
+        41,
         "SQLite schema table count changed; update the explicit cross-backend mapping"
     );
     assert_eq!(
         postgres_raw.len(),
-        41,
+        42,
         "Postgres schema table count changed; update the explicit cross-backend mapping"
     );
     assert!(

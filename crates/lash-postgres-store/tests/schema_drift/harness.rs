@@ -112,7 +112,11 @@ impl ScratchSchema {
 /// carries them is refused as a mismatch rather than migrated. Dropping the
 /// columns takes the partial unique guard with them, and dropping the group
 /// table takes its two indexes.
-pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_runtime_effect_group;
+pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs;
+     DROP INDEX idx_lash_sessions_checkpoint_ref;
+     DROP INDEX idx_lash_node_anchors_checkpoint_ref;
+     DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;
+     DROP TABLE lash_runtime_effect_group;
      ALTER TABLE lash_runtime_effect_replay
          DROP COLUMN group_key,
          DROP COLUMN settlement_seq;
@@ -125,15 +129,17 @@ pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_runtime_effect_group
 /// 55 generation. The shape checker ignores non-unique indexes, so a 54 source
 /// and this build differ in the version stamp alone — which is exactly what the
 /// 54 -> 55 migration declares as its source shape.
-pub const REWIND_PAST_55_ARTIFACTS: &str =
-    "DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;
+pub const REWIND_PAST_55_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs;
+     DROP INDEX idx_lash_sessions_checkpoint_ref;
+     DROP INDEX idx_lash_node_anchors_checkpoint_ref;
+     DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;
      DROP INDEX idx_lash_trigger_occurrences_reclaimable;
      ALTER TABLE lash_trigger_occurrences DROP COLUMN reclaimable_at_ms;";
 
-/// Rewinds a fresh schema to component 55: existing rows have no eligibility
-/// arm, and the maintenance index cannot exist without it.
-pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP INDEX idx_lash_trigger_occurrences_reclaimable;
-     ALTER TABLE lash_trigger_occurrences DROP COLUMN reclaimable_at_ms;";
+/// Rewinds a freshly provisioned schema to the published component-56 shape.
+pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs;
+     DROP INDEX idx_lash_sessions_checkpoint_ref;
+     DROP INDEX idx_lash_node_anchors_checkpoint_ref;";
 
 /// Reads `server_version_num`, for the one assertion that needs a PostgreSQL
 /// feature not present on every major in the support matrix.

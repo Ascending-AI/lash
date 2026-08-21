@@ -1932,7 +1932,7 @@ impl BackendRunner {
                 self.factory()
                     .delete_session(&self.session_id)
                     .await
-                    .map_err(StoreError::Backend)?;
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
                 Ok(None)
             }
             StoreOperation::AdmitOnHandle { handle_alias } => {

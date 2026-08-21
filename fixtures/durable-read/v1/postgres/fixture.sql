@@ -104,6 +104,16 @@ CREATE TABLE lash_durable_read_fixture.lash_blobs (
 
 
 --
+-- Name: lash_checkpoint_blob_refs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_checkpoint_blob_refs (
+    checkpoint_ref text NOT NULL,
+    blob_ref text NOT NULL
+);
+
+
+--
 -- Name: lash_deleted_sessions; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -766,10 +776,19 @@ INSERT INTO lash_durable_read_fixture.lash_await_event_waits VALUES ('await-even
 --
 
 INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('ae62c3c799a20bffc7a658902d16647546ba09abc77ed54ea76c38b8c909249f', '\x82ae736368656d615f76657273696f6e02aa7475726e5f737461746583aa7475726e5f696e64657800ab746f6b656e5f757361676585ac696e7075745f746f6b656e7300ad6f75747075745f746f6b656e7300b763616368655f726561645f696e7075745f746f6b656e7300b863616368655f77726974655f696e7075745f746f6b656e7300b7726561736f6e696e675f6f75747075745f746f6b656e7300b570726f746f636f6c5f7475726e5f6f7074696f6e7382ae736368656d615f76657273696f6e01a77061796c6f616480');
-INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('b9187311a43c21099d0489147774b854c2eb60b83b11a5321c77de172fb404c6', '\x464947383837');
-INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('a2da855fd72740bde2949b614e5b12dc7fae0b14191c7d6832fbce213141b942', '\x81a7706c7567696e7381bc64757261626c652d726561642d736e617073686f742d706c7567696e82a46d65746184a9706c7567696e5f6964bc64757261626c652d726561642d736e617073686f742d706c7567696eae706c7567696e5f76657273696f6ea5382e382e37a87265766973696f6ecd0377a5737461746582a766697874757265ac706c7567696e2d7374617465a576616c7565cd0377a96172746966616374739182a46e616d65b964757261626c652d726561642d61727469666163742e62696ea46461746193080807');
 INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('121392d01ce7a57a0cc9867127576041609d889a7a4c21ec18dbfd2572f9f8ca', '\x82aa67656e65726174696f6ecd0377a5746f6f6c7380');
 INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68', '\x84ae736368656d615f76657273696f6e02aa7475726e5f737461746583aa7475726e5f696e64657807ab746f6b656e5f757361676585ac696e7075745f746f6b656e730dad6f75747075745f746f6b656e7308b763616368655f726561645f696e7075745f746f6b656e7305b863616368655f77726974655f696e7075745f746f6b656e7303b7726561736f6e696e675f6f75747075745f746f6b656e7302b570726f746f636f6c5f7475726e5f6f7074696f6e7382ae736368656d615f76657273696f6e01a77061796c6f616480aa636f6d706f6e656e747383af657865637574696f6e5f737461746582a8626c6f625f726566d94062393138373331316134336332313039396430343839313437373734623835346332656236306238336231316135333231633737646531373266623430346336b0656e636f64696e675f76657273696f6e02af706c7567696e5f736e617073686f7482a8626c6f625f726566d94061326461383535666437323734306264653239343962363134653562313264633766616530623134313931633764363833326662636532313331343162393432b0656e636f64696e675f76657273696f6e02aa746f6f6c5f737461746582a8626c6f625f726566d94031323133393264303163653761353761306363393836373132373537363034313630396438383961376134633231656331386462666432353732663966386361b0656e636f64696e675f76657273696f6e02b8706c7567696e5f736e617073686f745f7265766973696f6e04');
+INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('a2da855fd72740bde2949b614e5b12dc7fae0b14191c7d6832fbce213141b942', '\x81a7706c7567696e7381bc64757261626c652d726561642d736e617073686f742d706c7567696e82a46d65746184a9706c7567696e5f6964bc64757261626c652d726561642d736e617073686f742d706c7567696eae706c7567696e5f76657273696f6ea5382e382e37a87265766973696f6ecd0377a5737461746582a766697874757265ac706c7567696e2d7374617465a576616c7565cd0377a96172746966616374739182a46e616d65b964757261626c652d726561642d61727469666163742e62696ea46461746193080807');
+INSERT INTO lash_durable_read_fixture.lash_blobs VALUES ('b9187311a43c21099d0489147774b854c2eb60b83b11a5321c77de172fb404c6', '\x464947383837');
+
+
+--
+-- Data for Name: lash_checkpoint_blob_refs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_checkpoint_blob_refs VALUES ('5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68', 'b9187311a43c21099d0489147774b854c2eb60b83b11a5321c77de172fb404c6');
+INSERT INTO lash_durable_read_fixture.lash_checkpoint_blob_refs VALUES ('5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68', 'a2da855fd72740bde2949b614e5b12dc7fae0b14191c7d6832fbce213141b942');
+INSERT INTO lash_durable_read_fixture.lash_checkpoint_blob_refs VALUES ('5cae1f5e80c69846241f7314bdfe9db9b5ff4acd1778feb8e48715ed5c56fe68', '121392d01ce7a57a0cc9867127576041609d889a7a4c21ec18dbfd2572f9f8ca');
 
 
 --
@@ -920,7 +939,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 56);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 57);
 
 
 --
@@ -1091,6 +1110,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_await_event_waits
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_blobs
     ADD CONSTRAINT lash_blobs_pkey PRIMARY KEY (hash);
+
+
+--
+-- Name: lash_checkpoint_blob_refs lash_checkpoint_blob_refs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
+    ADD CONSTRAINT lash_checkpoint_blob_refs_pkey PRIMARY KEY (checkpoint_ref, blob_ref);
 
 
 --
@@ -1459,6 +1486,13 @@ CREATE INDEX idx_lash_await_event_waits_session ON lash_durable_read_fixture.las
 
 
 --
+-- Name: idx_lash_checkpoint_blob_refs_blob_ref; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_checkpoint_blob_refs_blob_ref ON lash_durable_read_fixture.lash_checkpoint_blob_refs USING btree (blob_ref, checkpoint_ref);
+
+
+--
 -- Name: idx_lash_graph_nodes_parent; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1470,6 +1504,13 @@ CREATE INDEX idx_lash_graph_nodes_parent ON lash_durable_read_fixture.lash_graph
 --
 
 CREATE INDEX idx_lash_graph_nodes_seq ON lash_durable_read_fixture.lash_graph_nodes USING btree (session_id, seq);
+
+
+--
+-- Name: idx_lash_node_anchors_checkpoint_ref; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_node_anchors_checkpoint_ref ON lash_durable_read_fixture.lash_node_anchors USING btree (checkpoint_ref);
 
 
 --
@@ -1627,6 +1668,13 @@ CREATE INDEX idx_lash_runtime_effect_replay_session ON lash_durable_read_fixture
 
 
 --
+-- Name: idx_lash_sessions_checkpoint_ref; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_sessions_checkpoint_ref ON lash_durable_read_fixture.lash_sessions USING btree (checkpoint_ref);
+
+
+--
 -- Name: idx_lash_sessions_leaf; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1701,6 +1749,22 @@ CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_
 --
 
 CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_group_seq ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (group_key, settlement_seq) WHERE ((group_key IS NOT NULL) AND (settlement_seq IS NOT NULL));
+
+
+--
+-- Name: lash_checkpoint_blob_refs lash_checkpoint_blob_refs_blob_ref_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
+    ADD CONSTRAINT lash_checkpoint_blob_refs_blob_ref_fkey FOREIGN KEY (blob_ref) REFERENCES lash_durable_read_fixture.lash_blobs(hash);
+
+
+--
+-- Name: lash_checkpoint_blob_refs lash_checkpoint_blob_refs_checkpoint_ref_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
+    ADD CONSTRAINT lash_checkpoint_blob_refs_checkpoint_ref_fkey FOREIGN KEY (checkpoint_ref) REFERENCES lash_durable_read_fixture.lash_blobs(hash) ON DELETE CASCADE;
 
 
 --

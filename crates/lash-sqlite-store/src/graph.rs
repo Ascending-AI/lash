@@ -140,16 +140,6 @@ impl Store {
             .map_err(|error| stored_data_corrupt("SessionGraph", error))
     }
 
-    pub(crate) async fn maybe_auto_gc(&self) {
-        let Some(interval) = self.options.gc_policy.auto_run_every_commits else {
-            return;
-        };
-        let commits = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed) + 1;
-        if interval != 0 && commits.is_multiple_of(interval) {
-            let _ = self.gc_unreachable().await;
-        }
-    }
-
     pub async fn load_session_graph(&self) -> Result<lash_core::SessionGraph, StoreError> {
         let session_id = self.selected_session_id()?;
         self.conn
@@ -273,6 +263,22 @@ impl Store {
             // codec so an older binary cannot turn incompatibility into loss.
             stack.extend(retained_artifact_refs(&checkpoint));
         }
+        // Match PostgreSQL's strict ordering even though SQLite's component
+        // side is not FK-enforced: every dead root loses its complete outgoing
+        // edge set before any hash-ordered blob delete can reach a component.
+        tx.execute(
+            "DELETE FROM checkpoint_blob_refs AS edge
+             WHERE NOT EXISTS (
+                       SELECT 1 FROM session_head AS head
+                       WHERE head.checkpoint_ref = edge.checkpoint_ref
+                   )
+               AND NOT EXISTS (
+                       SELECT 1 FROM node_anchors AS anchor
+                       WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                   )",
+            [],
+        )
+        .map_err(sqlite_error)?;
         let all_hashes = {
             let mut stmt = tx
                 .prepare("SELECT hash FROM blobs ORDER BY hash ASC")

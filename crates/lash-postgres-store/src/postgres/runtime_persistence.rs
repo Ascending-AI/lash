@@ -12,6 +12,28 @@ pub(crate) async fn lock_session_history_mutation_tx(
     Ok(())
 }
 
+pub(crate) async fn lock_session_history_mutations_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_ids: &[String],
+) -> Result<(), StoreError> {
+    if session_ids.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
+         FROM (
+             SELECT DISTINCT session_id
+             FROM unnest($1::TEXT[]) AS target(session_id)
+             ORDER BY session_id
+         ) AS ordered",
+    )
+    .bind(session_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
 pub(crate) async fn ensure_session_not_deleted_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
@@ -577,12 +599,6 @@ impl SessionCommitStore for PostgresSessionStore {
             session_id: commit.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
         };
-        crate::session_meta::write_session_meta_tx(
-            &mut tx,
-            &direct_meta,
-            crate::session_meta::SessionMetaWrite::Insert,
-        )
-        .await?;
         planner.validate_node_derivation()?;
         {
             let prior = sqlx::query(
@@ -621,6 +637,12 @@ impl SessionCommitStore for PostgresSessionStore {
                     requested_node_count: stored_count,
                 };
                 if let Some(replay) = planner.decide_receipt(Some(prior))? {
+                    crate::session_meta::write_session_meta_tx(
+                        &mut tx,
+                        &direct_meta,
+                        crate::session_meta::SessionMetaWrite::Insert,
+                    )
+                    .await?;
                     if let Some(completion) = replay.release_session_execution_lease() {
                         let _release_was_current =
                             release_session_execution_lease_tx(&mut tx, completion).await?;
@@ -632,6 +654,15 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
             }
         }
+        // Publication owns the complete sorted blob-row set before this fresh
+        // commit locks or writes any checkpoint owner edge, graph row, or head.
+        let (checkpoint_ref, manifest) = put_checkpoint_tx(&mut tx, &commit.checkpoint).await?;
+        crate::session_meta::write_session_meta_tx(
+            &mut tx,
+            &direct_meta,
+            crate::session_meta::SessionMetaWrite::Insert,
+        )
+        .await?;
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
         if existing.is_none() {
             let placeholder = SessionHeadMeta::assemble(
@@ -789,7 +820,6 @@ impl SessionCommitStore for PostgresSessionStore {
         for completed in &commit.completed_turn_input_claims {
             ensure_turn_input_completion_tx(&mut tx, completed).await?;
         }
-        let (checkpoint_ref, manifest) = put_checkpoint_tx(&mut tx, &commit.checkpoint).await?;
         for entry in &commit.usage_deltas {
             let entry_ordinal = i64::try_from(entry.identity.entry_ordinal).map_err(|_| {
                 StoreError::Backend(
@@ -2874,6 +2904,24 @@ impl PostgresSessionStore {
                 retained.insert(descriptor.blob_ref.0.clone());
             }
         }
+        // Projection edges belong to live head/anchor roots. Sever every dead
+        // root's complete outgoing set before hash-ordered blob deletion: a
+        // component can sort before its root, and its strict FK must never be
+        // weakened to accommodate stale ownership data.
+        sqlx::query(
+            "DELETE FROM lash_checkpoint_blob_refs AS edge
+             WHERE NOT EXISTS (
+                       SELECT 1 FROM lash_sessions AS head
+                       WHERE head.checkpoint_ref = edge.checkpoint_ref
+                   )
+               AND NOT EXISTS (
+                       SELECT 1 FROM lash_node_anchors AS anchor
+                       WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                   )",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let all_hashes =
             sqlx::query_scalar::<_, String>("SELECT hash FROM lash_blobs ORDER BY hash ASC")
                 .fetch_all(&mut *tx)

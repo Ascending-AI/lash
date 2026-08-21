@@ -137,7 +137,7 @@ impl BackendRunner {
                 self.factory()
                     .delete_session(&self.session_id)
                     .await
-                    .map_err(StoreError::Backend)?;
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
                 let rewound = self
                     .factory()
                     .fork_at(&ForkSessionRequest {

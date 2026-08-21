@@ -30,7 +30,10 @@ impl SessionStoreFactory for DelegatingFactory {
         self.inner.session_was_deleted(session_id).await
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
 }

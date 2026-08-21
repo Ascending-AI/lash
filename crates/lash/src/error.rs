@@ -76,6 +76,17 @@ pub enum EmbedError {
     MissingQueuedWorkBatching,
     #[error("failed to create store for session `{session_id}`: {message}")]
     StoreFactory { session_id: String, message: String },
+    /// Session-store deletion stopped after witnessing some reclaim progress.
+    ///
+    /// The typed failure preserves the partial storage report required by ADR
+    /// 0067 so hosts can distinguish witnessed progress from an empty scope.
+    #[error("failed to delete store for session `{session_id}`: {failure}")]
+    SessionDeleteStorage {
+        /// Session whose durable storage deletion stopped.
+        session_id: String,
+        /// Typed stop reason and the reclaim counters witnessed before it.
+        failure: Box<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
+    },
     #[error("session store operation failed: {0}")]
     Store(#[from] lash_core::StoreError),
     #[error(

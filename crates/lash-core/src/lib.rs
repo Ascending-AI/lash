@@ -1036,12 +1036,13 @@ pub use store::{
     OperationId, OrphanedTurnInputScope, QueuedWorkClaimOutcome, QueuedWorkClaimRefusal,
     QueuedWorkStore, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome, SessionAdmission,
-    SessionBinding, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseDisplacement, SessionExecutionLeaseRenewalInstallMismatch,
-    SessionExecutionLeaseStore, SessionMeta, StoreBackend, StoreError, StoreMaintenance,
-    StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
-    TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+    SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
+    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
+    StoreBackend, StoreError, StoreMaintenance, StorePreflight, StoreSchemaDatabase,
+    StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId, TurnInputStore,
+    VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

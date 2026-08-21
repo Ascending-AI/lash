@@ -1534,12 +1534,23 @@ impl ProcessRegistry for PostgresProcessRegistry {
             .iter()
             .flat_map(|process_id| facade_support::process_runtime_session_ids(process_id))
             .collect::<Vec<_>>();
-        delete_process_sessions_tx(&mut tx, &session_ids)
+        let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids)
             .await
-            .map_err(|err| PluginError::Session(err.to_string()))?;
+            .map_err(|failure| {
+                PluginError::Session(format!(
+                    "process session blob reclaim {}; partial report: {:?}",
+                    failure.stop, failure.partial
+                ))
+            })?;
 
         let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
+        tracing::debug!(
+            enumerated_blob_count = blob_reclaim.enumerated_blob_count,
+            retained_blob_count = blob_reclaim.retained_blob_count,
+            deleted_blob_count = blob_reclaim.deleted_blob_count,
+            "process prune reclaimed process-session checkpoint blobs"
+        );
         Ok(report)
     }
 }

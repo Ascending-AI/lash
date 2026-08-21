@@ -1,45 +1,5 @@
 use crate::*;
 
-async fn retained_fork_config_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    node_id: &str,
-) -> Result<lash_core::PersistedSessionConfig, StoreError> {
-    let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
-        .await?
-        .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-            leaf_node_id: node_id.to_string(),
-        })?;
-    let row = sqlx::query(
-        "SELECT parent_node_id, node_json FROM lash_graph_nodes
-         WHERE node_id = $1 AND tombstoned = FALSE",
-    )
-    .bind(&frame_node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?
-    .ok_or_else(|| {
-        StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
-    })?;
-    let parent_node_id = row.get(0);
-    let node_json: String = row.get(1);
-    lash_core::SessionNodeRecord::decode_storage_body(
-        frame_node_id.clone(),
-        parent_node_id,
-        &node_json,
-    )
-    .map_err(|error| {
-        StoreError::Backend(format!(
-            "failed to decode retained frame node `{frame_node_id}`: {error}"
-        ))
-    })?
-    .frame_config()
-    .ok_or_else(|| {
-        StoreError::Backend(format!(
-            "retained frame node `{frame_node_id}` has no frame assignment"
-        ))
-    })
-}
-
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn create_store(
@@ -151,16 +111,39 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .map_err(|err| err.to_string())
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
-        let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
-        delete_session_tx(&mut tx, session_id)
-            .await
-            .map_err(|err| err.to_string())?;
-        tx.commit().await.map_err(|err| err.to_string())
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        let mut tx = self.pool.begin().await.map_err(|err| {
+            lash_core::MaintenanceFailure::failed_before_any_work(store_sqlx_error(err))
+        })?;
+        let mut report = lash_core::SessionBlobReclaimReport::default();
+        if let Err(error) = delete_session_tx(&mut tx, session_id, &mut report).await {
+            report.deleted_blob_count = 0;
+            return Err(lash_core::MaintenanceFailure::failed(error, report));
+        }
+        if let Err(error) = tx.commit().await {
+            report.deleted_blob_count = 0;
+            return Err(lash_core::MaintenanceFailure::failed(
+                store_sqlx_error(error),
+                report,
+            ));
+        }
+        Ok(report)
     }
 
     async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let (source_session_id, checkpoint_ref) =
+            crate::support::retained_checkpoint_tx(&mut tx, node_id)
+                .await?
+                .ok_or_else(|| StoreError::ForkPointNotRetained {
+                    node_id: node_id.to_string(),
+                })?;
+        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &source_session_id)
+            .await?;
+        crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
         let live_node = sqlx::query_scalar::<_, bool>(
             "SELECT TRUE FROM lash_graph_nodes
              WHERE node_id = $1 AND tombstoned = FALSE
@@ -184,7 +167,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .await
         .map_err(store_sqlx_error)?
         {
-            let config = retained_fork_config_tx(&mut tx, node_id).await?;
+            let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::ForkPoint {
                 node_id: node_id.to_string(),
@@ -194,20 +177,18 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 pinned: true,
             });
         }
-        let retained = sqlx::query_as::<_, (String, String)>(
-            "SELECT session_id, checkpoint_ref FROM lash_sessions
-             WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
-             ORDER BY session_id LIMIT 1
-             FOR SHARE",
+        if !crate::support::retention_source_holds_checkpoint_tx(
+            &mut tx,
+            node_id,
+            &source_session_id,
+            &checkpoint_ref,
         )
-        .bind(node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let (source_session_id, checkpoint_ref) =
-            retained.ok_or_else(|| StoreError::ForkPointNotRetained {
+        .await?
+        {
+            return Err(StoreError::ForkPointNotRetained {
                 node_id: node_id.to_string(),
-            })?;
+            });
+        }
         sqlx::query(
             "INSERT INTO lash_node_anchors (node_id, checkpoint_ref, source_session_id)
              VALUES ($1, $2, $3)",
@@ -218,7 +199,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let config = retained_fork_config_tx(&mut tx, node_id).await?;
+        let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core::ForkPoint {
             node_id: node_id.to_string(),
@@ -284,7 +265,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         for row in rows {
             let node_id: String = row.get(0);
             points.push(lash_core::ForkPoint {
-                config: retained_fork_config_tx(&mut tx, &node_id).await?,
+                config: crate::support::retained_fork_config_tx(&mut tx, &node_id).await?,
                 node_id,
                 checkpoint_ref: BlobRef(row.get(1)),
                 source_session_id: row.get(2),
@@ -300,10 +281,45 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         request: &lash_core::ForkSessionRequest,
     ) -> Result<lash_core::ForkSessionReceipt, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
+        // Target identity fences precede source-retention fences. This unlocked
+        // fast path only decides already-materialized targets and permanent
+        // tombstones; keep the post-lock checks below for concurrent changes.
+        let (exists, deleted) = sqlx::query_as::<_, (bool, bool)>(
+            "SELECT
+                EXISTS(
+                    SELECT 1 FROM lash_sessions WHERE session_id = $1
+                    UNION ALL
+                    SELECT 1 FROM lash_session_meta WHERE session_id = $1
+                ),
+                EXISTS(
+                    SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
+                )",
+        )
+        .bind(&request.session_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if exists {
+            return Err(StoreError::ForkSessionAlreadyExists {
+                session_id: request.session_id.clone(),
+            });
+        }
+        if deleted {
+            return Err(StoreError::SessionDeleted {
+                session_id: request.session_id.clone(),
+            });
+        }
+        let (source_session_id, checkpoint_ref) =
+            crate::support::retained_checkpoint_tx(&mut tx, &request.node_id)
+                .await?
+                .ok_or_else(|| StoreError::ForkPointNotRetained {
+                    node_id: request.node_id.clone(),
+                })?;
+        let session_ids = vec![request.session_id.clone(), source_session_id.clone()];
+        crate::runtime_persistence::lock_session_history_mutations_tx(&mut tx, &session_ids)
             .await?;
-        // Keep the fork fences in the shared order: exists -> deleted ->
-        // retained -> live -> frame.
+        // Keep the fork fences in the global order: every session advisory
+        // fence first, then the retained checkpoint root, then graph and head.
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(
                  SELECT 1 FROM lash_sessions WHERE session_id = $1
@@ -334,24 +350,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
-        let retained = sqlx::query_as::<_, (String, String)>(
-            "SELECT source_session_id, checkpoint_ref FROM (
-                 SELECT source_session_id, checkpoint_ref, 0 AS priority
-                 FROM lash_node_anchors WHERE node_id = $1
-                 UNION ALL
-                 SELECT session_id, checkpoint_ref, 1 AS priority FROM lash_sessions
-                 WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
-             ) retained
-             ORDER BY priority, source_session_id LIMIT 1",
-        )
-        .bind(&request.node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let (source_session_id, checkpoint_ref) =
-            retained.ok_or_else(|| StoreError::ForkPointNotRetained {
-                node_id: request.node_id.clone(),
-            })?;
+        crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
         let node_facts = sqlx::query_as::<_, (String, i64)>(
             "SELECT session_id, generation FROM lash_graph_nodes
              WHERE node_id = $1 AND tombstoned = FALSE
@@ -365,6 +364,18 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             node_facts.ok_or_else(|| StoreError::ForkPointNotRetained {
                 node_id: request.node_id.clone(),
             })?;
+        if !crate::support::retention_source_holds_checkpoint_tx(
+            &mut tx,
+            &request.node_id,
+            &source_session_id,
+            &checkpoint_ref,
+        )
+        .await?
+        {
+            return Err(StoreError::ForkPointNotRetained {
+                node_id: request.node_id.clone(),
+            });
+        }
         let current_frame_node_id =
             crate::runtime_persistence::nearest_frame_node_id_tx(&mut tx, &request.node_id)
                 .await?
@@ -692,6 +703,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
+    report: &mut lash_core::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     let materialized = sqlx::query_scalar::<_, bool>(
@@ -719,15 +731,31 @@ pub(crate) async fn delete_session_tx(
     }
     // Attachment intents are released before the rest of the session store so
     // a failed transaction cannot leave live-looking state without its owner.
-    let leaf_node_id = sqlx::query_scalar::<_, String>(
-        "SELECT leaf_node_id FROM lash_sessions
-         WHERE session_id = $1 AND leaf_node_id IS NOT NULL
-         FOR UPDATE",
+    // The session advisory fence stabilizes this head read. Do not take its
+    // row lock before the complete hash-sorted blob candidate set below.
+    let head = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT leaf_node_id, checkpoint_ref FROM lash_sessions
+         WHERE session_id = $1",
     )
     .bind(session_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
+    let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
+    let mut checkpoint_refs = std::collections::BTreeSet::new();
+    if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
+        checkpoint_refs.insert(checkpoint_ref.to_string());
+    }
+    let candidates =
+        crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(tx, &checkpoint_refs)
+            .await?;
+    crate::session_blob_reclaim::lock_session_blob_candidates_tx(
+        tx,
+        &candidates,
+        &format!("session `{session_id}`"),
+    )
+    .await?;
+    report.enumerated_blob_count = candidates.len();
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
         .bind(session_id)
         .execute(&mut **tx)
@@ -809,7 +837,13 @@ pub(crate) async fn delete_session_tx(
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    Ok(())
+    crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
+        tx,
+        candidates,
+        &checkpoint_refs,
+        report,
+    )
+    .await
 }
 
 /// Deletes process-owned runtime sessions as one batch inside the process
@@ -824,31 +858,46 @@ pub(crate) async fn delete_session_tx(
 pub(crate) async fn delete_process_sessions_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[String],
-) -> Result<(), StoreError> {
+) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
     if session_ids.is_empty() {
-        return Ok(());
+        return Ok(lash_core::SessionBlobReclaimReport::default());
     }
 
-    // Take every session-history mutation fence in a standalone statement
-    // before deleting heads or deciding whether graph cleanup is required.
-    // The ordered subquery gives overlapping batches one lock-request order.
-    sqlx::query(
-        "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
-         FROM (
-             SELECT session_id
-             FROM unnest($1::TEXT[]) AS target(session_id)
-             ORDER BY session_id
-         ) AS ordered",
-    )
-    .bind(session_ids)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let mut report = lash_core::SessionBlobReclaimReport::default();
+    let outcome: Result<(), StoreError> = async {
+        // Take every session-history mutation fence before deleting heads or
+        // deciding whether graph cleanup is required.
+        crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
 
-    // Permanent identity evidence for every materialized id in the batch,
-    // recorded before the rows go away so the reclaim arm below can see it.
-    sqlx::query(
-        "INSERT INTO lash_deleted_sessions (session_id)
+        let checkpoint_refs = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT checkpoint_ref
+         FROM lash_sessions
+         WHERE session_id = ANY($1) AND checkpoint_ref IS NOT NULL
+         ORDER BY checkpoint_ref",
+        )
+        .bind(session_ids)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        let candidates = crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(
+            tx,
+            &checkpoint_refs,
+        )
+        .await?;
+        crate::session_blob_reclaim::lock_session_blob_candidates_tx(
+            tx,
+            &candidates,
+            "process-prune session batch",
+        )
+        .await?;
+        report.enumerated_blob_count = candidates.len();
+
+        // Permanent identity evidence for every materialized id in the batch,
+        // recorded before the rows go away so the reclaim arm below can see it.
+        sqlx::query(
+            "INSERT INTO lash_deleted_sessions (session_id)
          SELECT target.session_id
          FROM unnest($1::TEXT[]) AS target(session_id)
          WHERE EXISTS (
@@ -860,14 +909,15 @@ pub(crate) async fn delete_process_sessions_tx(
                    WHERE session.session_id = target.session_id
                )
          ON CONFLICT (session_id) DO NOTHING",
-    )
-    .bind(session_ids)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+        )
+        .bind(session_ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
 
-    let (deleted_leaf_node_ids, has_graph_candidates) = sqlx::query_as::<_, (Vec<String>, bool)>(
-        "WITH deleted_sessions AS (
+        let (deleted_leaf_node_ids, has_graph_candidates) =
+            sqlx::query_as::<_, (Vec<String>, bool)>(
+                "WITH deleted_sessions AS (
                  DELETE FROM lash_sessions AS session
                  WHERE session.session_id = ANY($1)
                  RETURNING session.session_id, session.leaf_node_id
@@ -890,18 +940,19 @@ pub(crate) async fn delete_process_sessions_tx(
                           )
                     )
              FROM deleted_sessions",
-    )
-    .bind(session_ids)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+            )
+            .bind(session_ids)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
 
-    if has_graph_candidates {
-        for leaf_node_id in deleted_leaf_node_ids {
-            crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id).await?;
-        }
-        let unreachable_candidates = sqlx::query_scalar::<_, String>(
-            "SELECT graph.node_id FROM lash_graph_nodes AS graph
+        if has_graph_candidates {
+            for leaf_node_id in deleted_leaf_node_ids {
+                crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &leaf_node_id)
+                    .await?;
+            }
+            let unreachable_candidates = sqlx::query_scalar::<_, String>(
+                "SELECT graph.node_id FROM lash_graph_nodes AS graph
              WHERE graph.session_id = ANY($1) AND graph.tombstoned = FALSE
                AND NOT EXISTS (
                    SELECT 1 FROM lash_graph_nodes AS child
@@ -917,29 +968,29 @@ pub(crate) async fn delete_process_sessions_tx(
                    WHERE anchor.node_id = graph.node_id
                )
              ORDER BY graph.seq DESC",
-        )
-        .bind(session_ids)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        for node_id in unreachable_candidates {
-            crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
+            )
+            .bind(session_ids)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            for node_id in unreachable_candidates {
+                crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
+            }
         }
-    }
 
-    let trigger_owner_namespaces = session_ids
-        .iter()
-        .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
-        .collect::<Vec<_>>();
-    sqlx::query(
-        // Delete-time reclaim covers the batch's tombstoned rows plus any
-        // tombstoned row owned by an already-deleted session. The ancestry
-        // retire above tombstones a node regardless of who owns it, so a batch
-        // can strand a row belonging to a session outside it; that owner is
-        // unbindable, so no session-scoped vacuum could ever reach the row.
-        // Live sessions' rows stay resident for their own vacuum, so this is
-        // not a catalog-wide sweep.
-        "WITH deleted_graph_nodes AS (
+        let trigger_owner_namespaces = session_ids
+            .iter()
+            .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
+            .collect::<Vec<_>>();
+        sqlx::query(
+            // Delete-time reclaim covers the batch's tombstoned rows plus any
+            // tombstoned row owned by an already-deleted session. The ancestry
+            // retire above tombstones a node regardless of who owns it, so a batch
+            // can strand a row belonging to a session outside it; that owner is
+            // unbindable, so no session-scoped vacuum could ever reach the row.
+            // Live sessions' rows stay resident for their own vacuum, so this is
+            // not a catalog-wide sweep.
+            "WITH deleted_graph_nodes AS (
              DELETE FROM lash_graph_nodes
              WHERE tombstoned = TRUE
                AND (session_id = ANY($1)
@@ -1024,15 +1075,33 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_fork_lineage)
               + (SELECT count(*) FROM deleted_session_meta)
               + (SELECT count(*) FROM deleted_trigger_manifests)",
-    )
-    .bind(session_ids)
-    .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-    .bind(&trigger_owner_namespaces)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+        )
+        .bind(session_ids)
+        .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
+        .bind(&trigger_owner_namespaces)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
 
-    Ok(())
+        crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
+            tx,
+            candidates,
+            &checkpoint_refs,
+            &mut report,
+        )
+        .await?;
+        Ok(())
+    }
+    .await;
+    match outcome {
+        Ok(()) => Ok(report),
+        Err(error) => {
+            // The caller owns the transaction and rolls it back on this stop;
+            // no physical delete in the partial report can survive.
+            report.deleted_blob_count = 0;
+            Err(lash_core::MaintenanceFailure::failed(error, report))
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

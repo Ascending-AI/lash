@@ -50,7 +50,10 @@ impl SessionStoreFactory for SilentFactory {
         self.inner.create_store(request).await
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String> {
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
 }

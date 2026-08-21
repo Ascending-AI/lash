@@ -183,7 +183,6 @@ impl Store {
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options(StoreOptions {
             blob_profile: BuiltinBlobProfile::LowLatency,
-            gc_policy: StoreGcPolicy::default(),
         })
         .await
     }
@@ -194,7 +193,6 @@ impl Store {
         Self::memory_with_options_and_clock(
             StoreOptions {
                 blob_profile: BuiltinBlobProfile::LowLatency,
-                gc_policy: StoreGcPolicy::default(),
             },
             clock,
         )

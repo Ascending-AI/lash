@@ -205,7 +205,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // its partial maintenance index. Stores at 50 through 55 take a creation-only
 // migration that arms legacy zero-fan-out rows from their occurrence time while
 // leaving live-fan-out rows unarmed for the normal terminal transition.
-const SCHEMA_VERSION: i32 = 56;
+// Version 57 adds the indexed checkpoint-manifest component-edge projection and
+// root indexes used by exact-edge session-owner blob reclaim. Stores at 50
+// through 56 take a creation-only migration at open.
+const SCHEMA_VERSION: i32 = 57;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -465,7 +468,7 @@ impl PostgresStorage {
     ///
     /// The component schema is normally a reject-and-recreate boundary. This
     /// build has explicit exceptions: Lash-managed `Enforce` mode can apply
-    /// creation-only migrations from published component-50 through -55 shapes
+    /// creation-only migrations from published component-50 through -56 shapes
     /// to the current generation after an exact source-shape preflight. An older
     /// stamp over newer artifacts is ledger/schema divergence and is refused
     /// with an inspect-and-recreate remedy; other mismatches are rejected at
@@ -757,6 +760,8 @@ mod runtime_persistence;
 mod schema;
 #[path = "postgres/schema_shape.rs"]
 mod schema_shape;
+#[path = "postgres/session_blob_reclaim.rs"]
+mod session_blob_reclaim;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
 #[path = "postgres/session_meta.rs"]

@@ -812,8 +812,11 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
         Ok(false)
     }
 
-    async fn delete_session(&self, _session_id: &str) -> std::result::Result<(), String> {
-        Ok(())
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        Ok(lash_core::SessionBlobReclaimReport::default())
     }
 }
 
@@ -1219,8 +1222,11 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
         Ok(false)
     }
 
-    async fn delete_session(&self, _session_id: &str) -> std::result::Result<(), String> {
-        Ok(())
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        Ok(lash_core::SessionBlobReclaimReport::default())
     }
 }
 
@@ -1228,6 +1234,18 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
 struct DeletingStoreFactory {
     stores: std::sync::Mutex<std::collections::HashMap<String, Arc<SnapshotStore>>>,
     tombstones: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    delete_failure: std::sync::Mutex<
+        Option<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
+    >,
+}
+
+impl DeletingStoreFactory {
+    fn fail_next_delete(
+        &self,
+        failure: lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>,
+    ) {
+        *self.delete_failure.lock_recover() = Some(failure);
+    }
 }
 
 // SnapshotStore has a no-op attachment manifest; this deletion fixture
@@ -1285,12 +1303,18 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
         Ok(self.tombstones.lock_recover().contains(session_id))
     }
 
-    async fn delete_session(&self, session_id: &str) -> std::result::Result<(), String> {
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        if let Some(failure) = self.delete_failure.lock_recover().take() {
+            return Err(failure);
+        }
         self.stores.lock_recover().remove(session_id);
         self.tombstones
             .lock_recover()
             .insert(session_id.to_string());
-        Ok(())
+        Ok(lash_core::SessionBlobReclaimReport::default())
     }
 }
 

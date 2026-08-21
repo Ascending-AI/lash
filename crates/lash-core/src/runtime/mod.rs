@@ -1488,7 +1488,16 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// so explicitly; a decorator forwards to the store it wraps.
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String>;
 
-    async fn delete_session(&self, session_id: &str) -> Result<(), String>;
+    /// Delete one session and reclaim blobs whose final exact reference edge is
+    /// severed by that transaction.
+    ///
+    /// Failure carries the partial report accumulated before the transaction
+    /// rolled back; a zero success report therefore means witnessed emptiness,
+    /// never an unreported reclaim failure.
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport>;
 
     /// Retain the continuation checkpoint for `node_id`.
     ///

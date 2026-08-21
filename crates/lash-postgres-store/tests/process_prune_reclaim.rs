@@ -16,6 +16,54 @@ mod support;
 
 use support::{SharedDatabaseLock, database_url};
 
+struct PostgresProcessPruneBlobProbe {
+    storage: Arc<PostgresStorage>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::testing::conformance::SessionDeleteBlobProbe for PostgresProcessPruneBlobProbe {
+    async fn blob_exists(&self, blob_ref: &lash_core::BlobRef) -> bool {
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_blobs WHERE hash = $1)")
+            .bind(blob_ref.as_str())
+            .fetch_one(self.storage.pool())
+            .await
+            .expect("query Postgres process-prune blob existence")
+    }
+
+    async fn fail_next_blob_delete(&self) {
+        sqlx::query(
+            "CREATE OR REPLACE FUNCTION lash_fail_process_prune_blob_delete()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 RAISE EXCEPTION 'injected process-prune blob delete failure';
+             END
+             $$",
+        )
+        .execute(self.storage.pool())
+        .await
+        .expect("create Postgres process-prune blob fault function");
+        sqlx::query(
+            "CREATE TRIGGER fail_process_prune_blob_delete
+             BEFORE DELETE ON lash_blobs
+             FOR EACH ROW EXECUTE FUNCTION lash_fail_process_prune_blob_delete()",
+        )
+        .execute(self.storage.pool())
+        .await
+        .expect("install Postgres process-prune blob fault");
+    }
+
+    async fn clear_blob_delete_failure(&self) {
+        sqlx::query("DROP TRIGGER fail_process_prune_blob_delete ON lash_blobs")
+            .execute(self.storage.pool())
+            .await
+            .expect("remove Postgres process-prune blob trigger");
+        sqlx::query("DROP FUNCTION lash_fail_process_prune_blob_delete()")
+            .execute(self.storage.pool())
+            .await
+            .expect("remove Postgres process-prune blob function");
+    }
+}
+
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
     let url = database_url()?;
     let database_lock = SharedDatabaseLock::acquire(&url).await;
@@ -97,6 +145,42 @@ async fn postgres_process_prune_records_deletions_for_later_reclaim_when_configu
     let (factory, registry) = backend(&storage).await;
     lash_core::testing::conformance::process_prune_records_deletions_for_later_reclaim(
         factory, registry,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_prune_reclaims_checkpoint_blobs_and_propagates_failure_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres process-prune blob reclaim law: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let storage = Arc::new(storage);
+    let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
+        as Arc<dyn SessionStoreFactory>;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let probe = Arc::new(PostgresProcessPruneBlobProbe { storage });
+    lash_core::testing::conformance::process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
+        "postgres", factory, registry, probe,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_prune_reclaims_content_aliased_checkpoint_roots_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres process-prune content-alias law: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let storage = Arc::new(storage);
+    let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
+        as Arc<dyn SessionStoreFactory>;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let probe = Arc::new(PostgresProcessPruneBlobProbe { storage });
+    lash_core::testing::conformance::process_prune_reclaims_content_aliased_checkpoint_roots(
+        "postgres", factory, registry, probe,
     )
     .await;
 }

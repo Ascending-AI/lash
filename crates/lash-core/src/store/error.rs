@@ -364,6 +364,17 @@ pub enum StoreError {
         /// Content address named by the manifest but absent from the backend.
         blob_ref: crate::BlobRef,
     },
+    /// A checkpoint root observed before publication disappeared while its
+    /// transaction waited to acquire the root's blob-row lock.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
+    /// return this instead of surfacing a backend foreign-key failure when
+    /// concurrent reclaim wins publication of an already-persisted root.
+    #[error("checkpoint root `{blob_ref}` is not present in the store")]
+    CheckpointRootMissing {
+        /// Content address of the checkpoint root removed before publication.
+        blob_ref: crate::BlobRef,
+    },
     /// A component's persisted codec is not the codec implemented by this build.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -504,6 +515,7 @@ impl StoreError {
             Self::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
             Self::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
             Self::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
+            Self::CheckpointRootMissing { .. } => "CheckpointRootMissing",
             Self::CheckpointComponentEncodingVersionMismatch { .. } => {
                 "CheckpointComponentEncodingVersionMismatch"
             }

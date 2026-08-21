@@ -43,7 +43,7 @@ pub use load::{
 };
 pub use maintenance::{
     GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
-    MaintenanceStop, MaintenanceSweep, VacuumReport,
+    MaintenanceStop, MaintenanceSweep, SessionBlobReclaimReport, VacuumReport,
 };
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,

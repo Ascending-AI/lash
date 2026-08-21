@@ -288,6 +288,7 @@ impl Drop for InlineWorkDriverSlot {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SessionDeleteReport {
     pub session_id: String,
+    pub storage: lash_core::SessionBlobReclaimReport,
     pub process: Option<lash_core::ProcessSessionDeleteReport>,
 }
 
@@ -838,12 +839,12 @@ impl LashCore {
                 session_id: session_id.clone(),
                 message: err.to_string(),
             })?;
-        store_factory
+        let storage = store_factory
             .delete_session(&session_id)
             .await
-            .map_err(|message| EmbedError::StoreFactory {
+            .map_err(|failure| EmbedError::SessionDeleteStorage {
                 session_id: session_id.clone(),
-                message,
+                failure: Box::new(failure),
             })?;
         self.env
             .core
@@ -857,6 +858,7 @@ impl LashCore {
             })?;
         Ok(SessionDeleteReport {
             session_id,
+            storage,
             process,
         })
     }

@@ -34,6 +34,93 @@ pub(crate) fn clamp_epoch_ms(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
+pub(crate) async fn retained_checkpoint_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+) -> Result<Option<(String, String)>, StoreError> {
+    sqlx::query_as(
+        "SELECT source_session_id, checkpoint_ref FROM (
+             SELECT source_session_id, checkpoint_ref, 0 AS priority
+             FROM lash_node_anchors WHERE node_id = $1
+             UNION ALL
+             SELECT session_id, checkpoint_ref, 1 AS priority FROM lash_sessions
+             WHERE leaf_node_id = $1 AND checkpoint_ref IS NOT NULL
+         ) retained
+         ORDER BY priority, source_session_id LIMIT 1",
+    )
+    .bind(node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)
+}
+
+pub(crate) async fn retention_source_holds_checkpoint_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+    source_session_id: &str,
+    checkpoint_ref: &str,
+) -> Result<bool, StoreError> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(
+             SELECT 1 FROM lash_node_anchors
+             WHERE node_id = $1
+               AND source_session_id = $2
+               AND checkpoint_ref = $3
+             UNION ALL
+             SELECT 1 FROM lash_sessions
+             WHERE session_id = $2
+               AND leaf_node_id = $1
+               AND checkpoint_ref = $3
+         )",
+    )
+    .bind(node_id)
+    .bind(source_session_id)
+    .bind(checkpoint_ref)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)
+}
+
+pub(crate) async fn retained_fork_config_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    node_id: &str,
+) -> Result<lash_core::PersistedSessionConfig, StoreError> {
+    let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
+        .await?
+        .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
+            leaf_node_id: node_id.to_string(),
+        })?;
+    let row = sqlx::query(
+        "SELECT parent_node_id, node_json FROM lash_graph_nodes
+         WHERE node_id = $1 AND tombstoned = FALSE",
+    )
+    .bind(&frame_node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .ok_or_else(|| {
+        StoreError::Backend(format!("retained frame node `{frame_node_id}` is missing"))
+    })?;
+    let parent_node_id = row.get(0);
+    let node_json: String = row.get(1);
+    lash_core::SessionNodeRecord::decode_storage_body(
+        frame_node_id.clone(),
+        parent_node_id,
+        &node_json,
+    )
+    .map_err(|error| {
+        StoreError::Backend(format!(
+            "failed to decode retained frame node `{frame_node_id}`: {error}"
+        ))
+    })?
+    .frame_config()
+    .ok_or_else(|| {
+        StoreError::Backend(format!(
+            "retained frame node `{frame_node_id}` has no frame assignment"
+        ))
+    })
+}
+
 pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     if is_contention_error(&err) {
         StoreError::Contended
@@ -240,22 +327,34 @@ pub(crate) fn block_on_detached<T: Send + 'static>(
     .expect("postgres manifest thread")
 }
 
-async fn put_blob_tx(
+async fn put_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    content: &[u8],
-) -> Result<BlobRef, StoreError> {
-    let hash = format!("{:x}", Sha256::digest(content));
-    sqlx::query(
-        "INSERT INTO lash_blobs (hash, content)
-         VALUES ($1, $2)
-         ON CONFLICT (hash) DO NOTHING",
-    )
-    .bind(&hash)
-    .bind(content)
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    Ok(BlobRef(hash))
+    blobs: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<(), StoreError> {
+    let blobs = blobs.iter().collect::<Vec<_>>();
+    for chunk in blobs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+        let hashes = chunk
+            .iter()
+            .map(|(hash, _)| hash.as_str())
+            .collect::<Vec<_>>();
+        let contents = chunk
+            .iter()
+            .map(|(_, content)| content.as_slice())
+            .collect::<Vec<_>>();
+        sqlx::query(
+            "INSERT INTO lash_blobs (hash, content)
+             SELECT hash, content
+               FROM unnest($1::text[], $2::bytea[]) AS blob(hash, content)
+              ORDER BY hash
+             ON CONFLICT (hash) DO NOTHING",
+        )
+        .bind(hashes)
+        .bind(contents)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
+    Ok(())
 }
 
 async fn get_blob_tx(
@@ -274,23 +373,69 @@ async fn get_blob_tx(
 // request to roughly one MiB of SHA-256 text plus array framing.
 const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
 
-async fn existing_checkpoint_component_refs_tx(
+pub(crate) async fn lock_checkpoint_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    blob_refs: &std::collections::BTreeSet<String>,
-) -> Result<std::collections::HashSet<String>, StoreError> {
-    let mut existing = std::collections::HashSet::with_capacity(blob_refs.len());
-    let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
-    for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
-        let rows = sqlx::query_scalar::<_, String>(
-            "SELECT hash FROM lash_blobs WHERE hash = ANY($1::text[])",
-        )
-        .bind(chunk)
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        existing.extend(rows);
+    blob_ref: &str,
+    component_key: Option<&str>,
+) -> Result<(), StoreError> {
+    let exists =
+        sqlx::query_scalar::<_, bool>("SELECT TRUE FROM lash_blobs WHERE hash = $1 FOR KEY SHARE")
+            .bind(blob_ref)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    if exists.is_some() {
+        return Ok(());
     }
-    Ok(existing)
+    let blob_ref = BlobRef(blob_ref.to_string());
+    match component_key {
+        Some(key) => Err(StoreError::CheckpointComponentMissing {
+            key: key.to_string(),
+            blob_ref,
+        }),
+        None => Err(StoreError::CheckpointRootMissing { blob_ref }),
+    }
+}
+
+async fn lock_checkpoint_blobs_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    acquisition_order: &[(String, Option<String>)],
+) -> Result<(), StoreError> {
+    let blob_refs = acquisition_order
+        .iter()
+        .map(|(blob_ref, _)| blob_ref.as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut locked = std::collections::HashSet::with_capacity(blob_refs.len());
+    for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
+        locked.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT hash FROM lash_blobs
+                 WHERE hash = ANY($1::text[])
+                 ORDER BY hash
+                 FOR KEY SHARE",
+            )
+            .bind(chunk)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?,
+        );
+    }
+    for (blob_ref, component_key) in acquisition_order {
+        if locked.contains(blob_ref) {
+            continue;
+        }
+        let blob_ref = BlobRef(blob_ref.clone());
+        return match component_key {
+            Some(key) => Err(StoreError::CheckpointComponentMissing {
+                key: key.clone(),
+                blob_ref,
+            }),
+            None => Err(StoreError::CheckpointRootMissing { blob_ref }),
+        };
+    }
+    Ok(())
 }
 
 async fn checkpoint_component_bodies_tx(
@@ -317,36 +462,6 @@ async fn checkpoint_component_bodies_tx(
     Ok(bodies)
 }
 
-async fn validate_checkpoint_component_refs_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    checkpoint: &HydratedSessionCheckpoint,
-) -> Result<(), StoreError> {
-    let mut referenced = std::collections::BTreeSet::new();
-    for (key, component) in &checkpoint.components {
-        lash_core::store::ensure_checkpoint_component_encoding_version(
-            key,
-            component.encoding_version(),
-        )?;
-        let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
-            continue;
-        };
-        referenced.insert(blob_ref.as_str().to_string());
-    }
-    let existing = existing_checkpoint_component_refs_tx(tx, &referenced).await?;
-    for (key, component) in &checkpoint.components {
-        let Some(blob_ref) = component.blob_ref().filter(|_| component.body().is_none()) else {
-            continue;
-        };
-        if !existing.contains(blob_ref.as_str()) {
-            return Err(StoreError::CheckpointComponentMissing {
-                key: key.clone(),
-                blob_ref: blob_ref.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
 /// Persist the complete checkpoint root and every changed leaf inside the
 /// caller's commit transaction. Keeping both writes under the same transaction
 /// is the GC-safety argument: no collector can observe a git-loose-object-style
@@ -356,7 +471,29 @@ pub(crate) async fn put_checkpoint_tx(
     checkpoint: &HydratedSessionCheckpoint,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
     let manifest = checkpoint.manifest()?;
-    validate_checkpoint_component_refs_tx(tx, checkpoint).await?;
+    let bytes = encode_msgpack(&manifest, "checkpoint root")?;
+    let checkpoint_ref = BlobRef(format!("{:x}", Sha256::digest(&bytes)));
+
+    // Global PostgreSQL checkpoint lock order:
+    // 1. session-history advisory locks, ascending by session id;
+    // 2. manifest-root and component blob rows, ascending by content hash;
+    // 3. checkpoint-owner edges, graph rows, and session heads.
+    //
+    // This transaction bulk-inserts every supplied body in hash order, then
+    // acquires the complete root/component union with one ordered FOR KEY SHARE
+    // query. Concurrent reclaim that wins first is a typed missing-root/component
+    // refusal, never a resurrection or a later foreign-key error. Delete takes
+    // FOR UPDATE on the identical sorted union before severing any owner edge,
+    // graph row, or head.
+    let mut acquisition_order = manifest
+        .components
+        .iter()
+        .map(|(key, descriptor)| (descriptor.blob_ref.as_str().to_string(), Some(key.clone())))
+        .collect::<Vec<_>>();
+    acquisition_order.push((checkpoint_ref.as_str().to_string(), None));
+    acquisition_order.sort();
+    let mut supplied_blobs = std::collections::BTreeMap::new();
+    supplied_blobs.insert(checkpoint_ref.as_str().to_string(), bytes);
     for (key, descriptor) in &manifest.components {
         let component =
             checkpoint
@@ -367,16 +504,35 @@ pub(crate) async fn put_checkpoint_tx(
                     message: format!("manifest projection lost component `{key}`"),
                 })?;
         if let Some(body) = component.body() {
-            let stored_ref = put_blob_tx(tx, body).await?;
+            let stored_ref = BlobRef(format!("{:x}", Sha256::digest(body)));
             lash_core::store::ensure_checkpoint_component_hash_agreement(
                 key,
                 &stored_ref,
                 &descriptor.blob_ref,
             )?;
+            supplied_blobs
+                .entry(stored_ref.0)
+                .or_insert_with(|| body.to_vec());
         }
     }
-    let bytes = encode_msgpack(&manifest, "checkpoint root")?;
-    let checkpoint_ref = put_blob_tx(tx, &bytes).await?;
+    put_checkpoint_blobs_tx(tx, &supplied_blobs).await?;
+    lock_checkpoint_blobs_tx(tx, &acquisition_order).await?;
+    let component_refs = manifest
+        .components
+        .values()
+        .map(|descriptor| descriptor.blob_ref.as_str())
+        .collect::<Vec<_>>();
+    sqlx::query(
+        "INSERT INTO lash_checkpoint_blob_refs (checkpoint_ref, blob_ref)
+         SELECT $1, component_ref
+           FROM unnest($2::text[]) AS component_ref
+         ON CONFLICT (checkpoint_ref, blob_ref) DO NOTHING",
+    )
+    .bind(checkpoint_ref.as_str())
+    .bind(component_refs)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     Ok((checkpoint_ref, manifest))
 }
 
