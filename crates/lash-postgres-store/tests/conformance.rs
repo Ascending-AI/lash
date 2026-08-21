@@ -21,7 +21,10 @@ mod support;
 #[path = "../../lash-core/tests/support/cold_process_turn_parent.rs"]
 mod cold_process_turn_parent;
 
-use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
+use injectors::{
+    PostgresFenceIntegrityInjector, PostgresLegacyTriggerMutationReceiptInjector,
+    PostgresLineageConformanceInjector,
+};
 use support::{SharedDatabaseLock, database_url};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -152,6 +155,19 @@ impl lash_core::testing::conformance::TriggerOccurrenceRetentionFaultInjector
         .execute(&self.pool)
         .await
         .expect("install Postgres occurrence delete failure trigger");
+    }
+
+    async fn clear_occurrence_delete_failure(&self) {
+        sqlx::query(
+            "DROP TRIGGER IF EXISTS fail_fig1507_occurrence_delete ON lash_trigger_occurrences",
+        )
+        .execute(&self.pool)
+        .await
+        .expect("clear Postgres occurrence delete failure trigger");
+        sqlx::query("DROP FUNCTION IF EXISTS lash_fig1507_fail_occurrence_delete()")
+            .execute(&self.pool)
+            .await
+            .expect("clear Postgres occurrence delete failure function");
     }
 }
 
@@ -2169,6 +2185,8 @@ async fn postgres_process_trigger_retention_satisfies_conformance_when_configure
             lash_core::testing::conformance::ProcessTriggerRetentionHandles {
                 registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
                 triggers: Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>,
+                sessions: Arc::new(storage.session_store_factory_with_shared_process_registry())
+                    as Arc<dyn lash_core::SessionStoreFactory>,
             }
         }
     })
@@ -2281,6 +2299,22 @@ async fn postgres_trigger_store_satisfies_conformance_when_configured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_legacy_ownerless_trigger_receipt_is_retained_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres legacy trigger receipt law: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
+    let injector = PostgresLegacyTriggerMutationReceiptInjector { pool };
+    lash_core::testing::conformance::legacy_ownerless_trigger_receipt_is_retained_law(
+        store, &injector,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_trigger_occurrence_retention_failure_is_not_laundered_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
@@ -2303,6 +2337,22 @@ async fn postgres_trigger_occurrence_retention_failure_is_not_laundered_when_con
         .execute(&pool)
         .await
         .expect("drop Postgres occurrence delete failure function");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_trigger_retention_reconciliation_is_transactional_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres trigger retention transaction law: database is not configured"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let pool = storage.pool().clone();
+    let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
+    let fault = PostgresTriggerOccurrenceRetentionFaultInjector { pool };
+    lash_core::testing::conformance::trigger_retention_reconciliation_failure_law(store, &fault)
+        .await;
 }
 
 /// Drive one process into `waiting` and assert the retention contract: live rows

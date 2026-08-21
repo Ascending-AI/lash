@@ -19,17 +19,20 @@ struct PruneTriggerMutationReceiptsResponse {
     before_epoch_ms: u64,
 }
 
-/// Operator-invoked reclamation of trigger mutation idempotency receipts.
+/// Operator-invoked reclamation of host- and platform-owned trigger mutation
+/// idempotency receipts.
 ///
-/// **The caller owns the safety argument, and it is not a small one.** A
-/// mutation receipt is what makes a retried trigger command a replay instead
-/// of a second execution. Deleting one does not merely free a row: it converts
-/// every still-possible retry of that `operation_id` into a fresh evaluation
-/// against whatever the world looks like *now*. An outcome the caller already
-/// observed is recomputed, and a retry that was a safe no-op can turn into a
-/// terminal refusal against state the original call itself created — see
-/// `pruning_a_mutation_receipt_turns_a_safe_redrive_into_a_terminal_conflict`.
-/// So `before_epoch_ms` must be proven to sit outside
+/// Session-owned receipts are outside this cutoff: they survive while their
+/// owner is live and follow the ADR 0049 deleted-session frontier. A receipt
+/// whose owner cannot be determined is retained fail-safely as well. For the
+/// host/platform receipts this route can delete, **the caller owns the safety
+/// argument, and it is not a small one.** A mutation receipt is what makes a
+/// retried trigger command a replay instead of a second execution. Deleting
+/// one converts every still-possible retry of that `operation_id` into a fresh
+/// evaluation against whatever the world looks like *now*. An outcome the
+/// caller already observed is recomputed, and a retry that was a safe no-op can
+/// turn into a terminal refusal against state the original call itself
+/// created. So `before_epoch_ms` must be proven to sit outside
 /// **every** retry horizon this deployment can produce — Restate invocation
 /// retention, cron redrive windows, an operator's own manual replay, a queued
 /// turn that has been parked for a week — not merely "older than it looks

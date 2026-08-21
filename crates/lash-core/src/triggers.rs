@@ -1053,6 +1053,36 @@ impl From<PluginError> for TriggerOperationError {
 
 pub type TriggerEffectResult = Result<TriggerCommandOutcome, TriggerOperationError>;
 
+/// Store implementors use this encoder to persist a mutation result with its
+/// owner namespace in private receipt JSON. Normal [`TriggerEffectResult`]
+/// decoding ignores the field; retention uses it for receipts without records.
+#[doc(hidden)]
+pub fn encode_trigger_effect_result_receipt(
+    owner_scope: &TriggerOwnerScope,
+    result: &TriggerEffectResult,
+) -> Result<String, PluginError> {
+    let encoding_error = |error| {
+        PluginError::Session(format!(
+            "failed to encode trigger mutation receipt: {error}"
+        ))
+    };
+    let mut value = serde_json::to_value(result).map_err(encoding_error)?;
+    let variant = match &mut value {
+        serde_json::Value::Object(result) => result.values_mut().next(),
+        _ => None,
+    };
+    let Some(serde_json::Value::Object(payload)) = variant else {
+        return Err(PluginError::Session(
+            "trigger mutation receipt encoded without a result payload".to_string(),
+        ));
+    };
+    payload.insert(
+        "_owner_scope_namespace".to_string(),
+        serde_json::Value::String(owner_scope.namespace()),
+    );
+    serde_json::to_string(&value).map_err(encoding_error)
+}
+
 pub fn next_trigger_revision(
     record: &TriggerSubscriptionRecord,
 ) -> Result<u64, TriggerOperationError> {
@@ -1321,7 +1351,7 @@ pub struct TriggerDeliveryReservation {
     pub reservation_status: TriggerDeliveryReservationOutcome,
 }
 
-/// Stable identity of one trigger-delivery row considered for retention.
+/// Stable identity used by store implementors during delivery retention.
 ///
 /// The process id is carried alongside the delivery table's composite primary
 /// key so a retention decision can delete only the exact row it observed.
@@ -1330,6 +1360,19 @@ pub struct TriggerDeliveryRetentionCandidate {
     pub occurrence_id: String,
     pub subscription_id: String,
     pub process_id: String,
+}
+
+/// Counters produced by store implementors after atomic reconciliation.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerRetentionReconciliationReport {
+    /// Exact delivery observations removed by the reconciliation.
+    pub reclaimed_delivery_count: usize,
+    /// Occurrences removed after their complete delivery fan-out became empty.
+    pub reclaimed_occurrence_count: usize,
+    /// Deleted-session subscriptions removed after their deliveries were gone.
+    pub reclaimed_subscription_count: usize,
+    /// Deleted-session receipts removed after their deliveries were gone.
+    pub reclaimed_mutation_receipt_count: usize,
 }
 
 /// Outcome counters from one host-invoked trigger-occurrence reclaim pass.
@@ -1445,35 +1488,21 @@ impl TriggerDeliveryReservation {
     }
 }
 
-/// Durable home for trigger subscriptions, occurrences, and delivery
-/// reservations, parallel to [`RuntimePersistence`](crate::RuntimePersistence)
-/// and separate from it.
-///
-/// This trait is the whole supported surface: a store's tables (`lash_*` in the
-/// first-party SQL backends) are private to lash for reads as well as writes,
-/// because column names and record-JSON shapes are only stable within one
-/// schema version. Hosts read subscriptions through
-/// [`list_subscriptions`](Self::list_subscriptions) or
-/// [`TriggerCommand::List`], and change them through
-/// [`execute_command`](Self::execute_command).
+/// Store and durable-substrate implementors provide this durable home for
+/// trigger subscriptions, occurrences, and delivery reservations, separate
+/// from [`RuntimePersistence`](crate::RuntimePersistence). Store tables and
+/// record JSON are private to Lash; hosts use [`TriggerCommand`] and the Lash
+/// facade instead of reading or writing backend tables directly.
 #[async_trait::async_trait]
 pub trait TriggerStore: Send + Sync {
     /// Evaluate one [`TriggerCommand`] and, for a mutation, commit its record
     /// change and its receipt in a single transaction.
     ///
-    /// This is **the** supported host mutation route for trigger subscriptions;
-    /// [`TriggerCommand`] documents the verb vocabulary and carries a worked
-    /// re-enable example. The outer `Result` reports store failure. The inner
-    /// [`TriggerEffectResult`] reports the domain outcome, so a losing revision
-    /// fence arrives as [`TriggerOperationError::Conflict`] rather than as an
-    /// opaque backend error.
-    ///
-    /// `operation_id` is the caller's idempotency key within the command's
-    /// [`TriggerOwnerScope`]. A mutation journals what it evaluated, a committed
-    /// receipt or a conflict, under that id, so replaying the same operation
-    /// returns the original outcome even after the row has moved on.
-    /// Reuse an id only for a retry of the same intent. [`TriggerCommand::List`]
-    /// is never receipted and always reads current state.
+    /// The outer `Result` reports store failure; [`TriggerEffectResult`] carries
+    /// the domain outcome, including a losing revision fence. `operation_id` is
+    /// an idempotency key within the [`TriggerOwnerScope`]: a mutation journals
+    /// its result, so reuse it only to retry the same intent. Lists are not
+    /// receipted and always read current state.
     async fn execute_command(
         &self,
         operation_id: &str,
@@ -1522,48 +1551,50 @@ pub trait TriggerStore: Send + Sync {
     /// Process-retention reconciliation uses this narrow worklist query.
     async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError>;
 
-    /// List the stable row identities used by process-retention reconciliation.
-    ///
-    /// The returned identity is an observation token: later deletion must match
-    /// all three fields and must not expand to other rows that happen to carry
-    /// the same reusable process id.
+    /// List stable observations for process-retention reconciliation. Deletion
+    /// must match every identity field, never just the reusable process id.
     async fn list_delivery_retention_candidates(
         &self,
     ) -> Result<Vec<TriggerDeliveryRetentionCandidate>, PluginError>;
 
+    /// Store implementors list session owners found in subscriptions, delivery
+    /// snapshots, or receipts for ADR 0049 frontier classification.
+    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<String>, PluginError>;
+
+    /// Store implementors apply one trigger-retention decision atomically.
+    ///
+    /// Deletes exact delivery observations, then empty-fan-out occurrences and
+    /// delivery-free subscriptions and receipts for `deleted_session_ids`.
+    /// Host and platform subscription fences are never selected.
+    async fn reconcile_trigger_retention(
+        &self,
+        candidates: &[TriggerDeliveryRetentionCandidate],
+        deleted_session_ids: &[String],
+    ) -> Result<TriggerRetentionReconciliationReport, PluginError>;
+
     /// Delete only the supplied, previously observed delivery rows.
     ///
-    /// Every candidate must match both the delivery row's composite identity
-    /// and its observed process id. Repeating the deletion is harmless; a row
-    /// inserted or replaced after classification is never swept into the batch.
+    /// Candidates match the composite row identity and observed process id, so
+    /// repetition is harmless and later replacement rows are not swept in.
     async fn delete_delivery_retention_candidates(
         &self,
         candidates: &[TriggerDeliveryRetentionCandidate],
     ) -> Result<usize, PluginError>;
 
     /// Reclaim terminal trigger occurrences armed no later than a host cutoff.
-    ///
-    /// This is a host-invoked maintenance lever, never a timer or background
-    /// task. A zero-match occurrence is armed atomically with ingest accounting;
-    /// a matched occurrence is armed atomically when deletion of its last
-    /// delivery severs the fan-out. The cutoff may defer an armed row but can
-    /// never initiate eligibility for a live one. Hosts that do not invoke this
-    /// method simply have not run occurrence maintenance.
-    ///
-    /// The implementation witnesses the complete occurrence scope before the
-    /// first destructive step. SQL backends may do that with aggregate counts
-    /// while materializing only indexed reclaim candidates. Enumeration failure
-    /// is an error, and a later delete failure carries the partial report
-    /// accumulated so far.
+    /// This host lever deletes terminally armed occurrences: zero-match rows arm
+    /// at ingest, while matched rows arm with their last delivery's deletion.
+    /// The cutoff only defers eligibility. The complete scope is witnessed
+    /// before deletion; later failure returns the partial report accumulated.
     async fn reclaim_trigger_occurrences(
         &self,
         cutoff_epoch_ms: u64,
     ) -> TriggerOccurrenceReclamationResult;
 
-    /// Low-level primitive for dropping mutation idempotency receipts older
-    /// than an explicit cutoff. Process retention never prunes these receipts,
-    /// and list operations never create them. Lash deliberately exposes no
-    /// public facade or production schedule until FIG-653 can prove terminal-
-    /// gated eligibility for each receipt.
+    /// Low-level primitive for dropping host- and platform-scoped mutation
+    /// idempotency receipts older than an explicit cutoff. Session-scoped
+    /// receipts follow the ADR 0049 deletion frontier during reconciliation.
+    /// Lists do not create receipts. No public facade or production schedule is
+    /// exposed until FIG-653 proves terminal-gated eligibility.
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError>;
 }

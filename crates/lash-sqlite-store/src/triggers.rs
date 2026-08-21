@@ -330,7 +330,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         params![
                             operation_id.as_str(),
                             request_fingerprint.as_str(),
-                            Self::encode_json(&result)?,
+                            lash_core::facade_support::encode_trigger_effect_result_receipt(
+                                &owner_scope,
+                                &result,
+                            )?,
                             now as i64,
                         ],
                     )
@@ -709,6 +712,196 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             .map_err(process_sqlite_error)?
     }
 
+    async fn list_session_owner_ids_for_retention(
+        &self,
+    ) -> Result<Vec<String>, lash_core::PluginError> {
+        self.conn
+            .call(|conn| {
+                Ok((|| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT owner_scope
+                             FROM (
+                                 SELECT owner_scope
+                                 FROM trigger_subscriptions
+                                 UNION
+                                 SELECT 'session:' || json_extract(
+                                            subscription_snapshot_json,
+                                            '$.owner_scope.session_id'
+                                        )
+                                 FROM trigger_deliveries
+                                 WHERE json_extract(
+                                           subscription_snapshot_json,
+                                           '$.owner_scope.type'
+                                       ) = 'session'
+                                 UNION
+                                 SELECT COALESCE(
+                                     json_extract(
+                                         result_json,
+                                         '$.Ok._owner_scope_namespace'
+                                     ),
+                                     json_extract(
+                                         result_json,
+                                         '$.Err._owner_scope_namespace'
+                                     ),
+                                     CASE
+                                         WHEN json_extract(
+                                                  result_json,
+                                                  '$.Ok.receipt.owner_scope.type'
+                                              ) = 'session'
+                                         THEN 'session:' || json_extract(
+                                                  result_json,
+                                                  '$.Ok.receipt.owner_scope.session_id'
+                                              )
+                                     END,
+                                     CASE
+                                         WHEN json_extract(
+                                                  result_json,
+                                                  '$.Ok.receipts[0].owner_scope.type'
+                                              ) = 'session'
+                                         THEN 'session:' || json_extract(
+                                                  result_json,
+                                                  '$.Ok.receipts[0].owner_scope.session_id'
+                                              )
+                                     END
+                                 ) AS owner_scope
+                                 FROM trigger_mutation_receipts
+                             )
+                             WHERE owner_scope LIKE 'session:%'
+                             ORDER BY owner_scope",
+                        )
+                        .map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map([], |row| row.get::<_, String>(0))
+                        .map_err(process_sqlite_error)?;
+                    let mut session_ids = std::collections::BTreeSet::new();
+                    for row in rows {
+                        let owner_scope = row.map_err(process_sqlite_error)?;
+                        if let Some(session_id) = owner_scope.strip_prefix("session:") {
+                            session_ids.insert(session_id.to_string());
+                        }
+                    }
+                    Ok(session_ids.into_iter().collect())
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn reconcile_trigger_retention(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+        deleted_session_ids: &[String],
+    ) -> Result<lash_core::TriggerRetentionReconciliationReport, lash_core::PluginError> {
+        let candidates_json = serde_json::to_string(candidates).map_err(process_decode_error)?;
+        let deleted_owner_scopes = deleted_session_ids
+            .iter()
+            .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
+            .collect::<Vec<_>>();
+        let deleted_owner_scopes_json =
+            serde_json::to_string(&deleted_owner_scopes).map_err(process_decode_error)?;
+        self.conn
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+                let reclaimed_delivery_count = tx.execute(
+                    "DELETE FROM trigger_deliveries
+                     WHERE EXISTS (
+                         SELECT 1
+                         FROM json_each(?1) AS candidate
+                         WHERE trigger_deliveries.occurrence_id =
+                                   json_extract(candidate.value, '$.occurrence_id')
+                           AND trigger_deliveries.subscription_id =
+                                   json_extract(candidate.value, '$.subscription_id')
+                           AND trigger_deliveries.process_id =
+                                   json_extract(candidate.value, '$.process_id')
+                     )",
+                    params![&candidates_json],
+                )?;
+                let reclaimed_occurrence_count = tx.execute(
+                    "DELETE FROM trigger_occurrences
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM trigger_deliveries
+                         WHERE trigger_deliveries.occurrence_id =
+                               trigger_occurrences.occurrence_id
+                     )",
+                    [],
+                )?;
+
+                let blocked_owner_scopes = {
+                    let mut stmt = tx.prepare(
+                        "SELECT DISTINCT
+                                'session:' || json_extract(
+                                    subscription_snapshot_json,
+                                    '$.owner_scope.session_id'
+                                )
+                         FROM trigger_deliveries
+                         WHERE json_extract(
+                                   subscription_snapshot_json,
+                                   '$.owner_scope.type'
+                               ) = 'session'",
+                    )?;
+                    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+                    rows.collect::<Result<std::collections::HashSet<_>, _>>()?
+                };
+                let receipt_owner_scopes = deleted_owner_scopes
+                    .iter()
+                    .filter(|owner_scope| !blocked_owner_scopes.contains(*owner_scope))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let receipt_owner_scopes_json = serde_json::to_string(&receipt_owner_scopes)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+
+                let reclaimed_subscription_count = tx.execute(
+                    "DELETE FROM trigger_subscriptions
+                     WHERE owner_scope IN (SELECT value FROM json_each(?1))
+                       AND NOT EXISTS (
+                           SELECT 1 FROM trigger_deliveries
+                           WHERE trigger_deliveries.subscription_id =
+                                 trigger_subscriptions.subscription_id
+                       )",
+                    params![&deleted_owner_scopes_json],
+                )?;
+                let reclaimed_mutation_receipt_count = tx.execute(
+                    "DELETE FROM trigger_mutation_receipts
+                     WHERE COALESCE(
+                         json_extract(result_json, '$.Ok._owner_scope_namespace'),
+                         json_extract(result_json, '$.Err._owner_scope_namespace'),
+                         CASE
+                             WHEN json_extract(
+                                      result_json,
+                                      '$.Ok.receipt.owner_scope.type'
+                                  ) = 'session'
+                             THEN 'session:' || json_extract(
+                                      result_json,
+                                      '$.Ok.receipt.owner_scope.session_id'
+                                  )
+                         END,
+                         CASE
+                             WHEN json_extract(
+                                      result_json,
+                                      '$.Ok.receipts[0].owner_scope.type'
+                                  ) = 'session'
+                             THEN 'session:' || json_extract(
+                                      result_json,
+                                      '$.Ok.receipts[0].owner_scope.session_id'
+                                  )
+                         END
+                     ) IN (SELECT value FROM json_each(?1))",
+                    params![&receipt_owner_scopes_json],
+                )?;
+
+                tx.commit()?;
+                Ok(lash_core::TriggerRetentionReconciliationReport {
+                    reclaimed_delivery_count,
+                    reclaimed_occurrence_count,
+                    reclaimed_subscription_count,
+                    reclaimed_mutation_receipt_count,
+                })
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
     async fn delete_delivery_retention_candidates(
         &self,
         candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
@@ -892,7 +1085,58 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 conn.execute(
-                    "DELETE FROM trigger_mutation_receipts WHERE created_at_ms < ?1",
+                    "DELETE FROM trigger_mutation_receipts
+                     WHERE operation_id IN (
+                         SELECT operation_id
+                         FROM (
+                             SELECT operation_id,
+                                    COALESCE(
+                                        json_extract(
+                                            result_json,
+                                            '$.Ok._owner_scope_namespace'
+                                        ),
+                                        json_extract(
+                                            result_json,
+                                            '$.Err._owner_scope_namespace'
+                                        ),
+                                        CASE json_extract(
+                                            result_json,
+                                            '$.Ok.receipt.owner_scope.type'
+                                        )
+                                            WHEN 'session' THEN 'session:' || json_extract(
+                                                result_json,
+                                                '$.Ok.receipt.owner_scope.session_id'
+                                            )
+                                            WHEN 'host' THEN 'host:' || json_extract(
+                                                result_json,
+                                                '$.Ok.receipt.owner_scope.binding_id'
+                                            )
+                                            WHEN 'platform' THEN 'host'
+                                        END,
+                                        CASE json_extract(
+                                            result_json,
+                                            '$.Ok.receipts[0].owner_scope.type'
+                                        )
+                                            WHEN 'session' THEN 'session:' || json_extract(
+                                                result_json,
+                                                '$.Ok.receipts[0].owner_scope.session_id'
+                                            )
+                                            WHEN 'host' THEN 'host:' || json_extract(
+                                                result_json,
+                                                '$.Ok.receipts[0].owner_scope.binding_id'
+                                            )
+                                            WHEN 'platform' THEN 'host'
+                                        END
+                                    ) AS owner_scope
+                             FROM trigger_mutation_receipts
+                             WHERE created_at_ms < ?1
+                         ) AS classified_receipts
+                         WHERE owner_scope = 'host'
+                            OR (
+                                substr(owner_scope, 1, 5) = 'host:'
+                                AND length(owner_scope) > 5
+                            )
+                     )",
                     params![cutoff_epoch_ms],
                 )
             })

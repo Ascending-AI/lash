@@ -140,11 +140,41 @@ mod tests {
         store: Arc<crate::InMemoryTriggerStore>,
     }
 
+    struct InMemoryLegacyTriggerMutationReceiptInjector {
+        store: Arc<crate::InMemoryTriggerStore>,
+    }
+
+    #[async_trait::async_trait]
+    impl LegacyTriggerMutationReceiptInjector for InMemoryLegacyTriggerMutationReceiptInjector {
+        async fn insert_legacy_receipt(
+            &self,
+            operation_id: &str,
+            request_fingerprint: &str,
+            result_json: &str,
+            created_at_ms: u64,
+        ) {
+            self.store.insert_legacy_mutation_receipt_for_testing(
+                operation_id,
+                request_fingerprint,
+                result_json,
+                created_at_ms,
+            );
+        }
+
+        async fn receipt_exists(&self, operation_id: &str) -> bool {
+            self.store.has_mutation_receipt_for_testing(operation_id)
+        }
+    }
+
     #[async_trait::async_trait]
     impl TriggerOccurrenceRetentionFaultInjector for InMemoryTriggerOccurrenceRetentionFaultInjector {
         async fn fail_occurrence_delete(&self, occurrence_id: &str) {
             self.store
                 .fail_occurrence_delete_for_testing(occurrence_id.to_string());
+        }
+
+        async fn clear_occurrence_delete_failure(&self) {
+            self.store.clear_occurrence_delete_failure_for_testing();
         }
     }
 
@@ -361,12 +391,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_legacy_ownerless_trigger_receipt_is_retained() {
+        let store = Arc::new(crate::InMemoryTriggerStore::default());
+        let injector = InMemoryLegacyTriggerMutationReceiptInjector {
+            store: Arc::clone(&store),
+        };
+        legacy_ownerless_trigger_receipt_is_retained_law(store, &injector).await;
+    }
+
+    #[tokio::test]
     async fn in_memory_trigger_occurrence_retention_failure_is_not_laundered() {
         let store = Arc::new(crate::InMemoryTriggerStore::default());
         let fault = InMemoryTriggerOccurrenceRetentionFaultInjector {
             store: Arc::clone(&store),
         };
         trigger_occurrence_retention_failure_law(store, &fault).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_trigger_retention_reconciliation_is_transactional() {
+        let store = Arc::new(crate::InMemoryTriggerStore::default());
+        let fault = InMemoryTriggerOccurrenceRetentionFaultInjector {
+            store: Arc::clone(&store),
+        };
+        trigger_retention_reconciliation_failure_law(store, &fault).await;
     }
 
     #[tokio::test]
@@ -415,7 +463,12 @@ mod tests {
         process_trigger_retention(|| async {
             let triggers = Arc::new(crate::InMemoryTriggerStore::default());
             let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-            ProcessTriggerRetentionHandles { registry, triggers }
+            let sessions = Arc::new(crate::InMemorySessionStoreFactory::default());
+            ProcessTriggerRetentionHandles {
+                registry,
+                triggers,
+                sessions,
+            }
         })
         .await;
     }

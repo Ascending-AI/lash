@@ -3,7 +3,8 @@
 ## Status
 
 Accepted. Ratified on FIG-1494; the six sections of the decision are the six
-rulings recorded there.
+rulings recorded there. The trigger-store ownership map was ratified on
+FIG-1507 on 2026-08-21.
 
 ## Context
 
@@ -187,6 +188,36 @@ latency cliff the host never asked for and cannot schedule around.
 The FIG-1506 asymmetry resolves in both directions at once: SQLite's whole-DB
 blob sweep moves **out** of the session-delete transaction, and Postgres gains
 session-scoped reclaim **in** it.
+
+#### Trigger-store ownership map
+
+Trigger retention is scope-shaped. A session owner can become permanently
+unable to speak through ADR 0049. A host or platform owner has no equivalent
+terminal frontier, so its name fence remains durable.
+
+| Row class and scope | Owner | Reclaim trigger |
+|---|---|---|
+| Session subscription | Registering session | The ADR 0049 deleted-session frontier. Delivery-retention reconciliation deletes the row in its trigger-store transaction only after witnessing zero remaining deliveries for the subscription. This applies to enabled and tombstoned rows; a tombstone remains the `Revive` CAS fence while its session could still speak. |
+| Host or platform subscription tombstone | Host or platform namespace | Never. It is the permanent `Revive` name fence, and there is no purge lever. |
+| Session mutation receipt | Registering session's replay eligibility | The same ADR 0049 frontier and trigger-store reconciliation transaction. Receipts survive while any delivery owned by that session remains. Once the frontier is crossed and the delivery set is witnessed empty, post-deletion replay is impossible and the journal is reclaimed. |
+| Host or platform mutation receipt | Host or platform replay eligibility | The existing host-invoked `prune_mutation_receipts` cutoff. This policy is unchanged. |
+| Trigger occurrence | Committed delivery fan-out | Delivery-retention reconciliation deletes the occurrence only after witnessing zero remaining delivery rows. A zero-match occurrence has a committed empty fan-out at ingest, so the same predicate reclaims it. A matched occurrence waits for its last delivery. |
+| Trigger delivery | Deterministic process run | ADR 0021 process retention. This policy is unchanged. |
+
+The owner namespace added to new receipt JSON is not retroactive. Legacy
+successful mutation receipts and non-empty prune receipts already carry a
+typed owner in their record snapshots, so retention extracts that genuine
+owner. Legacy conflict/error receipts and successful empty-prune receipts do
+not carry an owner anywhere; their scoped receipt key is a one-way hash and
+cannot recover it. Those ownerless rows are retained indefinitely by design
+rather than classified lossily. They are a bounded pre-change set: the
+classifiable legacy portion shrinks as sessions cross the deletion frontier or
+host cutoffs run, while the irreducibly ownerless remainder stays retained.
+
+The reconciliation deletes exact terminal delivery candidates first. It then
+applies the occurrence and dead-session cascades in one trigger-store
+transaction. Any failure rolls the transaction back; retry repeats the same
+decision without weakening subscription revision fencing or delivery claims.
 
 ### 4. Report contract: a three-way split
 
