@@ -5,8 +5,7 @@ use super::support::*;
 /// files that need credentials.
 ///
 /// Wire shape is a flat JSON object: a `type` field plus the
-/// provider-specific config keys. This matches the legacy
-/// `~/.lash/config.json` shape so old configs load without migration.
+/// provider-specific config keys, suitable for host-owned application config.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderSpec {
     pub kind: String,
