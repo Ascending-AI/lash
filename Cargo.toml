@@ -38,6 +38,7 @@ members = [
     "examples/slack-clone",
     "examples/workflow-graph-roundtrip",
     "runbooks/restate-postgres-workers",
+    "vendor/regress",
 ]
 # `cargo build` from the repo root compiles only the publishable SDK surface.
 # Internal bins/benches/examples build with `cargo build --workspace` or `-p <name>`.
@@ -190,12 +191,18 @@ regress = { path = "vendor/regress" }
 lto = "thin"
 strip = true
 
-# Third-party dependencies build optimized in debug builds; workspace crates
-# stay at opt-level 0 so local iteration keeps its fast rebuild and its
+# Third-party dependencies build optimized in debug builds; first-party workspace
+# crates stay at opt-level 0 so local iteration keeps its fast rebuild and its
 # debuggability. Test suites that spend their time inside dependency code
 # (SQLite, serde, regex, the async runtime) pay dependency compilation once
 # and read back the difference on every subsequent test run.
 [profile.dev.package."*"]
+opt-level = 2
+
+# `regress` is vendored third-party code but is also a workspace member so its
+# upstream test suite participates in workspace gates. Restore the optimization
+# it received before becoming a member; the test profile inherits this override.
+[profile.dev.package.regress]
 opt-level = 2
 
 # The judged-runbook profile. A judged scenario scores what a host actually
