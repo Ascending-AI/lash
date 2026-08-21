@@ -128,39 +128,34 @@ async fn attachment_head_reflects_put_and_refreshes_timestamp(store: Arc<dyn Att
     };
 
     // S3 exposes `HEAD` freshness at whole-second HTTP-date resolution while
-    // local stores are finer grained. Retry on the real clock so the law tests
-    // a genuine restamp without assuming one backend's timer precision.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(1_100));
-        let repeated = store
-            .put(bytes.clone(), attachment_meta())
-            .await
-            .expect("repeat identical put");
-        assert_eq!(
-            repeated.id, reference.id,
-            "the repeated put must address the same blob"
-        );
-        let refreshed_head = store
-            .head(&reference.id)
-            .await
-            .expect("head attachment after repeated put")
-            .expect("head must still find an attachment after a repeated put");
-        assert_eq!(
-            refreshed_head.id, reference.id,
-            "head must return the requested attachment after a repeated put"
-        );
-        let refreshed_modified = refreshed_head
-            .last_modified_epoch_ms
-            .expect("head timestamp availability must remain stable across a repeated put");
-        if refreshed_modified > first_modified {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "a repeated identical put must refresh head's reported timestamp: {refreshed_modified} <= {first_modified}"
-        );
-    }
+    // local stores are finer grained. Cross that boundary before the repeated
+    // put, then require the very next head to observe the restamp: GC cannot
+    // wait for a stale metadata cache to expire.
+    std::thread::sleep(std::time::Duration::from_millis(1_100));
+    let repeated = store
+        .put(bytes, attachment_meta())
+        .await
+        .expect("repeat identical put");
+    assert_eq!(
+        repeated.id, reference.id,
+        "the repeated put must address the same blob"
+    );
+    let refreshed_head = store
+        .head(&reference.id)
+        .await
+        .expect("head attachment after repeated put")
+        .expect("head must still find an attachment after a repeated put");
+    assert_eq!(
+        refreshed_head.id, reference.id,
+        "head must return the requested attachment after a repeated put"
+    );
+    let refreshed_modified = refreshed_head
+        .last_modified_epoch_ms
+        .expect("head timestamp availability must remain stable across a repeated put");
+    assert!(
+        refreshed_modified > first_modified,
+        "a repeated identical put must refresh head's reported timestamp: {refreshed_modified} <= {first_modified}"
+    );
 }
 
 async fn attachment_get_unknown_is_not_found(store: Arc<dyn AttachmentStore>) {
@@ -375,6 +370,28 @@ mod tests {
         cached: Mutex<BTreeMap<AttachmentId, crate::StoredBlobRef>>,
     }
 
+    struct TtlCachedHeadState {
+        cached: Option<crate::StoredBlobRef>,
+        stale_until: Option<std::time::Instant>,
+    }
+
+    struct TtlCachedHeadStore {
+        inner: crate::InMemoryAttachmentStore,
+        state: Mutex<TtlCachedHeadState>,
+    }
+
+    impl TtlCachedHeadStore {
+        fn new() -> Self {
+            Self {
+                inner: crate::InMemoryAttachmentStore::new(),
+                state: Mutex::new(TtlCachedHeadState {
+                    cached: None,
+                    stale_until: None,
+                }),
+            }
+        }
+    }
+
     impl BrokenHeadStore {
         fn new(defect: HeadDefect) -> Self {
             Self {
@@ -450,6 +467,54 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
+    impl AttachmentStore for TtlCachedHeadStore {
+        async fn put(
+            &self,
+            bytes: Vec<u8>,
+            meta: AttachmentCreateMeta,
+        ) -> Result<crate::AttachmentRef, AttachmentStoreError> {
+            let reference = self.inner.put(bytes, meta).await?;
+            let mut state = self.state.lock().expect("head cache lock");
+            if state.cached.is_some() && state.stale_until.is_none() {
+                state.stale_until =
+                    Some(std::time::Instant::now() + std::time::Duration::from_millis(100));
+            }
+            Ok(reference)
+        }
+
+        async fn get(
+            &self,
+            id: &AttachmentId,
+        ) -> Result<crate::StoredAttachment, AttachmentStoreError> {
+            self.inner.get(id).await
+        }
+
+        async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+            self.inner.delete(id).await
+        }
+
+        async fn list(&self) -> Result<Vec<crate::StoredBlobRef>, AttachmentStoreError> {
+            self.inner.list().await
+        }
+
+        async fn head(
+            &self,
+            id: &AttachmentId,
+        ) -> Result<Option<crate::StoredBlobRef>, AttachmentStoreError> {
+            let honest = self.inner.head(id).await?;
+            let mut state = self.state.lock().expect("head cache lock");
+            if state
+                .stale_until
+                .is_some_and(|deadline| std::time::Instant::now() < deadline)
+            {
+                return Ok(state.cached.clone());
+            }
+            state.cached = honest.clone();
+            Ok(honest)
+        }
+    }
+
     #[tokio::test]
     #[should_panic(expected = "a repeated identical put must refresh head's reported timestamp")]
     async fn head_freshness_law_rejects_a_stale_timestamp() {
@@ -458,6 +523,16 @@ mod tests {
                 Arc::new(BrokenHeadStore::new(HeadDefect::StaleTimestamp))
                     as Arc<dyn AttachmentStore>
             },
+            AttachmentStorePersistence::Ephemeral,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "a repeated identical put must refresh head's reported timestamp")]
+    async fn head_freshness_law_rejects_a_transiently_cached_timestamp() {
+        attachment_store(
+            || Arc::new(TtlCachedHeadStore::new()) as Arc<dyn AttachmentStore>,
             AttachmentStorePersistence::Ephemeral,
         )
         .await;
