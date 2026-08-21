@@ -9,6 +9,11 @@ use lashlang::{
 };
 use proptest::prelude::*;
 
+#[path = "support/execute.rs"]
+mod execute_support;
+
+use execute_support::{ExecuteError, execute};
+
 #[derive(Default)]
 struct DeterministicHost;
 
@@ -46,7 +51,7 @@ fn run_execute(
         .enable_all()
         .build()
         .expect("test runtime")
-        .block_on(execute(source, state, host))
+        .block_on(execute(source, state, host, property_host_environment()))
 }
 
 fn finished(outcome: ExecutionOutcome) -> Value {
@@ -55,33 +60,6 @@ fn finished(outcome: ExecutionOutcome) -> Value {
         ExecutionOutcome::Continued => panic!("expected `finish`"),
         ExecutionOutcome::Failed(value) => panic!("unexpected process failure: {value}"),
     }
-}
-
-#[derive(Debug, thiserror::Error, PartialEq)]
-enum ExecuteError {
-    #[error(transparent)]
-    Parse(#[from] lashlang::ParseError),
-    #[error(transparent)]
-    Link(#[from] lashlang::LinkError),
-    #[error(transparent)]
-    Runtime(#[from] lashlang::RuntimeError),
-}
-
-async fn execute<H: ExecutionHost>(
-    source: &str,
-    state: &mut State,
-    host: &H,
-) -> Result<ExecutionOutcome, ExecuteError> {
-    let compiled = if source.contains("tools.") {
-        let program = parse(source)?;
-        let linked = lashlang::LinkedModule::link(program, property_host_environment())?;
-        lashlang::compile_linked(&linked)
-    } else {
-        lashlang::compile(source)?
-    };
-    lashlang::execute(&compiled, state, host)
-        .await
-        .map_err(ExecuteError::Runtime)
 }
 
 fn property_host_environment() -> lashlang::LashlangHostEnvironment {
