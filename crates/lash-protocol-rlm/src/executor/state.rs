@@ -12,7 +12,6 @@ use sha2::{Digest, Sha256};
 use crate::projection::{prune_protected_bindings, prune_reserved_projected_bindings};
 
 use super::apply_global_defaults;
-use super::files::{ScratchFileError, ScratchFileStamp, collect_files, restore_files};
 use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -20,7 +19,6 @@ pub(super) struct RlmSnapshotRoot {
     version: u32,
     engine: String,
     globals: BTreeMap<String, PersistedValue>,
-    files: BTreeMap<String, PersistedValue>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
 }
 
@@ -36,13 +34,7 @@ enum PersistedValue {
     },
 }
 
-const ROOT_FIELDS: &[&str] = &[
-    "version",
-    "engine",
-    "globals",
-    "files",
-    "deferred_resolutions",
-];
+const ROOT_FIELDS: &[&str] = &["version", "engine", "globals", "deferred_resolutions"];
 const PERSISTED_VALUE_FIELDS: &[&str] = &["kind", "body", "component"];
 const DEFERRED_RESOLUTION_FIELDS: &[&str] = &["link_key", "resolutions"];
 const DEFERRED_LINK_KEY_FIELDS: &[&str] = &[
@@ -200,16 +192,12 @@ fn root_map_order(location: &str) -> CanonicalMapOrder {
     }
     match location {
         "root" => CanonicalMapOrder::Declared(ROOT_FIELDS),
-        "root.globals" | "root.files" | "root.deferred_resolutions.resolutions" => {
-            CanonicalMapOrder::Sorted
-        }
+        "root.globals" | "root.deferred_resolutions.resolutions" => CanonicalMapOrder::Sorted,
         "root.deferred_resolutions" => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
         "root.deferred_resolutions.link_key" => {
             CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS)
         }
-        _ if is_persisted_value_location(location) => {
-            CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS)
-        }
+        _ if is_global_location(location) => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
         _ if is_resolution_location(location) => CanonicalMapOrder::Declared(RESOLUTION_FIELDS),
         _ if location.ends_with(".definition") => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
         _ if location.ends_with(".input_schema") || location.ends_with(".output_schema") => {
@@ -242,12 +230,11 @@ fn root_map_required(location: &str) -> bool {
         location,
         "root"
             | "root.globals"
-            | "root.files"
             | "root.deferred_resolutions"
             | "root.deferred_resolutions.link_key"
             | "root.deferred_resolutions.resolutions"
     ) || is_resolution_location(location)
-        || is_persisted_value_location(location)
+        || is_global_location(location)
         || location.ends_with(".definition")
         || location.ends_with(".input_schema")
         || location.ends_with(".output_schema")
@@ -269,17 +256,6 @@ fn is_global_location(location: &str) -> bool {
         .strip_prefix("root.globals.")
         .is_some_and(|suffix| !suffix.contains('.'))
         || (location.starts_with("root.globals[") && location.ends_with(']'))
-}
-
-fn is_file_location(location: &str) -> bool {
-    location
-        .strip_prefix("root.files.")
-        .is_some_and(|suffix| !suffix.contains('.'))
-        || (location.starts_with("root.files[") && location.ends_with(']'))
-}
-
-fn is_persisted_value_location(location: &str) -> bool {
-    is_global_location(location) || is_file_location(location)
 }
 
 fn is_schema_override_location(location: &str) -> bool {
@@ -421,34 +397,27 @@ fn resolve_leaf<'a>(
 }
 
 fn root_leaf_keys(root: &RlmSnapshotRoot) -> BTreeSet<String> {
-    root_leaf_keys_from_sections(&root.globals, &root.files)
+    leaf_keys_for_values(&root.globals)
 }
 
-fn root_leaf_keys_from_sections(
-    globals: &BTreeMap<String, PersistedValue>,
-    files: &BTreeMap<String, PersistedValue>,
-) -> BTreeSet<String> {
-    globals
+fn leaf_keys_for_values(values: &BTreeMap<String, PersistedValue>) -> BTreeSet<String> {
+    values
         .values()
         .filter_map(|global| match global {
             PersistedValue::Inline { .. } => None,
             PersistedValue::Leaf { component } => Some(component.clone()),
         })
-        .chain(files.values().filter_map(|file| match file {
-            PersistedValue::Inline { .. } => None,
-            PersistedValue::Leaf { component } => Some(component.clone()),
-        }))
         .collect()
 }
 
 /// Which state a capture is relative to.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CaptureMode {
-    /// A checkpoint delta: re-encode assigned bindings and changed files only,
-    /// and reference every other leaf the receiver already holds.
+    /// A checkpoint delta: re-encode assigned bindings and reference every
+    /// other leaf the receiver already holds.
     Incremental,
-    /// Every binding and file, with every leaf body present. Relative to
-    /// nothing, so it neither reads nor advances capture bookkeeping.
+    /// Every binding, with every leaf body present. Relative to nothing, so it
+    /// neither reads nor advances capture bookkeeping.
     Complete,
 }
 
@@ -456,8 +425,6 @@ enum CaptureMode {
 struct PreparedCapture {
     snapshot: lash_core::plugin::ExecutionStateSnapshot,
     persisted_globals: BTreeMap<String, PersistedValue>,
-    persisted_files: BTreeMap<String, PersistedValue>,
-    persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
     leaf_keys: BTreeSet<String>,
     #[cfg(test)]
     encoded_globals: usize,
@@ -465,11 +432,8 @@ struct PreparedCapture {
 
 struct CaptureRollback {
     persisted_globals: BTreeMap<String, PersistedValue>,
-    persisted_files: BTreeMap<String, PersistedValue>,
-    persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
-    dirty_files: BTreeSet<String>,
 }
 
 pub struct RlmExecutionState {
@@ -483,24 +447,9 @@ pub struct RlmExecutionState {
     /// a re-driven or recovered link replays the recorded grants and
     /// `NotAvailable` results without leaking them into a later code effect.
     pub(super) deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
-    /// Live scratch directory for this execution state.
-    ///
-    /// Change detection for its files is a metadata stamp (length, nanosecond
-    /// mtime, and on Unix device/inode/ctime), which a same-length rewrite
-    /// inside one filesystem timestamp tick could defeat. Any writer inside this
-    /// process must therefore mark the path in `dirty_files` as
-    /// [`Self::write_scratch_file_for_testing`] does, rather than rely on the stamp. Today
-    /// no production code writes here — code effects write through Lashlang
-    /// values, and `restore_files` writes only into a fresh directory during
-    /// restore — so the only writer is that test helper. A first production
-    /// writer must be added with its marking, not without it.
-    scratch_dir: tempfile::TempDir,
     persisted_globals: BTreeMap<String, PersistedValue>,
-    persisted_files: BTreeMap<String, PersistedValue>,
-    persisted_file_stamps: BTreeMap<String, ScratchFileStamp>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
-    dirty_files: BTreeSet<String>,
     root_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
     pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
@@ -510,38 +459,31 @@ pub struct RlmExecutionState {
 
 impl RlmExecutionState {
     #[cfg(test)]
-    pub fn new() -> Result<Self, SessionError> {
+    pub fn new() -> Self {
         Self::for_engine("lashlang")
     }
 
-    pub(crate) fn for_engine(engine_id: impl Into<Arc<str>>) -> Result<Self, SessionError> {
-        Ok(Self {
+    pub(crate) fn for_engine(engine_id: impl Into<Arc<str>>) -> Self {
+        Self {
             engine_id: engine_id.into(),
             rlm: FlowState::new(),
             scratch: ExecutionScratch::new(),
             linked_programs: lashlang::LinkedProgramCache::new(),
             stored_lashlang_modules: BTreeSet::new(),
             deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
-            scratch_dir: tempfile::TempDir::new()?,
             persisted_globals: BTreeMap::new(),
-            persisted_files: BTreeMap::new(),
-            persisted_file_stamps: BTreeMap::new(),
             persisted_leaf_keys: BTreeSet::new(),
             dirty_globals: BTreeSet::new(),
-            dirty_files: BTreeSet::new(),
             root_dirty: true,
             capture_rollback: None,
             pending_snapshot: None,
             #[cfg(test)]
             encoded_globals_in_last_snapshot: 0,
-        })
+        }
     }
 
     pub fn execution_state_dirty(&self) -> bool {
-        self.pending_snapshot.is_some()
-            || self.root_dirty
-            || !self.dirty_globals.is_empty()
-            || !self.dirty_files.is_empty()
+        self.pending_snapshot.is_some() || self.root_dirty || !self.dirty_globals.is_empty()
     }
 
     pub(super) fn mark_execution_started(&mut self) {
@@ -554,25 +496,6 @@ impl RlmExecutionState {
         self.root_dirty = true;
     }
 
-    /// Write a scratch file and mark it changed. The marking, not the metadata
-    /// stamp, is what makes a same-length rewrite safe; see [`Self::scratch_dir`].
-    #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
-    fn write_scratch_file_for_testing(
-        &mut self,
-        path: &str,
-        body: &[u8],
-    ) -> Result<(), SessionError> {
-        restore_files(
-            self.scratch_dir.path(),
-            &[(path.to_string(), body.to_vec())].into_iter().collect(),
-        )
-        .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        self.dirty_files.insert(path.to_string());
-        self.root_dirty = true;
-        Ok(())
-    }
-
     /// Encode the canonical RLM root and only the leaf bodies whose logical
     /// values were assigned since the previous capture.
     pub fn snapshot_execution_state(
@@ -581,7 +504,6 @@ impl RlmExecutionState {
         self.absorb_pending_assignments();
         if !self.root_dirty
             && self.dirty_globals.is_empty()
-            && self.dirty_files.is_empty()
             && let Some(snapshot) = &self.pending_snapshot
         {
             return Ok(snapshot.clone());
@@ -594,19 +516,15 @@ impl RlmExecutionState {
     /// now can succeed, without staging it.
     ///
     /// The whole fallible part of a capture is building it — canonical encoding
-    /// of every assigned binding and reading every changed scratch file — so
-    /// this proves capturability by building the same capture and dropping it.
+    /// of every assigned binding — so this proves capturability by building the
+    /// same capture and dropping it.
     /// It advances no capture bookkeeping: the dirty set only absorbs the
     /// assignments the last execution recorded, which is what keeps them from
     /// being lost, and everything else stays exactly as the eventual capture
     /// will find it.
     pub fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
         self.absorb_pending_assignments();
-        if !self.root_dirty
-            && self.dirty_globals.is_empty()
-            && self.dirty_files.is_empty()
-            && self.pending_snapshot.is_some()
-        {
+        if !self.root_dirty && self.dirty_globals.is_empty() && self.pending_snapshot.is_some() {
             return Ok(());
         }
         self.build_capture(CaptureMode::Incremental).map(|_| ())
@@ -725,39 +643,10 @@ impl RlmExecutionState {
             next_globals.insert(name.clone(), persisted);
         }
 
-        let mut reusable_file_stamps = if complete {
-            BTreeMap::new()
-        } else {
-            self.persisted_file_stamps.clone()
-        };
-        for path in &self.dirty_files {
-            reusable_file_stamps.remove(path);
-        }
-        let collected_files = collect_files(self.scratch_dir.path(), &reusable_file_stamps)
-            .map_err(|error| {
-                SessionError::Protocol(format!("failed to collect RLM scratch files: {error}"))
-            })?;
-        let mut persisted_files = BTreeMap::new();
-        let mut persisted_file_stamps = BTreeMap::new();
-        for (path, collected) in collected_files {
-            let persisted = if let Some(body) = collected.changed_body {
-                persist_value_body(body, &prior_leaf_keys, &mut changed_leaves)
-            } else {
-                self.persisted_files.get(&path).cloned().ok_or_else(|| {
-                    SessionError::Protocol(format!(
-                        "unchanged RLM scratch file `{path}` has no persisted value"
-                    ))
-                })?
-            };
-            persisted_file_stamps.insert(path.clone(), collected.stamp);
-            persisted_files.insert(path, persisted);
-        }
-
         let root = RlmSnapshotRoot {
             version: RLM_SNAPSHOT_VERSION,
             engine: self.engine_id.to_string(),
             globals: next_globals.clone(),
-            files: persisted_files.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
         };
         let encoded = rmp_serde::to_vec_named(&root).map_err(|error| {
@@ -779,8 +668,6 @@ impl RlmExecutionState {
         Ok(PreparedCapture {
             snapshot,
             persisted_globals: next_globals,
-            persisted_files,
-            persisted_file_stamps,
             leaf_keys,
             #[cfg(test)]
             encoded_globals,
@@ -797,8 +684,6 @@ impl RlmExecutionState {
         let PreparedCapture {
             snapshot,
             persisted_globals,
-            persisted_files,
-            persisted_file_stamps,
             leaf_keys,
             #[cfg(test)]
             encoded_globals,
@@ -809,22 +694,13 @@ impl RlmExecutionState {
                     &mut self.persisted_globals,
                     persisted_globals,
                 ),
-                persisted_files: std::mem::replace(&mut self.persisted_files, persisted_files),
-                persisted_file_stamps: std::mem::replace(
-                    &mut self.persisted_file_stamps,
-                    persisted_file_stamps,
-                ),
                 persisted_leaf_keys: std::mem::replace(&mut self.persisted_leaf_keys, leaf_keys),
                 dirty_globals: std::mem::take(&mut self.dirty_globals),
-                dirty_files: std::mem::take(&mut self.dirty_files),
             });
         } else {
             self.persisted_globals = persisted_globals;
-            self.persisted_files = persisted_files;
-            self.persisted_file_stamps = persisted_file_stamps;
             self.persisted_leaf_keys = leaf_keys;
             self.dirty_globals.clear();
-            self.dirty_files.clear();
         }
         self.root_dirty = false;
         #[cfg(test)]
@@ -849,17 +725,12 @@ impl RlmExecutionState {
             .keys()
             .cloned()
             .collect::<Vec<_>>();
-        let prior_file_names = rollback.persisted_files.keys().cloned().collect::<Vec<_>>();
         self.persisted_globals = rollback.persisted_globals;
-        self.persisted_files = rollback.persisted_files;
-        self.persisted_file_stamps = rollback.persisted_file_stamps;
         self.persisted_leaf_keys = rollback.persisted_leaf_keys;
         self.dirty_globals = rollback.dirty_globals;
-        self.dirty_files = rollback.dirty_files;
         self.dirty_globals.extend(prior_global_names);
         self.dirty_globals
             .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
-        self.dirty_files.extend(prior_file_names);
         self.root_dirty = true;
         self.pending_snapshot = None;
     }
@@ -926,20 +797,6 @@ impl RlmExecutionState {
         let mut next_rlm = FlowState::from_snapshot(lashlang::Snapshot::new(globals));
         prune_reserved_projected_bindings(&mut next_rlm);
 
-        let mut files = BTreeMap::new();
-        for (path, persisted) in &parsed.files {
-            let body = match persisted {
-                PersistedValue::Inline { body } => body.as_slice(),
-                PersistedValue::Leaf { component } => resolve_leaf(state, path, component)?,
-            };
-            files.insert(path.clone(), body.to_vec());
-        }
-        let next_scratch_dir = tempfile::TempDir::new().map_err(ScratchFileError::CreateScratch)?;
-        restore_files(next_scratch_dir.path(), &files)?;
-        let next_file_stamps = collect_files(next_scratch_dir.path(), &BTreeMap::new())?
-            .into_iter()
-            .map(|(path, collected)| (path, collected.stamp))
-            .collect();
         let next_live_names = next_rlm
             .globals()
             .iter()
@@ -949,16 +806,11 @@ impl RlmExecutionState {
         let mut next_globals = parsed.globals;
         next_globals.retain(|name, _| next_live_names.contains(name));
         self.rlm = next_rlm;
-        self.scratch_dir = next_scratch_dir;
         self.deferred_resolutions = parsed.deferred_resolutions;
         self.persisted_globals = next_globals;
-        self.persisted_files = parsed.files;
-        self.persisted_file_stamps = next_file_stamps;
-        self.persisted_leaf_keys =
-            root_leaf_keys_from_sections(&self.persisted_globals, &self.persisted_files);
+        self.persisted_leaf_keys = leaf_keys_for_values(&self.persisted_globals);
         self.root_dirty = pruned_reserved;
         self.dirty_globals.clear();
-        self.dirty_files.clear();
         self.capture_rollback = None;
         self.pending_snapshot = None;
         Ok(())
@@ -1036,20 +888,6 @@ impl RlmExecutionState {
         }
         out
     }
-}
-
-#[cfg(feature = "testing")]
-pub(crate) fn capture_scratch_files_for_testing(
-    files: Vec<(String, Vec<u8>)>,
-) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-    // Production construction names its dialect; this testing-feature helper
-    // captures files for the Lashlang engine, which is what it did before the
-    // dialect became explicit.
-    let mut state = RlmExecutionState::for_engine("lashlang")?;
-    for (path, body) in files {
-        state.write_scratch_file_for_testing(&path, &body)?;
-    }
-    state.hydrated_execution_state()
 }
 
 #[cfg(test)]

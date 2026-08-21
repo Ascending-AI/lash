@@ -93,7 +93,7 @@ impl RlmDialect for LashlangDialect {
             )
         })?;
         Ok(Box::new(LashlangDialectSession {
-            state: Some(RlmExecutionState::for_engine(self.snapshot_engine_id())?),
+            state: Some(RlmExecutionState::for_engine(self.snapshot_engine_id())),
             surface: self.surface.clone(),
             services,
             bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
@@ -250,9 +250,9 @@ impl RlmDialectSession for LashlangDialectSession {
                 "RLM execution state is busy".to_string(),
             ));
         }
-        // Construct the recovery state before taking the live state. If this
-        // allocation fails, the session remains usable instead of being left busy.
-        let reset_state = RlmExecutionState::for_engine(LANGUAGE_ID)?;
+        // Construct the recovery state before taking the live state, so the
+        // session remains usable if execution returns an error.
+        let reset_state = RlmExecutionState::for_engine(LANGUAGE_ID);
         let state = self
             .state
             .take()

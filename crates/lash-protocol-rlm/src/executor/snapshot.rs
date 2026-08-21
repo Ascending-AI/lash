@@ -7,6 +7,8 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v14 removes the obsolete guest scratch-file section. Older snapshots fail
+// closed with the standard drain-or-recreate remedy.
 // v13 carries Lashlang snapshot v7 and VM continuation v8: a heap error's brand
 // serializes by name, and the two substrate-minted brands are names an older
 // reader cannot decode, so the boundary has to be a version and not a decode
@@ -20,7 +22,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 13;
+pub const RLM_SNAPSHOT_VERSION: u32 = 14;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -62,8 +64,6 @@ pub(crate) enum RlmSnapshotError {
         missing: Vec<String>,
         unexpected: Vec<String>,
     },
-    #[error("RLM scratch-file snapshot is invalid: {0}")]
-    Scratch(#[from] super::files::ScratchFileError),
     #[error("RLM canonical Lashlang snapshot is invalid: {0}")]
     Lashlang(#[from] lashlang::SnapshotDecodeError),
 }

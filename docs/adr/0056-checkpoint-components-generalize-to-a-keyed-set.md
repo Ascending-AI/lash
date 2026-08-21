@@ -4,7 +4,8 @@
 
 Accepted. Amended 2026-08-10 (FIG-1195): the inline-versus-leaf line comes from
 a named constant rather than a store blob profile. Amended 2026-08-11
-(FIG-1257): that line applies to every value shape.
+(FIG-1257): that line applies to every value shape. Amended 2026-08-21
+(FIG-1728): RLM snapshot v14 removes the scratch-file section.
 
 ## Context
 
@@ -35,6 +36,12 @@ contract must prevent. Restate addresses state cells by key rather than
 rewriting a whole map.
 
 ## Decision
+
+**Amendment (2026-08-21, FIG-1728).** RLM snapshot v14 removes the `files`
+section and file-body leaves from the execution-state root. The remaining root
+contains globals and deferred resolutions; older snapshots fail closed with the
+standard drain-or-recreate remedy. References to files below record the
+superseded v13 decision rather than a compatibility path.
 
 The checkpoint-component contract is a keyed set rather than three fixed
 slots. An execution-state root is a small typed component with sections for
