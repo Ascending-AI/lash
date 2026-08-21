@@ -15,7 +15,9 @@ use lash_core::{
     BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan, DurableSurface,
     ScanCoverage, StorePreflight,
 };
-use lash_postgres_store::PostgresStorePreflight;
+use lash_postgres_store::{
+    PostgresStorage, PostgresStoreConfig, PostgresStorePreflight, SchemaProvisioning,
+};
 
 #[allow(dead_code)]
 mod support;
@@ -80,6 +82,50 @@ async fn an_unprovisioned_database_reports_not_scanned_rather_than_erroring() {
     scratch
         .apply("DROP SCHEMA IF EXISTS lash_preflight_walk_empty CASCADE")
         .await;
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn module_artifact_surface_reads_the_persisted_json() {
+    use lashlang::LashlangArtifactStore;
+
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping module artifact preflight walk: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    let storage = PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::HostProvisioned,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("open provisioned Postgres storage");
+    let artifact = lashlang::ModuleArtifact::from_store_bytes(include_bytes!(
+        "../../lashlang/tests/fixtures/module-artifact-old.json"
+    ))
+    .expect("decode frozen artifact");
+    storage
+        .lashlang_artifact_store()
+        .put_module_artifact(&artifact)
+        .await
+        .expect("persist module artifact");
+    drop(storage);
+
+    let page = PostgresStorePreflight::from_pool(scratch.pool.clone())
+        .scan_durable(&DurableScan::first(DurableSurface::ModuleArtifact, 10))
+        .await
+        .expect("walk module artifacts");
+    assert_eq!(page.coverage, ScanCoverage::Scanned);
+    assert_eq!(page.items.len(), 1, "{page:?}");
+    assert_eq!(page.items[0].cursor, artifact.module_ref.as_str());
+    match &page.items[0].payload {
+        DurablePayload::Json(json) => assert!(json.contains("compilation_dialect"), "{json}"),
+        other => panic!("expected module artifact JSON, got {other:?}"),
+    }
+
     scratch.cleanup().await;
 }
 

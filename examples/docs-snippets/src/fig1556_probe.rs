@@ -417,6 +417,7 @@ impl StorePreflight for DeclaredPreflight {
 /// summary mode's split principled rather than arbitrary.
 pub fn deep_surfaces() -> Vec<&'static str> {
     [
+        DurableSurface::ModuleArtifact,
         DurableSurface::ParkedSegment,
         DurableSurface::PendingWake,
         DurableSurface::SessionCheckpoint,
@@ -967,6 +968,8 @@ mod tests {
                 DurableSurface::SessionExecutionState.name(),
             ]
         );
+        assert_eq!(DurableSurface::ModuleArtifact.name(), "module artifacts");
+        assert!(!DurableSurface::ModuleArtifact.is_deep());
         assert!(!DurableSurface::ParkedSegment.is_deep());
         assert_eq!(DurableSurface::PendingWake.name(), "pending wakes");
     }

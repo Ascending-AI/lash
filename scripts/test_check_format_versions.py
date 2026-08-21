@@ -42,6 +42,7 @@ FIXTURE_VALUES = {
     "LASHLANG_SEGMENT_STATE_VERSION": "25",
     "RLM_SNAPSHOT_VERSION": "26",
     "LASHLANG_VM_ABI_VERSION": "lashlang-vm-abi-v27",
+    "LASHLANG_SEMANTIC_HASH_VERSION": "lashlang-semantic-v28",
     "TRACE_SCHEMA_VERSION": "28",
     "REMOTE_PROTOCOL_VERSION": "29",
     "SQLITE_SCHEMA_VERSION": "30",
@@ -81,7 +82,10 @@ class FixtureTree:
         by_path: dict[str, list[str]] = {}
         for constant in MODULE.CONSTANTS:
             value = self.values[constant.name]
-            if constant.name == "LASHLANG_VM_ABI_VERSION":
+            if constant.name in {
+                "LASHLANG_VM_ABI_VERSION",
+                "LASHLANG_SEMANTIC_HASH_VERSION",
+            }:
                 line = f'pub const {constant.symbol}: &str = "{value}";'
             else:
                 line = f"pub const {constant.symbol}: u32 = {value};"

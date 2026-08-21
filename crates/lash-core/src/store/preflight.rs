@@ -248,6 +248,8 @@ impl std::fmt::Display for StoreSchemaStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum DurableSurface {
+    /// One persisted JSON module artifact per content-addressed module ref.
+    ModuleArtifact,
     /// One parked segment-handover envelope per non-terminal process that has
     /// one: the durable continuation a process resumes from.
     ParkedSegment,
@@ -264,6 +266,7 @@ impl DurableSurface {
     /// The operator-facing name used in reports.
     pub fn name(self) -> &'static str {
         match self {
+            DurableSurface::ModuleArtifact => "module artifacts",
             DurableSurface::ParkedSegment => "parked segments",
             DurableSurface::PendingWake => "pending wakes",
             DurableSurface::SessionCheckpoint => "session checkpoints",

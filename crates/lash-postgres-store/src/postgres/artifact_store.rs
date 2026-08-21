@@ -5,7 +5,7 @@ use crate::*;
 /// so a key value that happens to collide across namespaces (a module ref that
 /// equals a process-execution-env ref, say) resolves to independent rows instead
 /// of silently clobbering one another under last-writer-wins.
-const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
+pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
 const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";

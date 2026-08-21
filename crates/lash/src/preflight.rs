@@ -137,6 +137,7 @@ pub async fn probe_store(
     let schema = handle.schema_status().await?;
     let mut walk = Walk::default();
     for surface in [
+        DurableSurface::ModuleArtifact,
         DurableSurface::ParkedSegment,
         DurableSurface::PendingWake,
         DurableSurface::SessionCheckpoint,
@@ -265,6 +266,10 @@ impl Walk {
                         detail: format!("{}: {detail}", owner(item)),
                     });
                 }
+                #[cfg(feature = "rlm")]
+                Extraction::IdentityMatch { format } => {
+                    self.tallies.entry(format).or_default().identity_match();
+                }
             }
         }
     }
@@ -364,6 +369,7 @@ impl Walk {
                 .any(|skipped| skipped.what == surface.name())
         };
         match format {
+            DurableFormat::ModuleArtifact => !unwalked(DurableSurface::ModuleArtifact),
             DurableFormat::LashlangSegmentHandover
             | DurableFormat::VmContinuation
             | DurableFormat::Bytecode => !unwalked(DurableSurface::ParkedSegment),

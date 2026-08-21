@@ -40,8 +40,7 @@ pub(super) enum Extraction {
     /// report: the identity is a hash whose preimage includes a format version,
     /// so a mismatch is a decided refusal that no integer describes.
     ///
-    /// Only a build carrying the language can mint an identity to compare
-    /// against, so without `rlm` there is no such observation to make.
+    /// Available when this build carries the optional Lashlang verifier.
     #[cfg(feature = "rlm")]
     IdentityMismatch {
         /// Which format the identity belongs to.
@@ -49,6 +48,11 @@ pub(super) enum Extraction {
         /// The refusal, in operator-facing words.
         detail: String,
     },
+    /// The stored identity was successfully verified. Identity-only formats
+    /// have no found version integer to report, so this increments the scan
+    /// count without inventing one.
+    #[cfg(feature = "rlm")]
+    IdentityMatch { format: DurableFormat },
 }
 
 /// The format a surface's payload primarily carries, used to attribute a
@@ -59,6 +63,7 @@ pub(super) fn primary_format(surface: DurableSurface) -> DurableFormat {
         DurableSurface::PendingWake => DurableFormat::ProcessWakeDelivery,
         DurableSurface::SessionCheckpoint => DurableFormat::SessionCheckpointManifest,
         DurableSurface::SessionExecutionState => DurableFormat::RlmSnapshotEnvelope,
+        DurableSurface::ModuleArtifact => DurableFormat::ModuleArtifact,
         // A surface this build does not know is not a surface it can attribute;
         // the manifest row it lands on is the checkpoint manifest, which is the
         // one every backend has.
@@ -92,7 +97,50 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
         DurableSurface::PendingWake => pending_wake(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
+        DurableSurface::ModuleArtifact => module_artifact(payload),
         _ => Vec::new(),
+    }
+}
+
+/// Inspect one persisted module artifact without inventing a version field.
+///
+/// With `rlm`, the artifact's module ref is the identity fence: a valid current
+/// artifact contributes a readable identity, while a hash mismatch or known
+/// future shape is a decided refusal. Without the verifier, the manifest row
+/// remains visible but stored artifacts are honestly undecidable. Malformed
+/// JSON is likewise undecidable because it is not evidence of another build.
+fn module_artifact(payload: Payload<'_>) -> Vec<Extraction> {
+    let format = DurableFormat::ModuleArtifact;
+    #[cfg(not(feature = "rlm"))]
+    {
+        let _ = payload;
+        vec![Extraction::Undecodable {
+            format,
+            reason: "module artifact identity verification requires the `rlm` feature".to_string(),
+        }]
+    }
+    #[cfg(feature = "rlm")]
+    {
+        let bytes = match payload {
+            Payload::Json(text) => text.as_bytes(),
+            Payload::MessagePack(_) => {
+                return vec![Extraction::Undecodable {
+                    format,
+                    reason: "payload is MessagePack where this format is JSON".to_string(),
+                }];
+            }
+        };
+        match lashlang::ModuleArtifact::from_store_bytes(bytes) {
+            Ok(_) => vec![Extraction::IdentityMatch { format }],
+            Err(lashlang::ModuleArtifactError::Codec(reason)) => vec![Extraction::Undecodable {
+                format,
+                reason: format!("module artifact is not readable JSON: {reason}"),
+            }],
+            Err(error) => vec![Extraction::IdentityMismatch {
+                format,
+                detail: error.to_string(),
+            }],
+        }
     }
 }
 
@@ -475,6 +523,68 @@ mod tests {
         let reasons = undecodable(&extractions, DurableFormat::SessionCheckpointManifest);
         assert_eq!(reasons.len(), 1);
         assert!(reasons[0].contains("sha256:abc"), "{reasons:?}");
+    }
+
+    #[test]
+    #[cfg(feature = "rlm")]
+    fn a_frozen_module_artifact_contributes_a_verified_identity() {
+        let extractions = extract(&item(
+            DurableSurface::ModuleArtifact,
+            DurablePayload::Json(
+                include_str!("../../../lashlang/tests/fixtures/module-artifact-old.json")
+                    .to_string(),
+            ),
+        ));
+        assert!(extractions.iter().any(|extraction| matches!(
+            extraction,
+            Extraction::IdentityMatch {
+                format: DurableFormat::ModuleArtifact
+            }
+        )));
+    }
+
+    #[test]
+    #[cfg(feature = "rlm")]
+    fn a_future_module_artifact_is_a_legible_identity_refusal() {
+        let mut raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../lashlang/tests/fixtures/module-artifact-old.json"
+        ))
+        .expect("frozen fixture should be JSON");
+        raw["compilation_dialect"] = serde_json::json!("future_dialect");
+        raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+        let extractions = extract(&item(
+            DurableSurface::ModuleArtifact,
+            DurablePayload::Json(
+                serde_json::to_string(&raw).expect("future fixture should encode"),
+            ),
+        ));
+        let detail = extractions
+            .iter()
+            .find_map(|extraction| match extraction {
+                Extraction::IdentityMismatch {
+                    format: DurableFormat::ModuleArtifact,
+                    detail,
+                } => Some(detail.as_str()),
+                _ => None,
+            })
+            .expect("future artifact shape should refuse as an identity mismatch");
+        assert!(detail.contains("recompile and republish"), "{detail}");
+        assert!(!detail.contains("unknown variant"), "{detail}");
+    }
+
+    #[test]
+    #[cfg(not(feature = "rlm"))]
+    fn a_module_artifact_is_undecidable_without_the_identity_verifier() {
+        let extractions = extract(&item(
+            DurableSurface::ModuleArtifact,
+            DurablePayload::Json("{}".to_string()),
+        ));
+        let reasons = undecodable(&extractions, DurableFormat::ModuleArtifact);
+        assert_eq!(reasons.len(), 1);
+        assert!(
+            reasons[0].contains("requires the `rlm` feature"),
+            "{reasons:?}"
+        );
     }
 
     #[test]

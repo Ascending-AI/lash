@@ -31,7 +31,7 @@ use crate::trigger_manifest::{
     CurrentTriggerKeyManifest, TriggerKeyManifest, TriggerManifestReplacement,
 };
 
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v2";
+pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v6";
 
@@ -151,8 +151,6 @@ pub struct ModuleArtifact {
     #[serde(default)]
     pub trigger_key_manifest: TriggerKeyManifest,
     pub canonical_ir: Program,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dependencies: Vec<ModuleRef>,
 }
 
 impl ModuleArtifact {
@@ -197,7 +195,6 @@ impl ModuleArtifact {
             compilation_dialect,
             trigger_key_manifest,
             canonical_ir,
-            dependencies: Vec::new(),
         })
     }
 
@@ -294,17 +291,59 @@ impl ModuleArtifact {
     }
 
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, ModuleArtifactError> {
-        let artifact: Self = serde_json::from_slice(bytes)
+        let raw: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
+        let known_dialect = matches!(
+            raw.get("compilation_dialect")
+                .and_then(|value| value.as_str()),
+            Some("lashlang" | "typescript")
+        );
+        reject_future_shape(&raw)?;
+        let artifact: Self = serde_json::from_value(raw).map_err(|err| {
+            let message = err.to_string();
+            if known_dialect && message.contains("unknown variant") {
+                ModuleArtifactError::FutureShape {
+                    field: "artifact shape",
+                    value: "nested enum variant".to_string(),
+                }
+            } else {
+                ModuleArtifactError::Codec(message)
+            }
+        })?;
         artifact.verify()?;
         Ok(artifact)
     }
+}
+
+/// Refuse a known-extensible top-level shape before typed Serde reaches a
+/// future enum variant nested in the artifact. Module artifacts carry no
+/// version envelope: their module ref is the identity fence, and a host must
+/// recompile and republish source when this build cannot read that identity.
+fn reject_future_shape(raw: &serde_json::Value) -> Result<(), ModuleArtifactError> {
+    let Some(dialect) = raw
+        .get("compilation_dialect")
+        .and_then(|value| value.as_str())
+    else {
+        return Ok(());
+    };
+    if matches!(dialect, "lashlang" | "typescript") {
+        return Ok(());
+    }
+    Err(ModuleArtifactError::FutureShape {
+        field: "compilation_dialect",
+        value: dialect.to_string(),
+    })
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ModuleArtifactError {
     #[error("failed to encode module artifact: {0}")]
     Codec(String),
+    #[error(
+        "module artifact uses unsupported future shape `{field}` = `{value}`; \
+         recompile and republish the module"
+    )]
+    FutureShape { field: &'static str, value: String },
     #[error("module artifact {field} mismatch: expected {expected}, got {actual}")]
     HashMismatch {
         field: &'static str,
@@ -327,6 +366,7 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
     fn from(value: ModuleArtifactError) -> Self {
         match value {
             ModuleArtifactError::Codec(message) => Self::Decode(message),
+            ModuleArtifactError::FutureShape { .. } => Self::Decode(value.to_string()),
             ModuleArtifactError::HashMismatch { .. } => Self::Decode(value.to_string()),
         }
     }
@@ -1037,6 +1077,69 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
             writer.atom("type-literal");
             write_type(writer, ty);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frozen_old_artifact_decodes_and_verifies() {
+        let artifact = ModuleArtifact::from_store_bytes(
+            include_str!("../tests/fixtures/module-artifact-old.json").as_bytes(),
+        )
+        .expect("frozen old artifact should decode");
+        artifact
+            .verify()
+            .expect("frozen old artifact should verify");
+        assert_eq!(
+            artifact.compilation_dialect,
+            crate::CompilationDialect::Lashlang
+        );
+    }
+
+    #[test]
+    fn future_shape_refuses_before_serde_reaches_unknown_variants() {
+        let mut raw: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/module-artifact-old.json"))
+                .expect("frozen fixture should be JSON");
+        raw["compilation_dialect"] = serde_json::json!("future_dialect");
+        raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+
+        let error = ModuleArtifact::from_store_bytes(
+            &serde_json::to_vec(&raw).expect("future fixture should encode"),
+        )
+        .expect_err("a future artifact shape must be refused");
+        assert!(matches!(error, ModuleArtifactError::FutureShape { .. }));
+        let message = error.to_string();
+        assert!(message.contains("recompile and republish"), "{message}");
+        assert!(!message.contains("unknown variant"), "{message}");
+    }
+
+    #[test]
+    fn unchanged_dialect_with_unknown_nested_variant_is_a_future_shape_refusal() {
+        let mut raw: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/module-artifact-old.json"))
+                .expect("frozen fixture should be JSON");
+        raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+
+        let error = ModuleArtifact::from_store_bytes(
+            &serde_json::to_vec(&raw).expect("future fixture should encode"),
+        )
+        .expect_err("a known-dialect future variant must be refused legibly");
+        assert!(matches!(error, ModuleArtifactError::FutureShape { .. }));
+        let message = error.to_string();
+        assert!(message.contains("recompile and republish"), "{message}");
+        assert!(!message.contains("unknown variant"), "{message}");
+    }
+
+    #[test]
+    fn malformed_artifact_json_remains_an_undecodable_codec_error() {
+        let error = ModuleArtifact::from_store_bytes(br#"{"#)
+            .expect_err("malformed JSON must remain undecodable");
+        assert!(matches!(error, ModuleArtifactError::Codec(_)));
+        assert!(!matches!(error, ModuleArtifactError::FutureShape { .. }));
     }
 }
 

@@ -37,6 +37,7 @@
 //! worth describing is often the one that was never provisioned, and a walk that
 //! failed on it would take the whole report down with it.
 
+use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
 use lash_core::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreError,
@@ -114,6 +115,15 @@ const SESSION_CHECKPOINT_SQL: &str = "SELECT session_id, checkpoint_ref
      ORDER BY session_id
      LIMIT $2";
 
+/// Persisted JSON module artifacts, ordered by their content-addressed module
+/// reference so the walk can resume without a table-sized offset scan.
+const MODULE_ARTIFACT_SQL: &str = "SELECT artifact_ref, artifact_bytes
+     FROM lash_lashlang_artifacts
+     WHERE namespace = $1
+       AND ($2::text IS NULL OR artifact_ref > $2::text)
+     ORDER BY artifact_ref
+     LIMIT $3";
+
 /// Fetch a page's blobs in one round trip.
 ///
 /// One statement per session would turn a hundred-session page into a hundred
@@ -130,6 +140,7 @@ pub(crate) async fn scan_durable(
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
     match scan.surface {
+        DurableSurface::ModuleArtifact => scan_module_artifacts(pool, scan).await,
         DurableSurface::ParkedSegment => scan_parked_segments(pool, scan).await,
         DurableSurface::PendingWake => scan_pending_wakes(pool, scan).await,
         DurableSurface::SessionCheckpoint => scan_session_checkpoints(pool, scan).await,
@@ -146,6 +157,43 @@ pub(crate) async fn scan_durable(
             },
         }),
     }
+}
+
+/// One persisted JSON module artifact per module reference.
+async fn scan_module_artifacts(
+    pool: &PgPool,
+    scan: &DurableScan,
+) -> Result<DurableScanPage, StoreError> {
+    let rows = sqlx::query_as::<_, (String, Vec<u8>)>(MODULE_ARTIFACT_SQL)
+        .bind(MODULE_ARTIFACT_NAMESPACE)
+        .bind(scan.after.clone())
+        .bind(row_limit(scan))
+        .fetch_all(pool)
+        .await;
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(error) => return read_failure(scan.surface, error),
+    };
+    let returned = rows.len();
+    let items: Vec<DurableItem> = rows
+        .into_iter()
+        .map(|(artifact_ref, bytes)| DurableItem {
+            surface: DurableSurface::ModuleArtifact,
+            cursor: artifact_ref,
+            process_id: None,
+            session_id: None,
+            status: None,
+            owner_record: None,
+            payload: match String::from_utf8(bytes) {
+                Ok(text) => DurablePayload::Json(text),
+                Err(error) => DurablePayload::Missing {
+                    reason: format!("module artifact blob is not UTF-8 JSON: {error}"),
+                },
+            },
+        })
+        .collect();
+    let next = page_cursor(scan, items.last().map(|item| item.cursor.clone()), returned);
+    Ok(scanned(items, next))
 }
 
 /// One parked segment-handover envelope per live process that has one.

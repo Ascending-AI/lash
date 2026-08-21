@@ -326,9 +326,14 @@ impl PreflightReport {
             // integer, and rendering an empty list would leave the operator
             // reading "`bytecode` is at  and this build writes ...".
             if component.found.is_empty() {
+                let remedy = if component.format == DurableFormat::ModuleArtifact.name() {
+                    "; recompile and republish the module"
+                } else {
+                    ""
+                };
                 reasons.push(format!(
-                    "`{}` holds {} item(s) written by another build, and this build writes {}",
-                    component.format, component.refused_without_version, component.expected
+                    "`{}` holds {} item(s) written by another build, and this build writes {}{}",
+                    component.format, component.refused_without_version, component.expected, remedy
                 ));
                 continue;
             }
@@ -428,11 +433,14 @@ impl FormatTally {
         *self.found.entry(version).or_default() += 1;
     }
 
+    #[cfg(feature = "rlm")]
+    pub(super) fn identity_match(&mut self) {
+        self.scanned += 1;
+    }
+
     /// Record an item this build refuses for a reason no version integer
     /// expresses — the identity-only case.
     ///
-    /// Gated with the language for the same reason the observation is: without
-    /// `rlm` there is no identity to recompute, so nothing ever reaches here.
     #[cfg(feature = "rlm")]
     pub(super) fn refuse_without_version(&mut self) {
         self.scanned += 1;

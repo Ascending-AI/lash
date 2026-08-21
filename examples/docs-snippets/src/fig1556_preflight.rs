@@ -26,7 +26,8 @@ use lash_sqlite_store::{SqliteDatabase, SqliteStorePreflight, verify_schema_at};
 /// them. A deploy gate walks a fixed list rather than whatever the manifest
 /// happens to hold, so a format appearing or vanishing between builds is a diff
 /// somebody approved rather than a silent change of coverage.
-const PINNED_FORMATS: [DurableFormat; 12] = [
+const PINNED_FORMATS: [DurableFormat; 13] = [
+    DurableFormat::ModuleArtifact,
     DurableFormat::SessionCheckpointManifest,
     DurableFormat::CheckpointComponentEncoding,
     DurableFormat::SessionHeadMeta,
@@ -80,11 +81,16 @@ fn pinned_format_versions() -> Vec<(DurableFormat, Option<FormatVersion>)> {
         .collect()
 }
 
-/// The version integers an operator compares between two builds. Recording
+/// The manifest versions an operator compares between two builds. Recording
 /// them beside the artifact is what lets a refusal after a rollout be traced to
-/// the bump that caused it, rather than reconstructed from logs afterwards.
+/// the identity or bump that caused it, rather than reconstructed from logs
+/// afterwards.
 fn recorded_format_versions() -> Vec<(&'static str, String)> {
     vec![
+        (
+            "module artifact",
+            lash::formats::LASHLANG_SEMANTIC_HASH_VERSION.to_string(),
+        ),
         (
             "session checkpoint manifest",
             lash::formats::SESSION_CHECKPOINT_SCHEMA_VERSION.to_string(),
@@ -476,6 +482,15 @@ mod tests {
         );
         assert_eq!(build_identity(head.version), None);
         assert!(!needs_recompute(head));
+
+        let module = durable_format(DurableFormat::ModuleArtifact).expect("a module format");
+        assert_eq!(module.owning_crate, "lash-sansio");
+        assert_eq!(module.constant, "LASHLANG_SEMANTIC_HASH_VERSION");
+        assert_eq!(module.probe, FormatProbe::IdentityOnly);
+        assert_eq!(
+            module.version,
+            FormatVersion::Identity(lash::formats::LASHLANG_SEMANTIC_HASH_VERSION)
+        );
     }
 
     /// The two exclusions are marked, not omitted. Dropping them would make the
