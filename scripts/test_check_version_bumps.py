@@ -364,6 +364,229 @@ class VersionBumpFixtureTest(unittest.TestCase):
 
         self.assertEqual(self.check(fixture, base, head), MODULE.CheckResult((), ()))
 
+    def test_test_only_serde_shape_needs_no_bump(self) -> None:
+        test_modules = (
+            """
+            #[cfg(test)]
+            mod tests {
+                #[derive(Serialize, Deserialize)]
+                struct TestFixture {
+                    added: bool,
+                }
+            }
+            """,
+            """
+            #[cfg(all(test, feature = "testing"))]
+            mod tests {
+                #[derive(Serialize, Deserialize)]
+                struct TestFixture {
+                    added: bool,
+                }
+            }
+            """,
+        )
+        for test_module in test_modules:
+            with self.subTest(test_module=test_module):
+                fixture = self.fixture()
+                fixture.write(LIB_V1, WIRE_BASE)
+                base = fixture.commit("base")
+                fixture.write(LIB_V1, WIRE_BASE + test_module)
+                head = fixture.commit("add a test-only Serde fixture")
+
+                self.assertEqual(
+                    self.check(fixture, base, head), MODULE.CheckResult((), ())
+                )
+
+    def test_production_serde_shape_still_needs_a_bump(self) -> None:
+        fixture = self.fixture()
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("base")
+        fixture.write(
+            LIB_V1,
+            WIRE_BASE
+            + """
+            #[derive(Serialize, Deserialize)]
+            struct ProductionShape {
+                added: bool,
+            }
+            """,
+        )
+        head = fixture.commit("add a production Serde shape without a bump")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+
+    def test_serde_shape_in_cfg_any_test_module_still_needs_a_bump(self) -> None:
+        fixture = self.fixture()
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("base")
+        fixture.write(
+            LIB_V1,
+            WIRE_BASE
+            + """
+            #[cfg(any(feature = "core-conversions", test))]
+            mod core_conversions {
+                #[derive(Serialize, Deserialize)]
+                struct FeatureShape {
+                    added: bool,
+                }
+            }
+            """,
+        )
+        head = fixture.commit("add a feature-enabled Serde shape without a bump")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+
+    def test_production_shape_after_test_module_still_needs_a_bump(self) -> None:
+        test_module = r'''
+        #[cfg(test)]
+        mod tests {
+            const STRING_BRACE: &str = "}";
+            const RAW_BRACE: &str = r#"}"#;
+            // }
+            /* { nested /* } */ } */
+            #[derive(Serialize, Deserialize)]
+            struct TestFixture;
+        }
+        '''
+        fixture = self.fixture()
+        fixture.write(LIB_V1, test_module + WIRE_BASE)
+        base = fixture.commit("base")
+        fixture.write(LIB_V1, test_module + WIRE_CHANGED)
+        head = fixture.commit("change a production shape after a test module")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+
+    def test_cfg_test_only_detection_is_conservative(self) -> None:
+        cases = (
+            ("#[cfg(test)]", True),
+            ('#[cfg(all(feature = "testing", test))]', True),
+            ('#[cfg(any(feature = "core-conversions", test))]', False),
+            ("#[cfg(not(test))]", False),
+            ("#[cfg_attr(test, allow(dead_code))]", False),
+            ('#[cfg(all(test, feature = r"testing"))]', False),
+            ('#[cfg(all(test, feature = "x-y.z_1"))]', True),
+            ('#[cfg(all(test, feature = "with space"))]', False),
+            ('#[cfg(all(test, feature = "esc\\nape"))]', False),
+            ("#[cfg(all (test))]", True),
+            ('#[cfg(all(test, feature = "\\u{110000}"))]', False),
+            ('#[cfg(all(test, feature = "\\u{D800}"))]', False),
+            ('#[cfg(all(test, feature = "\\xFF"))]', False),
+            ("#[cfg(all (test))]", False),
+        )
+        for attribute, expected in cases:
+            with self.subTest(attribute=attribute):
+                self.assertEqual(MODULE._test_only_cfg(attribute), expected)
+
+    def test_malformed_test_module_keeps_serde_shapes_in_sweep(self) -> None:
+        cases = (
+            (
+                "comment-split test predicate",
+                r"""
+                #[cfg(te /* boundary */ st)]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct CommentSplitShape;
+                }
+                """,
+                "CommentSplitShape",
+            ),
+            (
+                "invalid pub restriction",
+                r"""
+                #[cfg(test)]
+                pub() mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct InvalidVisibilityShape;
+                }
+                """,
+                "InvalidVisibilityShape",
+            ),
+            (
+                "invalid cfg string escape",
+                r'''
+                #[cfg(all(test, feature = "bad\qescape"))]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct InvalidEscapeShape;
+                }
+                ''',
+                "InvalidEscapeShape",
+            ),
+            (
+                "unterminated string before derive",
+                r'''
+                #[cfg(test)]
+                mod tests {
+                    const BROKEN: &str = "unterminated
+                    #[derive(Serialize, Deserialize)]
+                    struct AfterUnterminatedString;
+                }
+                ''',
+                "AfterUnterminatedString",
+            ),
+            (
+                "unterminated block comment before derive",
+                r"""
+                #[cfg(test)]
+                mod tests {
+                    /* unterminated
+                    #[derive(Serialize, Deserialize)]
+                    struct AfterUnterminatedComment;
+                }
+                """,
+                "AfterUnterminatedComment",
+            ),
+            (
+                "malformed cfg predicate",
+                r"""
+                #[cfg(all(test feature = "testing"))]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct MalformedCfgShape;
+                }
+                """,
+                "MalformedCfgShape",
+            ),
+            (
+                "unbalanced module body",
+                r"""
+                #[cfg(test)]
+                mod tests {
+                    #[derive(Serialize, Deserialize)]
+                    struct UnbalancedBodyShape;
+                """,
+                "UnbalancedBodyShape",
+            ),
+        )
+        for name, source, shape in cases:
+            with self.subTest(name=name):
+                shapes = MODULE.serde_shapes(textwrap.dedent(source))
+
+                self.assertIn(shape, shapes)
+
+    def test_unterminated_raw_string_in_module_fails_closed(self) -> None:
+        source = textwrap.dedent(
+            r"""
+            #[cfg(test)]
+            mod tests {
+                const BROKEN: &str = r##"never closes
+                #[derive(Serialize, Deserialize)]
+                struct AfterUnterminatedRawString;
+            }
+            """
+        )
+        with self.assertRaises(MODULE.CheckError):
+            MODULE.serde_shapes(source)
+
     def test_trace_event_multiline_attribute_is_detected(self) -> None:
         shapes = MODULE.serde_shapes(textwrap.dedent(TRACE_EVENT_BASE))
 
