@@ -59,8 +59,16 @@ async fn google_non_streaming_response_carries_provider_execution_evidence() {
         }
     })
     .to_string();
-    let provider = GoogleOAuthProvider::new("access", "refresh", 0)
-        .with_transport(Arc::new(StaticResponseTransport(body)));
+    let provider = GoogleOAuthProvider::new(
+        "access",
+        "refresh",
+        0,
+        crate::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: "oauth-client-secret".into(),
+        },
+    )
+    .with_transport(Arc::new(StaticResponseTransport(body)));
     let response = provider
         .execute_request(
             "access",
@@ -89,7 +97,7 @@ async fn google_non_streaming_response_carries_provider_execution_evidence() {
 
 #[tokio::test]
 async fn google_stream_evidence_is_monotonic_and_rejects_identity_drift() {
-    let monotonic = GoogleOAuthProvider::new("access", "refresh", 0).with_transport(Arc::new(
+    let monotonic = GoogleOAuthProvider::new("access", "refresh", 0, crate::GoogleOAuthClient { id: "oauth-client-id".into(), secret: "oauth-client-secret".into() }).with_transport(Arc::new(
         StaticSseTransport(
             "data: {\"response\":{\"responseId\":\"google-stable\",\"modelVersion\":\"gemini-stable\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]}}],\"usageMetadata\":{\"thoughtsTokenCount\":7}}}\n\ndata: {\"response\":{\"responseId\":\"google-stable\",\"modelVersion\":\"gemini-stable\",\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"thoughtsTokenCount\":0}}}\n\n"
                 .to_string(),
@@ -114,7 +122,7 @@ async fn google_stream_evidence_is_monotonic_and_rejects_identity_drift() {
         Some(7)
     );
 
-    let drifting = GoogleOAuthProvider::new("access", "refresh", 0).with_transport(Arc::new(
+    let drifting = GoogleOAuthProvider::new("access", "refresh", 0, crate::GoogleOAuthClient { id: "oauth-client-id".into(), secret: "oauth-client-secret".into() }).with_transport(Arc::new(
         StaticSseTransport(
             "data: {\"response\":{\"responseId\":\"google-first\",\"modelVersion\":\"gemini-first\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}}\n\ndata: {\"response\":{\"responseId\":\"google-second\",\"modelVersion\":\"gemini-second\",\"candidates\":[{\"finishReason\":\"STOP\"}]}}\n\n"
                 .to_string(),

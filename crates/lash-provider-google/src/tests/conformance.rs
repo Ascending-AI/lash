@@ -212,7 +212,7 @@ impl ProviderNormalizer for GoogleNormalizer {
     }
 
     fn parts_from_wire(&self, body: &Value) -> Vec<LlmOutputPart> {
-        GoogleOAuthProvider::response_parts_from_value(body, None)
+        GoogleOAuthProvider::for_test().response_parts_from_value(body, None)
     }
 
     fn usage_from_wire(&self, body: &Value) -> LlmUsage {
@@ -246,22 +246,23 @@ impl ProviderNormalizer for GoogleNormalizer {
         });
         for raw in sse_events {
             let first_new_tool_call = tool_calls.len();
-            GoogleOAuthProvider::process_sse_event_with_text_parts(
-                raw,
-                crate::support::SseTextPartSink {
-                    full: &mut full,
-                    text_deltas: &mut text_deltas,
-                    reasoning_deltas: &mut reasoning_deltas,
-                    usage: &mut usage,
-                    provider_usage: &mut provider_usage,
-                    execution_evidence: &mut execution_evidence,
-                    tool_call_parts: Some(&mut tool_calls),
-                    output_parts: Some(&mut output_parts),
-                    finish_event: &mut finish_event,
-                },
-                None,
-            )
-            .expect("google sse event parses");
+            GoogleOAuthProvider::for_test()
+                .process_sse_event_with_text_parts(
+                    raw,
+                    crate::support::SseTextPartSink {
+                        full: &mut full,
+                        text_deltas: &mut text_deltas,
+                        reasoning_deltas: &mut reasoning_deltas,
+                        usage: &mut usage,
+                        provider_usage: &mut provider_usage,
+                        execution_evidence: &mut execution_evidence,
+                        tool_call_parts: Some(&mut tool_calls),
+                        output_parts: Some(&mut output_parts),
+                        finish_event: &mut finish_event,
+                    },
+                    None,
+                )
+                .expect("google sse event parses");
             for part in &tool_calls[first_new_tool_call..] {
                 sender.send(LlmStreamEvent::Part(part.clone()));
             }
@@ -284,8 +285,16 @@ impl ProviderNormalizer for GoogleNormalizer {
     fn build_next_request(&self, _scenario: Scenario, messages: Vec<LlmMessage>) -> Value {
         let mut req = request(None);
         req.messages = messages;
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
-        let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
+        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
     }
 }

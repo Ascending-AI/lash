@@ -119,9 +119,17 @@ fn classify(failure: ProviderFailure) -> ProviderFailure {
 
 #[tokio::test]
 async fn google_per_minute_throttle_is_retryable_and_honors_retry_info() {
-    let mut provider = GoogleOAuthProvider::new("access-token", "refresh-token", 0)
-        .with_project_id(Some("project-1".to_string()))
-        .with_transport(transport(GOOGLE_PER_MINUTE));
+    let mut provider = GoogleOAuthProvider::new(
+        "access-token",
+        "refresh-token",
+        0,
+        lash_provider_google::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: "oauth-client-secret".into(),
+        },
+    )
+    .with_project_id(Some("project-1".to_string()))
+    .with_transport(transport(GOOGLE_PER_MINUTE));
     let failure = provider
         .complete(request("gemini-3.1-pro-preview", false, false))
         .await
@@ -135,9 +143,17 @@ async fn google_per_minute_throttle_is_retryable_and_honors_retry_info() {
 
 #[tokio::test]
 async fn google_hard_quota_is_not_retried_as_a_per_minute_throttle() {
-    let mut provider = GoogleOAuthProvider::new("access-token", "refresh-token", 0)
-        .with_project_id(Some("project-1".to_string()))
-        .with_transport(transport(GOOGLE_HARD_QUOTA));
+    let mut provider = GoogleOAuthProvider::new(
+        "access-token",
+        "refresh-token",
+        0,
+        lash_provider_google::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: "oauth-client-secret".into(),
+        },
+    )
+    .with_project_id(Some("project-1".to_string()))
+    .with_transport(transport(GOOGLE_HARD_QUOTA));
     let failure = classify(
         provider
             .complete(request("gemini-3.1-pro-preview", false, false))

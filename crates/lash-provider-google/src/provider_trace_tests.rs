@@ -10,6 +10,7 @@ use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTr
 use serde_json::json;
 
 const SECRET_SENTINEL: &str = "sk-super-secret-do-not-log";
+const CLIENT_SECRET_SENTINEL: &str = "oauth-super-secret-do-not-log";
 
 #[derive(Debug)]
 struct RecordingTransport {
@@ -55,10 +56,9 @@ fn assert_auth_material_absent(event: &LlmProviderTraceEvent) {
         body_json.to_string(),
         format!("{event:?}"),
     ] {
-        assert!(
-            !captured.contains(SECRET_SENTINEL),
-            "secret leaked: {captured}"
-        );
+        for secret in [SECRET_SENTINEL, CLIENT_SECRET_SENTINEL] {
+            assert!(!captured.contains(secret), "secret leaked: {captured}");
+        }
         let lowercase = captured.to_ascii_lowercase();
         assert!(
             !lowercase.contains("authorization") && !lowercase.contains("bearer"),
@@ -74,8 +74,16 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
         "contents": [{"role": "user", "parts": [{"text": "x".repeat(3_000)}]}],
     });
     let transport = Arc::new(RecordingTransport::new(200));
-    let provider = GoogleOAuthProvider::new(SECRET_SENTINEL, "refresh-secret", 0)
-        .with_transport(transport.clone());
+    let provider = GoogleOAuthProvider::new(
+        SECRET_SENTINEL,
+        "refresh-secret",
+        0,
+        crate::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: CLIENT_SECRET_SENTINEL.into(),
+        },
+    )
+    .with_transport(transport.clone());
     let events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let event_sink = Arc::clone(&events);
 
@@ -114,8 +122,16 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
     );
 
     let error_transport = Arc::new(RecordingTransport::new(500));
-    let error_provider = GoogleOAuthProvider::new(SECRET_SENTINEL, "refresh-secret", 0)
-        .with_transport(error_transport);
+    let error_provider = GoogleOAuthProvider::new(
+        SECRET_SENTINEL,
+        "refresh-secret",
+        0,
+        crate::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: CLIENT_SECRET_SENTINEL.into(),
+        },
+    )
+    .with_transport(error_transport);
     let error_events = Arc::new(Mutex::new(Vec::<LlmProviderTraceEvent>::new()));
     let error_event_sink = Arc::clone(&error_events);
     let error = error_provider
@@ -144,6 +160,7 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
     );
     let error_capture = format!("{error:?}");
     assert!(!error_capture.contains(SECRET_SENTINEL));
+    assert!(!error_capture.contains(CLIENT_SECRET_SENTINEL));
     let lowercase = error_capture.to_ascii_lowercase();
     assert!(!lowercase.contains("authorization"));
     assert!(!lowercase.contains("bearer"));

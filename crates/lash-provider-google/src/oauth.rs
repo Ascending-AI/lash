@@ -3,45 +3,33 @@
 
 use lash_provider_auth::{OAuthError, OAuthTokens, now_secs, url_form_encode};
 
-const GOOGLE_CLIENT_ID_ENV: &str = "LASH_GOOGLE_CLIENT_ID";
-const GOOGLE_CLIENT_SECRET_ENV: &str = "LASH_GOOGLE_CLIENT_SECRET";
+use crate::GoogleOAuthClient;
+
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_REDIRECT_URI: &str = "https://codeassist.google.com/authcode";
 const GOOGLE_SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 const GOOGLE_PROMPT: &str = "consent select_account";
 
-fn google_client_id() -> Option<String> {
-    std::env::var(GOOGLE_CLIENT_ID_ENV)
-        .ok()
-        .filter(|v| !v.is_empty())
-}
-
-fn google_client_secret() -> Option<String> {
-    std::env::var(GOOGLE_CLIENT_SECRET_ENV)
-        .ok()
-        .filter(|v| !v.is_empty())
-}
-
-fn google_client_credentials() -> Result<(String, String), OAuthError> {
-    match (google_client_id(), google_client_secret()) {
-        (Some(client_id), Some(client_secret)) => Ok((client_id, client_secret)),
-        (None, None) => Err(OAuthError::TokenExchange(format!(
-            "Missing Google OAuth env config: set both {} and {}.",
-            GOOGLE_CLIENT_ID_ENV, GOOGLE_CLIENT_SECRET_ENV
-        ))),
-        _ => Err(OAuthError::TokenExchange(format!(
-            "Invalid Google OAuth env config: set both {} and {}, or set neither.",
-            GOOGLE_CLIENT_ID_ENV, GOOGLE_CLIENT_SECRET_ENV
-        ))),
+fn validate_client_credentials(oauth_client: &GoogleOAuthClient) -> Result<(), OAuthError> {
+    if oauth_client.id.trim().is_empty() || oauth_client.secret.trim().is_empty() {
+        Err(OAuthError::TokenExchange(
+            "Google OAuth client id and client secret must both be non-empty.".to_string(),
+        ))
+    } else {
+        Ok(())
     }
 }
 
 /// Build the Google OAuth authorization URL for manual code entry.
-pub fn authorize_url(challenge: &str) -> Result<String, OAuthError> {
+pub fn authorize_url(client_id: &str, challenge: &str) -> Result<String, OAuthError> {
+    if client_id.trim().is_empty() {
+        return Err(OAuthError::TokenExchange(
+            "Google OAuth client id must be non-empty.".to_string(),
+        ));
+    }
     let state = uuid::Uuid::new_v4().to_string();
-    let (client_id, _) = google_client_credentials()?;
-    Ok(build_authorize_url(&client_id, challenge, &state))
+    Ok(build_authorize_url(client_id, challenge, &state))
 }
 
 fn build_authorize_url(client_id: &str, challenge: &str, state: &str) -> String {
@@ -60,9 +48,13 @@ fn build_authorize_url(client_id: &str, challenge: &str, state: &str) -> String 
 }
 
 /// Exchange an authorization code (or a redirect URL containing
-/// `code=...`) for tokens.
-pub async fn exchange_code(code: &str, verifier: &str) -> Result<OAuthTokens, OAuthError> {
-    let (client_id, client_secret) = google_client_credentials()?;
+/// `code=...`) for tokens using the host's named OAuth client credentials.
+pub async fn exchange_code(
+    oauth_client: &GoogleOAuthClient,
+    code: &str,
+    verifier: &str,
+) -> Result<OAuthTokens, OAuthError> {
+    validate_client_credentials(oauth_client)?;
     let auth_code = extract_auth_code(code);
     if auth_code.is_empty() {
         return Err(OAuthError::TokenExchange(
@@ -77,8 +69,8 @@ pub async fn exchange_code(code: &str, verifier: &str) -> Result<OAuthTokens, OA
             ("grant_type", "authorization_code"),
             ("code", auth_code.as_str()),
             ("redirect_uri", GOOGLE_REDIRECT_URI),
-            ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
+            ("client_id", oauth_client.id.as_str()),
+            ("client_secret", oauth_client.secret.as_str()),
             ("code_verifier", verifier),
         ]))
         .send()
@@ -96,9 +88,12 @@ pub async fn exchange_code(code: &str, verifier: &str) -> Result<OAuthTokens, OA
     parse_token_response(&body)
 }
 
-/// Refresh Google OAuth tokens.
-pub async fn refresh_tokens(refresh: &str) -> Result<OAuthTokens, OAuthError> {
-    let (client_id, client_secret) = google_client_credentials()?;
+/// Refresh Google OAuth tokens using the host's named OAuth client credentials.
+pub async fn refresh_tokens(
+    oauth_client: &GoogleOAuthClient,
+    refresh: &str,
+) -> Result<OAuthTokens, OAuthError> {
+    validate_client_credentials(oauth_client)?;
     let client = reqwest::Client::new();
     let resp = client
         .post(GOOGLE_TOKEN_URL)
@@ -106,8 +101,8 @@ pub async fn refresh_tokens(refresh: &str) -> Result<OAuthTokens, OAuthError> {
         .body(url_form_encode(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh),
-            ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
+            ("client_id", oauth_client.id.as_str()),
+            ("client_secret", oauth_client.secret.as_str()),
         ]))
         .send()
         .await?;
@@ -173,6 +168,17 @@ fn extract_auth_code(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn google_authorization_url_requires_explicit_client_id() {
+        let error = authorize_url("   ", "challenge").expect_err("an empty client id is rejected");
+        assert!(error.to_string().contains("client id must be non-empty"));
+
+        let url = authorize_url("client-id", "challenge")
+            .expect("an explicit client id builds an authorization URL");
+        assert!(url.contains("client_id=client-id"));
+        assert!(url.contains("code_challenge=challenge"));
+    }
 
     #[test]
     fn authorization_url_matches_known_good_literal() {

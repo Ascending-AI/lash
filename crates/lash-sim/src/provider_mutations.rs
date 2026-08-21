@@ -494,9 +494,17 @@ async fn run_mutation_script(
             provider.complete(anthropic_messages_request()).await
         }
         MutationRequestKind::Google { stream } => {
-            let mut provider = GoogleOAuthProvider::new("access-token", "refresh-token", 0)
-                .with_project_id(Some("project-1".to_string()))
-                .with_transport(provider_transport(&transport));
+            let mut provider = GoogleOAuthProvider::new(
+                "access-token",
+                "refresh-token",
+                0,
+                lash_provider_google::GoogleOAuthClient {
+                    id: "oauth-client-id".into(),
+                    secret: "oauth-client-secret".into(),
+                },
+            )
+            .with_project_id(Some("project-1".to_string()))
+            .with_transport(provider_transport(&transport));
             provider.complete(google_request(stream)).await
         }
     };

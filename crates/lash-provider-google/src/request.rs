@@ -99,10 +99,11 @@ impl GoogleOAuthProvider {
     }
 
     pub(crate) fn build_contents_with_attachment_parts(
+        &self,
         req: &LlmRequest,
         attachment_parts: &[Value],
     ) -> Vec<Value> {
-        let serving_route = Self::route_identity_for_model(&req.model);
+        let serving_route = self.route_identity_for_model(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
         let req = safe_request.as_ref();
         let mut out: Vec<Value> = Vec::new();
