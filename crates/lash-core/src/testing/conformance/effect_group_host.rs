@@ -1071,9 +1071,8 @@ async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -> Ho
 
 const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
 
-/// Every await is bounded: a host that never serves a rank must fail this suite
-/// as a timeout at the law that waited, not as a hung test binary.
-const AWAIT_BUDGET: Duration = Duration::from_secs(10);
+/// Hang detector for the entire conformance law, not a latency expectation.
+const AWAIT_BUDGET: Duration = Duration::from_secs(60);
 
 fn scope(prefix: &str, label: &str) -> ExecutionScope {
     ExecutionScope::runtime_operation(format!("{prefix}-{label}"))

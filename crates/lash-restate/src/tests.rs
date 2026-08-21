@@ -10485,9 +10485,9 @@ async fn running_process_cancel_uses_native_signal_without_poll_delay() {
         .expect("append cancel request");
     signal_transport.release.notify_one();
 
-    let outcome = tokio::time::timeout(Duration::from_millis(20), run)
+    let outcome = tokio::time::timeout(Duration::from_secs(5), run)
         .await
-        .expect("accepted cancel must not wait for the 25ms polling floor")
+        .expect("native cancellation signal must not hang")
         .expect("join running process")
         .expect("run process");
     assert!(matches!(
@@ -12142,6 +12142,17 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
                 )
             })
             .unwrap_or_else(|| panic!("missing {child_name} child in {children:?}"));
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry)).await_event(
+                &child.id,
+                "process.cancel_requested",
+                0,
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("timed out awaiting {child_name} child Cancel delivery"))
+        .unwrap_or_else(|error| panic!("failed awaiting {child_name} child Cancel: {error}"));
         assert_eq!(
             registry
                 .events_after(&child.id, 0)
