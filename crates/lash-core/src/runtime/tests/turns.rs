@@ -8081,10 +8081,9 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
                 runtime_event: None,
                 external_registrar: Some(Arc::new(|reg| {
                     reg.operations().command(
-                        crate::plugin::PluginOperationDef {
+                        crate::plugin::PluginOperationSpec {
                             name: "test.spawn".to_string(),
                             description: "spawn".to_string(),
-                            kind: crate::plugin::PluginOperationKind::Command,
                             session_param: crate::SessionParam::Optional,
                             input_schema: json!({}),
                             output_schema: json!({}),
@@ -8123,7 +8122,7 @@ async fn external_invoke_can_create_session_from_current_snapshot() {
                                                 crate::test_support::PluginOperationFailure::new(err.to_string())
                                             });
                                         match snapshot {
-                                            Ok(snapshot) => Ok(crate::plugin::ErasedPluginCommandOutcome {
+                                            Ok(snapshot) => Ok(crate::plugin::ErasedPluginOperationOutcome {
                                                 output: json!({
                                                 "session_id": handle.session_id,
                                                 "message_count": snapshot.read_model().messages.len(),
@@ -8197,17 +8196,16 @@ async fn plugin_command_reuses_caller_scope_on_lost_response_retry() {
                 runtime_event: None,
                 external_registrar: Some(Arc::new(|reg| {
                     reg.operations().command(
-                        crate::plugin::PluginOperationDef {
+                        crate::plugin::PluginOperationSpec {
                             name: "test.emit".to_string(),
                             description: "emit one durable event".to_string(),
-                            kind: crate::plugin::PluginOperationKind::Command,
                             session_param: crate::SessionParam::Optional,
                             input_schema: json!({}),
                             output_schema: json!({}),
                         },
                         Arc::new(|_, _| {
                             Box::pin(async move {
-                                Ok(crate::plugin::ErasedPluginCommandOutcome {
+                                Ok(crate::plugin::ErasedPluginOperationOutcome {
                                     output: json!({"ok": true}),
                                     events: vec![crate::PluginRuntimeEvent::Custom {
                                         name: "test.event".to_string(),

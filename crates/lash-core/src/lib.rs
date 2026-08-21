@@ -234,7 +234,6 @@ pub mod facade_support {
     pub use crate::plugin::DirectLlmCompletion;
     pub use crate::plugin::PersistentRuntimeServices;
     pub use crate::plugin::PluginCommand;
-    pub use crate::plugin::PluginCommandReceipt;
     pub use crate::plugin::PluginDirective;
     pub use crate::plugin::PluginExtensionContribution;
     pub use crate::plugin::PluginFactory;
@@ -243,6 +242,7 @@ pub mod facade_support {
     pub use crate::plugin::PluginLifecycleEventHook;
     pub use crate::plugin::PluginOperation;
     pub use crate::plugin::PluginOperationInvokeError;
+    pub use crate::plugin::PluginOperationReceipt;
     pub use crate::plugin::PluginOwned;
     pub use crate::plugin::PluginQuery;
     pub use crate::plugin::PluginRegistrar;
@@ -251,7 +251,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpec;
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
-    pub use crate::plugin::PluginTaskReceipt;
     pub use crate::plugin::PromptHookContext;
     pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;

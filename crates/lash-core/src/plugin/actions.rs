@@ -12,15 +12,22 @@ pub type PluginQueryInvokeFuture =
     Pin<Box<dyn Future<Output = Result<serde_json::Value, PluginOperationFailure>> + Send>>;
 pub type PluginQueryHandler =
     Arc<dyn Fn(PluginQueryContext, serde_json::Value) -> PluginQueryInvokeFuture + Send + Sync>;
-pub type PluginCommandInvokeFuture = Pin<
-    Box<dyn Future<Output = Result<ErasedPluginCommandOutcome, PluginOperationFailure>> + Send>,
+pub(crate) type ErasedPluginOperationInvokeFuture = Pin<
+    Box<dyn Future<Output = Result<ErasedPluginOperationOutcome, PluginOperationFailure>> + Send>,
 >;
-pub type PluginCommandHandler =
-    Arc<dyn Fn(PluginCommandContext, serde_json::Value) -> PluginCommandInvokeFuture + Send + Sync>;
-pub type PluginTaskInvokeFuture =
-    Pin<Box<dyn Future<Output = Result<ErasedPluginTaskOutcome, PluginOperationFailure>> + Send>>;
-pub type PluginTaskHandler =
-    Arc<dyn Fn(PluginTaskContext, serde_json::Value) -> PluginTaskInvokeFuture + Send + Sync>;
+pub type PluginCommandHandler = Arc<
+    dyn Fn(PluginCommandContext, serde_json::Value) -> ErasedPluginOperationInvokeFuture
+        + Send
+        + Sync,
+>;
+pub type PluginTaskHandler = Arc<
+    dyn Fn(PluginTaskContext, serde_json::Value) -> ErasedPluginOperationInvokeFuture + Send + Sync,
+>;
+type PluginOperationHandler = Arc<
+    dyn Fn(PluginOperationContext, serde_json::Value) -> ErasedPluginOperationInvokeFuture
+        + Send
+        + Sync,
+>;
 pub type PluginOperationFuture<T> =
     Pin<Box<dyn Future<Output = Result<T, PluginOperationFailure>> + Send>>;
 
@@ -40,16 +47,69 @@ pub enum PluginOperationKind {
     Task,
 }
 
+impl PluginOperationKind {
+    /// The word this kind is called by in operator-facing failure text.
+    ///
+    /// The match is exhaustive on purpose: a fourth kind has to answer this
+    /// question before it compiles, which is what keeps the dispatch
+    /// mismatch below a typed failure rather than a panic.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Query => "query",
+            Self::Command => "command",
+            Self::Task => "task",
+        }
+    }
+}
+
+/// A plugin operation as its author describes it, before registration.
+///
+/// The kind is deliberately absent: it is decided by which
+/// [`PluginOperationRegistration`] constructor the spec is handed to, so a
+/// registration whose declared kind disagrees with its handler cannot be
+/// written down.
+#[derive(Clone, Debug)]
+pub(crate) struct PluginOperationSpec {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) session_param: SessionParam,
+    pub(crate) input_schema: serde_json::Value,
+    pub(crate) output_schema: serde_json::Value,
+}
+
+/// A registered plugin operation as hosts see it.
+///
+/// `kind` is an output, not an input: it is stamped by the registration
+/// constructor that also wrapped the handler, so the two can never disagree.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginOperationDef {
     pub name: String,
     pub description: String,
-    pub kind: PluginOperationKind,
+    kind: PluginOperationKind,
     pub session_param: SessionParam,
     #[serde(default)]
     pub input_schema: serde_json::Value,
     #[serde(default)]
     pub output_schema: serde_json::Value,
+}
+
+impl PluginOperationDef {
+    /// The kind this operation was registered as, and therefore the only
+    /// kind of invocation that reaches its handler.
+    pub fn kind(&self) -> PluginOperationKind {
+        self.kind
+    }
+
+    fn from_spec(spec: PluginOperationSpec, kind: PluginOperationKind) -> Self {
+        Self {
+            name: spec.name,
+            description: spec.description,
+            kind,
+            session_param: spec.session_param,
+            input_schema: spec.input_schema,
+            output_schema: spec.output_schema,
+        }
+    }
 }
 
 pub trait PluginOperation: Send + Sync + 'static {
@@ -98,11 +158,10 @@ impl From<PluginError> for PluginOperationFailure {
     }
 }
 
-pub fn plugin_operation_def<Op: PluginOperation>(kind: PluginOperationKind) -> PluginOperationDef {
-    PluginOperationDef {
+pub(crate) fn plugin_operation_spec<Op: PluginOperation>() -> PluginOperationSpec {
+    PluginOperationSpec {
         name: Op::NAME.to_string(),
         description: Op::DESCRIPTION.to_string(),
-        kind,
         session_param: Op::SESSION_PARAM,
         input_schema: serde_json::to_value(schemars::schema_for!(Op::Args))
             .unwrap_or_else(|_| serde_json::json!({})),
@@ -197,13 +256,13 @@ pub enum PluginRuntimeDirective {
 }
 
 #[derive(Clone, Debug)]
-pub struct PluginCommandOutcome<T> {
+pub struct PluginOperationOutcome<T> {
     pub output: T,
     pub events: Vec<PluginRuntimeEvent>,
     pub directives: Vec<PluginRuntimeDirective>,
 }
 
-impl<T> PluginCommandOutcome<T> {
+impl<T> PluginOperationOutcome<T> {
     pub fn new(output: T) -> Self {
         Self {
             output,
@@ -224,77 +283,152 @@ impl<T> PluginCommandOutcome<T> {
 }
 
 #[derive(Clone, Debug)]
-pub struct PluginTaskOutcome<T> {
+pub struct PluginOperationReceipt<T> {
     pub output: T,
-    pub events: Vec<PluginRuntimeEvent>,
-    pub directives: Vec<PluginRuntimeDirective>,
+    pub events: Vec<PluginOwned<PluginRuntimeEvent>>,
+    pub pending_turn_inputs: Vec<crate::PendingTurnInput>,
 }
 
-impl<T> PluginTaskOutcome<T> {
-    pub fn new(output: T) -> Self {
+#[derive(Clone, Debug)]
+pub(crate) struct ErasedPluginOperationOutcome {
+    pub(crate) output: serde_json::Value,
+    pub(crate) events: Vec<PluginRuntimeEvent>,
+    pub(crate) directives: Vec<PluginRuntimeDirective>,
+}
+
+impl ErasedPluginOperationOutcome {
+    pub(crate) fn new(output: serde_json::Value) -> Self {
         Self {
             output,
             events: Vec::new(),
             directives: Vec::new(),
         }
     }
+}
 
-    pub fn with_events(mut self, events: Vec<PluginRuntimeEvent>) -> Self {
-        self.events = events;
-        self
+pub(crate) enum PluginOperationContext {
+    Query(PluginQueryContext),
+    Command(PluginCommandContext),
+    Task(PluginTaskContext),
+}
+
+impl PluginOperationContext {
+    /// The kind of registration this context can drive.
+    fn kind(&self) -> PluginOperationKind {
+        match self {
+            Self::Query(_) => PluginOperationKind::Query,
+            Self::Command(_) => PluginOperationKind::Command,
+            Self::Task(_) => PluginOperationKind::Task,
+        }
+    }
+}
+
+/// The typed failure a registration returns when it is handed a context of
+/// the wrong kind.
+///
+/// The stamped-kind invariant makes that unreachable today; returning a
+/// failure rather than panicking keeps a future kind's dispatch bug a failed
+/// operation instead of an aborted turn.
+fn mismatched_operation_context(
+    expected: PluginOperationKind,
+    actual: PluginOperationKind,
+) -> ErasedPluginOperationInvokeFuture {
+    Box::pin(async move {
+        Err(PluginOperationFailure::new(format!(
+            "{} registration invoked with a {} context",
+            expected.label(),
+            actual.label()
+        )))
+    })
+}
+
+#[derive(Clone)]
+pub(crate) struct PluginOperationRegistration {
+    def: PluginOperationDef,
+    handler: PluginOperationHandler,
+}
+
+impl PluginOperationRegistration {
+    pub(crate) fn query(spec: PluginOperationSpec, handler: PluginQueryHandler) -> Self {
+        Self {
+            def: PluginOperationDef::from_spec(spec, PluginOperationKind::Query),
+            handler: Arc::new(move |ctx, args| match ctx {
+                PluginOperationContext::Query(ctx) => {
+                    let future = handler(ctx, args);
+                    Box::pin(async move { future.await.map(ErasedPluginOperationOutcome::new) })
+                        as ErasedPluginOperationInvokeFuture
+                }
+                other @ (PluginOperationContext::Command(_) | PluginOperationContext::Task(_)) => {
+                    mismatched_operation_context(PluginOperationKind::Query, other.kind())
+                }
+            }),
+        }
     }
 
-    pub fn with_directives(mut self, directives: Vec<PluginRuntimeDirective>) -> Self {
-        self.directives = directives;
-        self
+    pub(crate) fn command(spec: PluginOperationSpec, handler: PluginCommandHandler) -> Self {
+        Self {
+            def: PluginOperationDef::from_spec(spec, PluginOperationKind::Command),
+            handler: Arc::new(move |ctx, args| match ctx {
+                PluginOperationContext::Command(ctx) => handler(ctx, args),
+                other @ (PluginOperationContext::Query(_) | PluginOperationContext::Task(_)) => {
+                    mismatched_operation_context(PluginOperationKind::Command, other.kind())
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn task(spec: PluginOperationSpec, handler: PluginTaskHandler) -> Self {
+        Self {
+            def: PluginOperationDef::from_spec(spec, PluginOperationKind::Task),
+            handler: Arc::new(move |ctx, args| match ctx {
+                PluginOperationContext::Task(ctx) => handler(ctx, args),
+                other @ (PluginOperationContext::Query(_) | PluginOperationContext::Command(_)) => {
+                    mismatched_operation_context(PluginOperationKind::Task, other.kind())
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn def(&self) -> &PluginOperationDef {
+        &self.def
+    }
+
+    pub(crate) fn invoke(
+        &self,
+        ctx: PluginOperationContext,
+        args: serde_json::Value,
+    ) -> ErasedPluginOperationInvokeFuture {
+        (self.handler)(ctx, args)
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct PluginCommandReceipt<T> {
-    pub output: T,
-    pub events: Vec<PluginOwned<PluginRuntimeEvent>>,
-    pub pending_turn_inputs: Vec<crate::PendingTurnInput>,
-}
-
-#[derive(Clone, Debug)]
-pub struct PluginTaskReceipt<T> {
-    pub output: T,
-    pub events: Vec<PluginOwned<PluginRuntimeEvent>>,
-    pub pending_turn_inputs: Vec<crate::PendingTurnInput>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ErasedPluginCommandOutcome {
-    pub(crate) output: serde_json::Value,
-    pub(crate) events: Vec<PluginRuntimeEvent>,
-    pub(crate) directives: Vec<PluginRuntimeDirective>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ErasedPluginTaskOutcome {
-    pub(crate) output: serde_json::Value,
-    pub(crate) events: Vec<PluginRuntimeEvent>,
-    pub(crate) directives: Vec<PluginRuntimeDirective>,
-}
-
 #[derive(Clone)]
-pub(crate) struct RegisteredPluginQuery {
-    pub(crate) plugin_id: String,
-    pub(crate) def: PluginOperationDef,
-    pub(crate) handler: PluginQueryHandler,
+pub(crate) struct RegisteredPluginOperation {
+    plugin_id: String,
+    operation: PluginOperationRegistration,
 }
 
-#[derive(Clone)]
-pub(crate) struct RegisteredPluginCommand {
-    pub(crate) plugin_id: String,
-    pub(crate) def: PluginOperationDef,
-    pub(crate) handler: PluginCommandHandler,
-}
+impl RegisteredPluginOperation {
+    pub(crate) fn new(plugin_id: String, operation: PluginOperationRegistration) -> Self {
+        Self {
+            plugin_id,
+            operation,
+        }
+    }
 
-#[derive(Clone)]
-pub(crate) struct RegisteredPluginTask {
-    pub(crate) plugin_id: String,
-    pub(crate) def: PluginOperationDef,
-    pub(crate) handler: PluginTaskHandler,
+    pub(crate) fn plugin_id(&self) -> &str {
+        &self.plugin_id
+    }
+
+    pub(crate) fn def(&self) -> &PluginOperationDef {
+        self.operation.def()
+    }
+
+    pub(crate) fn invoke(
+        &self,
+        ctx: PluginOperationContext,
+        args: serde_json::Value,
+    ) -> ErasedPluginOperationInvokeFuture {
+        self.operation.invoke(ctx, args)
+    }
 }
