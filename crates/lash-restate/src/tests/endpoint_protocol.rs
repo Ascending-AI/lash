@@ -334,6 +334,52 @@ pub(super) fn encode_completed_captured_sleep_replay<T: serde::Serialize>(
     Ok(body.freeze())
 }
 
+/// FIG-1631: redrive a turn-cancel gate that parked on its timer.
+///
+/// The gate's journal is its contract, so the captured `register_awakeable`
+/// call and `SleepCommand` frames are spliced back verbatim and in the order
+/// the deployed code emitted them, then both are completed.
+pub(super) fn encode_completed_gate_sleep_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    suspended_output: &[u8],
+    calls: &[(RestateCallFrame, Option<serde_json::Value>)],
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let sleep_command = restate_message_frame(suspended_output, 0x040C)
+        .ok_or_else(|| TerminalError::new("suspended gate omitted its SleepCommand"))?;
+    let sleep_completion_id = u32::try_from(
+        protobuf_varint_field(
+            sleep_command
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("sleep command omitted its frame payload"))?,
+            11,
+        )
+        .ok_or_else(|| TerminalError::new("sleep command omitted its completion id"))?,
+    )
+    .map_err(|_| TerminalError::new("sleep command completion id exceeded u32"))?;
+    let known_entries = u32::try_from(2 + calls.len())
+        .map_err(|_| TerminalError::new("too many commands in gate replay fixture"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, known_entries));
+    body.extend_from_slice(&encode_input_command(&input));
+    for (call, _) in calls {
+        body.extend_from_slice(&call.frame);
+    }
+    body.extend_from_slice(sleep_command);
+    for (call, completion) in calls {
+        if let Some(completion) = completion {
+            let completion = serde_json::to_vec(completion).map_err(TerminalError::from_error)?;
+            body.extend_from_slice(&encode_call_completion(
+                call.result_completion_id,
+                &completion,
+            ));
+        }
+    }
+    body.extend_from_slice(&encode_sleep_completion(sleep_completion_id));
+    Ok(body.freeze())
+}
+
 /// FIG-788: splice the exact deployed segment-finish and successor-send
 /// commands, then complete only the send's invocation-id notification.
 pub(super) fn encode_process_segment_send_replay<T: serde::Serialize>(

@@ -112,12 +112,9 @@ pub use turn::{RestateTurnAttach, RestateTurnDeployment};
 // generated handlers can name them, and `doc(hidden)` because they are not a
 // host contract.
 #[doc(hidden)]
-pub use controller::{RestateControllerContext, RestateProcessAwaitRaceOutcome};
+pub use controller::RestateControllerContext;
 #[doc(hidden)]
-pub use durable_wait::{
-    RestateAwaitEventRaceOutcome, RestateSleepRaceOutcome, RestateTurnAwaitEventWaitRequest,
-    RestateTurnSleepWaitRequest,
-};
+pub use durable_wait::RestateTurnCancelRaceOutcome;
 
 #[cfg(test)]
 mod tests;

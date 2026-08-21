@@ -17,13 +17,13 @@ use std::time::Duration;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome, ProcessExternalRef,
-    ProcessRecord, ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, RuntimeInvocation, ScopedEffectController,
-    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
-    facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
+    PluginError, ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord,
+    ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
+    RuntimeInvocation, ScopedEffectController, facade_support::CanonicalRuntimeEffectEnvelope,
+    facade_support::RuntimeAwaitEventOptions, facade_support::RuntimeSleepOptions,
+    facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
 };
 use restate_sdk::context::RunRetryPolicy;
@@ -31,9 +31,9 @@ use restate_sdk::errors::TerminalError;
 use serde::Serialize;
 
 use crate::durable_wait::{
-    RestateAwaitEventRaceOutcome, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
-    RestateDurableWaitResolveRequest, RestateSleepRaceOutcome, restate_await_event_key,
-    restate_await_event_key_is_valid, restate_durable_wait_request, restate_unknown_or_revoked,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
+    RestateTurnCancelRaceOutcome, restate_await_event_key, restate_await_event_key_is_valid,
+    restate_durable_wait_request, restate_unknown_or_revoked,
 };
 use crate::process::RestateProcessCancelRequest;
 
@@ -139,13 +139,6 @@ impl fmt::Debug for RestateEffectControllerOptions {
             )
             .finish()
     }
-}
-#[doc(hidden)]
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub enum RestateProcessAwaitRaceOutcome {
-    Terminal(Box<ProcessAwaitOutput>),
-    TurnCancelled,
-    SessionRevoked { session_id: String },
 }
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub(crate) struct RecordedRuntimeEffect {
@@ -749,8 +742,20 @@ where
                     .sleep_or_turn_cancel(duration, turn_cancel, cancellation.clone())
                     .await
                 {
-                    Ok(RestateSleepRaceOutcome::Slept) => {}
-                    Ok(RestateSleepRaceOutcome::Cancelled) => {
+                    Ok(RestateTurnCancelRaceOutcome::Completed(())) => {}
+                    Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id }) => {
+                        self.emit_trace(Some(&invocation), || {
+                            lash_trace::TraceEvent::DurableTimerResolved {
+                                duration_ms,
+                                status: "session_revoked".to_string(),
+                            }
+                        });
+                        cancellation.cancel();
+                        return Err(RuntimeEffectControllerError::from(
+                            lash_core::StoreError::SessionDeleted { session_id },
+                        ));
+                    }
+                    Ok(RestateTurnCancelRaceOutcome::TurnCancelled) => {
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableTimerResolved {
                                 duration_ms,
@@ -824,7 +829,7 @@ where
                     )
                     .await
                 {
-                    Ok(RestateAwaitEventRaceOutcome::Event(resolution)) => {
+                    Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableWaitResolved {
                                 wait_kind: "await_event".to_string(),
@@ -833,7 +838,19 @@ where
                         });
                         Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
                     }
-                    Ok(RestateAwaitEventRaceOutcome::TurnCancelled) => {
+                    Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id }) => {
+                        self.emit_trace(Some(&invocation), || {
+                            lash_trace::TraceEvent::DurableWaitResolved {
+                                wait_kind: "await_event".to_string(),
+                                resolution: "session_revoked".to_string(),
+                            }
+                        });
+                        cancellation.cancel();
+                        Err(RuntimeEffectControllerError::from(
+                            lash_core::StoreError::SessionDeleted { session_id },
+                        ))
+                    }
+                    Ok(RestateTurnCancelRaceOutcome::TurnCancelled) => {
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableWaitResolved {
                                 wait_kind: "await_event".to_string(),
@@ -1122,11 +1139,11 @@ where
                 }
             };
             let output = match first_wait {
-                RestateProcessAwaitRaceOutcome::Terminal(output) => {
+                RestateTurnCancelRaceOutcome::Completed(output) => {
                     trace_resolve("process", "resolved");
                     *output
                 }
-                RestateProcessAwaitRaceOutcome::TurnCancelled => {
+                RestateTurnCancelRaceOutcome::TurnCancelled => {
                     trace_resolve("process", "turn_cancelled");
                     let Some(turn_cancellation) = turn_cancellation.as_ref() else {
                         return Err(RuntimeEffectControllerError::new(
@@ -1160,7 +1177,7 @@ where
                         }
                     }
                 }
-                RestateProcessAwaitRaceOutcome::SessionRevoked { session_id } => {
+                RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
                     trace_resolve("process", "session_revoked");
                     return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
                 }
