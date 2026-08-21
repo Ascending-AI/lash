@@ -65778,7 +65778,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TokenLedgerEntry::source"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/blobs.rs:281#source: row.get(0)?,"
+usage = "crates/lash-sqlite-store/src/blobs.rs:298#source: row.get(0)?,"
 
 [[api]]
 symbol = "lash::usage::TokenLedgerEntry::usage"
@@ -65787,7 +65787,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TokenLedgerEntry::usage"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/blobs.rs:283#usage: lash_core::TokenUsage {"
+usage = "crates/lash-sqlite-store/src/blobs.rs:300#usage: lash_core::TokenUsage {"
 
 [[api]]
 symbol = "lash::usage::TokenUsage"

@@ -55,7 +55,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
             .expect("maintenance store"),
     );
     let orphan_blob = gc_store
-        .put_artifact_blob(
+        .put_unrooted_artifact_blob_for_testing(
             BlobArtifactDescriptor::checkpoint_component(),
             b"unreachable checkpoint component",
         )
