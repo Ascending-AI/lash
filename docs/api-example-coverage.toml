@@ -29447,7 +29447,7 @@ availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/remote_trigger_assertions.rs:91#.list(&filter)"
-assertion = "examples/agent-workbench/src/main_sections/tests/remote_trigger_assertions.rs:180#assert_eq!(round_trip_ids, observed_ids);"
+assertion = "examples/agent-workbench/src/main_sections/tests/remote_trigger_assertions.rs:180#assert_eq!(sorted_listed_ids, expected_ids);"
 
 [[api]]
 symbol = "lash::process::Processes::list_observed_by"
