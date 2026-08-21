@@ -1074,8 +1074,9 @@ pub trait ProcessRegistry: Send + Sync {
     /// Trigger-delivery rows are never deleted by this operation, including in
     /// co-located backends. Callers use [`reconcile_pruned_trigger_deliveries`]
     /// afterward so every backend has one observable reclamation path.
-    /// Trigger-mutation idempotency receipts are owned by the trigger store's
-    /// explicit retention lever, not process retention. Durable backends also
+    /// Session-scoped trigger-mutation receipts follow their owner's ADR 0049
+    /// deletion frontier during reconciliation; host and platform receipts
+    /// remain owned by the trigger store's explicit cutoff lever. Durable backends also
     /// release attachment intents and delete the process-owned `process-env:<id>` and
     /// `process-session-turn:<id>` session stores before deleting the process
     /// row. Backends must fail toward retaining the terminal process if that
@@ -1088,10 +1089,10 @@ pub trait ProcessRegistry: Send + Sync {
     /// maximum waiter lifetime, so callers cannot validate this against a
     /// library-owned bound; retaining terminal rows beyond every still-replayable
     /// waiter is currently an explicit host operational responsibility.
-    /// Occurrence-level idempotency survives retention: re-emitting the same
-    /// trigger occurrence id after its process has aged out reserves nothing
-    /// new, because the occurrence record — not the delivery row — carries that
-    /// identity.
+    /// Occurrence replay eligibility ends when the committed fan-out becomes
+    /// empty during reconciliation. Re-emitting an occurrence id after that
+    /// point is a new ingest; callers must retain an occurrence outside this
+    /// boundary when its replay horizon is longer than process retention.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1129,11 +1130,13 @@ pub trait ProcessRegistry: Send + Sync {
 struct TriggerDeliveryReconciliationPlan {
     surveyed_count: usize,
     candidates: Vec<crate::TriggerDeliveryRetentionCandidate>,
+    deleted_session_ids: Vec<String>,
 }
 
 async fn prepare_pruned_trigger_delivery_reconciliation(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
+    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
 ) -> Result<TriggerDeliveryReconciliationPlan, PluginError> {
     let surveyed = match trigger_store.list_delivery_retention_candidates().await {
         Ok(surveyed) => surveyed,
@@ -1183,9 +1186,27 @@ async fn prepare_pruned_trigger_delivery_reconciliation(
         classified_for_deletion = candidates.len(),
         "classified trigger-delivery retention candidates"
     );
+    let mut deleted_session_ids = Vec::new();
+    if let Some(session_store_factory) = session_store_factory {
+        let owner_ids = trigger_store.list_session_owner_ids_for_retention().await?;
+        for session_id in owner_ids {
+            if session_store_factory
+                .session_was_deleted(&session_id)
+                .await
+                .map_err(|error| {
+                    PluginError::Session(format!(
+                        "failed to read deleted-session frontier for `{session_id}`: {error}"
+                    ))
+                })?
+            {
+                deleted_session_ids.push(session_id);
+            }
+        }
+    }
     Ok(TriggerDeliveryReconciliationPlan {
         surveyed_count: surveyed.len(),
         candidates,
+        deleted_session_ids,
     })
 }
 
@@ -1193,11 +1214,7 @@ async fn apply_pruned_trigger_delivery_reconciliation(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
     plan: TriggerDeliveryReconciliationPlan,
-) -> Result<usize, PluginError> {
-    if plan.candidates.is_empty() {
-        return Ok(0);
-    }
-
+) -> Result<crate::TriggerRetentionReconciliationReport, PluginError> {
     // Classification and deletion live in separate stores. Revalidate at the
     // action boundary so a process id reused after the survey fails toward
     // retaining its delivery; the exact row keys below independently prevent a
@@ -1233,19 +1250,11 @@ async fn apply_pruned_trigger_delivery_reconciliation(
         .into_iter()
         .filter(|candidate| still_tombstoned.contains(&candidate.process_id))
         .collect::<Vec<_>>();
-    if candidates.is_empty() {
-        tracing::debug!(
-            candidate_count = plan.surveyed_count,
-            deletion_result = "preserved_after_revalidation",
-            "trigger-delivery retention reconciliation made no change"
-        );
-        return Ok(0);
-    }
-    let deleted = match trigger_store
-        .delete_delivery_retention_candidates(&candidates)
+    let report = match trigger_store
+        .reconcile_trigger_retention(&candidates, &plan.deleted_session_ids)
         .await
     {
-        Ok(deleted) => deleted,
+        Ok(report) => report,
         Err(err) => {
             tracing::warn!(
                 failure_stage = "delete_observed_delivery_rows",
@@ -1258,11 +1267,14 @@ async fn apply_pruned_trigger_delivery_reconciliation(
             return Err(err);
         }
     };
-    if deleted > 0 {
+    if report != crate::TriggerRetentionReconciliationReport::default() {
         tracing::info!(
             candidate_count = plan.surveyed_count,
             attempted_delete_count = candidates.len(),
-            deleted_deliveries = deleted,
+            deleted_deliveries = report.reclaimed_delivery_count,
+            deleted_occurrences = report.reclaimed_occurrence_count,
+            deleted_subscriptions = report.reclaimed_subscription_count,
+            deleted_mutation_receipts = report.reclaimed_mutation_receipt_count,
             deleted_candidates = ?candidates,
             deletion_result = "deleted_observed_rows",
             "completed trigger-delivery retention reconciliation"
@@ -1271,24 +1283,30 @@ async fn apply_pruned_trigger_delivery_reconciliation(
         tracing::debug!(
             candidate_count = plan.surveyed_count,
             attempted_delete_count = candidates.len(),
-            deleted_deliveries = deleted,
+            deleted_deliveries = report.reclaimed_delivery_count,
             deletion_result = "observed_rows_changed_or_already_deleted",
             "trigger-delivery retention reconciliation made no change"
         );
     }
-    Ok(deleted)
+    Ok(report)
 }
 
 async fn reconcile_pruned_trigger_deliveries_inner<F, Fut>(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
+    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
     after_classification: F,
-) -> Result<usize, PluginError>
+) -> Result<crate::TriggerRetentionReconciliationReport, PluginError>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let plan = prepare_pruned_trigger_delivery_reconciliation(registry, trigger_store).await?;
+    let plan = prepare_pruned_trigger_delivery_reconciliation(
+        registry,
+        trigger_store,
+        session_store_factory,
+    )
+    .await?;
     after_classification().await;
     apply_pruned_trigger_delivery_reconciliation(registry, trigger_store, plan).await
 }
@@ -1297,24 +1315,41 @@ where
 pub(crate) async fn reconcile_pruned_trigger_deliveries_interleaved<F, Fut>(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
+    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
     after_classification: F,
-) -> Result<usize, PluginError>
+) -> Result<crate::TriggerRetentionReconciliationReport, PluginError>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    reconcile_pruned_trigger_deliveries_inner(registry, trigger_store, after_classification).await
+    reconcile_pruned_trigger_deliveries_inner(
+        registry,
+        trigger_store,
+        session_store_factory,
+        after_classification,
+    )
+    .await
 }
 
-/// Delete trigger deliveries whose deterministic process ids have been pruned.
+/// Reconcile trigger retention after deterministic process ids are pruned.
 ///
 /// Process and trigger state may live in separate durable stores. This
 /// coordinator preserves those ownership boundaries: the process registry
-/// identifies durable tombstones, while the trigger store owns deletion of its
-/// delivery rows. Re-running it repairs a prior partial cleanup safely.
+/// identifies durable tombstones, the session factory classifies permanent
+/// ADR 0049 deletion, and the trigger store owns the atomic deletion. The
+/// trigger transaction reclaims exact deliveries, empty-fan-out occurrences,
+/// and dead-session subscriptions plus receipts. Re-running it repairs a prior
+/// partial cleanup safely.
 pub async fn reconcile_pruned_trigger_deliveries(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
-) -> Result<usize, PluginError> {
-    reconcile_pruned_trigger_deliveries_inner(registry, trigger_store, || async {}).await
+    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
+) -> Result<crate::TriggerRetentionReconciliationReport, PluginError> {
+    reconcile_pruned_trigger_deliveries_inner(
+        registry,
+        trigger_store,
+        session_store_factory,
+        || async {},
+    )
+    .await
 }

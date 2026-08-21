@@ -7,14 +7,15 @@ use std::sync::Arc;
 use crate::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProjectionWatermark, RecoveryContract, SessionScope, TriggerCommand, TriggerOwnerScope,
-    TriggerStore, TriggerSubscriptionDraft,
+    ProjectionWatermark, RecoveryContract, SessionScope, TriggerCommand, TriggerCommandOutcome,
+    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
 };
 
 /// Fresh paired process and trigger stores for retention conformance.
 pub struct ProcessTriggerRetentionHandles {
     pub registry: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
+    pub sessions: Arc<dyn crate::SessionStoreFactory>,
 }
 
 /// Run the process/trigger retention laws against one backend.
@@ -34,12 +35,174 @@ where
         "process_trigger_retention reused one trigger-store Arc"
     );
     drop((first, second));
+    deleted_session_frontier_authorizes_trigger_owner_reclamation(make().await).await;
     process_prune_preserves_trigger_mutation_receipts(make().await).await;
+    zero_match_occurrence_is_reclaimed_at_delivery_reconciliation(make().await).await;
     delivery_delete_is_bound_to_observed_row_identity(make().await).await;
     process_prune_only_deletes_deliveries_for_pruned_processes(make().await).await;
     pruned_delivery_process_is_not_a_recovery_candidate(make().await).await;
     reregistered_between_classification_and_delete_preserves_delivery(make().await).await;
     outstanding_delivery_blocks_interleaved_tombstone_compaction(make().await).await;
+}
+
+async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "frontier-trigger-retention-session";
+    const RECEIPT_ONLY_SESSION: &str = "frontier-trigger-receipt-only-session";
+    const KEY: &str = "frontier-trigger-retention-key";
+    const REGISTER_OPERATION: &str = "frontier-trigger-retention-register";
+    let request = super::session_store_factory::session_store_request(
+        SESSION,
+        "frontier-trigger-retention-model",
+        crate::SessionRelation::Root,
+    );
+    handles
+        .sessions
+        .create_store(&request)
+        .await
+        .expect("materialize trigger owner session");
+    let original_draft = draft(SESSION, KEY, "frontier-trigger-retention-source");
+    let created = handles
+        .triggers
+        .execute_command(
+            REGISTER_OPERATION,
+            TriggerCommand::Register {
+                owner_scope: owner(SESSION),
+                actor: actor(SESSION),
+                draft: original_draft.clone(),
+            },
+        )
+        .await
+        .expect("register frontier-owned trigger")
+        .expect("frontier-owned registration succeeds");
+    let TriggerCommandOutcome::Mutation { receipt: created } = created else {
+        panic!("register must return a mutation receipt")
+    };
+    handles
+        .triggers
+        .execute_command(
+            "frontier-trigger-retention-delete",
+            TriggerCommand::Delete {
+                owner_scope: owner(SESSION),
+                actor: actor(SESSION),
+                subscription_key: KEY.to_string(),
+                expected_revision: created.revision,
+            },
+        )
+        .await
+        .expect("delete frontier-owned trigger")
+        .expect("frontier-owned delete succeeds");
+    handles
+        .sessions
+        .delete_session(SESSION)
+        .await
+        .expect("delete trigger owner session");
+    let receipt_only_request = super::session_store_factory::session_store_request(
+        RECEIPT_ONLY_SESSION,
+        "frontier-trigger-receipt-only-model",
+        crate::SessionRelation::Root,
+    );
+    handles
+        .sessions
+        .create_store(&receipt_only_request)
+        .await
+        .expect("materialize receipt-only trigger owner session");
+    handles
+        .triggers
+        .execute_command(
+            "frontier-trigger-receipt-only-operation",
+            TriggerCommand::Prune {
+                owner_scope: owner(RECEIPT_ONLY_SESSION),
+                actor: actor(RECEIPT_ONLY_SESSION),
+                subscription_keys: Vec::new(),
+            },
+        )
+        .await
+        .expect("journal receipt-only trigger command")
+        .expect("receipt-only trigger command succeeds");
+    handles
+        .sessions
+        .delete_session(RECEIPT_ONLY_SESSION)
+        .await
+        .expect("delete receipt-only trigger owner session");
+
+    let report = crate::reconcile_pruned_trigger_deliveries(
+        handles.registry.as_ref(),
+        handles.triggers.as_ref(),
+        Some(handles.sessions.as_ref()),
+    )
+    .await
+    .expect("reconcile deleted trigger owner");
+    assert_eq!(report.reclaimed_subscription_count, 1);
+    assert_eq!(report.reclaimed_mutation_receipt_count, 3);
+
+    let mut replacement = original_draft;
+    replacement.source_key = "frontier-trigger-retention-replacement".to_string();
+    let recreated = handles
+        .triggers
+        .execute_command(
+            REGISTER_OPERATION,
+            TriggerCommand::Register {
+                owner_scope: owner(SESSION),
+                actor: actor(SESSION),
+                draft: replacement,
+            },
+        )
+        .await
+        .expect("reuse operation id after dead-owner receipt reclamation")
+        .expect("recreate trigger after dead-owner fence reclamation");
+    let TriggerCommandOutcome::Mutation { receipt: recreated } = recreated else {
+        panic!("recreate must return a mutation receipt")
+    };
+    assert_eq!(recreated.revision, 1);
+    handles
+        .triggers
+        .execute_command(
+            "frontier-trigger-receipt-only-operation",
+            TriggerCommand::Prune {
+                owner_scope: owner(RECEIPT_ONLY_SESSION),
+                actor: actor(RECEIPT_ONLY_SESSION),
+                subscription_keys: vec!["different-content-after-reclaim".to_string()],
+            },
+        )
+        .await
+        .expect("reuse receipt-only operation id after owner cascade")
+        .expect("receipt-only operation is re-evaluated after owner cascade");
+}
+
+async fn zero_match_occurrence_is_reclaimed_at_delivery_reconciliation(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    let ingress = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "zero-match-reconciliation-source",
+            serde_json::json!({ "button": "Blue" }),
+            "zero-match-reconciliation-occurrence",
+        ))
+        .await
+        .expect("ingest zero-match occurrence");
+    assert!(ingress.reservations.is_empty());
+
+    crate::reconcile_pruned_trigger_deliveries(
+        handles.registry.as_ref(),
+        handles.triggers.as_ref(),
+        Some(handles.sessions.as_ref()),
+    )
+    .await
+    .expect("reconcile zero-match occurrence");
+
+    assert!(
+        handles
+            .triggers
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list occurrences after reconciliation")
+            .is_empty(),
+        "a committed zero-match fan-out must be reclaimed at delivery reconciliation"
+    );
 }
 
 async fn delivery_delete_is_bound_to_observed_row_identity(
@@ -180,9 +343,11 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
         crate::reconcile_pruned_trigger_deliveries(
             handles.registry.as_ref(),
             handles.triggers.as_ref(),
+            Some(handles.sessions.as_ref()),
         )
         .await
-        .expect("reconcile while process is live"),
+        .expect("reconcile while process is live")
+        .reclaimed_delivery_count,
         0
     );
     handles
@@ -227,9 +392,11 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
         crate::reconcile_pruned_trigger_deliveries(
             handles.registry.as_ref(),
             handles.triggers.as_ref(),
+            Some(handles.sessions.as_ref()),
         )
         .await
-        .expect("reconcile guarded delivery"),
+        .expect("reconcile guarded delivery")
+        .reclaimed_delivery_count,
         1
     );
     assert_eq!(
@@ -370,6 +537,7 @@ async fn prune_with_trigger_cleanup(handles: &ProcessTriggerRetentionHandles) {
     crate::reconcile_pruned_trigger_deliveries(
         handles.registry.as_ref(),
         handles.triggers.as_ref(),
+        Some(handles.sessions.as_ref()),
     )
     .await
     .expect("reconcile pruned trigger deliveries");
@@ -622,6 +790,7 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
         crate::runtime::reconcile_pruned_trigger_deliveries_interleaved(
             handles.registry.as_ref(),
             handles.triggers.as_ref(),
+            Some(handles.sessions.as_ref()),
             move || async move {
                 registry
                     .register_process(
@@ -640,7 +809,8 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
             },
         )
         .await
-        .expect("reconcile across process-id reuse interleaving"),
+        .expect("reconcile across process-id reuse interleaving")
+        .reclaimed_delivery_count,
         0,
         "stale classification must not delete a re-registered process's delivery"
     );

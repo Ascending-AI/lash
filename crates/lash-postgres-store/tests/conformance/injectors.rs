@@ -3,6 +3,48 @@
 
 use super::*;
 
+pub(crate) struct PostgresLegacyTriggerMutationReceiptInjector {
+    pub(crate) pool: sqlx::PgPool,
+}
+
+#[async_trait::async_trait]
+impl lash_core::testing::conformance::LegacyTriggerMutationReceiptInjector
+    for PostgresLegacyTriggerMutationReceiptInjector
+{
+    async fn insert_legacy_receipt(
+        &self,
+        operation_id: &str,
+        request_fingerprint: &str,
+        result_json: &str,
+        created_at_ms: u64,
+    ) {
+        sqlx::query(
+            "INSERT INTO lash_trigger_mutation_receipts (
+                operation_id, request_fingerprint, result_json, created_at_ms
+             ) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(operation_id)
+        .bind(request_fingerprint)
+        .bind(result_json)
+        .bind(i64::try_from(created_at_ms).expect("legacy receipt timestamp fits Postgres"))
+        .execute(&self.pool)
+        .await
+        .expect("insert Postgres legacy trigger receipt");
+    }
+
+    async fn receipt_exists(&self, operation_id: &str) -> bool {
+        sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM lash_trigger_mutation_receipts WHERE operation_id = $1
+             )",
+        )
+        .bind(operation_id)
+        .fetch_one(&self.pool)
+        .await
+        .expect("inspect Postgres legacy trigger receipt")
+    }
+}
+
 pub(crate) struct PostgresLineageConformanceInjector {
     pub(crate) storage: Arc<PostgresStorage>,
 }

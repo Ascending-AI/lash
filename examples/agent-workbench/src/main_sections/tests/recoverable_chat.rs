@@ -297,6 +297,25 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
         self.inner.list_delivery_retention_candidates().await
     }
 
+    async fn list_session_owner_ids_for_retention(
+        &self,
+    ) -> Result<Vec<String>, lash::plugins::PluginError> {
+        self.inner.list_session_owner_ids_for_retention().await
+    }
+
+    async fn reconcile_trigger_retention(
+        &self,
+        candidates: &[lash::triggers::TriggerDeliveryRetentionCandidate],
+        deleted_session_ids: &[String],
+    ) -> Result<
+        lash::triggers::TriggerRetentionReconciliationReport,
+        lash::plugins::PluginError,
+    > {
+        self.inner
+            .reconcile_trigger_retention(candidates, deleted_session_ids)
+            .await
+    }
+
     async fn delete_delivery_retention_candidates(
         &self,
         candidates: &[lash::triggers::TriggerDeliveryRetentionCandidate],

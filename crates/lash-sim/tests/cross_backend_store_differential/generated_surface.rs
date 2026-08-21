@@ -1058,7 +1058,7 @@ fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
             .into_iter()
             .map(
                 |(operation_id, request_fingerprint, result, _created_at_ms)| {
-                    normalized_trigger_json(
+                    normalized_trigger_receipt_json(
                         serde_json::json!({
                             "operation_id": operation_id,
                             "request_fingerprint": request_fingerprint,
@@ -1107,6 +1107,29 @@ fn normalized_trigger_json(
 ) -> serde_json::Value {
     normalize_json_fields(&mut value, Some(incarnations));
     value
+}
+
+fn normalized_trigger_receipt_json(
+    mut value: serde_json::Value,
+    incarnations: &mut BTreeMap<String, String>,
+) -> serde_json::Value {
+    if let Some(result) = value
+        .get_mut("result")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for variant in ["Ok", "Err"] {
+            if let Some(payload) = result
+                .get_mut(variant)
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                // SQL stores use this private field to classify retention. The
+                // typed receipt returned to callers, and the in-memory row,
+                // deliberately keep that metadata outside the logical result.
+                payload.remove("_owner_scope_namespace");
+            }
+        }
+    }
+    normalized_trigger_json(value, incarnations)
 }
 
 fn normalized_trigger_delivery_json(
@@ -1443,7 +1466,7 @@ fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
     let mutation_receipts = sqlite_simple_json_rows(connection, "SELECT operation_id, request_fingerprint, result_json FROM trigger_mutation_receipts ORDER BY operation_id", |row| {
         let result: String = row.get(2)?;
         Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "request_fingerprint": row.get::<_, String>(1)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
-    }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
+    }).into_iter().map(|row| normalized_trigger_receipt_json(row, &mut incarnations)).collect();
     let occurrences = sqlite_simple_json_rows(connection, "SELECT record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
         let record: String = row.get(0)?;
         Ok(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))
@@ -1637,7 +1660,7 @@ async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
         .map(|row| normalized_trigger_json(serde_json::from_str(&row).unwrap(), &mut incarnations))
         .collect();
     let receipts: Vec<(String, String, String)> = sqlx::query_as("SELECT operation_id, request_fingerprint, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
-    let mutation_receipts = receipts.into_iter().map(|(operation_id, request_fingerprint, result)| normalized_trigger_json(serde_json::json!({"operation_id": operation_id, "request_fingerprint": request_fingerprint, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
+    let mutation_receipts = receipts.into_iter().map(|(operation_id, request_fingerprint, result)| normalized_trigger_receipt_json(serde_json::json!({"operation_id": operation_id, "request_fingerprint": request_fingerprint, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
     let occurrence_rows: Vec<String> = sqlx::query_scalar(
         "SELECT record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
     )
@@ -1956,6 +1979,12 @@ async fn generated_cross_backend_surface_differential_agrees() {
     {
         panic!("seed-852 minimized trigger-occurrence regression diverged: {divergence:#?}");
     }
+    // PR #570 seed 852 at 9eef49f32 minimized to one session-owned registration.
+    if let Some(divergence) =
+        first_divergence(&storage, &[SurfaceOperation::TriggerRegister { key: 0 }]).await
+    {
+        panic!("seed-852 minimized trigger-register regression diverged: {divergence:#?}");
+    }
     let canonical_conflict_material = [
         SurfaceOperation::TriggerOccurrenceNullSource { key: 0 },
         SurfaceOperation::TriggerOccurrenceNullSource { key: 0 },
@@ -2111,7 +2140,7 @@ async fn attachment_blob_store_differential_agrees() {
                 s3.delete(&id).await.unwrap();
             }
         }
-        let memory_rows = memory.raw_blobs_for_testing();
+        let memory_rows = InMemoryAttachmentStore::raw_blobs_for_testing(&memory);
         let file_rows = raw_file_blobs(root.path());
         let s3_rows = s3.raw_blobs_for_testing().await.unwrap();
         assert_eq!(

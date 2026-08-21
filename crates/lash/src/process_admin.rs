@@ -134,6 +134,34 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
         Ok(self.retention_candidates.lock_recover().clone())
     }
 
+    async fn list_session_owner_ids_for_retention(
+        &self,
+    ) -> std::result::Result<Vec<String>, lash_core::PluginError> {
+        self.inner.list_session_owner_ids_for_retention().await
+    }
+
+    async fn reconcile_trigger_retention(
+        &self,
+        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+        deleted_session_ids: &[String],
+    ) -> std::result::Result<lash_core::TriggerRetentionReconciliationReport, lash_core::PluginError>
+    {
+        let report = self
+            .inner
+            .reconcile_trigger_retention(candidates, deleted_session_ids)
+            .await?;
+        if report.reclaimed_delivery_count == candidates.len() {
+            let deleted_candidates = candidates
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            self.retention_candidates
+                .lock_recover()
+                .retain(|candidate| !deleted_candidates.contains(candidate));
+        }
+        Ok(report)
+    }
+
     async fn delete_delivery_retention_candidates(
         &self,
         candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
@@ -484,9 +512,12 @@ impl Processes {
     /// outcomes plus
     /// [`ProcessStatus::CallerDeparted`](lash_core::ProcessStatus::CallerDeparted),
     /// which nothing may ever honestly terminalize. The configured trigger
-    /// store also removes delivery reservations for processes now represented
-    /// by tombstones; unrelated trigger rows are retained. Live rows — running
-    /// and waiting — are never touched. Lash exposes no finite maximum waiter
+    /// store then removes exact delivery reservations for processes now
+    /// represented by tombstones. In the same trigger-store transaction it
+    /// reclaims empty-fan-out occurrences and trigger rows whose session owner
+    /// has crossed the ADR 0049 deletion frontier. Host and platform name
+    /// fences remain permanent. Live process rows — running and waiting — are
+    /// never touched. Lash exposes no finite maximum waiter
     /// lifetime: the host must retain rows beyond every still-replayable await,
     /// and a later await after pruning receives the typed
     /// `ProcessNoLongerRetained` outcome. Pass
@@ -562,26 +593,34 @@ impl Processes {
             }
         };
         if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
-            report.pruned_trigger_deliveries =
-                match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
-                    registry.as_ref(),
-                    trigger_store.as_ref(),
-                )
-                .await
-                {
-                    Ok(deleted) => deleted,
-                    Err(err) => {
-                        tracing::warn!(
-                            failure_stage = "reconcile_trigger_deliveries_after_process_prune",
-                            cutoff_epoch_ms,
-                            pruned_processes = report.pruned_processes,
-                            pruned_events = report.pruned_events,
-                            error = %err,
-                            "process retention partially completed"
-                        );
-                        return Err(err.into());
-                    }
-                };
+            let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
+                registry.as_ref(),
+                trigger_store.as_ref(),
+                self.core.store_factory.as_deref(),
+            )
+            .await
+            {
+                Ok(retention) => retention,
+                Err(err) => {
+                    tracing::warn!(
+                        failure_stage = "reconcile_trigger_deliveries_after_process_prune",
+                        cutoff_epoch_ms,
+                        pruned_processes = report.pruned_processes,
+                        pruned_events = report.pruned_events,
+                        error = %err,
+                        "process retention partially completed"
+                    );
+                    return Err(err.into());
+                }
+            };
+            report.pruned_trigger_deliveries = retention.reclaimed_delivery_count;
+            tracing::info!(
+                reclaimed_trigger_deliveries = retention.reclaimed_delivery_count,
+                reclaimed_trigger_occurrences = retention.reclaimed_occurrence_count,
+                reclaimed_trigger_subscriptions = retention.reclaimed_subscription_count,
+                reclaimed_trigger_mutation_receipts = retention.reclaimed_mutation_receipt_count,
+                "completed trigger retention after process prune"
+            );
         }
         Ok(report)
     }
@@ -623,10 +662,11 @@ impl Processes {
                 match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
                     registry.as_ref(),
                     &surveyed_trigger_store,
+                    self.core.store_factory.as_deref(),
                 )
                 .await
                 {
-                    Ok(deleted) => deleted,
+                    Ok(retention) => retention.reclaimed_delivery_count,
                     Err(err) => {
                         tracing::warn!(
                             failure_stage = "reconcile_trigger_deliveries_before_compaction",

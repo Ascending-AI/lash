@@ -33,9 +33,11 @@ artifacts are the backend truth for this judged runbook.
 4. **Crash evidence names both sides of the seam.** The sender must be `enqueuing` while one
    receiver batch already exists before the kill; after restart the same receiver batch remains
    singular and the sender becomes `enqueued`.
-5. **Retention never guesses.** Trigger mutation receipts survive process pruning. Delivery rows
-   are deleted only after their process tombstone proves pruning, and an outstanding delivery
-   prevents tombstone compaction.
+5. **Retention never guesses.** Trigger mutation receipts survive process pruning while their
+   owners remain live. Delivery rows are deleted only after their process tombstone proves
+   pruning, and an outstanding delivery prevents tombstone compaction. Once a session is
+   permanently deleted and its final delivery is gone, its subscription and receipt cascade is
+   expected reclamation, not a retention failure.
 6. **Migrated tools have one full-tier contract without host-affecting authorities.**
    Judged runbooks must never hand agents host-affecting authorities (`shell.*`).
    Instead, deterministic world-tool and process authorities (`process.start`,
@@ -227,20 +229,24 @@ healthy successor.
 
 ## Phase 7 — Process and trigger retention
 
-**Setup.** Inspect `07-retention.log`, whose PostgreSQL fixture creates trigger mutation receipts,
-terminal delivery processes, unrelated delivery rows, and a guarded tombstone interleaving.
+**Setup.** Inspect `07-retention.log`, whose PostgreSQL fixture creates live-owner and
+deleted-session trigger mutation receipts, terminal delivery processes, unrelated delivery rows,
+and a guarded tombstone interleaving.
 
 **Action.** Run `Processes::prune` semantics, reconcile trigger deliveries whose process ids are
 tombstoned, and invoke delivery-aware `compact_tombstones` before and after reconciliation.
 
-**Expected observable evidence.** Mutation receipts replay unchanged; only deliveries belonging
-to pruned processes are removed; unrelated/live deliveries remain; the guarded tombstone first
-refuses compaction while its delivery remains, then compacts only after reconciliation deletes
-that delivery.
+**Expected observable evidence.** Live-owner mutation receipts replay unchanged through PROCESS
+pruning; only deliveries belonging to pruned processes are removed; unrelated/live deliveries
+remain; the guarded tombstone first refuses compaction while its delivery remains, then compacts
+only after reconciliation deletes that delivery. After the ADR 0049 frontier confirms permanent
+session deletion and the final delivery is gone, reconciliation also deletes that session's
+subscriptions and receipts; this cascade is the successful retention outcome.
 
-**Judgment — FAIL if:** pruning deletes mutation receipts, removes an unrelated delivery,
-recovery resurrects pruned trigger work, compaction orphans a delivery, or a trigger-store survey
-failure permits compaction.
+**Judgment — FAIL if:** PROCESS pruning deletes a live owner's mutation receipts, removes an
+unrelated delivery, recovery resurrects pruned trigger work, compaction orphans a delivery, a
+trigger-store survey failure permits compaction, or deleted-session receipt cascading occurs
+before permanent deletion and the final-delivery fence.
 
 ## Phase 8 — Selected-drain scope isolation
 

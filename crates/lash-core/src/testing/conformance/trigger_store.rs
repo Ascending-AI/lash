@@ -17,7 +17,7 @@ where
     committed_mutation_receipt_survives_later_revision(make()).await;
     conflicting_mutation_receipt_survives_later_revision(make()).await;
     list_operations_are_not_receipted(make()).await;
-    mutation_receipts_follow_retention_cutoff(make()).await;
+    mutation_receipts_follow_owner_retention(make()).await;
     reservations_execute_the_reserved_revision(make()).await;
     disable_preserves_reserved_work_and_requires_explicit_enable(make()).await;
     register_disable_reenable_roundtrip_is_fenced_and_receipted(make()).await;
@@ -26,6 +26,10 @@ where
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
     occurrence_time_bounds_match_the_rust_predicate(make()).await;
+    session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(make()).await;
+    host_tombstone_remains_a_permanent_revive_fence(make()).await;
+    zero_match_occurrence_reconciles_without_deliveries(make()).await;
+    occurrence_with_live_delivery_survives_reconciliation(make()).await;
     zero_match_occurrence_is_immediately_reclaimable(make()).await;
     matched_occurrence_waits_for_terminal_deliveries(make()).await;
     cutoff_defers_but_never_initiates_occurrence_reclaim(make()).await;
@@ -37,10 +41,78 @@ where
 #[async_trait::async_trait]
 pub trait TriggerOccurrenceRetentionFaultInjector: Send + Sync {
     async fn fail_occurrence_delete(&self, occurrence_id: &str);
+    async fn clear_occurrence_delete_failure(&self);
 }
 
-/// Proves that a mid-pass delete failure is `Err` with completed work in its
-/// partial report, never a forged `NothingToDo` success.
+/// Raw receipt access for conformance-suite embedders proving compatibility
+/// with ownerless receipts written before owner namespaces were journaled.
+#[async_trait::async_trait]
+pub trait LegacyTriggerMutationReceiptInjector: Send + Sync {
+    async fn insert_legacy_receipt(
+        &self,
+        operation_id: &str,
+        request_fingerprint: &str,
+        result_json: &str,
+        created_at_ms: u64,
+    );
+
+    async fn receipt_exists(&self, operation_id: &str) -> bool;
+}
+
+/// Proves for conformance-suite embedders that an old receipt whose JSON names
+/// no owner survives both deleted-session reconciliation and the host cutoff.
+pub async fn legacy_ownerless_trigger_receipt_is_retained_law(
+    store: Arc<dyn crate::TriggerStore>,
+    injector: &dyn LegacyTriggerMutationReceiptInjector,
+) {
+    const SESSION_ID: &str = "legacy-ownerless-receipt-session";
+    const PUBLIC_OPERATION_ID: &str = "legacy-ownerless-empty-prune";
+    const REQUEST_FINGERPRINT: &str = "legacy-ownerless-request-fingerprint";
+    const OLD_RESULT_JSON: &str = r#"{"Ok":{"type":"prune","receipts":[]}}"#;
+
+    let old_result: crate::TriggerEffectResult = Ok(crate::TriggerCommandOutcome::Prune {
+        receipts: Vec::new(),
+    });
+    assert_eq!(
+        serde_json::to_string(&old_result).expect("encode old-form trigger receipt"),
+        OLD_RESULT_JSON,
+        "the fixture must remain byte-for-byte what the old store code wrote"
+    );
+
+    let receipt_id = crate::trigger_operation_receipt_id(
+        &crate::TriggerOwnerScope::session(SESSION_ID),
+        PUBLIC_OPERATION_ID,
+    );
+    injector
+        .insert_legacy_receipt(&receipt_id, REQUEST_FINGERPRINT, OLD_RESULT_JSON, 0)
+        .await;
+
+    let report = store
+        .reconcile_trigger_retention(&[], &[SESSION_ID.to_string()])
+        .await
+        .expect("reconcile around an ownerless legacy receipt");
+    assert_eq!(
+        report.reclaimed_mutation_receipt_count, 0,
+        "the deleted-session cascade cannot classify an ownerless legacy receipt"
+    );
+    assert!(
+        injector.receipt_exists(&receipt_id).await,
+        "the ownerless legacy receipt must survive the deleted-session cascade"
+    );
+
+    assert_eq!(
+        store.prune_mutation_receipts(u64::MAX).await.unwrap(),
+        0,
+        "the host cutoff must retain a receipt whose owner cannot be determined"
+    );
+    assert!(
+        injector.receipt_exists(&receipt_id).await,
+        "the ownerless legacy receipt must survive the host cutoff"
+    );
+}
+
+/// Proves that a mid-pass host-lever delete failure is `Err` with completed
+/// work in its partial report, never a forged `NothingToDo` success.
 pub async fn trigger_occurrence_retention_failure_law(
     store: Arc<dyn crate::TriggerStore>,
     fault: &dyn TriggerOccurrenceRetentionFaultInjector,
@@ -85,6 +157,301 @@ pub async fn trigger_occurrence_retention_failure_law(
         .expect("inspect state after injected failure");
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].occurrence_id, occurrence_ids[1]);
+}
+
+/// Proves that reconciliation delete failure rolls the whole trigger-retention
+/// transaction back and that the same decision succeeds when retried.
+pub async fn trigger_retention_reconciliation_failure_law(
+    store: Arc<dyn crate::TriggerStore>,
+    fault: &dyn TriggerOccurrenceRetentionFaultInjector,
+) {
+    for key in ["transaction-failure-a", "transaction-failure-b"] {
+        store
+            .ingest_occurrence(button_occurrence("no-matching-subscription", key))
+            .await
+            .expect("ingest zero-match occurrence for transaction failure law");
+    }
+    let mut occurrence_ids = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("enumerate transaction failure-law occurrences")
+        .into_iter()
+        .map(|occurrence| occurrence.occurrence_id)
+        .collect::<Vec<_>>();
+    occurrence_ids.sort();
+    fault.fail_occurrence_delete(&occurrence_ids[1]).await;
+
+    store
+        .reconcile_trigger_retention(&[], &[])
+        .await
+        .expect_err("the injected delete must fail reconciliation");
+    let remaining = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("inspect state after injected reconciliation failure");
+    assert_eq!(
+        remaining.len(),
+        2,
+        "the injected failure must roll every occurrence delete back"
+    );
+
+    fault.clear_occurrence_delete_failure().await;
+    let retried = store
+        .reconcile_trigger_retention(&[], &[])
+        .await
+        .expect("retry occurrence retention after one-shot fault");
+    assert_eq!(retried.reclaimed_occurrence_count, 2);
+    assert!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("inspect state after successful retry")
+            .is_empty()
+    );
+}
+
+async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
+    store: Arc<dyn crate::TriggerStore>,
+) {
+    const SESSION: &str = "dead-owner-retention-session";
+    const KEY: &str = "dead-owner-retention-key";
+    const ACTIVE_KEY: &str = "dead-owner-retention-active-key";
+    const REGISTER_OPERATION: &str = "dead-owner-retention-register";
+    let draft = sample_draft(
+        SESSION,
+        KEY,
+        "dead-owner-retention-source",
+        "dead-owner-retention-worker",
+    );
+    let created = mutate(
+        &store,
+        REGISTER_OPERATION,
+        register_command(SESSION, draft.clone()),
+    )
+    .await;
+    let ingress = store
+        .ingest_occurrence(button_occurrence(
+            "dead-owner-retention-source",
+            "dead-owner-retention-occurrence",
+        ))
+        .await
+        .expect("ingest dead-owner retention occurrence");
+    assert_eq!(ingress.reservations.len(), 1);
+    let deleted = mutate(
+        &store,
+        "dead-owner-retention-delete",
+        revision_command(SESSION, KEY, created.revision, "delete"),
+    )
+    .await;
+    assert!(deleted.record_snapshot.tombstoned);
+
+    let blocked = store
+        .reconcile_trigger_retention(&[], &[SESSION.to_string()])
+        .await
+        .expect("reconcile while dead owner's delivery remains");
+    assert_eq!(
+        blocked,
+        crate::TriggerRetentionReconciliationReport::default(),
+        "the live delivery must retain its occurrence, tombstone, and receipts"
+    );
+    assert_eq!(
+        mutate(
+            &store,
+            REGISTER_OPERATION,
+            register_command(SESSION, draft.clone()),
+        )
+        .await,
+        created,
+        "the registration receipt must replay while a delivery remains"
+    );
+    assert!(
+        execute(
+            &store,
+            "dead-owner-retention-register-probe",
+            register_command(SESSION, draft.clone()),
+        )
+        .await
+        .is_err(),
+        "the tombstone remains the Revive fence while a delivery references it"
+    );
+    mutate(
+        &store,
+        "dead-owner-retention-active-register",
+        register_command(
+            SESSION,
+            sample_draft(
+                SESSION,
+                ACTIVE_KEY,
+                "dead-owner-retention-active-source",
+                "dead-owner-retention-active-worker",
+            ),
+        ),
+    )
+    .await;
+
+    let reservation = &ingress.reservations[0];
+    let report = store
+        .reconcile_trigger_retention(
+            &[crate::TriggerDeliveryRetentionCandidate {
+                occurrence_id: ingress.occurrence.occurrence_id,
+                subscription_id: reservation.subscription.subscription_id.clone(),
+                process_id: reservation.process_id.clone(),
+            }],
+            &[SESSION.to_string()],
+        )
+        .await
+        .expect("reconcile dead owner's final delivery");
+    assert_eq!(report.reclaimed_delivery_count, 1);
+    assert_eq!(report.reclaimed_occurrence_count, 1);
+    assert_eq!(
+        report.reclaimed_subscription_count, 2,
+        "the deleted-session cascade covers enabled and tombstoned subscriptions"
+    );
+    assert_eq!(report.reclaimed_mutation_receipt_count, 4);
+
+    let mut replacement = draft;
+    replacement.source_key = "dead-owner-retention-replacement".to_string();
+    let recreated = mutate(
+        &store,
+        REGISTER_OPERATION,
+        register_command(SESSION, replacement),
+    )
+    .await;
+    assert_eq!(recreated.revision, 1, "the old receipt was reclaimed");
+}
+
+async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::TriggerStore>) {
+    let owner_scope = crate::TriggerOwnerScope::host("retention-host").unwrap();
+    let mut draft = sample_draft(
+        "unused-host-session",
+        "host-retention-key",
+        "host-retention-source",
+        "host-retention-worker",
+    );
+    draft.wake_target = None;
+    let actor = crate::ProcessOriginator::host_scoped("retention-host");
+    let created = mutate(
+        &store,
+        "host-retention-register",
+        crate::TriggerCommand::Register {
+            owner_scope: owner_scope.clone(),
+            actor: actor.clone(),
+            draft: draft.clone(),
+        },
+    )
+    .await;
+    let deleted = mutate(
+        &store,
+        "host-retention-delete",
+        crate::TriggerCommand::Delete {
+            owner_scope: owner_scope.clone(),
+            actor: actor.clone(),
+            subscription_key: draft.subscription_key.clone(),
+            expected_revision: created.revision,
+        },
+    )
+    .await;
+    store
+        .ingest_occurrence(button_occurrence(
+            "host-zero-match-source",
+            "host-zero-match-occurrence",
+        ))
+        .await
+        .expect("ingest host-law zero-match occurrence");
+
+    let report = store
+        .reconcile_trigger_retention(&[], &["unrelated-deleted-session".to_string()])
+        .await
+        .expect("reconcile around host tombstone");
+    assert_eq!(report.reclaimed_occurrence_count, 1);
+    assert_eq!(report.reclaimed_subscription_count, 0);
+    assert_eq!(report.reclaimed_mutation_receipt_count, 0);
+
+    let revived = mutate(
+        &store,
+        "host-retention-revive",
+        crate::TriggerCommand::Revive {
+            owner_scope,
+            actor,
+            subscription_key: draft.subscription_key.clone(),
+            draft,
+            expected_revision: deleted.revision,
+        },
+    )
+    .await;
+    assert_eq!(revived.revision, 3);
+}
+
+async fn zero_match_occurrence_reconciles_without_deliveries(store: Arc<dyn crate::TriggerStore>) {
+    store
+        .ingest_occurrence(button_occurrence(
+            "reconciliation-zero-match-source",
+            "reconciliation-zero-match-occurrence",
+        ))
+        .await
+        .expect("ingest reconciliation zero-match occurrence");
+    let report = store
+        .reconcile_trigger_retention(&[], &[])
+        .await
+        .expect("reconcile zero-match occurrence");
+    assert_eq!(report.reclaimed_occurrence_count, 1);
+    assert!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list after zero-match reconciliation")
+            .is_empty()
+    );
+}
+
+async fn occurrence_with_live_delivery_survives_reconciliation(
+    store: Arc<dyn crate::TriggerStore>,
+) {
+    store
+        .ingest_occurrence(button_occurrence(
+            "live-reconciliation-zero-control",
+            "live-reconciliation-zero-control-occurrence",
+        ))
+        .await
+        .expect("ingest zero-match control occurrence");
+    mutate(
+        &store,
+        "live-reconciliation-register",
+        register_command(
+            "live-reconciliation-session",
+            sample_draft(
+                "live-reconciliation-session",
+                "live-reconciliation-key",
+                "live-reconciliation-source",
+                "live-reconciliation-worker",
+            ),
+        ),
+    )
+    .await;
+    let ingress = store
+        .ingest_occurrence(button_occurrence(
+            "live-reconciliation-source",
+            "live-reconciliation-occurrence",
+        ))
+        .await
+        .expect("ingest live-fan-out occurrence");
+    assert_eq!(ingress.reservations.len(), 1);
+
+    let report = store
+        .reconcile_trigger_retention(&[], &[])
+        .await
+        .expect("reconcile with a live delivery");
+    assert_eq!(
+        report.reclaimed_occurrence_count, 1,
+        "the same pass must reclaim its zero-match control"
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list live occurrence after reconciliation"),
+        vec![ingress.occurrence]
+    );
 }
 
 pub async fn trigger_store_reopenable<F>(make: F)
@@ -435,21 +802,46 @@ async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) 
     ));
 }
 
-async fn mutation_receipts_follow_retention_cutoff(store: Arc<dyn crate::TriggerStore>) {
+async fn mutation_receipts_follow_owner_retention(store: Arc<dyn crate::TriggerStore>) {
     let key = "receipt-retention-key";
     let command = register_command("session-a", sample_draft("session-a", key, "v1", "worker"));
     let created = mutate(&store, "receipt-retention-register", command.clone()).await;
     assert_eq!(created.disposition, crate::TriggerMutationOutcome::Created);
+
+    for (operation_id, owner_scope, actor) in [
+        (
+            "receipt-retention-host",
+            crate::TriggerOwnerScope::host("receipt-retention-binding").unwrap(),
+            crate::ProcessOriginator::host_scoped("receipt-retention-binding"),
+        ),
+        (
+            "receipt-retention-platform",
+            crate::TriggerOwnerScope::Platform,
+            crate::ProcessOriginator::host(),
+        ),
+    ] {
+        execute(
+            &store,
+            operation_id,
+            crate::TriggerCommand::Prune {
+                owner_scope,
+                actor,
+                subscription_keys: Vec::new(),
+            },
+        )
+        .await
+        .expect("host or platform prune is journaled");
+    }
+
     assert_eq!(
         store.prune_mutation_receipts(u64::MAX).await.unwrap(),
-        1,
-        "the retention cutoff removes the aged mutation receipt"
+        2,
+        "the retention cutoff removes only aged host and platform receipts"
     );
-    let reevaluated = mutate(&store, "receipt-retention-register", command).await;
+    let replayed = mutate(&store, "receipt-retention-register", command).await;
     assert_eq!(
-        reevaluated.disposition,
-        crate::TriggerMutationOutcome::Unchanged,
-        "after retention, the operation is evaluated against current state"
+        replayed, created,
+        "a live session's mutation receipt survives the host cutoff"
     );
 }
 
@@ -1251,4 +1643,33 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
             .len(),
         1
     );
+}
+
+#[cfg(test)]
+mod trigger_retention_law_tests {
+    use super::*;
+
+    fn store() -> Arc<dyn crate::TriggerStore> {
+        Arc::new(crate::InMemoryTriggerStore::default())
+    }
+
+    #[tokio::test]
+    async fn session_scope_waits_for_owner_frontier_and_last_delivery() {
+        session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(store()).await;
+    }
+
+    #[tokio::test]
+    async fn host_scope_retains_the_permanent_revive_fence() {
+        host_tombstone_remains_a_permanent_revive_fence(store()).await;
+    }
+
+    #[tokio::test]
+    async fn committed_zero_match_fan_out_is_reclaimed() {
+        zero_match_occurrence_reconciles_without_deliveries(store()).await;
+    }
+
+    #[tokio::test]
+    async fn occurrence_with_a_live_delivery_is_retained() {
+        occurrence_with_live_delivery_survives_reconciliation(store()).await;
+    }
 }

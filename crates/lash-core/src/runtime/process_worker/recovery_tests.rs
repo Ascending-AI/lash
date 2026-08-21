@@ -1451,7 +1451,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         .await
         .expect("prune completed trigger delivery process");
     assert_eq!(report.pruned_processes, 1);
-    crate::reconcile_pruned_trigger_deliveries(registry.as_ref(), trigger_store.as_ref())
+    crate::reconcile_pruned_trigger_deliveries(registry.as_ref(), trigger_store.as_ref(), None)
         .await
         .expect("reconcile pruned trigger deliveries");
     assert!(

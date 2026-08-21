@@ -300,23 +300,18 @@
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
-    /// Pins what the operator is actually buying when they call the admin
-    /// prune route.
+    /// Pins the session-owner fence on the operator's admin cutoff.
     ///
     /// A mutation receipt is the only thing that makes a redriven trigger
     /// command a replay instead of a second evaluation. While the receipt
     /// exists, Restate can redrive the register handler forever and it keeps
     /// answering exactly what it answered the first time, even after the
-    /// subscription it created was deliberately deleted. Prune the receipt and
-    /// the same redrive is re-evaluated against current state — where the
-    /// tombstone now makes it a hard, terminal conflict. A retry that was a
-    /// safe no-op becomes a permanent handler failure, and nothing about the
-    /// call site changed.
-    ///
-    /// This is the cost the route's contract makes its caller own, written
-    /// down as a behavior rather than a warning.
+    /// subscription it created was deliberately deleted. The host cutoff may
+    /// reclaim host/platform receipts, but a live session's journal is reserved
+    /// for the ADR 0049 deleted-session frontier and this route cannot turn its
+    /// safe redrive into a fresh evaluation.
     #[tokio::test]
-    async fn pruning_a_mutation_receipt_turns_a_safe_redrive_into_a_terminal_conflict() {
+    async fn host_cutoff_preserves_a_live_sessions_safe_redrive() {
         let data_dir = tempfile::tempdir().expect("receipt prune tempdir");
         let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
         let state = recoverable_chat_test_state_with_trigger_store(
@@ -385,24 +380,22 @@
         )
         .await
         .expect("operator-invoked receipt prune");
-        assert!(
-            pruned.pruned >= 1,
-            "the prune must report the receipts it destroyed: {pruned:?}"
+        assert_eq!(
+            pruned.pruned, 0,
+            "the host cutoff must not destroy live session receipts: {pruned:?}"
         );
 
-        let refused =
+        let replayed_after_cutoff =
             workbench_trigger_mutation(trigger_store.as_ref(), register_operation_id, register)
                 .await
-                .expect_err("the unreceipted redrive is evaluated afresh");
+                .expect("the retained live-session receipt still replays");
+        assert_eq!(
+            replayed_after_cutoff, created,
+            "the host cutoff cannot turn a live session's safe redrive into a fresh evaluation"
+        );
         assert!(
-            matches!(
-                &refused,
-                lash::triggers::TriggerOperationError::Conflict { subscription_key, .. }
-                    if *subscription_key == created.subscription_key
-            ),
-            "this is the cost the route's caller owns: with the receipt gone, \
-             a redrive that was a safe no-op fails terminally against the \
-             tombstone it originally created: {refused:?}"
+            workbench_live_trigger_keys(&state).await.is_empty(),
+            "the retained receipt still writes nothing, so the delete stands"
         );
     }
 

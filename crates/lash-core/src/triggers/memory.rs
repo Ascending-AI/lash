@@ -32,12 +32,18 @@ impl InMemoryTriggerStore {
         }
     }
 
-    /// Fail the next reclaim delete of `occurrence_id` after earlier deletes in
-    /// the pass have committed. Used only by maintenance conformance.
+    /// Fail the next reconciliation delete of `occurrence_id`. Used only by
+    /// transactional retention conformance.
     #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn fail_occurrence_delete_for_testing(&self, occurrence_id: impl Into<String>) {
         *self.occurrence_delete_failure.lock_recover() = Some(occurrence_id.into());
+    }
+
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn clear_occurrence_delete_failure_for_testing(&self) {
+        self.occurrence_delete_failure.lock_recover().take();
     }
 
     #[doc(hidden)]
@@ -49,7 +55,7 @@ impl InMemoryTriggerStore {
             .mutation_receipts
             .iter()
             .map(
-                |(operation_id, (request_fingerprint, result, created_at_ms))| {
+                |(operation_id, (_, request_fingerprint, result, created_at_ms))| {
                     (
                         operation_id.clone(),
                         request_fingerprint.clone(),
@@ -79,6 +85,33 @@ impl InMemoryTriggerStore {
             occurrences,
             deliveries,
         }
+    }
+
+    /// Insert one receipt encoded exactly as an older SQL backend stored it.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn insert_legacy_mutation_receipt_for_testing(
+        &self,
+        operation_id: impl Into<String>,
+        request_fingerprint: impl Into<String>,
+        result_json: &str,
+        created_at_ms: u64,
+    ) {
+        let result = serde_json::from_str(result_json).expect("decode legacy trigger receipt");
+        self.state.lock_recover().mutation_receipts.insert(
+            operation_id.into(),
+            (None, request_fingerprint.into(), result, created_at_ms),
+        );
+    }
+
+    /// Report whether one raw receipt remains in the in-memory store.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn has_mutation_receipt_for_testing(&self, operation_id: &str) -> bool {
+        self.state
+            .lock_recover()
+            .mutation_receipts
+            .contains_key(operation_id)
     }
 
     #[cfg(test)]
@@ -143,10 +176,11 @@ impl Default for InMemoryTriggerStore {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct InMemoryTriggerEventState {
     pub(super) subscriptions: BTreeMap<String, TriggerSubscriptionRecord>,
-    pub(super) mutation_receipts: BTreeMap<String, (String, TriggerEffectResult, u64)>,
+    pub(super) mutation_receipts:
+        BTreeMap<String, (Option<String>, String, TriggerEffectResult, u64)>,
     pub(super) occurrences: BTreeMap<String, TriggerOccurrenceRecord>,
     pub(super) occurrence_id_by_idempotency_key: BTreeMap<String, String>,
     pub(super) occurrence_reclaimable_at_ms: BTreeMap<String, u64>,
@@ -384,6 +418,144 @@ impl TriggerStore for InMemoryTriggerStore {
             .collect())
     }
 
+    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<String>, PluginError> {
+        let state = self.state.lock_recover();
+        let mut session_ids = state
+            .subscriptions
+            .values()
+            .filter_map(|record| record.registrant_session_id().map(str::to_string))
+            .collect::<std::collections::BTreeSet<_>>();
+        session_ids.extend(state.deliveries.values().filter_map(|delivery| {
+            delivery
+                .subscription_snapshot
+                .registrant_session_id()
+                .map(str::to_string)
+        }));
+        session_ids.extend(
+            state
+                .mutation_receipts
+                .values()
+                .filter_map(|(owner_scope, _, _, _)| owner_scope.as_deref())
+                .filter_map(|owner_scope| owner_scope.strip_prefix("session:").map(str::to_string)),
+        );
+        Ok(session_ids.into_iter().collect())
+    }
+
+    async fn reconcile_trigger_retention(
+        &self,
+        candidates: &[TriggerDeliveryRetentionCandidate],
+        deleted_session_ids: &[String],
+    ) -> Result<TriggerRetentionReconciliationReport, PluginError> {
+        let candidates = candidates
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.occurrence_id.as_str(),
+                    candidate.subscription_id.as_str(),
+                    candidate.process_id.as_str(),
+                )
+            })
+            .collect::<std::collections::HashSet<_>>();
+        let deleted_session_ids = deleted_session_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let mut state = self.state.lock_recover();
+        let mut staged = state.clone();
+        let delivery_count_before = staged.deliveries.len();
+        staged.deliveries.retain(|_, delivery| {
+            !candidates.contains(&(
+                delivery.occurrence_id.as_str(),
+                delivery.subscription_id.as_str(),
+                delivery.process_id.as_str(),
+            ))
+        });
+
+        let occurrence_ids = staged
+            .occurrences
+            .keys()
+            .filter(|occurrence_id| {
+                !staged
+                    .deliveries
+                    .values()
+                    .any(|delivery| &delivery.occurrence_id == *occurrence_id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for occurrence_id in &occurrence_ids {
+            #[cfg(any(test, feature = "testing"))]
+            {
+                let should_fail = self
+                    .occurrence_delete_failure
+                    .lock_recover()
+                    .as_ref()
+                    .is_some_and(|injected| injected == occurrence_id);
+                if should_fail {
+                    self.occurrence_delete_failure.lock_recover().take();
+                    return Err(PluginError::Session(format!(
+                        "injected trigger occurrence delete failure for `{occurrence_id}`"
+                    )));
+                }
+            }
+            let occurrence = staged
+                .occurrences
+                .remove(occurrence_id)
+                .expect("enumerated occurrence exists in staged trigger state");
+            staged
+                .occurrence_id_by_idempotency_key
+                .remove(&occurrence.idempotency_key);
+            staged.occurrence_reclaimable_at_ms.remove(occurrence_id);
+        }
+
+        let retained_delivery_session_ids = staged
+            .deliveries
+            .values()
+            .filter_map(|delivery| {
+                delivery
+                    .subscription_snapshot
+                    .registrant_session_id()
+                    .map(str::to_string)
+            })
+            .collect::<std::collections::HashSet<_>>();
+        let retained_delivery_subscription_ids = staged
+            .deliveries
+            .values()
+            .map(|delivery| delivery.subscription_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let subscription_count_before = staged.subscriptions.len();
+        staged.subscriptions.retain(|subscription_id, record| {
+            let reclaimable_owner = record.registrant_session_id().is_some_and(|session_id| {
+                deleted_session_ids.contains(session_id)
+                    && !retained_delivery_subscription_ids.contains(subscription_id)
+            });
+            !reclaimable_owner
+        });
+        let receipt_count_before = staged.mutation_receipts.len();
+        staged
+            .mutation_receipts
+            .retain(|_, (owner_scope, _, _, _)| {
+                let Some(owner_scope) = owner_scope.as_deref() else {
+                    return true;
+                };
+                let Some(session_id) = owner_scope.strip_prefix("session:") else {
+                    return true;
+                };
+                !deleted_session_ids.contains(session_id)
+                    || retained_delivery_session_ids.contains(session_id)
+            });
+
+        let report = TriggerRetentionReconciliationReport {
+            reclaimed_delivery_count: delivery_count_before.saturating_sub(staged.deliveries.len()),
+            reclaimed_occurrence_count: occurrence_ids.len(),
+            reclaimed_subscription_count: subscription_count_before
+                .saturating_sub(staged.subscriptions.len()),
+            reclaimed_mutation_receipt_count: receipt_count_before
+                .saturating_sub(staged.mutation_receipts.len()),
+        };
+        *state = staged;
+        Ok(report)
+    }
+
     async fn delete_delivery_retention_candidates(
         &self,
         candidates: &[TriggerDeliveryRetentionCandidate],
@@ -492,7 +664,19 @@ impl TriggerStore for InMemoryTriggerStore {
         let before = state.mutation_receipts.len();
         state
             .mutation_receipts
-            .retain(|_, (_, _, created_at_ms)| *created_at_ms >= cutoff_epoch_ms);
+            .retain(
+                |_, (owner_scope, _, _, created_at_ms)| match owner_scope.as_deref() {
+                    Some("host") => *created_at_ms >= cutoff_epoch_ms,
+                    Some(owner_scope)
+                        if owner_scope
+                            .strip_prefix("host:")
+                            .is_some_and(|binding_id| !binding_id.is_empty()) =>
+                    {
+                        *created_at_ms >= cutoff_epoch_ms
+                    }
+                    Some(_) | None => true,
+                },
+            );
         Ok(before.saturating_sub(state.mutation_receipts.len()))
     }
 }
@@ -507,7 +691,8 @@ fn execute_in_memory_trigger_command(
     let request_fingerprint = trigger_command_fingerprint(&command);
     let receipt_id = trigger_operation_receipt_id(command.owner_scope(), operation_id);
     if is_mutation
-        && let Some((existing_hash, existing_result, _)) = state.mutation_receipts.get(&receipt_id)
+        && let Some((_, existing_hash, existing_result, _)) =
+            state.mutation_receipts.get(&receipt_id)
     {
         if existing_hash == &request_fingerprint {
             return Ok(existing_result.clone());
@@ -521,11 +706,13 @@ fn execute_in_memory_trigger_command(
         }));
     }
 
+    let owner_scope = command.owner_scope().namespace();
     let result = apply_in_memory_trigger_command(state, command, now);
     if is_mutation {
-        state
-            .mutation_receipts
-            .insert(receipt_id, (request_fingerprint, result.clone(), now));
+        state.mutation_receipts.insert(
+            receipt_id,
+            (Some(owner_scope), request_fingerprint, result.clone(), now),
+        );
     }
     Ok(result)
 }
