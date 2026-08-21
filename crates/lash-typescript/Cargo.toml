@@ -21,13 +21,11 @@ workspace = true
 
 [dependencies]
 lashlang = { workspace = true }
-regress = { workspace = true }
 ryu-js = { workspace = true }
 serde_json = { workspace = true }
 swc_common = { workspace = true }
 swc_ecma_ast = { workspace = true }
 swc_ecma_parser = { workspace = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
