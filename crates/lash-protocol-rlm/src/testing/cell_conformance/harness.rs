@@ -100,10 +100,7 @@ impl Session {
         Self {
             dialect,
             mode,
-            state: Some(
-                RlmExecutionState::for_engine(dialect.language_id())
-                    .expect("open an RLM execution state"),
-            ),
+            state: Some(RlmExecutionState::for_engine(dialect.language_id())),
             history: Vec::new(),
         }
     }
@@ -205,8 +202,7 @@ impl Session {
         let hydrated = state
             .hydrated_execution_state()
             .expect("capture the RLM execution state");
-        let mut restored = RlmExecutionState::for_engine(self.dialect.language_id())
-            .expect("open a replacement RLM execution state");
+        let mut restored = RlmExecutionState::for_engine(self.dialect.language_id());
         restored
             .restore_execution_state(&hydrated)
             .expect("restore the RLM execution state");

@@ -5,8 +5,6 @@ use futures_util::StreamExt as _;
 use lash_core::QueuedWorkStore as _;
 use lash_core::SessionExecutionLeaseStore as _;
 use lash_sansio::sync::{LockResultExt, MutexExt};
-#[cfg(feature = "rlm")]
-use sha2::Digest as _;
 use std::collections::BTreeSet;
 
 struct QueuedWorkHydrationProbeFactory {
@@ -3456,7 +3454,7 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
 #[tokio::test]
 async fn incarnation_change_invalidates_cursor() {
     let original = crate::observe::InMemoryLiveReplayStore::default();
-    let preserved = original.reopen_preserving_history();
+    let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);
     lash_core::testing::conformance::incarnation_change_invalidates_cursor(
         Arc::new(original),
         Arc::new(crate::observe::InMemoryLiveReplayStore::default()),
@@ -7382,7 +7380,6 @@ struct RlmExecutionSnapshotProbe {
     version: u32,
     engine: String,
     globals: std::collections::BTreeMap<String, RlmPersistedValueProbe>,
-    files: std::collections::BTreeMap<String, RlmPersistedValueProbe>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
 }
 
@@ -7417,19 +7414,6 @@ impl RlmExecutionSnapshotProbe {
             .globals()
             .get("value")
             .cloned()
-    }
-
-    fn file<'a>(
-        &'a self,
-        state: &'a lash_core::plugin::HydratedExecutionState,
-        path: &str,
-    ) -> Option<&'a [u8]> {
-        match self.files.get(path)? {
-            RlmPersistedValueProbe::Inline { body } => Some(body),
-            RlmPersistedValueProbe::Leaf { component } => {
-                state.components.get(component).map(Vec::as_slice)
-            }
-        }
     }
 }
 
@@ -7477,37 +7461,6 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .disable_queued_work_driver()
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
-
-    let mut initial_execution_state = first_session
-        .admin()
-        .state()
-        .snapshot_execution()
-        .await?
-        .expect("RLM has an execution snapshot");
-    let mut initial_root: RlmExecutionSnapshotProbe =
-        rmp_serde::from_slice(&initial_execution_state.root)
-            .expect("decode RLM execution snapshot");
-    let old_file_body = b"scratch:abandoned".to_vec();
-    let old_file_component = format!(
-        "execution_state/sha256/{:x}",
-        sha2::Sha256::digest(&old_file_body)
-    );
-    initial_root.files.insert(
-        "old-frame.txt".to_string(),
-        RlmPersistedValueProbe::Leaf {
-            component: old_file_component.clone(),
-        },
-    );
-    initial_execution_state
-        .components
-        .insert(old_file_component, old_file_body);
-    initial_execution_state.root =
-        rmp_serde::to_vec_named(&initial_root).expect("encode mutated RLM execution snapshot");
-    first_session
-        .admin()
-        .state()
-        .restore_execution(&initial_execution_state)
-        .await?;
 
     let switched = first_session
         .turn(TurnInput::text("switch away from the abandoned frame"))
@@ -7648,11 +7601,6 @@ fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> 
             ));
 
             assert!(
-                !execution_state.files.contains_key("old-frame.txt"),
-                "the old frame's scratch files must not survive in the {geometry} executor"
-            );
-
-            assert!(
                 execution_state.deferred_resolutions.is_empty(),
                 "the old frame's deferred resolutions must not survive in the {geometry} executor"
             );
@@ -7667,131 +7615,6 @@ fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> 
             small.switch_checkpoint_budget_bytes,
             large.switch_checkpoint_budget_bytes
         );
-        Ok(())
-    })
-}
-
-#[cfg(feature = "rlm")]
-async fn assert_binary_scratch_files_survive_cold_reopen(
-    backend: &str,
-    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
-) -> Result<()> {
-    let snapshot = lash_protocol_rlm::capture_scratch_files_for_testing(vec![
-        (
-            "inline-invalid-utf8.bin".to_string(),
-            vec![0xff, 0xfe, 0x80, 0x00, 0x7f],
-        ),
-        ("leaf-invalid-utf8.bin".to_string(), vec![0xff; 513]),
-    ])?;
-    let root: RlmExecutionSnapshotProbe =
-        rmp_serde::from_slice(&snapshot.root).expect("decode production-captured RLM root");
-    assert!(matches!(
-        root.files.get("inline-invalid-utf8.bin"),
-        Some(RlmPersistedValueProbe::Inline { .. })
-    ));
-    assert!(matches!(
-        root.files.get("leaf-invalid-utf8.bin"),
-        Some(RlmPersistedValueProbe::Leaf { .. })
-    ));
-    assert_eq!(snapshot.components.len(), 1);
-
-    let session_id = format!("binary-scratch-cold-{backend}-{}", uuid::Uuid::new_v4());
-    let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        "checkpoint_marker = 1\nfinish checkpoint_marker",
-    )]))
-    .model(mock_model_spec())
-    .store_factory(store_factory.clone())
-    .disable_queued_work_driver()
-    .build(crate::testing::runtime_lease_owner())?;
-    let first_session = first_core.session(&session_id).open().await?;
-    first_session
-        .admin()
-        .state()
-        .restore_execution(&snapshot)
-        .await?;
-    first_session
-        .turn(TurnInput::text("commit the restored scratch files"))
-        .run()
-        .await?;
-    drop(first_session);
-    drop(first_core);
-
-    let reopened_core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        crate::TurnBudget::Unbounded,
-        rlm_factory(),
-    ))
-    .provider(queued_text_provider(Vec::<String>::new()))
-    .model(mock_model_spec())
-    .store_factory(store_factory)
-    .disable_queued_work_driver()
-    .build(crate::testing::runtime_lease_owner())?;
-    let reopened = reopened_core.session(&session_id).open().await?;
-    let cold = reopened
-        .admin()
-        .state()
-        .snapshot_execution()
-        .await?
-        .expect("cold-reopened RLM has execution state");
-    let cold_root: RlmExecutionSnapshotProbe =
-        rmp_serde::from_slice(&cold.root).expect("decode cold RLM root");
-    assert!(matches!(
-        cold_root.files.get("inline-invalid-utf8.bin"),
-        Some(RlmPersistedValueProbe::Inline { .. })
-    ));
-    assert!(matches!(
-        cold_root.files.get("leaf-invalid-utf8.bin"),
-        Some(RlmPersistedValueProbe::Leaf { .. })
-    ));
-    assert_eq!(cold.components.len(), 1);
-    assert_eq!(
-        cold_root.file(&cold, "inline-invalid-utf8.bin"),
-        Some([0xff, 0xfe, 0x80, 0x00, 0x7f].as_slice())
-    );
-    let leaf = cold_root
-        .file(&cold, "leaf-invalid-utf8.bin")
-        .expect("cold leaf file body");
-    assert_eq!(leaf.len(), 513);
-    assert_eq!(
-        format!("{:x}", sha2::Sha256::digest(leaf)),
-        "ea032debaa72c17dae01588597abe1bf263f08612fe41bd4a599e6b3480f0bec"
-    );
-    Ok(())
-}
-
-#[cfg(feature = "rlm")]
-#[test]
-fn binary_scratch_files_survive_store_backed_cold_reopen_byte_exactly() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-binary-scratch-cold-reopen-test", || async {
-        let in_memory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-        assert_binary_scratch_files_survive_cold_reopen("in-memory", in_memory).await?;
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let sqlite = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            dir.path().join("sessions"),
-        ));
-        assert_binary_scratch_files_survive_cold_reopen("sqlite", sqlite).await?;
-
-        match std::env::var("LASH_POSTGRES_DATABASE_URL") {
-            Ok(database_url) if !database_url.is_empty() => {
-                // Own database, not the shared one: the Postgres conformance
-                // suites truncate every `lash_*` table, and this law's rows
-                // would vanish mid-run beside them.
-                let database =
-                    lash_postgres_store::testing::IsolatedDatabase::create(&database_url).await;
-                let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
-                let postgres = Arc::new(storage.session_store_factory());
-                assert_binary_scratch_files_survive_cold_reopen("postgres", postgres).await?;
-                storage.pool().close().await;
-            }
-            _ if std::env::var("LASH_REQUIRE_POSTGRES").as_deref() == Ok("1") => {
-                panic!("LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1")
-            }
-            _ => eprintln!("skipping PostgreSQL binary scratch cold-reopen law: not configured"),
-        }
         Ok(())
     })
 }

@@ -582,7 +582,7 @@ symbols = ["ProtocolTurnOptions"]
 [[surface]]
 constant = "RLM_SNAPSHOT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
-description = "canonical typed MessagePack RLM execution snapshot"
+description = "canonical typed MessagePack RLM execution snapshot for globals and deferred resolutions"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"

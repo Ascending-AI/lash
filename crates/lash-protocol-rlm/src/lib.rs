@@ -53,11 +53,3 @@ pub use protocol::{
     rlm_execution_section_for_host_environment,
 };
 pub use rlm_support::format_budget_suffix;
-
-#[cfg(feature = "testing")]
-#[doc(hidden)]
-pub fn capture_scratch_files_for_testing(
-    files: Vec<(String, Vec<u8>)>,
-) -> Result<lash_core::plugin::HydratedExecutionState, lash_core::SessionError> {
-    executor::capture_scratch_files_for_testing(files)
-}

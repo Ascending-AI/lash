@@ -36,7 +36,6 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 tokio = { workspace = true, features = ["rt", "sync"] }
-tempfile = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]

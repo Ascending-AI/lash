@@ -1,12 +1,9 @@
-mod files;
 mod host_bridge;
 mod snapshot;
 mod state;
 
 pub use snapshot::RLM_SNAPSHOT_VERSION;
 pub use state::RlmExecutionState;
-#[cfg(feature = "testing")]
-pub(crate) use state::capture_scratch_files_for_testing;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -201,7 +198,7 @@ pub struct RlmCheckpointPerfFixture {
 #[cfg(feature = "testing")]
 impl RlmCheckpointPerfFixture {
     pub fn new(binding_count: usize, payload_bytes: usize) -> Result<Self, SessionError> {
-        let mut state = RlmExecutionState::for_engine("lashlang")?;
+        let mut state = RlmExecutionState::for_engine("lashlang");
         // The snapshot's globals became a read-only projection when the heap
         // took ownership of them, so seed through the state's own insert.
         for index in 0..binding_count {
@@ -281,7 +278,7 @@ impl RlmCheckpointPerfFixture {
     }
 
     pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
-        let mut restored = RlmExecutionState::for_engine("lashlang")?;
+        let mut restored = RlmExecutionState::for_engine("lashlang");
         restored
             .restore_execution_state(state)
             .map_err(|error| SessionError::Protocol(error.to_string()))
@@ -1131,7 +1128,7 @@ mod tests {
                 invocation,
             );
         let (_, response) = execute_code_unbounded_for_tests(
-            RlmExecutionState::new().expect("state"),
+            RlmExecutionState::new(),
             context,
             ExecRequest {
                 language: "lashlang".to_string(),
@@ -1313,7 +1310,7 @@ mod tests {
         abilities: lashlang::LashlangAbilities,
         resources: lashlang::LashlangHostCatalog,
     ) -> ExecResponse {
-        let state = RlmExecutionState::new().expect("state");
+        let state = RlmExecutionState::new();
         let ctx = if abilities.triggers {
             lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
                 lash_core::facade_support::InMemoryTriggerStore::default(),
@@ -1357,7 +1354,7 @@ mod tests {
         let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
         block_on(async {
             let _ = execute_code_with_bounds(
-                RlmExecutionState::new().expect("state"),
+                RlmExecutionState::new(),
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -1386,7 +1383,7 @@ mod tests {
         block_on(async {
             let previous = set_execution_bound_exhaustion_loud(false);
             let result = execute_code_with_bounds(
-                RlmExecutionState::new().expect("state"),
+                RlmExecutionState::new(),
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -1421,7 +1418,7 @@ mod tests {
     #[test]
     fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         block_on(async {
-            let state = RlmExecutionState::new().expect("state");
+            let state = RlmExecutionState::new();
             let request = || ExecRequest {
                 language: "lashlang".to_string(),
                 code: "finish 1".to_string(),
@@ -1642,7 +1639,7 @@ mod tests {
                 lash_core::testing::code_execution_context_with_invocation(first_invocation);
             assert!(first_ctx.tool_catalog().tools.is_empty());
             let (mut state, first) = execute_code_unbounded_for_tests(
-                RlmExecutionState::new().expect("state"),
+                RlmExecutionState::new(),
                 first_ctx.clone(),
                 deferred_matrix_request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1672,7 +1669,7 @@ mod tests {
                     .snapshot_execution_state()
                     .expect("snapshot components"),
             );
-            let mut restored = RlmExecutionState::new().expect("state");
+            let mut restored = RlmExecutionState::new();
             restored
                 .restore_execution_state(&snapshot)
                 .expect("restore");
@@ -1789,7 +1786,7 @@ mod tests {
             assert!(ctx.tool_catalog().tools.is_empty());
 
             let (state, response) = execute_code_unbounded_for_tests(
-                RlmExecutionState::new().expect("state"),
+                RlmExecutionState::new(),
                 ctx.clone(),
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -1858,7 +1855,7 @@ mod tests {
             );
 
             let (state, response) = execute_typescript_code_with_bounds(
-                RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+                RlmExecutionState::for_engine("typescript"),
                 ctx.clone(),
                 ExecRequest {
                     language: "typescript".to_string(),
@@ -1894,7 +1891,7 @@ mod tests {
     #[test]
     fn execute_code_stores_process_module_artifact_once() {
         block_on(async {
-            let state = RlmExecutionState::new().expect("state");
+            let state = RlmExecutionState::new();
             let request = || ExecRequest {
                 language: "lashlang".to_string(),
                 code: "process later() { finish 1 }\nfinish 1".to_string(),
@@ -1952,7 +1949,7 @@ mod tests {
         block_on(async {
             let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
             let (state, response) = execute_typescript_code_with_bounds(
-                RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+                RlmExecutionState::for_engine("typescript"),
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
                     language: "typescript".to_string(),
@@ -2362,7 +2359,7 @@ mod tests {
             ),
         );
         let (_, response) = execute_typescript_code_with_bounds(
-            RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+            RlmExecutionState::for_engine("typescript"),
             ctx,
             ExecRequest {
                 language: "typescript".to_string(),
@@ -2505,7 +2502,7 @@ mod tests {
             ),
         );
         let (_, response) = execute_typescript_code_with_bounds(
-            RlmExecutionState::for_engine("typescript").expect("TypeScript state"),
+            RlmExecutionState::for_engine("typescript"),
             ctx,
             ExecRequest {
                 language: "typescript".to_string(),
@@ -2658,7 +2655,7 @@ mod tests {
         code: &str,
         controller: CapturingTriggerEffectController,
     ) -> ExecResponse {
-        let state = RlmExecutionState::new().expect("state");
+        let state = RlmExecutionState::new();
         let ctx =
             lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
                 Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
@@ -2703,7 +2700,7 @@ mod tests {
     }
 
     async fn execute_typescript_with_trigger_environment(code: &str) -> ExecResponse {
-        let state = RlmExecutionState::for_engine("typescript").expect("TypeScript state");
+        let state = RlmExecutionState::for_engine("typescript");
         let (_, response) = execute_typescript_code_with_bounds(
             state,
             lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
@@ -2853,7 +2850,7 @@ mod tests {
                 timer_trigger_resources(),
             );
             let (_, response) = execute_code_unbounded_for_tests(
-                RlmExecutionState::new().expect("state"),
+                RlmExecutionState::new(),
                 ctx,
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -3004,7 +3001,7 @@ mod tests {
                 lashlang::LashlangLanguageFeatures::default(),
                 timer_trigger_resources(),
             );
-            let mut state = RlmExecutionState::new().expect("state");
+            let mut state = RlmExecutionState::new();
 
             let (next, first) = execute_code_unbounded_for_tests(
                 state,
@@ -3555,7 +3552,7 @@ mod tests {
     #[test]
     fn projected_history_is_available_without_clobbering_executor_globals() {
         block_on(async {
-            let mut state = RlmExecutionState::new().expect("state");
+            let mut state = RlmExecutionState::new();
             let mut set_default = serde_json::Map::new();
             set_default.insert("diary".to_string(), serde_json::json!(["kept"]));
             state
@@ -3584,7 +3581,7 @@ mod tests {
     #[test]
     fn projected_history_defaults_to_empty_list_when_missing() {
         block_on(async {
-            let mut state = RlmExecutionState::new().expect("state");
+            let mut state = RlmExecutionState::new();
 
             let projected = projected_history(Vec::new());
             let compiled =
@@ -3601,7 +3598,7 @@ mod tests {
 
     #[test]
     fn set_default_initializes_once_and_does_not_mutate_projected_globals() {
-        let mut state = RlmExecutionState::new().expect("state");
+        let mut state = RlmExecutionState::new();
         let projected = BTreeSet::from_iter(["current_query".to_string()]);
 
         state
@@ -3653,7 +3650,7 @@ mod tests {
     fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
         block_on(async {
             let projected = ProjectedBindings::new();
-            let mut state = RlmExecutionState::new().expect("state");
+            let mut state = RlmExecutionState::new();
             let setup = lashlang::compile("seed = [{ nested: [1] }]").expect("compile setup");
             execute_with_projected(&setup, &mut state.rlm, &projected)
                 .await
@@ -3703,7 +3700,7 @@ mod tests {
     fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_marks() {
         block_on(async {
             let projected = ProjectedBindings::new();
-            let mut state = RlmExecutionState::new().expect("state");
+            let mut state = RlmExecutionState::new();
             let setup = lashlang::compile("seed = [{ nested: [1] }]").expect("compile setup");
             execute_with_projected(&setup, &mut state.rlm, &projected)
                 .await
@@ -3757,7 +3754,7 @@ mod tests {
     fn rejected_protected_name_patch_leaves_byte_identical_state() {
         block_on(async {
             let projected = ProjectedBindings::new();
-            let mut state = RlmExecutionState::new().expect("state");
+            let mut state = RlmExecutionState::new();
             let setup = lashlang::compile("seed = [1]").expect("compile setup");
             execute_with_projected(&setup, &mut state.rlm, &projected)
                 .await
@@ -3885,7 +3882,7 @@ mod tests {
 
     #[test]
     fn set_default_rejects_projected_host_bindings() {
-        let mut state = RlmExecutionState::new().expect("state");
+        let mut state = RlmExecutionState::new();
         let projected = BTreeSet::from_iter(["current_query".to_string()]);
 
         let err = state
@@ -3918,7 +3915,7 @@ mod tests {
     #[test]
     fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
         block_on(async {
-            let mut state = RlmExecutionState::new().expect("state");
+            let mut state = RlmExecutionState::new();
             let mut projected = ProjectedBindings::new();
             projected.insert(
                 "current_query",
@@ -3967,7 +3964,7 @@ mod tests {
     #[test]
     fn executor_snapshot_does_not_materialize_projected_tool_result_globals() {
         let projected = Arc::new(SnapshotProjectedToolText::default());
-        let mut state = RlmExecutionState::new().expect("state");
+        let mut state = RlmExecutionState::new();
         state
             .rlm
             .insert_global(
@@ -3991,7 +3988,7 @@ mod tests {
         assert!(!encoded_text.contains("rendered tool text"));
         assert!(!encoded_text.contains("materialized tool text"));
 
-        let mut restored_execution = RlmExecutionState::new().expect("restored state");
+        let mut restored_execution = RlmExecutionState::new();
         restored_execution
             .restore_execution_state(&snapshot)
             .expect("restore runtime");
@@ -4013,8 +4010,7 @@ mod tests {
             for index in 0..40 {
                 source.push_str(&format!("small_{index} = {index}\n"));
             }
-            let mut state =
-                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let mut state = execute_test_code(RlmExecutionState::new(), source).await;
             let initial = state.snapshot_execution_state().expect("initial snapshot");
             assert_eq!(
                 initial
@@ -4063,8 +4059,8 @@ mod tests {
 
             let initial_budget = state::measure_snapshot(&initial);
             let changed_budget = state::measure_snapshot(&changed);
-            assert_eq!(initial_budget.checkpoint_bytes, 82_522);
-            assert_eq!(changed_budget.checkpoint_bytes, 14_040);
+            assert_eq!(initial_budget.checkpoint_bytes, 82_515);
+            assert_eq!(changed_budget.checkpoint_bytes, 14_033);
         });
     }
 
@@ -4073,7 +4069,7 @@ mod tests {
         block_on(async {
             let initial_payload = format!("before-{}", "x".repeat(8 * 1024));
             let mut state = execute_test_code(
-                RlmExecutionState::new().expect("state"),
+                RlmExecutionState::new(),
                 format!("large = [\"{initial_payload}\"]"),
             )
             .await;
@@ -4104,7 +4100,7 @@ mod tests {
             );
 
             let hydrated = hydrate_snapshot(final_snapshot);
-            let mut reopened = RlmExecutionState::new().expect("cold state");
+            let mut reopened = RlmExecutionState::new();
             reopened
                 .restore_execution_state(&hydrated)
                 .expect("cold reopen final capture");
@@ -4119,7 +4115,7 @@ mod tests {
                 .snapshot_execution_state()
                 .expect("retry superseded capture after commit failure");
             let retry_hydrated = hydrate_snapshot(retry_snapshot);
-            let mut retry_reopened = RlmExecutionState::new().expect("retry cold state");
+            let mut retry_reopened = RlmExecutionState::new();
             retry_reopened
                 .restore_execution_state(&retry_hydrated)
                 .expect("cold reopen retry capture");
@@ -4137,7 +4133,7 @@ mod tests {
             let payload_a = format!("a-{}", "x".repeat(8 * 1024));
             let payload_b = format!("b-{}", "y".repeat(8 * 1024));
             let mut state = execute_test_code(
-                RlmExecutionState::new().expect("state"),
+                RlmExecutionState::new(),
                 format!("large = [\"{payload_a}\"]"),
             )
             .await;
@@ -4194,7 +4190,7 @@ mod tests {
                 .execution_state_hydration()
                 .expect("hydrate staged final A")
                 .expect("final A root");
-            let mut reopened = RlmExecutionState::new().expect("cold state");
+            let mut reopened = RlmExecutionState::new();
             reopened
                 .restore_execution_state(&final_hydration)
                 .expect("cold reopen final A capture");
@@ -4213,7 +4209,7 @@ mod tests {
                 .execution_state_hydration()
                 .expect("hydrate retry A")
                 .expect("retry A root");
-            let mut retry_reopened = RlmExecutionState::new().expect("retry cold state");
+            let mut retry_reopened = RlmExecutionState::new();
             retry_reopened
                 .restore_execution_state(&retry_hydration)
                 .expect("cold reopen retry A capture");
@@ -4235,8 +4231,7 @@ mod tests {
             for index in 0..80 {
                 source.push_str(&format!("small_{index} = {index}\n"));
             }
-            let mut state =
-                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let mut state = execute_test_code(RlmExecutionState::new(), source).await;
             let full_state_bytes = state
                 .rlm
                 .snapshot()
@@ -4282,8 +4277,8 @@ mod tests {
                 measured.len()
             );
             assert_eq!(full_state_bytes, 136_711);
-            assert_eq!(minimum, 21_047);
-            assert_eq!(maximum, 21_101);
+            assert_eq!(minimum, 21_040);
+            assert_eq!(maximum, 21_094);
         });
     }
 
@@ -4301,8 +4296,7 @@ mod tests {
                 let payload = format!("note-{index}-{}", "n".repeat(3 * 1024 + 512));
                 source.push_str(&format!("mid_{index} = [\"{payload}\"]\n"));
             }
-            let mut state =
-                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let mut state = execute_test_code(RlmExecutionState::new(), source).await;
             let full_state_bytes = state
                 .rlm
                 .snapshot()
@@ -4348,8 +4342,8 @@ mod tests {
                 "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
                 measured.len()
             );
-            assert_eq!(minimum, 94_294);
-            assert_eq!(maximum, 94_296);
+            assert_eq!(minimum, 94_287);
+            assert_eq!(maximum, 94_289);
         });
     }
 
@@ -4365,8 +4359,7 @@ mod tests {
                 let payload = format!("short-{index}-{}", "s".repeat(48));
                 source.push_str(&format!("short_{index} = [\"{payload}\"]\n"));
             }
-            let mut state =
-                execute_test_code(RlmExecutionState::new().expect("state"), source).await;
+            let mut state = execute_test_code(RlmExecutionState::new(), source).await;
             let initial = state.snapshot_execution_state().expect("initial snapshot");
             assert_eq!(initial.components.len(), 0);
             state.acknowledge_execution_state_capture();
@@ -4405,7 +4398,7 @@ mod tests {
     #[test]
     fn bound_variables_prompt_renders_live_globals_after_execution() {
         block_on(async {
-            let state = RlmExecutionState::new().expect("state");
+            let state = RlmExecutionState::new();
             let ctx = lash_core::testing::code_execution_context();
             let (state, response) = execute_code_unbounded_for_tests(
                 state,
@@ -4450,7 +4443,7 @@ mod tests {
     #[ignore = "microbenchmark; run with `-- --ignored --nocapture`"]
     fn bench_bound_variables_render_cost() {
         block_on(async {
-            let state = RlmExecutionState::new().expect("state");
+            let state = RlmExecutionState::new();
             let ctx = lash_core::testing::code_execution_context();
             // Realistic mid-game RLM state: a ~25-room map, a 67-entry notes
             // log, and a small inventory.
@@ -4549,7 +4542,7 @@ mod tests {
     #[test]
     fn bound_variables_prompt_degrades_large_live_globals() {
         block_on(async {
-            let state = RlmExecutionState::new().expect("state");
+            let state = RlmExecutionState::new();
             let ctx = lash_core::testing::code_execution_context();
             // Same constructs the runtime-perf `rlm_globals` scenario seeds:
             // a large record and a large list that exceed the inline budget.
@@ -4675,7 +4668,7 @@ mod tests {
     #[test]
     fn executor_snapshot_round_trips_projection_ref_metadata() {
         let reference = ProjectionRef::new("memory", serde_json::json!("doc"));
-        let mut state = RlmExecutionState::new().expect("state");
+        let mut state = RlmExecutionState::new();
         state
             .rlm
             .insert_global(
@@ -4691,7 +4684,7 @@ mod tests {
         let snapshot =
             hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
 
-        let mut restored_execution = RlmExecutionState::new().expect("restored state");
+        let mut restored_execution = RlmExecutionState::new();
         restored_execution
             .restore_execution_state(&snapshot)
             .expect("restore runtime");
@@ -4869,7 +4862,7 @@ finish final_ids"#;
     fn a_closure_from_one_typescript_cell_does_not_poison_the_next_cell() {
         block_on(async {
             for cell in CLOSURE_BEARING_TYPESCRIPT_CELLS {
-                let state = RlmExecutionState::for_engine("typescript").expect("TypeScript state");
+                let state = RlmExecutionState::for_engine("typescript");
                 let (state, first) = execute_typescript_test_cell(state, cell).await;
                 assert!(first.error.is_none(), "cell `{cell}`: {:?}", first.error);
 
@@ -4897,7 +4890,7 @@ finish final_ids"#;
     fn a_restored_typescript_closure_does_not_poison_a_different_cell() {
         block_on(async {
             for cell in CLOSURE_BEARING_TYPESCRIPT_CELLS {
-                let state = RlmExecutionState::for_engine("typescript").expect("TypeScript state");
+                let state = RlmExecutionState::for_engine("typescript");
                 let (mut state, first) = execute_typescript_test_cell(state, cell).await;
                 assert!(first.error.is_none(), "cell `{cell}`: {:?}", first.error);
 
@@ -4906,8 +4899,7 @@ finish final_ids"#;
                         .snapshot_execution_state()
                         .expect("snapshot components"),
                 );
-                let mut restored =
-                    RlmExecutionState::for_engine("typescript").expect("restored state");
+                let mut restored = RlmExecutionState::for_engine("typescript");
                 restored
                     .restore_execution_state(&snapshot)
                     .expect("restore TypeScript execution state");

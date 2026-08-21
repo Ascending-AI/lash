@@ -341,7 +341,7 @@ impl RlmDialect for TypescriptDialect {
 
     fn create_session(&self) -> Result<Box<dyn RlmDialectSession>, SessionError> {
         Ok(Box::new(TypescriptDialectSession {
-            state: Some(RlmExecutionState::for_engine(LANGUAGE_ID)?),
+            state: Some(RlmExecutionState::for_engine(LANGUAGE_ID)),
             surface: self.surface.clone(),
             services: self.services.clone(),
             bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
@@ -524,7 +524,7 @@ impl RlmDialectSession for TypescriptDialectSession {
                 "RLM execution state is busy".to_string(),
             ));
         }
-        let reset_state = RlmExecutionState::for_engine(LANGUAGE_ID)?;
+        let reset_state = RlmExecutionState::for_engine(LANGUAGE_ID);
         let state = self
             .state
             .take()
