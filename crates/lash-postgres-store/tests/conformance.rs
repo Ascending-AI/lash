@@ -863,6 +863,26 @@ impl lash_core::testing::conformance::SessionDeleteBlobProbe for PostgresSession
             .expect("remove Postgres blob-delete function");
     }
 
+    async fn checkpoint_component_edge_exists(
+        &self,
+        checkpoint_ref: &lash_core::BlobRef,
+        blob_ref: &lash_core::BlobRef,
+    ) -> Option<bool> {
+        Some(
+            sqlx::query_scalar(
+                "SELECT EXISTS(
+                     SELECT 1 FROM lash_checkpoint_blob_refs
+                     WHERE checkpoint_ref = $1 AND blob_ref = $2
+                 )",
+            )
+            .bind(checkpoint_ref.as_str())
+            .bind(blob_ref.as_str())
+            .fetch_one(self.storage.pool())
+            .await
+            .expect("query Postgres checkpoint edge"),
+        )
+    }
+
     async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core::BlobRef) -> bool {
         assert_eq!(
             sqlx::query("UPDATE lash_blobs SET content = '\\xffffffff'::bytea WHERE hash = $1")

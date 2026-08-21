@@ -35,6 +35,26 @@ impl lash_core::testing::conformance::SessionDeleteBlobProbe for SqliteSessionDe
             .expect("remove SQLite blob-delete failure");
     }
 
+    async fn checkpoint_component_edge_exists(
+        &self,
+        checkpoint_ref: &lash_core::BlobRef,
+        blob_ref: &lash_core::BlobRef,
+    ) -> Option<bool> {
+        Some(
+            rusqlite::Connection::open(&self.path)
+                .expect("open SQLite checkpoint-edge probe")
+                .query_row(
+                    "SELECT EXISTS(
+                         SELECT 1 FROM checkpoint_blob_refs
+                         WHERE checkpoint_ref = ?1 AND blob_ref = ?2
+                     )",
+                    rusqlite::params![checkpoint_ref.as_str(), blob_ref.as_str()],
+                    |row| row.get(0),
+                )
+                .expect("query SQLite checkpoint edge"),
+        )
+    }
+
     async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core::BlobRef) -> bool {
         let conn = rusqlite::Connection::open(&self.path).expect("open SQLite GC fault");
         assert_eq!(

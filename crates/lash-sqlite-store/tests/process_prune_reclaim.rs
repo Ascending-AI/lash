@@ -78,6 +78,18 @@ async fn sqlite_process_prune_reclaims_checkpoint_blobs_and_propagates_failure()
     .await;
 }
 
+#[tokio::test]
+async fn sqlite_process_prune_reclaims_content_aliased_checkpoint_roots() {
+    let (dir, factory, registry) = backend().await;
+    let probe = Arc::new(SqliteProcessPruneBlobProbe {
+        path: dir.path().join("sessions/durable-core.db"),
+    });
+    lash_core::testing::conformance::process_prune_reclaims_content_aliased_checkpoint_roots(
+        "sqlite", factory, registry, probe,
+    )
+    .await;
+}
+
 /// A session factory and process registry sharing one temp root, so the prune
 /// path deletes the process-owned session stores the factory owns. The returned
 /// temp dir must outlive both.

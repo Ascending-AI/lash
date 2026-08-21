@@ -11,7 +11,45 @@
 
 use std::sync::Arc;
 
-use super::session_delete_blob_reclaim::SessionDeleteBlobProbe;
+use super::session_delete_blob_reclaim::{
+    SessionDeleteBlobProbe, commit_content_aliased_checkpoint_roots,
+};
+
+/// Process pruning must reclaim a two-session checkpoint batch even when root
+/// B's exact bytes are an opaque component of root A and B sorts first.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders** run this law
+/// against custom process registries and session-store backends.
+pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
+    backend: &str,
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    probe: Arc<dyn SessionDeleteBlobProbe>,
+) {
+    const PROCESS_ID: &str = "prune-reclaims-content-aliased-roots";
+    register_process(registry.as_ref(), PROCESS_ID).await;
+    let [aliased_session_id, dependent_session_id] = crate::process_runtime_session_ids(PROCESS_ID);
+    let roots = commit_content_aliased_checkpoint_roots(
+        &factory,
+        &dependent_session_id,
+        &aliased_session_id,
+    )
+    .await;
+    assert!(
+        roots.aliased_root.as_str() < roots.dependent_root.as_str(),
+        "{backend}: the fixture must put aliased root B first in hash order"
+    );
+    assert!(
+        probe.blob_exists(&roots.aliased_root).await,
+        "{backend}: the content-aliased root must exist before process prune"
+    );
+
+    prune_completed_process(registry.as_ref(), PROCESS_ID).await;
+    assert!(
+        !probe.blob_exists(&roots.aliased_root).await,
+        "{backend}: process prune must reclaim root B after severing root A's edge"
+    );
+}
 
 /// Process retention must route its runtime-session severance through the same
 /// exact-edge blob reclaim as an explicit session delete. A failed blob delete

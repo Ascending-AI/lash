@@ -2,6 +2,7 @@
 
 use super::session_store_factory::session_store_request;
 use super::*;
+use sha2::Digest as _;
 
 /// Backend observation and fault seam for the session-delete blob laws.
 ///
@@ -27,6 +28,17 @@ pub trait SessionDeleteBlobProbe: Send + Sync {
     /// Integrator class (ADR 0051): **conformance-suite embedders** implement
     /// this when their injected fault persists beyond one transaction.
     async fn clear_blob_delete_failure(&self) {}
+
+    /// Observe one exact checkpoint-root projection edge when the backend
+    /// materializes that projection. Backends without a projection table
+    /// return `None`.
+    async fn checkpoint_component_edge_exists(
+        &self,
+        _checkpoint_ref: &crate::BlobRef,
+        _blob_ref: &crate::BlobRef,
+    ) -> Option<bool> {
+        None
+    }
 
     /// Break the factory-global GC scope while leaving exact edge rows intact.
     /// Backends with no fallible GC scope return `false`.
@@ -59,6 +71,7 @@ struct CommittedCheckpoint {
     request: crate::SessionStoreCreateRequest,
     store: Arc<dyn crate::RuntimePersistence>,
     checkpoint_ref: crate::BlobRef,
+    manifest: crate::SessionCheckpoint,
     component_refs: Vec<crate::BlobRef>,
     leaf_node_id: String,
 }
@@ -107,8 +120,96 @@ async fn committed_checkpoint(
         request,
         store,
         checkpoint_ref: receipt.checkpoint_ref,
+        manifest: receipt.manifest,
         component_refs,
         leaf_node_id,
+    }
+}
+
+pub(super) struct ContentAliasedCheckpointRoots {
+    pub(super) dependent_root: crate::BlobRef,
+    pub(super) aliased_root: crate::BlobRef,
+    pub(super) aliased_component: crate::BlobRef,
+}
+
+fn encoded_checkpoint_manifest(manifest: &crate::SessionCheckpoint) -> Vec<u8> {
+    rmp_serde::to_vec_named(manifest).expect("encode checkpoint manifest for content alias")
+}
+
+/// Commit two roots A and B where A names B's exact root bytes as one opaque
+/// component. The nonce makes B sort before A, reproducing the restrictive-FK
+/// delete order that matters to a multi-root reclaim batch.
+pub(super) async fn commit_content_aliased_checkpoint_roots(
+    factory: &Arc<dyn crate::SessionStoreFactory>,
+    dependent_session_id: &str,
+    aliased_session_id: &str,
+) -> ContentAliasedCheckpointRoots {
+    let aliased = committed_checkpoint(factory, aliased_session_id).await;
+    let aliased_root_bytes = encoded_checkpoint_manifest(&aliased.manifest);
+    assert_eq!(
+        crate::BlobRef(format!("{:x}", sha2::Sha256::digest(&aliased_root_bytes))),
+        aliased.checkpoint_ref,
+        "the law must reproduce the backend's checkpoint-root content address"
+    );
+
+    let request = session_store_request(
+        dependent_session_id,
+        "session-delete-blob-reclaim-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create dependent content-alias session");
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..crate::RuntimeSessionState::new(request.policy.clone())
+    };
+    state.ensure_agent_frame_initialized();
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.checkpoint.components.insert(
+        "conformance/content-aliased-root".to_string(),
+        crate::HydratedCheckpointComponent::changed(aliased_root_bytes),
+    );
+
+    let predicted_dependent_root = (0_u64..10_000)
+        .find_map(|nonce| {
+            commit.checkpoint.components.insert(
+                "conformance/content-alias-order".to_string(),
+                crate::HydratedCheckpointComponent::changed(nonce.to_be_bytes().to_vec()),
+            );
+            let manifest = commit
+                .checkpoint
+                .manifest()
+                .expect("project dependent root");
+            let root = crate::BlobRef(format!(
+                "{:x}",
+                sha2::Sha256::digest(encoded_checkpoint_manifest(&manifest))
+            ));
+            (aliased.checkpoint_ref.as_str() < root.as_str()).then_some(root)
+        })
+        .expect("find a dependent checkpoint root that sorts after its aliased component root");
+    let receipt = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("commit dependent content-alias checkpoint");
+    assert_eq!(receipt.checkpoint_ref, predicted_dependent_root);
+    assert_eq!(
+        receipt
+            .manifest
+            .component_ref("conformance/content-aliased-root"),
+        Some(&aliased.checkpoint_ref),
+        "root B's bytes must be stored as an opaque component of root A"
+    );
+
+    ContentAliasedCheckpointRoots {
+        dependent_root: receipt.checkpoint_ref,
+        aliased_root: aliased.checkpoint_ref,
+        aliased_component: aliased
+            .component_refs
+            .into_iter()
+            .next()
+            .expect("aliased root has one owned component"),
     }
 }
 
@@ -138,8 +239,61 @@ where
 {
     session_delete_reclaims_exclusive_checkpoint_blobs(backend, make()).await;
     session_delete_keeps_fork_shared_checkpoint_blobs(backend, make()).await;
+    session_delete_reclaims_content_aliased_checkpoint_roots(backend, make()).await;
     session_delete_blob_failure_rolls_back_with_partial_report(backend, make()).await;
     session_delete_ignores_broken_factory_gc_scope(backend, make()).await;
+}
+
+async fn session_delete_reclaims_content_aliased_checkpoint_roots(
+    backend: &str,
+    handles: SessionDeleteBlobHandles,
+) {
+    const DEPENDENT_SESSION_ID: &str = "delete-content-alias-dependent";
+    const ALIASED_SESSION_ID: &str = "delete-content-alias-root";
+    let roots = commit_content_aliased_checkpoint_roots(
+        &handles.factory,
+        DEPENDENT_SESSION_ID,
+        ALIASED_SESSION_ID,
+    )
+    .await;
+    assert!(
+        handles.probe.blob_exists(&roots.aliased_root).await,
+        "{backend}: root B must exist as both a live root and root A's opaque component"
+    );
+
+    handles
+        .factory
+        .delete_session(ALIASED_SESSION_ID)
+        .await
+        .expect("delete root B's session while root A still aliases it");
+    assert!(
+        handles.probe.blob_exists(&roots.aliased_root).await,
+        "{backend}: deleting B's head must retain B while live root A aliases its bytes"
+    );
+    assert!(
+        !handles.probe.blob_exists(&roots.aliased_component).await,
+        "{backend}: deleting B's head must reclaim B's now-unowned component"
+    );
+    if let Some(edge_exists) = handles
+        .probe
+        .checkpoint_component_edge_exists(&roots.aliased_root, &roots.aliased_component)
+        .await
+    {
+        assert!(
+            !edge_exists,
+            "{backend}: deleting B's head must sever B's outgoing projection edge before deleting its component"
+        );
+    }
+
+    handles
+        .factory
+        .delete_session(DEPENDENT_SESSION_ID)
+        .await
+        .expect("delete root A's session and its content-aliased component");
+    assert!(
+        !handles.probe.blob_exists(&roots.aliased_root).await,
+        "{backend}: deleting root A must reclaim the now-unowned aliased root B"
+    );
 }
 
 async fn session_delete_reclaims_exclusive_checkpoint_blobs(
