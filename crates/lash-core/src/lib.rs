@@ -51,6 +51,10 @@ pub mod triggers;
 
 #[doc(hidden)]
 pub mod store_backend_support {
+    mod session_meta;
+
+    pub use session_meta::{CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredRelation};
+
     /// Construct queued-work claim data with the predecessor identity that an
     /// abandoning store must restore. Store implementors pass `None` for fresh
     /// work and the interrupted `claim_id` for a redrive.

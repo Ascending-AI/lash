@@ -75,6 +75,50 @@ async fn direct_session_store_defers_missing_identity_validation() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_unbound_session_meta_refuses_ambiguous_resolution() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping unbound session-meta refusal: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect unbound session-meta storage");
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT tablename FROM pg_tables
+         WHERE schemaname = 'public'
+           AND tablename LIKE 'lash\\_%'
+           AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta')
+         ORDER BY tablename",
+    )
+    .fetch_all(storage.pool())
+    .await
+    .expect("list Lash tables for unbound session-meta reset");
+    let truncate = format!("TRUNCATE {} RESTART IDENTITY CASCADE", tables.join(", "));
+    sqlx::query(&truncate)
+        .execute(storage.pool())
+        .await
+        .expect("reset unbound session-meta tables");
+    for session_id in ["unbound-session-meta-a", "unbound-session-meta-b"] {
+        sqlx::query(
+            "INSERT INTO lash_session_meta
+             (session_id, relation_kind, observer_intent_depth)
+             VALUES ($1, 'root', 0)",
+        )
+        .bind(session_id)
+        .execute(storage.pool())
+        .await
+        .unwrap_or_else(|error| panic!("seed `{session_id}` metadata: {error}"));
+    }
+
+    lash_core::testing::conformance::unbound_session_meta_refuses_ambiguous_resolution(
+        "PostgreSQL",
+        crate::session_meta::load_session_meta(storage.pool(), None),
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
     let Some(database_url) = postgres_test_support::database_url() else {
