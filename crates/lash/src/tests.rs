@@ -1234,6 +1234,18 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
 struct DeletingStoreFactory {
     stores: std::sync::Mutex<std::collections::HashMap<String, Arc<SnapshotStore>>>,
     tombstones: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    delete_failure: std::sync::Mutex<
+        Option<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
+    >,
+}
+
+impl DeletingStoreFactory {
+    fn fail_next_delete(
+        &self,
+        failure: lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>,
+    ) {
+        *self.delete_failure.lock_recover() = Some(failure);
+    }
 }
 
 // SnapshotStore has a no-op attachment manifest; this deletion fixture
@@ -1295,6 +1307,9 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
         &self,
         session_id: &str,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        if let Some(failure) = self.delete_failure.lock_recover().take() {
+            return Err(failure);
+        }
         self.stores.lock_recover().remove(session_id);
         self.tombstones
             .lock_recover()

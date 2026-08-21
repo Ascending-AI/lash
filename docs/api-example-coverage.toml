@@ -1886,6 +1886,33 @@ disposition = "unused-add"
 reason = "Add lash::EmbedError::SessionDeleteProcess::session_id to the agent-workbench durable process flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::EmbedError::SessionDeleteStorage"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::EmbedError::SessionDeleteStorage"]
+area = "stores"
+disposition = "unused-add"
+reason = "Add lash::EmbedError::SessionDeleteStorage to a durable session-deletion example and assert its typed stop reason and partial reclaim report."
+
+[[api]]
+symbol = "lash::EmbedError::SessionDeleteStorage::failure"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::EmbedError::SessionDeleteStorage::failure"]
+area = "stores"
+disposition = "unused-add"
+reason = "Add the typed session-delete storage failure to a durable deletion example and assert its witnessed partial counters."
+
+[[api]]
+symbol = "lash::EmbedError::SessionDeleteStorage::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::EmbedError::SessionDeleteStorage::session_id"]
+area = "stores"
+disposition = "unused-add"
+reason = "Add the typed session-delete storage failure to a durable deletion example and assert the affected session id."
+
+[[api]]
 symbol = "lash::EmbedError::SessionStillInUse"
 kind = "variant"
 availability = "default+all-features"

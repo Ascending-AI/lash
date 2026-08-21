@@ -43,8 +43,10 @@ CREATE TABLE IF NOT EXISTS lash_node_anchors (
 CREATE INDEX IF NOT EXISTS idx_lash_node_anchors_checkpoint_ref
     ON lash_node_anchors(checkpoint_ref);
 
--- Indexed projection of exact checkpoint-manifest component edges. This is
--- reference data, never a cached reference count.
+-- Indexed projection of exact checkpoint-manifest component edges. Each row is
+-- owned by its checkpoint root's publication and is reclaimed by owner-delete
+-- cascade when that root row is deleted. This is reference data, never a cached
+-- reference count.
 CREATE TABLE IF NOT EXISTS lash_checkpoint_blob_refs (
     checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
     blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,

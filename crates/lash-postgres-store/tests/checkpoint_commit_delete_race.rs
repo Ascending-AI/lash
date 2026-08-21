@@ -211,23 +211,18 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .expect("blocked checkpoint publication did not resume")
         .expect("join checkpoint publication")
         .expect_err("publication must refuse a component deleted before its edge");
-    match branch {
-        ReuseBranch::UnchangedComponent | ReuseBranch::ChangedComponent => assert!(
-            matches!(
-                error,
-                StoreError::CheckpointComponentMissing { ref blob_ref, .. }
-                    if blob_ref == &shared.blob_ref
-            ),
-            "the losing commit must report the exact missing component: {error}"
-        ),
-        ReuseBranch::ExistingRoot => assert!(
-            matches!(
-                error,
-                StoreError::CheckpointRootMissing { ref blob_ref }
-                    if blob_ref == &victim_receipt.checkpoint_ref
-            ),
-            "the losing commit must report the exact missing root: {error}"
-        ),
+    match (branch, error) {
+        (
+            ReuseBranch::UnchangedComponent | ReuseBranch::ChangedComponent,
+            StoreError::CheckpointComponentMissing { key, blob_ref },
+        ) => {
+            assert_eq!(key, "law/commit-delete-shared");
+            assert_eq!(blob_ref, shared.blob_ref);
+        }
+        (ReuseBranch::ExistingRoot, StoreError::CheckpointRootMissing { blob_ref }) => {
+            assert_eq!(blob_ref, victim_receipt.checkpoint_ref);
+        }
+        (_, other) => panic!("the losing commit returned the wrong typed error: {other}"),
     }
     commit_pool.close().await;
 }

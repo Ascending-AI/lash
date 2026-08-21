@@ -60,6 +60,11 @@ pub struct VacuumReport {
 /// session edges being severed. `retained_blob_count` counts candidates that
 /// still have an exact edge from a surviving head, anchor, artifact ref, or
 /// checkpoint manifest. The remainder was deleted in the owning transaction.
+///
+/// Integrator class (ADR 0051): **store and durable-substrate implementors**
+/// produce this report from [`SessionStoreFactory::delete_session`](crate::SessionStoreFactory::delete_session),
+/// and durable-store operators consume its witnessed counters through the
+/// facade.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionBlobReclaimReport {
     pub enumerated_blob_count: usize,

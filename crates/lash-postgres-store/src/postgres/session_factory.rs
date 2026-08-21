@@ -143,7 +143,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 })?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &source_session_id)
             .await?;
-        crate::session_blob_reclaim::lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
+        crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
         let live_node = sqlx::query_scalar::<_, bool>(
             "SELECT TRUE FROM lash_graph_nodes
              WHERE node_id = $1 AND tombstoned = FALSE
@@ -350,7 +350,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
-        crate::session_blob_reclaim::lock_checkpoint_blob_root_tx(&mut tx, &checkpoint_ref).await?;
+        crate::support::lock_checkpoint_blob_tx(&mut tx, &checkpoint_ref, None).await?;
         let node_facts = sqlx::query_as::<_, (String, i64)>(
             "SELECT session_id, generation FROM lash_graph_nodes
              WHERE node_id = $1 AND tombstoned = FALSE

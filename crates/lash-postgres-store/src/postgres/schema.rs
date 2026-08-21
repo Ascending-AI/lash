@@ -54,6 +54,8 @@ const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_conde
             phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))
         )"#;
 
+/// Projection rows are owned by exactly one checkpoint-root publication and
+/// reclaimed by owner-delete cascade when that root blob row is deleted.
 const CHECKPOINT_BLOB_REFS_DDL: &str = r#"CREATE TABLE lash_checkpoint_blob_refs (
             checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
             blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,

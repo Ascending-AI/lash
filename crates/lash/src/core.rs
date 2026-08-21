@@ -842,9 +842,9 @@ impl LashCore {
         let storage = store_factory
             .delete_session(&session_id)
             .await
-            .map_err(|error| EmbedError::StoreFactory {
+            .map_err(|failure| EmbedError::SessionDeleteStorage {
                 session_id: session_id.clone(),
-                message: error.to_string(),
+                failure: Box::new(failure),
             })?;
         self.env
             .core

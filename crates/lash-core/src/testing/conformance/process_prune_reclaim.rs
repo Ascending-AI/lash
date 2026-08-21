@@ -17,6 +17,9 @@ use super::session_delete_blob_reclaim::SessionDeleteBlobProbe;
 /// exact-edge blob reclaim as an explicit session delete. A failed blob delete
 /// aborts the process prune, and the identical retry reclaims the now-unowned
 /// checkpoint root and components.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders** run this law
+/// against custom process registries and session-store backends.
 pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,

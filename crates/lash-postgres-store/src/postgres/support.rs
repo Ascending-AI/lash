@@ -373,7 +373,7 @@ async fn get_blob_tx(
 // request to roughly one MiB of SHA-256 text plus array framing.
 const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
 
-async fn lock_checkpoint_publication_blob_tx(
+pub(crate) async fn lock_checkpoint_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &str,
     component_key: Option<&str>,

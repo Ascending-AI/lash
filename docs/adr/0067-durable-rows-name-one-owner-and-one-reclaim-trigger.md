@@ -68,6 +68,12 @@ whose owner and trigger are not stated is not reviewable, and a table that
 cannot name an owner is evidence that the thing it records belongs to something
 that does not exist yet.
 
+The durable reference-edge inventory includes:
+
+| Row class | Exactly-one owner | Reclaim trigger |
+| --- | --- | --- |
+| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | The checkpoint root's publication identified by `checkpoint_ref`; each edge belongs to exactly one published root. | Owner-delete cascade: deleting that checkpoint-root blob cascades its projection edges in the same transaction. |
+
 #### Reclaim is severance, not sweeping
 
 The trigger classes above sit under an earlier and stronger ruling (FIG-1494,

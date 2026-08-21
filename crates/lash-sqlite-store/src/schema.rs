@@ -24,6 +24,9 @@ pub(crate) enum StoreBacking {
 /// the exact checkpoint-component edge projection before advancing
 /// `PRAGMA user_version`. Lash's broader durable contract still lives one level
 /// up in per-record `schema_version` stamps, not in compatibility reads.
+/// Each `checkpoint_blob_refs` row is owned by exactly one checkpoint-root
+/// publication and is reclaimed by owner-delete cascade when that root row is
+/// deleted.
 pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS blobs (
     hash    TEXT PRIMARY KEY,
@@ -51,7 +54,9 @@ CREATE INDEX IF NOT EXISTS idx_node_anchors_checkpoint_ref
     ON node_anchors(checkpoint_ref);
 
 -- Indexed projection of the exact manifest -> component edges carried in each
--- checkpoint blob. This is reference data, never a cached reference count.
+-- checkpoint blob. Each row is owned by its checkpoint root's publication and
+-- is reclaimed by owner-delete cascade when that root row is deleted. This is
+-- reference data, never a cached reference count.
 CREATE TABLE IF NOT EXISTS checkpoint_blob_refs (
     checkpoint_ref TEXT NOT NULL,
     blob_ref       TEXT NOT NULL,

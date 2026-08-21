@@ -4,25 +4,54 @@ use super::session_store_factory::session_store_request;
 use super::*;
 
 /// Backend observation and fault seam for the session-delete blob laws.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders** implement this
+/// probe for a custom store so the shared laws can observe and fault its exact
+/// blob-deletion boundary.
 #[async_trait::async_trait]
 pub trait SessionDeleteBlobProbe: Send + Sync {
+    /// Observe whether one exact content address exists.
+    ///
+    /// Integrator class (ADR 0051): **conformance-suite embedders** implement
+    /// this probe operation for their backend.
     async fn blob_exists(&self, blob_ref: &crate::BlobRef) -> bool;
 
     /// Make the next deletion of a reclaimable session-owned blob fail.
+    ///
+    /// Integrator class (ADR 0051): **conformance-suite embedders** implement
+    /// this fault injection at their backend's delete boundary.
     async fn fail_next_blob_delete(&self);
 
     /// Remove any backend fault object that outlives the failed transaction.
+    ///
+    /// Integrator class (ADR 0051): **conformance-suite embedders** implement
+    /// this when their injected fault persists beyond one transaction.
     async fn clear_blob_delete_failure(&self) {}
 
     /// Break the factory-global GC scope while leaving exact edge rows intact.
     /// Backends with no fallible GC scope return `false`.
+    ///
+    /// Integrator class (ADR 0051): **conformance-suite embedders** implement
+    /// this when their backend exposes a separately fallible global GC scope.
     async fn break_factory_gc_scope(&self, _checkpoint_ref: &crate::BlobRef) -> bool {
         false
     }
 }
 
+/// Factory and observation handles consumed by the session-delete blob laws.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders** construct this
+/// pair for each fresh custom-backend test instance.
 pub struct SessionDeleteBlobHandles {
+    /// Fresh session-store factory under conformance test.
+    ///
+    /// Integrator class (ADR 0051): **conformance-suite embedders** supply this
+    /// handle for their backend.
     pub factory: Arc<dyn crate::SessionStoreFactory>,
+    /// Backend-specific exact-blob observation and fault handle.
+    ///
+    /// Integrator class (ADR 0051): **conformance-suite embedders** supply this
+    /// handle for their backend.
     pub probe: Arc<dyn SessionDeleteBlobProbe>,
 }
 
@@ -100,6 +129,9 @@ async fn assert_components_exist(
 }
 
 /// Prove session deletion reclaims only blobs whose final exact edge it severs.
+///
+/// Integrator class (ADR 0051): **conformance-suite embedders** run this against
+/// each custom session-store backend.
 pub async fn session_delete_blob_reclaim_conformance<F>(backend: &str, make: F)
 where
     F: Fn() -> SessionDeleteBlobHandles,

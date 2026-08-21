@@ -1,23 +1,5 @@
 use crate::*;
 
-pub(crate) async fn lock_checkpoint_blob_root_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    checkpoint_ref: &str,
-) -> Result<(), StoreError> {
-    let exists =
-        sqlx::query_scalar::<_, bool>("SELECT TRUE FROM lash_blobs WHERE hash = $1 FOR KEY SHARE")
-            .bind(checkpoint_ref)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    if exists.is_none() {
-        return Err(StoreError::CheckpointRootMissing {
-            blob_ref: BlobRef(checkpoint_ref.to_string()),
-        });
-    }
-    Ok(())
-}
-
 pub(crate) async fn enumerate_checkpoint_blob_candidates_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint_refs: &std::collections::BTreeSet<String>,
