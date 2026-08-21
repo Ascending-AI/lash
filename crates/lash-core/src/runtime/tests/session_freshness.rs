@@ -195,7 +195,13 @@ async fn resident_refresh_does_not_revert_live_uncommitted_model() {
         .context_window_tokens(123_456)
         .build()
         .expect("live model");
-    runtime.set_model(live_model.clone());
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(live_model.clone()),
+            ..Default::default()
+        })
+        .await
+        .expect("apply live model change");
 
     let mut durable_head = store
         .load_session_head_meta()
@@ -227,7 +233,13 @@ async fn resident_refresh_does_not_revert_live_uncommitted_provider() {
         .complete_error("provider must not be called by refresh")
         .build()
         .into_handle();
-    runtime.set_provider(live_provider);
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(live_provider),
+            ..Default::default()
+        })
+        .await
+        .expect("apply live provider change");
 
     let mut durable_head = store
         .load_session_head_meta()

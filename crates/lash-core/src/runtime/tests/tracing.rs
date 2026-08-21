@@ -89,12 +89,18 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
         serializations_after_first,
         "an identical composition must not serialize schemas or allocate a fresh schema Vec"
     );
-    runtime.set_model(
-        crate::ModelSpec::builder("different-route")
-            .context_window_tokens(150_000)
-            .build()
-            .expect("route-noise model"),
-    );
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(
+                crate::ModelSpec::builder("different-route")
+                    .context_window_tokens(150_000)
+                    .build()
+                    .expect("route-noise model"),
+            ),
+            ..Default::default()
+        })
+        .await
+        .expect("apply route-noise model");
     run_composition_probe_turn(&mut runtime, "route-capacity-noise").await;
     runtime
         .add_prompt_contribution(crate::PromptContribution::guidance(

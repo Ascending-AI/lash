@@ -1,5 +1,5 @@
-//! `LashRuntime` configuration mutators: provider, model spec, session id,
-//! and tool-catalog refresh, plus the patch type they take.
+//! `LashRuntime` session configuration patches and prompt helpers, plus
+//! tool-catalog and tool-state operations.
 //!
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`.
 
@@ -37,20 +37,6 @@ impl SessionConfigPatch {
 }
 
 impl LashRuntime {
-    /// Update model spec on the runtime config.
-    pub fn set_model(&mut self, model: crate::ModelSpec) {
-        self.policy.model = model;
-        self.state.policy.model = self.policy.model.clone();
-    }
-
-    /// Update provider on the runtime config.
-    pub fn set_provider(&mut self, provider: ProviderHandle) {
-        self.host.core.providers.provider_resolver =
-            std::sync::Arc::new(crate::SingleProviderResolver::new(provider.clone()));
-        self.policy.provider_id = provider.kind().to_string();
-        self.state.policy.provider_id = self.policy.provider_id.clone();
-    }
-
     /// Apply a mid-run configuration change; see [`SessionConfigPatch`] for
     /// what each field leaves alone and what it replaces.
     pub async fn update_session_config(
@@ -69,7 +55,9 @@ impl LashRuntime {
             .await?;
         let previous = self.session_policy();
         if let Some(provider) = patch.provider {
-            self.set_provider(provider);
+            self.host.core.providers.provider_resolver =
+                std::sync::Arc::new(crate::SingleProviderResolver::new(provider.clone()));
+            self.policy.provider_id = provider.kind().to_string();
         }
         if let Some(model) = patch.model {
             self.policy.model = model;
