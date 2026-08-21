@@ -617,6 +617,7 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_occurrences (
     source_type text NOT NULL,
     source_key text NOT NULL,
     occurred_at_ms bigint NOT NULL,
+    reclaimable_at_ms bigint,
     record_json text NOT NULL
 );
 
@@ -903,7 +904,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:e0ebf5
 -- Data for Name: lash_runtime_effect_replay; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', '0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1', '{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"durable-read-exec-effect\",\"kind\":\"exec_code\"},\"replay\":{\"key\":\"durable-read-exec-replay\"}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":["durable read effect"],"observation_truncation":[],"tool_calls":[],"executed_calls":[],"images":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 1700000000000, 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"version":2,"kind":"turn","session_id":"durable-read-fixture","execution_id":"durable-read-effect-turn"}', 'durable-read-fixture', 'durable-read-exec-replay', '0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1', '{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"durable-read-fixture\",\"turn_id\":\"durable-read-effect-turn\",\"turn_index\":7,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"durable-read-exec-effect\",\"kind\":\"exec_code\"},\"replay\":{\"key\":\"durable-read-exec-replay\"}},\"command\":{\"type\":\"exec_code\",\"language\":\"fixture\",\"code\":\"return 887\"}}","hash":"0f8912550d39a8652f1db702550808102f5deb1b604ed1d408322f624db454f1"}', 'completed', '{"type":"exec_code","result":{"Ok":{"observations":["durable read effect"],"observation_truncation":[],"tool_calls":[],"executed_calls":[],"printed_images":[],"error":null,"duration_ms":887,"terminal_finish":{"fixture":887}}}}', NULL, NULL, NULL, 0, NULL, NULL, NULL, 1700000000000, 1700000000000);
 
 
 --
@@ -919,7 +920,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 55);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 56);
 
 
 --
@@ -985,7 +986,7 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_mutation_receipts VALUES ('tr
 -- Data for Name: lash_trigger_occurrences; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:durable-read-occurrence', 'durable-read-occurrence', 'fixture.event', 'fixture-source', 1700000000000, '{"occurrence_id":"trigger:durable-read-occurrence","source_type":"fixture.event","source_key":"fixture-source","payload":{"value":42},"idempotency_key":"durable-read-occurrence","occurred_at_ms":1700000000000}');
+INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:durable-read-occurrence', 'durable-read-occurrence', 'fixture.event', 'fixture-source', 1700000000000, NULL, '{"occurrence_id":"trigger:durable-read-occurrence","source_type":"fixture.event","source_key":"fixture-source","payload":{"value":42},"idempotency_key":"durable-read-occurrence","occurred_at_ms":1700000000000}');
 
 
 --
@@ -1651,6 +1652,13 @@ CREATE INDEX idx_lash_trigger_deliveries_process ON lash_durable_read_fixture.la
 --
 
 CREATE INDEX idx_lash_trigger_deliveries_subscription ON lash_durable_read_fixture.lash_trigger_deliveries USING btree (subscription_id);
+
+
+--
+-- Name: idx_lash_trigger_occurrences_reclaimable; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_trigger_occurrences_reclaimable ON lash_durable_read_fixture.lash_trigger_occurrences USING btree (reclaimable_at_ms, occurrence_id) WHERE (reclaimable_at_ms IS NOT NULL);
 
 
 --

@@ -115,7 +115,9 @@ impl ScratchSchema {
 pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_runtime_effect_group;
      ALTER TABLE lash_runtime_effect_replay
          DROP COLUMN group_key,
-         DROP COLUMN settlement_seq;";
+         DROP COLUMN settlement_seq;
+     DROP INDEX idx_lash_trigger_occurrences_reclaimable;
+     ALTER TABLE lash_trigger_occurrences DROP COLUMN reclaimable_at_ms;";
 
 /// Rewinds a freshly provisioned schema to the published component-54 shape.
 ///
@@ -124,7 +126,14 @@ pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_runtime_effect_group
 /// and this build differ in the version stamp alone — which is exactly what the
 /// 54 -> 55 migration declares as its source shape.
 pub const REWIND_PAST_55_ARTIFACTS: &str =
-    "DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;";
+    "DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;
+     DROP INDEX idx_lash_trigger_occurrences_reclaimable;
+     ALTER TABLE lash_trigger_occurrences DROP COLUMN reclaimable_at_ms;";
+
+/// Rewinds a fresh schema to component 55: existing rows have no eligibility
+/// arm, and the maintenance index cannot exist without it.
+pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP INDEX idx_lash_trigger_occurrences_reclaimable;
+     ALTER TABLE lash_trigger_occurrences DROP COLUMN reclaimable_at_ms;";
 
 /// Reads `server_version_num`, for the one assertion that needs a PostgreSQL
 /// feature not present on every major in the support matrix.

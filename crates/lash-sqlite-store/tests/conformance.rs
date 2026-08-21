@@ -31,6 +31,8 @@ use tempfile::TempDir;
 
 #[path = "conformance/pre_frame_key.rs"]
 mod pre_frame_key;
+#[path = "conformance/trigger_occurrence_retention.rs"]
+mod trigger_occurrence_retention;
 
 struct SqliteLineageConformanceInjector {
     path: PathBuf,
@@ -1134,7 +1136,7 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash trigger store schema"));
-    assert!(message.contains("supports schema version 5"));
+    assert!(message.contains("supports schema version 6"));
     assert!(message.contains("delete the trigger store database and start fresh"));
 }
 

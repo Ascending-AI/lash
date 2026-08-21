@@ -337,6 +337,18 @@ impl TriggerStore for PostgresTriggerStore {
         } else {
             postgres_delivery_snapshots(&mut tx, &occurrence).await?
         };
+        if is_new && reservations.is_empty() {
+            sqlx::query(
+                "UPDATE lash_trigger_occurrences
+                 SET reclaimable_at_ms = $2
+                 WHERE occurrence_id = $1 AND reclaimable_at_ms IS NULL",
+            )
+            .bind(&occurrence.occurrence_id)
+            .bind(i64::try_from(occurrence.occurred_at_ms).unwrap_or(i64::MAX))
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        }
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core::TriggerIngressReceipt {
             occurrence,
@@ -472,7 +484,9 @@ impl TriggerStore for PostgresTriggerStore {
             .iter()
             .map(|candidate| candidate.process_id.clone())
             .collect::<Vec<_>>();
-        Ok(sqlx::query(
+        let armed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        let deleted = sqlx::query(
             "DELETE FROM lash_trigger_deliveries AS delivery
                  USING UNNEST($1::TEXT[], $2::TEXT[], $3::TEXT[])
                        AS candidate(occurrence_id, subscription_id, process_id)
@@ -483,10 +497,114 @@ impl TriggerStore for PostgresTriggerStore {
         .bind(occurrence_ids)
         .bind(subscription_ids)
         .bind(process_ids)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?
-        .rows_affected() as usize)
+        .rows_affected() as usize;
+        sqlx::query(
+            "UPDATE lash_trigger_occurrences AS occurrence
+             SET reclaimable_at_ms = $2
+             WHERE occurrence.reclaimable_at_ms IS NULL
+               AND occurrence.occurrence_id = ANY($1::TEXT[])
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_trigger_deliveries AS delivery
+                   WHERE delivery.occurrence_id = occurrence.occurrence_id
+               )",
+        )
+        .bind(
+            candidates
+                .iter()
+                .map(|candidate| candidate.occurrence_id.clone())
+                .collect::<Vec<_>>(),
+        )
+        .bind(armed_at_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(deleted)
+    }
+
+    async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> lash_core::TriggerOccurrenceReclamationResult {
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        // One statement gives the scope proof and the indexed worklist from the
+        // same snapshot. The aggregate deliberately visits the whole table so
+        // `NothingToDo` remains witnessed emptiness; only eligible ids are
+        // materialized, through the partial reclaimability index.
+        let rows = sqlx::query(
+            "WITH scope AS (
+                 SELECT COUNT(*) AS inspected_count,
+                        COUNT(*) FILTER (WHERE reclaimable_at_ms IS NULL)
+                            AS live_fan_out_count,
+                        COUNT(*) FILTER (WHERE reclaimable_at_ms > $1)
+                            AS grace_deferred_count
+                 FROM lash_trigger_occurrences
+             ), candidates AS (
+                 SELECT occurrence_id
+                 FROM lash_trigger_occurrences
+                 WHERE reclaimable_at_ms IS NOT NULL
+                   AND reclaimable_at_ms <= $1
+             )
+             SELECT scope.inspected_count,
+                    scope.live_fan_out_count,
+                    scope.grace_deferred_count,
+                    candidates.occurrence_id
+             FROM scope
+             LEFT JOIN candidates ON TRUE
+             ORDER BY candidates.occurrence_id ASC",
+        )
+        .bind(cutoff_epoch_ms)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| {
+            lash_core::MaintenanceFailure::failed_before_any_work(Box::new(plugin_sqlx_error(
+                error,
+            )))
+        })?;
+        let first = &rows[0];
+        let mut report = lash_core::TriggerOccurrenceReclamationReport {
+            inspected_occurrence_count: first.get::<i64, _>(0) as usize,
+            live_fan_out_count: first.get::<i64, _>(1) as usize,
+            grace_deferred_count: first.get::<i64, _>(2) as usize,
+            ..lash_core::TriggerOccurrenceReclamationReport::default()
+        };
+        let candidates = rows
+            .into_iter()
+            .filter_map(|row| row.get::<Option<String>, _>(3))
+            .collect::<Vec<_>>();
+
+        for occurrence_id in candidates {
+            let deleted = sqlx::query(
+                "DELETE FROM lash_trigger_occurrences AS occurrence
+                 WHERE occurrence.occurrence_id = $1
+                   AND occurrence.reclaimable_at_ms IS NOT NULL
+                   AND occurrence.reclaimable_at_ms <= $2
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_trigger_deliveries AS delivery
+                       WHERE delivery.occurrence_id = occurrence.occurrence_id
+                   )",
+            )
+            .bind(&occurrence_id)
+            .bind(cutoff_epoch_ms)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| {
+                lash_core::MaintenanceFailure::failed(
+                    Box::new(plugin_sqlx_error(error)),
+                    report.clone(),
+                )
+            })?
+            .rows_affected() as usize;
+            if deleted == 0 {
+                report.reinspection_deferred_count += 1;
+            } else {
+                report.reclaimed_occurrence_count += deleted;
+            }
+        }
+        Ok(report)
     }
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {

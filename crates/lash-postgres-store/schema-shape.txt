@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 55
+version 56
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -346,6 +346,7 @@ table lash_trigger_occurrences
   column idempotency_key text not-null
   column occurred_at_ms bigint not-null
   column occurrence_id text not-null
+  column reclaimable_at_ms bigint nullable
   column record_json text not-null
   column source_key text not-null
   column source_type text not-null

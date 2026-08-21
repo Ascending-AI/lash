@@ -634,9 +634,10 @@ pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
     TriggerEventCatalog, TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceRecord,
-    TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
+    TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceReclamationReport,
+    TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
+    TriggerOperationError, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
+    TriggerSubscriptionFilter, TriggerSubscriptionRecord,
 };
 pub(crate) const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 

@@ -4,6 +4,8 @@ use lash_sansio::sync::MutexExt;
 pub struct InMemoryTriggerStore {
     clock: Arc<dyn crate::Clock>,
     state: Mutex<InMemoryTriggerEventState>,
+    #[cfg(any(test, feature = "testing"))]
+    occurrence_delete_failure: Mutex<Option<String>>,
 }
 
 /// Concrete in-memory trigger rows exposed to raw differential readers.
@@ -25,7 +27,17 @@ impl InMemoryTriggerStore {
         Self {
             clock,
             state: Mutex::new(InMemoryTriggerEventState::default()),
+            #[cfg(any(test, feature = "testing"))]
+            occurrence_delete_failure: Mutex::new(None),
         }
+    }
+
+    /// Fail the next reclaim delete of `occurrence_id` after earlier deletes in
+    /// the pass have committed. Used only by maintenance conformance.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fail_occurrence_delete_for_testing(&self, occurrence_id: impl Into<String>) {
+        *self.occurrence_delete_failure.lock_recover() = Some(occurrence_id.into());
     }
 
     #[doc(hidden)]
@@ -137,6 +149,7 @@ pub(super) struct InMemoryTriggerEventState {
     pub(super) mutation_receipts: BTreeMap<String, (String, TriggerEffectResult, u64)>,
     pub(super) occurrences: BTreeMap<String, TriggerOccurrenceRecord>,
     pub(super) occurrence_id_by_idempotency_key: BTreeMap<String, String>,
+    pub(super) occurrence_reclaimable_at_ms: BTreeMap<String, u64>,
     pub(super) deliveries: BTreeMap<(String, String), InMemoryTriggerDeliveryRecord>,
 }
 
@@ -290,6 +303,11 @@ impl TriggerStore for InMemoryTriggerStore {
         state.occurrences.insert(occurrence_id, record.clone());
         let reservations =
             reserve_in_memory_for_occurrence(&mut state, &record, self.clock.as_ref())?;
+        if reservations.is_empty() {
+            state
+                .occurrence_reclaimable_at_ms
+                .insert(record.occurrence_id.clone(), record.occurred_at_ms);
+        }
         Ok(TriggerIngressReceipt {
             occurrence: record,
             reservations,
@@ -385,6 +403,10 @@ impl TriggerStore for InMemoryTriggerStore {
             .collect::<std::collections::HashSet<_>>();
         let mut state = self.state.lock_recover();
         let before = state.deliveries.len();
+        let affected_occurrence_ids = candidates
+            .iter()
+            .map(|(occurrence_id, _, _)| (*occurrence_id).to_string())
+            .collect::<std::collections::BTreeSet<_>>();
         state.deliveries.retain(|_, delivery| {
             !candidates.contains(&(
                 delivery.occurrence_id.as_str(),
@@ -392,7 +414,77 @@ impl TriggerStore for InMemoryTriggerStore {
                 delivery.process_id.as_str(),
             ))
         });
-        Ok(before.saturating_sub(state.deliveries.len()))
+        let deleted = before.saturating_sub(state.deliveries.len());
+        let armed_at_ms = self.clock.timestamp_ms();
+        for occurrence_id in affected_occurrence_ids {
+            if state.occurrences.contains_key(&occurrence_id)
+                && !state
+                    .deliveries
+                    .values()
+                    .any(|delivery| delivery.occurrence_id == occurrence_id)
+            {
+                state
+                    .occurrence_reclaimable_at_ms
+                    .entry(occurrence_id)
+                    .or_insert(armed_at_ms);
+            }
+        }
+        Ok(deleted)
+    }
+
+    async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> TriggerOccurrenceReclamationResult {
+        let mut state = self.state.lock_recover();
+        let mut report = TriggerOccurrenceReclamationReport {
+            inspected_occurrence_count: state.occurrences.len(),
+            ..TriggerOccurrenceReclamationReport::default()
+        };
+        let mut candidates = Vec::new();
+        for occurrence_id in state.occurrences.keys() {
+            match state.occurrence_reclaimable_at_ms.get(occurrence_id) {
+                Some(armed_at_ms) if *armed_at_ms <= cutoff_epoch_ms => {
+                    candidates.push(occurrence_id.clone());
+                }
+                Some(_) => report.grace_deferred_count += 1,
+                None => report.live_fan_out_count += 1,
+            }
+        }
+
+        for occurrence_id in candidates {
+            #[cfg(any(test, feature = "testing"))]
+            {
+                let should_fail = self
+                    .occurrence_delete_failure
+                    .lock_recover()
+                    .as_ref()
+                    .is_some_and(|injected| injected == &occurrence_id);
+                if should_fail {
+                    self.occurrence_delete_failure.lock_recover().take();
+                    return Err(crate::store::MaintenanceFailure::failed(
+                        Box::new(PluginError::Session(format!(
+                            "injected trigger occurrence delete failure for `{occurrence_id}`"
+                        ))),
+                        report,
+                    ));
+                }
+            }
+
+            let Some(occurrence) = state.occurrences.remove(&occurrence_id) else {
+                report.reinspection_deferred_count += 1;
+                continue;
+            };
+            state
+                .occurrence_id_by_idempotency_key
+                .remove(&occurrence.idempotency_key);
+            state.occurrence_reclaimable_at_ms.remove(&occurrence_id);
+            state
+                .deliveries
+                .retain(|_, delivery| delivery.occurrence_id != occurrence_id);
+            report.reclaimed_occurrence_count += 1;
+        }
+        Ok(report)
     }
 
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {

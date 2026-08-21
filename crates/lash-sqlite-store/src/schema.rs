@@ -601,11 +601,16 @@ CREATE TABLE IF NOT EXISTS trigger_occurrences (
     source_type      TEXT NOT NULL,
     source_key       TEXT NOT NULL,
     occurred_at_ms   INTEGER NOT NULL,
+    reclaimable_at_ms INTEGER,
     record_json      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_trigger_occurrences_source
     ON trigger_occurrences(source_type, source_key, occurred_at_ms);
+
+CREATE INDEX IF NOT EXISTS idx_trigger_occurrences_reclaimable
+    ON trigger_occurrences(reclaimable_at_ms, occurrence_id)
+    WHERE reclaimable_at_ms IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS trigger_deliveries (
     occurrence_id    TEXT NOT NULL,
@@ -638,7 +643,8 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // deliberately no compatibility read path.
 // Version 5 stores v3 process-environment refs and the resulting trigger
 // definition fingerprints after the required per-turn budget cutover.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 5;
+// Version 6 durably arms occurrence reclaim eligibility at fan-out terminality.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 6;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (

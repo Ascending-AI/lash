@@ -488,10 +488,14 @@ CREATE TABLE IF NOT EXISTS lash_trigger_occurrences (
     source_type TEXT NOT NULL,
     source_key TEXT NOT NULL,
     occurred_at_ms BIGINT NOT NULL,
+    reclaimable_at_ms BIGINT,
     record_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_source
     ON lash_trigger_occurrences(source_type, source_key, occurred_at_ms);
+CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_reclaimable
+    ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
+    WHERE reclaimable_at_ms IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
     occurrence_id TEXT NOT NULL REFERENCES lash_trigger_occurrences(occurrence_id) ON DELETE CASCADE,
@@ -526,7 +530,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 55)
+VALUES ('lash-postgres-store', 56)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

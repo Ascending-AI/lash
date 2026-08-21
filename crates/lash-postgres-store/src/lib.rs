@@ -201,7 +201,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // hold no settlement rank yet. An index and nothing else, so stores at 50
 // through 54 take a creation-only migration at open; SQLite carries the same
 // index unversioned, and `RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL` says why.
-const SCHEMA_VERSION: i32 = 55;
+// Version 56 adds the nullable trigger-occurrence reclaim eligibility arm and
+// its partial maintenance index. Stores at 50 through 55 take a creation-only
+// migration that arms legacy zero-fan-out rows from their occurrence time while
+// leaving live-fan-out rows unarmed for the normal terminal transition.
+const SCHEMA_VERSION: i32 = 56;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -460,9 +464,9 @@ impl PostgresStorage {
     /// `lash_schema_versions`.
     ///
     /// The component schema is normally a reject-and-recreate boundary. This
-    /// build has two explicit exceptions: Lash-managed `Enforce` mode can apply
-    /// the creation-only migrations from the published component-50, -51, or
-    /// -52 shapes to 53 after an exact source-shape preflight. An older
+    /// build has explicit exceptions: Lash-managed `Enforce` mode can apply
+    /// creation-only migrations from published component-50 through -55 shapes
+    /// to the current generation after an exact source-shape preflight. An older
     /// stamp over newer artifacts is ledger/schema divergence and is refused
     /// with an inspect-and-recreate remedy; other mismatches are rejected at
     /// open.

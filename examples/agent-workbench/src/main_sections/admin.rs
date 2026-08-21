@@ -69,6 +69,43 @@ async fn prune_trigger_mutation_receipts(
     }))
 }
 
+/// Operator-supplied eligibility cutoff for trigger-occurrence reclamation.
+///
+/// The absolute cutoff only defers rows whose terminal transition already
+/// armed them; it cannot make a live delivery fan-out eligible.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct ReclaimTriggerOccurrencesRequest {
+    cutoff_epoch_ms: u64,
+}
+
+/// Run the deployment-wide trigger-occurrence maintenance lever explicitly.
+///
+/// Like receipt pruning, this is an operator-composed request with no UI and no
+/// schedule. The complete typed report is returned so a caller can distinguish
+/// reclaimed rows, live fan-out, grace deferral, and a concurrent reinspection
+/// requirement.
+async fn reclaim_trigger_occurrences(
+    State(state): State<AppState>,
+    Json(request): Json<ReclaimTriggerOccurrencesRequest>,
+) -> Result<Json<lash::triggers::TriggerOccurrenceReclamationReport>, AppError> {
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::RunStoreMaintenance)?;
+    let report = state
+        .trigger_store
+        .reclaim_trigger_occurrences(request.cutoff_epoch_ms)
+        .await
+        .map_err(AppError::internal)?;
+    state.trace(
+        "admin.trigger_occurrences.reclaimed",
+        json!({
+            "cutoff_epoch_ms": request.cutoff_epoch_ms,
+            "report": report,
+        }),
+    );
+    Ok(Json(report))
+}
+
 /// Operator-supplied plan for one store-growth maintenance pass.
 ///
 /// Both levers are opt-in and neither has a default: a request that names no

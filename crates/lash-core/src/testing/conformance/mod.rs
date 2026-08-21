@@ -136,6 +136,18 @@ mod tests {
         runtime: Arc<crate::InMemorySessionStore>,
     }
 
+    struct InMemoryTriggerOccurrenceRetentionFaultInjector {
+        store: Arc<crate::InMemoryTriggerStore>,
+    }
+
+    #[async_trait::async_trait]
+    impl TriggerOccurrenceRetentionFaultInjector for InMemoryTriggerOccurrenceRetentionFaultInjector {
+        async fn fail_occurrence_delete(&self, occurrence_id: &str) {
+            self.store
+                .fail_occurrence_delete_for_testing(occurrence_id.to_string());
+        }
+    }
+
     #[async_trait::async_trait]
     impl GraphIntegrityInjector for InMemoryGraphIntegrityInjector {
         async fn inject(&self, target: &GraphIntegrityTarget) {
@@ -346,6 +358,15 @@ mod tests {
             Arc::new(crate::InMemoryTriggerStore::default()) as Arc<dyn crate::TriggerStore>
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_trigger_occurrence_retention_failure_is_not_laundered() {
+        let store = Arc::new(crate::InMemoryTriggerStore::default());
+        let fault = InMemoryTriggerOccurrenceRetentionFaultInjector {
+            store: Arc::clone(&store),
+        };
+        trigger_occurrence_retention_failure_law(store, &fault).await;
     }
 
     #[tokio::test]

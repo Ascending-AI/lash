@@ -549,6 +549,15 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?
                     };
+                    if is_new && reservations.is_empty() {
+                        tx.execute(
+                            "UPDATE trigger_occurrences
+                             SET reclaimable_at_ms = ?2
+                             WHERE occurrence_id = ?1 AND reclaimable_at_ms IS NULL",
+                            params![record.occurrence_id.as_str(), record.occurred_at_ms as i64],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    }
                     Ok(lash_core::TriggerIngressReceipt {
                         occurrence: record,
                         reservations,
@@ -708,9 +717,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             return Ok(0);
         }
         let candidates_json = serde_json::to_string(candidates).map_err(process_decode_error)?;
+        let armed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         self.conn
             .call(move |conn| {
-                conn.execute(
+                let tx = conn.transaction()?;
+                let deleted = tx.execute(
                     "DELETE FROM trigger_deliveries
                      WHERE EXISTS (
                          SELECT 1
@@ -722,11 +733,155 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                            AND trigger_deliveries.process_id =
                                    json_extract(candidate.value, '$.process_id')
                      )",
-                    params![candidates_json],
-                )
+                    params![&candidates_json],
+                )?;
+                tx.execute(
+                    "UPDATE trigger_occurrences
+                     SET reclaimable_at_ms = ?2
+                     WHERE reclaimable_at_ms IS NULL
+                       AND NOT EXISTS (
+                           SELECT 1 FROM trigger_deliveries
+                           WHERE trigger_deliveries.occurrence_id =
+                                 trigger_occurrences.occurrence_id
+                       )
+                       AND occurrence_id IN (
+                           SELECT DISTINCT json_extract(candidate.value, '$.occurrence_id')
+                           FROM json_each(?1) AS candidate
+                       )",
+                    params![&candidates_json, armed_at_ms],
+                )?;
+                tx.commit()?;
+                Ok(deleted)
             })
             .await
             .map_err(process_sqlite_error)
+    }
+
+    async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> lash_core::TriggerOccurrenceReclamationResult {
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        let partial = Arc::new(Mutex::new(
+            lash_core::TriggerOccurrenceReclamationReport::default(),
+        ));
+        let partial_for_call = Arc::clone(&partial);
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    // One statement gives the scope proof and the indexed
+                    // worklist from the same snapshot. The aggregate visits the
+                    // whole table so `NothingToDo` stays witnessed emptiness;
+                    // only eligible ids are materialized.
+                    let rows = {
+                        let mut stmt = conn
+                            .prepare(
+                                "WITH scope AS (
+                                     SELECT COUNT(*) AS inspected_count,
+                                            COUNT(*) FILTER (
+                                                WHERE reclaimable_at_ms IS NULL
+                                            ) AS live_fan_out_count,
+                                            COUNT(*) FILTER (
+                                                WHERE reclaimable_at_ms > ?1
+                                            ) AS grace_deferred_count
+                                     FROM trigger_occurrences
+                                 ), candidates AS (
+                                     SELECT occurrence_id
+                                     FROM trigger_occurrences
+                                     WHERE reclaimable_at_ms IS NOT NULL
+                                       AND reclaimable_at_ms <= ?1
+                                 )
+                                 SELECT scope.inspected_count,
+                                        scope.live_fan_out_count,
+                                        scope.grace_deferred_count,
+                                        candidates.occurrence_id
+                                 FROM scope
+                                 LEFT JOIN candidates ON TRUE
+                                 ORDER BY candidates.occurrence_id ASC",
+                            )
+                            .map_err(|error| {
+                                lash_core::MaintenanceFailure::failed_before_any_work(Box::new(
+                                    process_sqlite_error(error),
+                                ))
+                            })?;
+                        let rows = stmt
+                            .query_map(params![cutoff_epoch_ms], |row| {
+                                Ok((
+                                    row.get::<_, i64>(0)?,
+                                    row.get::<_, i64>(1)?,
+                                    row.get::<_, i64>(2)?,
+                                    row.get::<_, Option<String>>(3)?,
+                                ))
+                            })
+                            .map_err(|error| {
+                                lash_core::MaintenanceFailure::failed_before_any_work(Box::new(
+                                    process_sqlite_error(error),
+                                ))
+                            })?;
+                        rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                            lash_core::MaintenanceFailure::failed_before_any_work(Box::new(
+                                process_sqlite_error(error),
+                            ))
+                        })?
+                    };
+
+                    let first = &rows[0];
+                    let mut report = lash_core::TriggerOccurrenceReclamationReport {
+                        inspected_occurrence_count: first.0 as usize,
+                        live_fan_out_count: first.1 as usize,
+                        grace_deferred_count: first.2 as usize,
+                        ..lash_core::TriggerOccurrenceReclamationReport::default()
+                    };
+                    *partial_for_call
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = report.clone();
+                    let candidates = rows
+                        .into_iter()
+                        .filter_map(|(_, _, _, occurrence_id)| occurrence_id)
+                        .collect::<Vec<_>>();
+
+                    for occurrence_id in candidates {
+                        let deleted = conn
+                            .execute(
+                                "DELETE FROM trigger_occurrences
+                                 WHERE occurrence_id = ?1
+                                   AND reclaimable_at_ms IS NOT NULL
+                                   AND reclaimable_at_ms <= ?2
+                                   AND NOT EXISTS (
+                                       SELECT 1 FROM trigger_deliveries
+                                       WHERE trigger_deliveries.occurrence_id =
+                                             trigger_occurrences.occurrence_id
+                                   )",
+                                params![occurrence_id, cutoff_epoch_ms],
+                            )
+                            .map_err(|error| {
+                                lash_core::MaintenanceFailure::failed(
+                                    Box::new(process_sqlite_error(error)),
+                                    report.clone(),
+                                )
+                            })?;
+                        if deleted == 0 {
+                            report.reinspection_deferred_count += 1;
+                        } else {
+                            report.reclaimed_occurrence_count += deleted;
+                        }
+                        *partial_for_call
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = report.clone();
+                    }
+                    Ok(report)
+                })())
+            })
+            .await
+            .map_err(|error| {
+                lash_core::MaintenanceFailure::failed(
+                    Box::new(process_sqlite_error(error)),
+                    partial
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone(),
+                )
+            })?
     }
 
     async fn prune_mutation_receipts(
