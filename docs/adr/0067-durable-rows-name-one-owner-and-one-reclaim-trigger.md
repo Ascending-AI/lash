@@ -72,7 +72,7 @@ The durable reference-edge inventory includes:
 
 | Row class | Exactly-one owner | Reclaim trigger |
 | --- | --- | --- |
-| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | The checkpoint root's publication identified by `checkpoint_ref`; each edge belongs to exactly one published root. | Owner-delete cascade: deleting that checkpoint-root blob cascades its projection edges in the same transaction. |
+| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | Session: the session whose head or anchor owns the checkpoint root identified by `checkpoint_ref`; components may be shared, but each edge belongs to that session-owned root. | Owner-delete cascade: owner-scoped session delete or process prune deletes the unreferenced checkpoint root, cascading its projection edges in the same transaction. |
 
 #### Reclaim is severance, not sweeping
 

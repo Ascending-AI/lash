@@ -1752,6 +1752,14 @@ CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_group_seq ON lash_durable_read
 
 
 --
+-- Name: lash_checkpoint_blob_refs lash_checkpoint_blob_refs_blob_ref_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
+    ADD CONSTRAINT lash_checkpoint_blob_refs_blob_ref_fkey FOREIGN KEY (blob_ref) REFERENCES lash_durable_read_fixture.lash_blobs(hash);
+
+
+--
 -- Name: lash_checkpoint_blob_refs lash_checkpoint_blob_refs_checkpoint_ref_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 

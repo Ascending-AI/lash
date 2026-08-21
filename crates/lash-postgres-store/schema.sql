@@ -44,12 +44,14 @@ CREATE INDEX IF NOT EXISTS idx_lash_node_anchors_checkpoint_ref
     ON lash_node_anchors(checkpoint_ref);
 
 -- Indexed projection of exact checkpoint-manifest component edges. Each row is
--- owned by its checkpoint root's publication and is reclaimed by owner-delete
--- cascade when that root row is deleted. This is reference data, never a cached
--- reference count.
+-- owned by the session whose head or anchor owns the checkpoint root named by
+-- checkpoint_ref. Owner-scoped session delete or process prune deletes an
+-- unreferenced root and cascades its edges in the same transaction. The
+-- component foreign key only prevents dangling edges; it is not a second
+-- reclaim trigger. This is reference data, never a cached reference count.
 CREATE TABLE IF NOT EXISTS lash_checkpoint_blob_refs (
     checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
-    blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
+    blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash),
     PRIMARY KEY (checkpoint_ref, blob_ref)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_checkpoint_blob_refs_blob_ref

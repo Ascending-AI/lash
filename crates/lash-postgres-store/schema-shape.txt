@@ -64,7 +64,7 @@ table lash_checkpoint_blob_refs
   column blob_ref text not-null
   column checkpoint_ref text not-null
   primary-key (checkpoint_ref, blob_ref)
-  foreign-key (blob_ref) references lash_blobs (hash) on delete cascade
+  foreign-key (blob_ref) references lash_blobs (hash) on delete no action
   foreign-key (checkpoint_ref) references lash_blobs (hash) on delete cascade
 table lash_deleted_sessions
   column session_id text not-null

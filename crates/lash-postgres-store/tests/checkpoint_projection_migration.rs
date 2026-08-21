@@ -55,6 +55,30 @@ async fn postgres_55_to_56_backfill_preserves_legacy_fork_components_when_new_si
     )
     .await
     .expect("migrate seeded Postgres component 55 to 56");
+    let foreign_key_actions = sqlx::query_as::<_, (String, String)>(
+        "SELECT conname, confdeltype::TEXT
+         FROM pg_catalog.pg_constraint
+         WHERE conrelid = 'lash_checkpoint_blob_refs'::regclass
+           AND contype = 'f'
+         ORDER BY conname",
+    )
+    .fetch_all(&scratch.pool)
+    .await
+    .expect("read migrated checkpoint projection foreign keys");
+    assert_eq!(
+        foreign_key_actions,
+        vec![
+            (
+                "lash_checkpoint_blob_refs_blob_ref_fkey".to_string(),
+                "a".to_string(),
+            ),
+            (
+                "lash_checkpoint_blob_refs_checkpoint_ref_fkey".to_string(),
+                "c".to_string(),
+            ),
+        ],
+        "component deletion must be restrictive while root deletion owns the only cascade"
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM lash_checkpoint_blob_refs

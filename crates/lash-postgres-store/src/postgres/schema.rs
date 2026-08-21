@@ -54,11 +54,14 @@ const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_conde
             phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))
         )"#;
 
-/// Projection rows are owned by exactly one checkpoint-root publication and
-/// reclaimed by owner-delete cascade when that root blob row is deleted.
+/// Each projection row is owned by the session whose head or anchor owns the
+/// checkpoint root named by `checkpoint_ref`. Owner-scoped session delete or
+/// process prune deletes an unreferenced root and cascades its edges in the same
+/// transaction. The component foreign key only prevents dangling edges; it is
+/// not a second reclaim trigger.
 const CHECKPOINT_BLOB_REFS_DDL: &str = r#"CREATE TABLE lash_checkpoint_blob_refs (
             checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
-            blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
+            blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash),
             PRIMARY KEY (checkpoint_ref, blob_ref)
         )"#;
 
