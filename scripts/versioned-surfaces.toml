@@ -34,7 +34,7 @@ description = "JSON wire structs and enums exchanged by Lash remote peers"
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-remote-protocol/src/*.rs"]
-must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent"]
+must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent", "RemoteTurnReport"]
 
 [[surface]]
 constant = "SCHEMA_VERSION"

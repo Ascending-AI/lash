@@ -936,6 +936,42 @@ fn model_attempt_reset_has_pinned_wire_shape() {
 }
 
 #[test]
+fn remote_turn_result_rejects_contradictory_status_and_outcome() {
+    let mut result = RemoteTurnReport {
+        protocol_version: REMOTE_PROTOCOL_VERSION,
+        session_id: "session".to_string(),
+        turn_id: "turn".to_string(),
+        status: RemoteTurnStatus::Cancelled,
+        outcome: RemoteTurnOutcome::Stopped {
+            stop: RemoteTurnStop::Cancelled,
+        },
+        cancellation: None,
+        assistant_output: RemoteAssistantOutput::default(),
+        usage: RemoteTurnUsageReport::default(),
+        execution: RemoteTurnExecutionMetrics::default(),
+        tool_calls: Vec::new(),
+        llm_calls: Vec::new(),
+        issues: Vec::new(),
+        activities: Vec::new(),
+        metadata: HashMap::new(),
+    };
+    result.cancellation = Some(RemoteTurnCancellationEvidence {
+        request_id: "request-1".to_string(),
+        origin: Some("workbench-user".to_string()),
+        reason: Some("stop".to_string()),
+    });
+    result.validate().expect("cancelled result with evidence");
+
+    result.status = RemoteTurnStatus::Completed;
+    result.cancellation = None;
+    assert!(matches!(
+        result.validate(),
+        Err(RemoteProtocolError::InvalidEnvelope { type_name, message })
+            if type_name == "RemoteTurnReport" && message.contains("contradicts its outcome")
+    ));
+}
+
+#[test]
 fn remote_turn_result_requires_cancellation_evidence_iff_cancelled() {
     let mut result = RemoteTurnReport {
         protocol_version: REMOTE_PROTOCOL_VERSION,
@@ -955,7 +991,11 @@ fn remote_turn_result_requires_cancellation_evidence_iff_cancelled() {
         activities: Vec::new(),
         metadata: HashMap::new(),
     };
-    assert!(result.validate().is_err());
+    assert!(matches!(
+        result.validate(),
+        Err(RemoteProtocolError::InvalidEnvelope { message, .. })
+            if message.contains("cancellation evidence")
+    ));
 
     result.cancellation = Some(RemoteTurnCancellationEvidence {
         request_id: "request-1".to_string(),
@@ -965,7 +1005,16 @@ fn remote_turn_result_requires_cancellation_evidence_iff_cancelled() {
     result.validate().expect("cancelled result with evidence");
 
     result.status = RemoteTurnStatus::Completed;
-    assert!(result.validate().is_err());
+    result.outcome = RemoteTurnOutcome::Finished {
+        finish: RemoteTurnFinish::AssistantMessage {
+            text: "done".to_string(),
+        },
+    };
+    assert!(matches!(
+        result.validate(),
+        Err(RemoteProtocolError::InvalidEnvelope { message, .. })
+            if message.contains("cancellation evidence")
+    ));
 }
 
 #[test]
@@ -1267,10 +1316,10 @@ enum Protocol41ObservationSignalShape {
 }
 
 /// A version 41 peer has no resident-replacement signal. Its frozen envelope
-/// reader must reject the complete v42 envelope at the version probe, before
+/// reader must reject the complete v43 envelope at the version probe, before
 /// its closed payload decoder can see `resident_changed`.
 #[test]
-fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback() {
+fn protocol_41_peer_rejects_protocol_43_resident_changed_without_commit_fallback() {
     let resident = RemoteSessionObservationEvent {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "resident-session".to_string(),
@@ -1280,11 +1329,11 @@ fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback
         cursor: "resident-cursor".to_string(),
         event: RemoteSessionObservationEventPayload::ResidentChanged,
     };
-    let wire = serde_json::to_vec(&resident).expect("serialize complete version 42 envelope");
+    let wire = serde_json::to_vec(&resident).expect("serialize complete version 43 envelope");
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 42,
+            "protocol_version": 43,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1295,11 +1344,11 @@ fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback
 
     PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(false, std::sync::atomic::Ordering::SeqCst);
     let error = Protocol41ObservationEnvelope::decode_json(&wire)
-        .expect_err("version 41 reader must reject a complete version 42 envelope");
+        .expect_err("version 41 reader must reject a complete version 43 envelope");
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 42,
+            actual: 43,
             expected: 41,
         }
     ));
@@ -1309,7 +1358,7 @@ fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback
     );
 
     let mut mislabeled =
-        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect v42 fixture");
+        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect v43 fixture");
     mislabeled["protocol_version"] = serde_json::json!(41);
     PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(false, std::sync::atomic::Ordering::SeqCst);
     let error = Protocol41ObservationEnvelope::decode_json(
@@ -1325,7 +1374,7 @@ fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 42, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 43, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1734,7 +1783,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 42,
+            expected: 43,
         })
     ));
 }
@@ -1774,7 +1823,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             ensure_protocol_version(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 42,
+                expected: 43,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1810,7 +1859,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             ensure_protocol_version(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 42,
+                expected: 43,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1866,7 +1915,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             ensure_protocol_version(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 42,
+                expected: 43,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1898,7 +1947,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             ensure_protocol_version(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 42,
+                expected: 43,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"

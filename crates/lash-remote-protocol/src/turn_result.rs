@@ -53,6 +53,13 @@ impl RemoteTurnReport {
                     .to_string(),
             });
         }
+        let expected_status = RemoteTurnStatus::from(&self.outcome);
+        if self.status != expected_status {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteTurnReport",
+                message: format!("turn status `{:?}` contradicts its outcome", self.status),
+            });
+        }
         if let Some(cancellation) = self.cancellation.as_ref() {
             cancellation.validate()?;
         }
@@ -211,6 +218,20 @@ pub enum RemoteTurnStop {
         tool_name: String,
         value: serde_json::Value,
     },
+}
+
+impl From<&RemoteTurnOutcome> for RemoteTurnStatus {
+    fn from(value: &RemoteTurnOutcome) -> Self {
+        match value {
+            RemoteTurnOutcome::Finished { .. } | RemoteTurnOutcome::AgentFrameSwitch { .. } => {
+                Self::Completed
+            }
+            RemoteTurnOutcome::Stopped {
+                stop: RemoteTurnStop::Cancelled,
+            } => Self::Cancelled,
+            RemoteTurnOutcome::Stopped { .. } => Self::Failed,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
