@@ -2009,7 +2009,7 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
 /// Every transition in the model is exercised here, legal and illegal alike:
 /// the state is durable, reachable only from a running Externally-Owned row,
 /// idempotent, refused from every other source state and disposition, closable
-/// by external reconciliation, and never terminal.
+/// by external reconciliation, and never retracts a reconciled terminal state.
 async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     let process_id = "caller-departure-machine";
     let observer_session = "caller-departure-observer";
@@ -2178,9 +2178,14 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
         "reconciliation, not lash, supplies the outcome"
     );
 
-    // Illegal: a terminal row cannot go back.
-    assert!(
-        registry.record_caller_departure(process_id).await.is_err(),
+    // Replaying the earlier departure is a no-op once reconciliation appended
+    // a later terminal event. The terminal projection must not go back.
+    let terminal_replay = registry
+        .record_caller_departure(process_id)
+        .await
+        .expect("the earlier non-tail departure replays without repair");
+    assert_eq!(
+        terminal_replay, closed,
         "a recorded outcome cannot be retracted into a caller departure"
     );
 }
