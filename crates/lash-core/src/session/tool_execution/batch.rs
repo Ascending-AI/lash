@@ -301,6 +301,24 @@ impl RuntimeExecutionContext<'_> {
 
         let batch_id = deterministic_tool_invocation_batch_id(&calls);
         let mut replies = vec![None; calls.len()];
+        // A failed batch reports an empty settlement order by construction: downstream
+        // settlement-selecting aggregates treat the order as evidence of what settled.
+        // Replies already completed during preparation are preserved.
+        let fail_batch =
+            |reason: String, replies: &mut Vec<Option<ToolInvocationReply>>| -> ToolBatchReplies {
+                let error = serde_json::json!(format!("tool batch failed: {reason}"));
+                ToolBatchReplies {
+                    replies: replies
+                        .iter_mut()
+                        .map(|reply| {
+                            reply
+                                .take()
+                                .unwrap_or_else(|| ToolInvocationReply::error(error.clone()))
+                        })
+                        .collect(),
+                    settlement_order: Vec::new(),
+                }
+            };
         let mut prepared_entries = Vec::new();
         // A call that finishes while being prepared has already settled by the
         // time the concurrent batch starts, so it leads the settlement order.
@@ -433,29 +451,11 @@ impl RuntimeExecutionContext<'_> {
                 .controller()
                 .execute_effect(envelope, local_executor)
                 .await;
-            let mut outcome = match raw_outcome
-                .and_then(crate::RuntimeEffectOutcome::into_tool_batch_effect)
-            {
-                Ok(outcome) => outcome,
-                Err(err) => {
-                    for (index, prepared, _, _) in prepared_entries {
-                        replies[index] = Some(ToolInvocationReply::error(serde_json::json!(
-                            format!("tool batch failed: {err}")
-                        )));
-                        let _ = prepared;
-                    }
-                    // The batch never ran, so no order was observed. Claiming
-                    // input order here is the shape this layer exists to
-                    // remove; an empty order says what is true.
-                    return ToolBatchReplies {
-                        replies: replies
-                            .into_iter()
-                            .map(|reply| reply.expect("every batch reply slot should be filled"))
-                            .collect(),
-                        settlement_order: Vec::new(),
-                    };
-                }
-            };
+            let mut outcome =
+                match raw_outcome.and_then(crate::RuntimeEffectOutcome::into_tool_batch_effect) {
+                    Ok(outcome) => outcome,
+                    Err(err) => return fail_batch(err.to_string(), &mut replies),
+                };
             // The batch effect drained its own trigger buffer into the recorded
             // outcome, so restoring it here is what makes an inner emission
             // survive both the local run and its replay: the enclosing effect
@@ -478,18 +478,15 @@ impl RuntimeExecutionContext<'_> {
             if let Err(reason) =
                 validate_batch_settlement_order(&outcome.settlement_order, batch_call_indices.len())
             {
-                for (index, _, _, _) in prepared_entries {
-                    replies[index] = Some(ToolInvocationReply::error(serde_json::json!(format!(
-                        "tool batch failed: {reason}"
-                    ))));
-                }
-                return ToolBatchReplies {
-                    replies: replies
-                        .into_iter()
-                        .map(|reply| reply.expect("every batch reply slot should be filled"))
-                        .collect(),
-                    settlement_order: Vec::new(),
-                };
+                return fail_batch(reason, &mut replies);
+            }
+            if outcome.launches.len() != prepared_entries.len() {
+                let message = format!(
+                    "returned {} launches for {} prepared calls",
+                    outcome.launches.len(),
+                    prepared_entries.len()
+                );
+                return fail_batch(message, &mut replies);
             }
             settlement_order.extend(
                 outcome
@@ -497,83 +494,72 @@ impl RuntimeExecutionContext<'_> {
                     .iter()
                     .map(|position| batch_call_indices[*position]),
             );
-            if outcome.launches.len() != prepared_entries.len() {
-                let message = format!(
-                    "tool batch returned {} launches for {} prepared calls",
-                    outcome.launches.len(),
-                    prepared_entries.len()
-                );
-                for (index, _, _, _) in prepared_entries {
-                    replies[index] = Some(ToolInvocationReply::error(serde_json::json!(message)));
-                }
-            } else {
-                // This loop looks like it settles parked leaves in input order,
-                // and a reviewer reading it alone would rightly call that a
-                // defect: a deferred leaf that rejects first would not lead the
-                // order. It does not, because a batch leaf never reaches here
-                // parked. `execute_prepared_tool_batch_child` awaits its own
-                // pending completion and always hands back `Done`, and it does
-                // so inside the unordered scheduler, so a deferred leaf's true
-                // completion time is what places it in `settlement_order`.
-                // `ToolBatchEffectOutcome` is crate-private with that one
-                // producer, so no host can supply parked launches either. The
-                // `Pending` arm below is therefore unreachable today and is
-                // kept only so the match stays total.
-                //
-                // `session::settlement_latency_tests` holds this down with two
-                // real deferred tools whose completions race: the fast rejection
-                // leads the order whichever position it was launched in.
-                for ((index, prepared, _, _), launch) in
-                    prepared_entries.into_iter().zip(outcome.launches)
-                {
-                    let call_id = prepared.call_id.clone();
-                    let reply = match launch {
-                        crate::runtime::ToolCallLaunch::Done { result } => {
-                            let result = *result;
-                            let record = ToolCallRecord {
-                                call_id: Some(result.call_id.clone()),
-                                tool: result.tool_name.clone(),
-                                args: result.args.clone(),
-                                output: result.output.clone(),
-                                duration_ms: result.duration_ms,
-                            };
-                            ToolInvocationReply::from_output(result.output).with_record(record)
-                        }
-                        crate::runtime::ToolCallLaunch::Pending {
-                            key,
-                            pending,
-                            duration_ms,
-                        } => {
-                            let dispatch_outcome = self
-                                .await_pending_tool_dispatch_outcome(
-                                    &call_id,
-                                    Some(invocation.clone()),
-                                    crate::tool_dispatch::PendingToolDispatchOutcome {
-                                        tool_name: prepared.tool_name.clone(),
-                                        args: prepared.args.clone(),
-                                        key: *key,
-                                        pending,
-                                        duration_ms,
-                                        attempts: Vec::new(),
-                                    },
-                                    self.cancellation_token.clone(),
-                                )
-                                .await;
-                            let completed = self
-                                .complete_tool_call(
-                                    index,
-                                    call_id.clone(),
-                                    prepared.replay.clone(),
-                                    dispatch_outcome,
-                                    TurnActivityId::new(format!("tool:{call_id}")),
-                                )
-                                .await;
-                            ToolInvocationReply::from_output(completed.completed.output)
-                                .with_record(completed.record)
-                        }
-                    };
-                    replies[index] = Some(reply);
-                }
+            // This loop looks like it settles parked leaves in input order,
+            // and a reviewer reading it alone would rightly call that a
+            // defect: a deferred leaf that rejects first would not lead the
+            // order. It does not, because a batch leaf never reaches here
+            // parked. `execute_prepared_tool_batch_child` awaits its own
+            // pending completion and always hands back `Done`, and it does
+            // so inside the unordered scheduler, so a deferred leaf's true
+            // completion time is what places it in `settlement_order`.
+            // `ToolBatchEffectOutcome` is crate-private with that one
+            // producer, so no host can supply parked launches either. The
+            // `Pending` arm below is therefore unreachable today and is
+            // kept only so the match stays total.
+            //
+            // `session::settlement_latency_tests` holds this down with two
+            // real deferred tools whose completions race: the fast rejection
+            // leads the order whichever position it was launched in.
+            for ((index, prepared, _, _), launch) in
+                prepared_entries.into_iter().zip(outcome.launches)
+            {
+                let call_id = prepared.call_id.clone();
+                let reply = match launch {
+                    crate::runtime::ToolCallLaunch::Done { result } => {
+                        let result = *result;
+                        let record = ToolCallRecord {
+                            call_id: Some(result.call_id.clone()),
+                            tool: result.tool_name.clone(),
+                            args: result.args.clone(),
+                            output: result.output.clone(),
+                            duration_ms: result.duration_ms,
+                        };
+                        ToolInvocationReply::from_output(result.output).with_record(record)
+                    }
+                    crate::runtime::ToolCallLaunch::Pending {
+                        key,
+                        pending,
+                        duration_ms,
+                    } => {
+                        let dispatch_outcome = self
+                            .await_pending_tool_dispatch_outcome(
+                                &call_id,
+                                Some(invocation.clone()),
+                                crate::tool_dispatch::PendingToolDispatchOutcome {
+                                    tool_name: prepared.tool_name.clone(),
+                                    args: prepared.args.clone(),
+                                    key: *key,
+                                    pending,
+                                    duration_ms,
+                                    attempts: Vec::new(),
+                                },
+                                self.cancellation_token.clone(),
+                            )
+                            .await;
+                        let completed = self
+                            .complete_tool_call(
+                                index,
+                                call_id.clone(),
+                                prepared.replay.clone(),
+                                dispatch_outcome,
+                                TurnActivityId::new(format!("tool:{call_id}")),
+                            )
+                            .await;
+                        ToolInvocationReply::from_output(completed.completed.output)
+                            .with_record(completed.record)
+                    }
+                };
+                replies[index] = Some(reply);
             }
         }
 
@@ -585,5 +571,233 @@ impl RuntimeExecutionContext<'_> {
             replies,
             settlement_order,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone, Copy)]
+    enum BatchFailureResponse {
+        LaunchCountMismatch,
+        MalformedSettlementOrder,
+        EffectDecodeError,
+    }
+
+    struct BatchFailureEffectController {
+        calls: AtomicUsize,
+        response: BatchFailureResponse,
+    }
+
+    impl BatchFailureEffectController {
+        fn new(response: BatchFailureResponse) -> Self {
+            Self {
+                calls: AtomicUsize::default(),
+                response,
+            }
+        }
+    }
+
+    impl crate::AwaitEventResolver for BatchFailureEffectController {}
+
+    #[async_trait::async_trait]
+    impl crate::RuntimeEffectController for BatchFailureEffectController {
+        async fn execute_effect(
+            &self,
+            envelope: crate::RuntimeEffectEnvelope,
+            _local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert!(matches!(
+                envelope.command,
+                crate::RuntimeEffectCommand::ToolBatch { .. }
+            ));
+            let settlement_order = match self.response {
+                BatchFailureResponse::LaunchCountMismatch => vec![0],
+                BatchFailureResponse::MalformedSettlementOrder => vec![0, 0],
+                BatchFailureResponse::EffectDecodeError => {
+                    return Err(crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
+                        "effect decode failed",
+                    ));
+                }
+            };
+            Ok(crate::RuntimeEffectOutcome::ToolBatch {
+                launches: Vec::new(),
+                triggers: Vec::new(),
+                settlement_order,
+            })
+        }
+    }
+
+    struct BatchFailureTools;
+
+    fn batch_failure_tool() -> crate::ToolDefinition {
+        crate::ToolDefinition::raw(
+            "tool:batch_failure",
+            "batch_failure",
+            "",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        )
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ToolProvider for BatchFailureTools {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            vec![batch_failure_tool().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "batch_failure").then(|| Arc::new(batch_failure_tool().contract()))
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("not reached"))
+        }
+    }
+
+    fn batch_failure_context(
+        controller: Arc<BatchFailureEffectController>,
+    ) -> crate::RuntimeExecutionContext<'static> {
+        let provider: Arc<dyn crate::ToolProvider> = Arc::new(BatchFailureTools);
+        let plugins = crate::plugin::PluginHost::new(vec![Arc::new(
+            crate::plugin::StaticPluginFactory::new(
+                "batch_failure_tools",
+                crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
+            ),
+        )])
+        .build_session("session", None)
+        .expect("plugin session");
+        let tools = plugins.tools();
+        let tool_catalog = plugins
+            .resolved_tool_catalog("session")
+            .expect("tool catalog");
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
+        let attachment_store: Arc<crate::SessionAttachmentStore> =
+            Arc::new(crate::SessionAttachmentStore::in_memory());
+        let dispatch = crate::tool_dispatch::ToolDispatchContext {
+            plugins,
+            tools,
+            tool_registry: None,
+            tool_catalog,
+            sessions: Arc::new(crate::testing::MockSessionManager::default()),
+            session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
+            session_graph: Arc::new(crate::testing::MockSessionManager::default()),
+            processes: Arc::new(crate::UnavailableProcessService),
+            trigger_router: None,
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            session_id: "session".to_string(),
+            agent_frame_id: String::new(),
+            event_tx,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
+            attachment_store: Arc::clone(&attachment_store),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: Arc::new(crate::SystemClock),
+        };
+        crate::RuntimeExecutionContext::new(
+            "session".to_string(),
+            Arc::new(dispatch),
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            attachment_store,
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn launch_count_mismatch_returns_empty_settlement_order() {
+        let controller = Arc::new(BatchFailureEffectController::new(
+            BatchFailureResponse::LaunchCountMismatch,
+        ));
+        let context = batch_failure_context(Arc::clone(&controller));
+        let replies = context
+            .call_tool_batch(vec![ToolInvocation::new(
+                "call",
+                crate::ToolId::from("tool:batch_failure"),
+                serde_json::json!({}),
+            )])
+            .await;
+
+        assert_eq!(
+            controller.calls.load(Ordering::SeqCst),
+            1,
+            "the effect controller must drive the launch-count-mismatch path"
+        );
+        assert_eq!(replies.replies.len(), 1, "one reply per input call");
+        assert!(
+            !replies.replies[0].output.is_success(),
+            "mismatched launch count must fail the reply"
+        );
+        assert!(
+            replies.settlement_order.is_empty(),
+            "a failed batch reports no settled calls"
+        );
+        assert_eq!(
+            replies.replies[0].output.value_for_projection()["message"],
+            serde_json::json!("tool batch failed: returned 0 launches for 1 prepared calls")
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_settlement_order_returns_empty_settlement_order() {
+        let context = batch_failure_context(Arc::new(BatchFailureEffectController::new(
+            BatchFailureResponse::MalformedSettlementOrder,
+        )));
+        let replies = context
+            .call_tool_batch(vec![ToolInvocation::new(
+                "call",
+                crate::ToolId::from("tool:batch_failure"),
+                serde_json::json!({}),
+            )])
+            .await;
+
+        assert!(!replies.replies[0].output.is_success());
+        assert!(replies.settlement_order.is_empty());
+        assert_eq!(
+            replies.replies[0].output.value_for_projection()["message"],
+            serde_json::json!(
+                "tool batch failed: tool batch reported 2 settled positions for 1 launches"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn effect_decode_error_returns_empty_settlement_order() {
+        let context = batch_failure_context(Arc::new(BatchFailureEffectController::new(
+            BatchFailureResponse::EffectDecodeError,
+        )));
+        let replies = context
+            .call_tool_batch(vec![ToolInvocation::new(
+                "call",
+                crate::ToolId::from("tool:batch_failure"),
+                serde_json::json!({}),
+            )])
+            .await;
+
+        assert!(!replies.replies[0].output.is_success());
+        assert!(replies.settlement_order.is_empty());
+        assert_eq!(
+            replies.replies[0].output.value_for_projection()["message"],
+            serde_json::json!(
+                "tool batch failed: runtime_effect_envelope_canonical_decode: effect decode failed"
+            )
+        );
     }
 }
