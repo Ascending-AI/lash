@@ -169,4 +169,18 @@
             assert_eq!(round_trip_process_id, *process_id);
             assert_eq!(round_trip_tail, expected_tail);
         }
+        let listed_ids = observed
+            .iter()
+            .map(|process| process.process_id.as_str())
+            .collect::<Vec<_>>();
+        let mut sorted_listed_ids = listed_ids.clone();
+        sorted_listed_ids.sort_unstable();
+        let mut expected_ids = process_ids.iter().map(String::as_str).collect::<Vec<_>>();
+        expected_ids.sort_unstable();
+        assert_eq!(sorted_listed_ids, expected_ids);
+        let round_trip_ids = round_trip_observed
+            .iter()
+            .map(|process| process.process_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(round_trip_ids, listed_ids);
     }
