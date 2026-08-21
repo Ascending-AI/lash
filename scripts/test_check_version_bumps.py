@@ -473,6 +473,14 @@ class VersionBumpFixtureTest(unittest.TestCase):
             ("#[cfg(not(test))]", False),
             ("#[cfg_attr(test, allow(dead_code))]", False),
             ('#[cfg(all(test, feature = r"testing"))]', False),
+            ('#[cfg(all(test, feature = "x-y.z_1"))]', True),
+            ('#[cfg(all(test, feature = "with space"))]', False),
+            ('#[cfg(all(test, feature = "esc\\nape"))]', False),
+            ("#[cfg(all (test))]", True),
+            ('#[cfg(all(test, feature = "\\u{110000}"))]', False),
+            ('#[cfg(all(test, feature = "\\u{D800}"))]', False),
+            ('#[cfg(all(test, feature = "\\xFF"))]', False),
+            ("#[cfg(all (test))]", False),
         )
         for attribute, expected in cases:
             with self.subTest(attribute=attribute):
@@ -564,6 +572,20 @@ class VersionBumpFixtureTest(unittest.TestCase):
                 shapes = MODULE.serde_shapes(textwrap.dedent(source))
 
                 self.assertIn(shape, shapes)
+
+    def test_unterminated_raw_string_in_module_fails_closed(self) -> None:
+        source = textwrap.dedent(
+            r"""
+            #[cfg(test)]
+            mod tests {
+                const BROKEN: &str = r##"never closes
+                #[derive(Serialize, Deserialize)]
+                struct AfterUnterminatedRawString;
+            }
+            """
+        )
+        with self.assertRaises(MODULE.CheckError):
+            MODULE.serde_shapes(source)
 
     def test_trace_event_multiline_attribute_is_detected(self) -> None:
         shapes = MODULE.serde_shapes(textwrap.dedent(TRACE_EVENT_BASE))

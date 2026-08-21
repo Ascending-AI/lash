@@ -727,52 +727,32 @@ RUST_SERDE_SHAPE = re.compile(
 RUST_INLINE_MODULE = re.compile(
     r"(?:pub(?:\s*\(\s*(?:crate|self|super|in\s+(?:crate|self|super)"
     r"(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*\))?\s+)?"
-    r"mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{"
+    r"mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
+    re.ASCII,
 )
+
+
+_CFG_ASCII_SPACE = " \t\r\n"
+_CFG_SIMPLE_STRING = re.compile(r'"[A-Za-z0-9_.-]*"')
 
 
 def _rust_space_end(text: str, start: int) -> int:
     cursor = start
-    while cursor < len(text) and text[cursor].isspace():
+    while cursor < len(text) and text[cursor] in _CFG_ASCII_SPACE:
         cursor += 1
     return cursor
 
 
 def _rust_string_end(text: str, start: int) -> int | None:
-    """Return one valid cooked Rust string's end, rejecting invalid escapes."""
-    if start >= len(text) or text[start] != '"':
-        return None
-    cursor = start + 1
-    while cursor < len(text):
-        char = text[cursor]
-        if char == '"':
-            return cursor + 1
-        if char in "\r\n":
-            return None
-        if char != "\\":
-            cursor += 1
-            continue
-        cursor += 1
-        if cursor >= len(text):
-            return None
-        escape = text[cursor]
-        if escape in {'"', "'", "\\", "n", "r", "t", "0"}:
-            cursor += 1
-        elif escape == "x":
-            digits = text[cursor + 1 : cursor + 3]
-            if len(digits) != 2 or re.fullmatch(r"[0-9A-Fa-f]{2}", digits) is None:
-                return None
-            cursor += 3
-        elif escape == "u":
-            unicode_escape = re.match(
-                r"u\{[0-9A-Fa-f](?:_?[0-9A-Fa-f]){0,5}\}", text[cursor:]
-            )
-            if unicode_escape is None:
-                return None
-            cursor += len(unicode_escape.group(0))
-        else:
-            return None
-    return None
+    """Return one simple cfg string's end, refusing anything with escapes.
+
+    Proving a predicate test-only never requires interpreting Rust escape
+    semantics, so instead of validating escapes this accepts only the plain
+    identifier-like strings real cfg values use. Any other string leaves the
+    predicate unproven and the region swept.
+    """
+    matched = _CFG_SIMPLE_STRING.match(text, start)
+    return None if matched is None else matched.end()
 
 
 def _cfg_predicate(text: str, start: int = 0) -> tuple[int, bool] | None:
@@ -850,7 +830,7 @@ def _rust_trivia_end(text: str, start: int) -> int | None:
     """Skip whitespace and comments, returning None for malformed trivia."""
     cursor = start
     while cursor < len(text):
-        if text[cursor].isspace():
+        if text[cursor] in _CFG_ASCII_SPACE:
             cursor += 1
         elif text.startswith("//", cursor):
             newline = text.find("\n", cursor + 2)
