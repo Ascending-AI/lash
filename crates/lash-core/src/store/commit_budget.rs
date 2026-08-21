@@ -27,17 +27,22 @@ impl CommitBudgetLimit {
 /// Host-owned limits on one atomic runtime commit.
 ///
 /// Bytes cover the persisted session configuration, graph delta, hydrated
-/// checkpoint, and attachment-manifest ids. Nodes cover the graph delta. Hosts
-/// must choose bounded or unbounded
-/// behavior for both dimensions; this type deliberately has no `Default`.
-/// A 1 MiB byte limit and 512-node limit are the documented recommended
-/// starting point; hosts should tune them for their backend latency envelope.
+/// checkpoint, and attachment-manifest ids. Nodes bound all rows the commit
+/// writes: graph nodes plus attachment-intent adoption rows. Hosts must choose
+/// bounded or unbounded behavior for both dimensions; this type deliberately
+/// has no `Default`. The reference curve in ADR 0058 recommends a 1 MiB
+/// logical-byte limit because its p95 physical commit interval stays below the
+/// named 60 ms target on both reference backends; 512 rows remains the separate
+/// starting-point node bound. Hosts should remeasure and tune both limits for
+/// their own backend envelope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommitBudget {
     /// Aggregate logical persisted-payload byte limit.
     pub bytes: CommitBudgetLimit,
-    /// Graph nodes written by one commit.
+    /// Rows the commit writes as recorded by this attempt: graph nodes plus
+    /// attachment-intent adoption rows. A same-turn-id replay may stamp
+    /// prior-attempt rows beyond the count.
     pub nodes: CommitBudgetLimit,
 }
 
@@ -61,6 +66,9 @@ impl CommitBudget {
 }
 
 pub(crate) struct RuntimeCommitBudgetMeasurement {
+    pub(crate) graph_rows: usize,
+    pub(crate) adopted_intent_rows: usize,
+    pub(crate) total_rows: usize,
     pub(crate) session_config_bytes: usize,
     pub(crate) graph_delta_bytes: usize,
     pub(crate) checkpoint_bytes: usize,
@@ -84,20 +92,24 @@ impl RuntimeCommit {
     /// agent frames, usage deltas, and the durable turn result are currently
     /// outside it.
     pub fn validate_budget(&self) -> Result<(), StoreError> {
-        let node_count = self.graph.nodes.len();
+        let graph_rows = self.graph.nodes.len();
+        let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
+        let row_count = graph_rows.saturating_add(adopted_intent_rows);
         match self.commit_budget.nodes {
-            CommitBudgetLimit::Bounded(max_nodes) if node_count > max_nodes.get() => {
+            CommitBudgetLimit::Bounded(max_nodes) if row_count > max_nodes.get() => {
                 tracing::warn!(
                     target: "lash.runtime_commit.budget",
                     session_id = %self.session_id,
                     dimension = "nodes",
-                    actual = node_count,
+                    graph_rows,
+                    adopted_intent_rows,
+                    actual = row_count,
                     limit = max_nodes.get(),
                     outcome = "rejected",
                     "runtime commit budget decision"
                 );
                 return Err(StoreError::CommitNodeBudgetExceeded {
-                    node_count,
+                    node_count: row_count,
                     max_nodes: max_nodes.get(),
                 });
             }
@@ -105,7 +117,9 @@ impl RuntimeCommit {
                 target: "lash.runtime_commit.budget",
                 session_id = %self.session_id,
                 dimension = "nodes",
-                actual = node_count,
+                graph_rows,
+                adopted_intent_rows,
+                actual = row_count,
                 limit = max_nodes.get(),
                 outcome = "admitted",
                 "runtime commit budget decision"
@@ -114,7 +128,9 @@ impl RuntimeCommit {
                 target: "lash.runtime_commit.budget",
                 session_id = %self.session_id,
                 dimension = "nodes",
-                actual = node_count,
+                graph_rows,
+                adopted_intent_rows,
+                actual = row_count,
                 limit = "unbounded",
                 outcome = "admitted",
                 "runtime commit budget decision"
@@ -139,6 +155,9 @@ impl RuntimeCommit {
                 target: "lash.runtime_commit.budget",
                 session_id = %self.session_id,
                 dimension = "bytes",
+                graph_rows = measurement.graph_rows,
+                adopted_intent_rows = measurement.adopted_intent_rows,
+                total_rows = measurement.total_rows,
                 session_config_bytes = measurement.session_config_bytes,
                 graph_delta_bytes = measurement.graph_delta_bytes,
                 checkpoint_bytes = measurement.checkpoint_bytes,
@@ -161,6 +180,9 @@ impl RuntimeCommit {
             target: "lash.runtime_commit.budget",
             session_id = %self.session_id,
             dimension = "bytes",
+            graph_rows = measurement.graph_rows,
+            adopted_intent_rows = measurement.adopted_intent_rows,
+            total_rows = measurement.total_rows,
             session_config_bytes = measurement.session_config_bytes,
             graph_delta_bytes = measurement.graph_delta_bytes,
             checkpoint_bytes = measurement.checkpoint_bytes,
@@ -210,7 +232,13 @@ impl RuntimeCommit {
             .saturating_add(graph_delta_bytes)
             .saturating_add(checkpoint_bytes)
             .saturating_add(attachment_manifest_bytes);
+        let graph_rows = self.graph.nodes.len();
+        let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
+        let total_rows = graph_rows.saturating_add(adopted_intent_rows);
         Ok(RuntimeCommitBudgetMeasurement {
+            graph_rows,
+            adopted_intent_rows,
+            total_rows,
             session_config_bytes,
             graph_delta_bytes,
             checkpoint_bytes,
@@ -262,6 +290,36 @@ mod tests {
                 max_nodes
             }) if node_count == 3 && max_nodes == 2
         ));
+    }
+
+    #[test]
+    fn adopted_intent_rows_count_against_the_node_budget() {
+        let state = crate::RuntimeSessionState {
+            session_id: "budget-adoption-rows".to_string(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        let budget = CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::bounded(2));
+        let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
+        commit.adopted_intent_rows = 3;
+
+        let error = commit
+            .validate_budget()
+            .expect_err("adoption rows must consume the configured row budget");
+        assert!(matches!(
+            &error,
+            StoreError::CommitNodeBudgetExceeded {
+                node_count: 3,
+                max_nodes: 2,
+            }
+        ));
+        assert!(error.to_string().contains("configured 2-row node budget"));
+        assert!(
+            error
+                .to_string()
+                .contains("including attachment-intent adoption")
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 22,
+  "fixture_schema_version": 23,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
@@ -129,6 +129,7 @@
     },
     "completed_queue_claims": [],
     "completed_turn_input_claims": [],
+    "adopted_intent_rows": 0,
     "committed_attachment_ids": []
   },
   "legacy_commit_retry": {
@@ -466,6 +467,7 @@
     },
     "completed_queue_claims": [],
     "completed_turn_input_claims": [],
+    "adopted_intent_rows": 1,
     "committed_attachment_ids": [
       "durable-read-attachment"
     ]

@@ -385,7 +385,7 @@ async fn commit_node_budget_failure_reaches_the_host_as_terminal_and_actionable(
     );
     assert!(
         runtime_error.message.contains(&format!(
-            "exceeding the {CONFIGURED_NODE_LIMIT}-node transaction budget"
+            "exceeding the configured {CONFIGURED_NODE_LIMIT}-row node budget"
         )),
         "{}",
         runtime_error.message
@@ -458,7 +458,7 @@ fn assert_node_budget_session_error(error: &EmbedError, configured_limit: usize)
     );
     assert!(
         error.to_string().contains(&format!(
-            "exceeding the {configured_limit}-node transaction budget"
+            "exceeding the configured {configured_limit}-row node budget"
         )),
         "{error}"
     );

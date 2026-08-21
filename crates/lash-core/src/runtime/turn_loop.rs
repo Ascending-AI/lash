@@ -461,6 +461,7 @@ impl PreparedTurn {
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         release_session_execution_lease: bool,
         trace_turn_id: &str,
+        recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     ) -> Result<CommittedTurn, crate::StoreError> {
         let accepted = self
             .turn_pipeline
@@ -479,6 +480,7 @@ impl PreparedTurn {
                 // Any active-turn input that missed the turn's final
                 // checkpoint must become the next ordinary user turn.
                 Some(trace_turn_id.to_string()),
+                recorded_attachment_intent_ids,
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
                     .flatten(),
@@ -1500,6 +1502,11 @@ impl LashRuntime {
                 session_execution_lease,
                 release_session_execution_lease,
                 &trace_turn_id,
+                self.host
+                    .core
+                    .durability
+                    .attachment_store
+                    .recorded_turn_intent_ids(&trace_turn_id),
             )
             .await
         {

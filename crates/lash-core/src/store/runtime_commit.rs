@@ -88,6 +88,11 @@ pub struct RuntimeCommit {
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interrupted_turn_input_turn_id: Option<String>,
+    /// Unique attachment-manifest rows this commit will stamp as adopted.
+    /// Runtime assembly derives this from explicit attachment references and
+    /// turn-owned write-ahead intents before store validation begins.
+    #[serde(default)]
+    pub adopted_intent_rows: u64,
     /// Attachment ids explicitly adopted by this commit. In the same
     /// transaction the backend also stamps every uncommitted manifest row owned
     /// by the turn id in `turn_commit.operation`, including ids that appear only in plain tool

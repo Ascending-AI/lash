@@ -7,7 +7,7 @@ use crate::session_model::SessionHistoryRecord;
 use crate::store::{GraphAppend, RuntimeCommit, RuntimePersistence, StoreError};
 use crate::{
     AssembledTurn, MessageSequence, PluginSession, Session, SessionPolicy, SessionReadView,
-    ToolCallRecord, TurnOutcome,
+    TurnOutcome,
 };
 
 use super::turn_graph_editor::ReadProjectionDiagnostic;
@@ -19,6 +19,8 @@ mod accepted_commit;
 pub(super) use accepted_commit::AcceptedTurnCommit;
 mod execution_state;
 use execution_state::*;
+mod final_commit_input;
+use final_commit_input::FinalCommitInput;
 mod settlement;
 use settlement::*;
 
@@ -64,27 +66,6 @@ impl TurnCommitStage {
         let state = RuntimeSessionState::new(SessionPolicy::new(crate::TurnBudget::Unbounded));
         Self::Finalized(Box::new(FinalizedTurnCommitStage { state }))
     }
-}
-
-struct FinalCommitInput<'a> {
-    returned_state: &'a crate::SessionSnapshot,
-    tool_calls: &'a [ToolCallRecord],
-    plugins: Option<&'a PluginSession>,
-    execution_state_update: ExecutionStateUpdate,
-    agent_frame_switch_materializes: bool,
-    store: Option<&'a (dyn RuntimePersistence + 'a)>,
-    usage_deltas: &'a [crate::store::RuntimeUsageDelta],
-    outcome: &'a TurnOutcome,
-    originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    queue_claim_generations: std::collections::HashMap<String, u64>,
-    turn_input_claim_generations: std::collections::HashMap<String, u64>,
-    current_session_lease_generation: Option<u64>,
-    enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
-    interrupted_turn_input_turn_id: Option<String>,
-    session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
 }
 
 impl TurnBoundary {
@@ -301,6 +282,7 @@ impl TurnBoundary {
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
+        recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
         let agent_frame_switch_materializes = match &returned_turn.outcome {
@@ -347,6 +329,7 @@ impl TurnBoundary {
                 current_session_lease_generation,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
+                recorded_attachment_intent_ids,
                 session_execution_lease_completion,
             })
             .await;
@@ -432,6 +415,7 @@ impl TurnBoundary {
             current_session_lease_generation,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
+            recorded_attachment_intent_ids,
             session_execution_lease_completion,
         } = input;
         let clock = Arc::clone(&self.clock);
@@ -460,6 +444,14 @@ impl TurnBoundary {
         if let Some(store) = store {
             let graph = state.pending_graph_commit();
             let committed_attachment_ids = committed_attachment_ids(state, tool_calls);
+            let adopted_intent_rows = committed_attachment_ids
+                .iter()
+                .cloned()
+                .chain(recorded_attachment_intent_ids)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                .try_into()
+                .unwrap_or(u64::MAX);
             self.apply_commit(
                 store,
                 graph,
@@ -475,6 +467,7 @@ impl TurnBoundary {
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
                 committed_attachment_ids,
+                adopted_intent_rows,
                 session_execution_lease_completion,
             )
             .await
@@ -507,6 +500,7 @@ impl TurnBoundary {
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<String>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
+        adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<
         (
@@ -552,6 +546,7 @@ impl TurnBoundary {
                 commit_budget,
             )?
             .with_committed_attachments(committed_attachment_ids);
+        commit.adopted_intent_rows = adopted_intent_rows;
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
         }
@@ -1116,6 +1111,7 @@ mod tests {
                 current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
+                recorded_attachment_intent_ids: Default::default(),
                 session_execution_lease_completion: None,
             })
             .await
@@ -1174,6 +1170,7 @@ mod tests {
                 current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
+                recorded_attachment_intent_ids: Default::default(),
                 session_execution_lease_completion: None,
             })
             .await
@@ -1312,6 +1309,7 @@ mod tests {
                 current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
+                recorded_attachment_intent_ids: Default::default(),
                 session_execution_lease_completion: None,
             })
             .await
@@ -1430,6 +1428,7 @@ mod tests {
                 current_session_lease_generation: Some(recovery_lease.fencing_token),
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
+                recorded_attachment_intent_ids: Default::default(),
                 session_execution_lease_completion: Some(recovery_lease.completion()),
             })
             .await
@@ -1492,6 +1491,7 @@ mod tests {
                 current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
+                recorded_attachment_intent_ids: Default::default(),
                 session_execution_lease_completion: None,
             })
             .await
@@ -1527,6 +1527,7 @@ mod tests {
                 current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
+                recorded_attachment_intent_ids: Default::default(),
                 session_execution_lease_completion: None,
             })
             .await
@@ -1575,6 +1576,7 @@ mod tests {
                 current_session_lease_generation: None,
                 enqueued_queue_batches: Vec::new(),
                 interrupted_turn_input_turn_id: None,
+                recorded_attachment_intent_ids: Default::default(),
                 session_execution_lease_completion: None,
             })
             .await

@@ -1004,21 +1004,26 @@ pub struct SessionAttachmentStore {
     backend: Arc<dyn AttachmentStore>,
     manifest: Arc<dyn AttachmentManifest>,
     session_id: String,
-    owner: Mutex<Option<(crate::AttachmentOwnerKind, String)>>,
+    owner: Mutex<Option<AttachmentOwner>>,
     clock: Arc<dyn crate::Clock>,
+}
+
+#[derive(Clone)]
+struct AttachmentOwner {
+    kind: crate::AttachmentOwnerKind,
+    id: String,
+    recorded_intent_ids: Arc<Mutex<BTreeSet<AttachmentId>>>,
 }
 
 pub(crate) struct AttachmentOwnerBinding {
     store: Arc<SessionAttachmentStore>,
-    kind: crate::AttachmentOwnerKind,
-    owner_id: String,
-    previous: Option<(crate::AttachmentOwnerKind, String)>,
+    owner: AttachmentOwner,
+    previous: Option<AttachmentOwner>,
 }
 
 impl Drop for AttachmentOwnerBinding {
     fn drop(&mut self) {
-        self.store
-            .restore_owner(self.kind, &self.owner_id, self.previous.take());
+        self.store.restore_owner(&self.owner, self.previous.take());
     }
 }
 
@@ -1095,28 +1100,40 @@ impl SessionAttachmentStore {
         kind: crate::AttachmentOwnerKind,
         owner_id: String,
     ) -> AttachmentOwnerBinding {
-        let previous = self.owner.lock_recover().replace((kind, owner_id.clone()));
+        let owner = AttachmentOwner {
+            kind,
+            id: owner_id,
+            recorded_intent_ids: Arc::new(Mutex::new(BTreeSet::new())),
+        };
+        let previous = self.owner.lock_recover().replace(owner.clone());
         AttachmentOwnerBinding {
             store: Arc::clone(self),
-            kind,
-            owner_id,
+            owner,
             previous,
         }
     }
 
-    fn restore_owner(
-        &self,
-        kind: crate::AttachmentOwnerKind,
-        owner_id: &str,
-        previous: Option<(crate::AttachmentOwnerKind, String)>,
-    ) {
+    fn restore_owner(&self, completed: &AttachmentOwner, previous: Option<AttachmentOwner>) {
         let mut owner = self.owner.lock_recover();
         if owner
             .as_ref()
-            .is_some_and(|(current_kind, id)| *current_kind == kind && id == owner_id)
+            .is_some_and(|current| current.kind == completed.kind && current.id == completed.id)
         {
             *owner = previous;
         }
+    }
+
+    /// Returns the unique attachment intents recorded by the active durable
+    /// turn. The runtime uses this turn-side evidence while assembling the
+    /// commit budget; stores are never queried during admission.
+    pub(crate) fn recorded_turn_intent_ids(&self, turn_id: &str) -> BTreeSet<AttachmentId> {
+        let recorded = self.owner.lock_recover().as_ref().and_then(|owner| {
+            (owner.kind == crate::AttachmentOwnerKind::Turn && owner.id == turn_id)
+                .then(|| Arc::clone(&owner.recorded_intent_ids))
+        });
+        recorded
+            .map(|ids| ids.lock_recover().clone())
+            .unwrap_or_default()
     }
 
     pub async fn put(
@@ -1131,8 +1148,8 @@ impl SessionAttachmentStore {
             session_id: self.session_id.clone(),
             canonical_uri: attachment_uri(&attachment_id),
             intent_at_epoch_ms: self.clock.timestamp_ms(),
-            owner_kind: owner.as_ref().map(|(kind, _)| *kind),
-            owner_id: owner.map(|(_, id)| id),
+            owner_kind: owner.as_ref().map(|owner| owner.kind),
+            owner_id: owner.as_ref().map(|owner| owner.id.clone()),
         };
         // Acquire the write fence first: the intent is recorded before any bytes
         // land (the write-ahead guarantee) and, in the same mutation, the digest
@@ -1150,7 +1167,15 @@ impl SessionAttachmentStore {
                     ))
                 })?;
             match fence {
-                AttachmentWriteFence::Granted => break,
+                AttachmentWriteFence::Granted => {
+                    if let Some(owner) = &owner {
+                        owner
+                            .recorded_intent_ids
+                            .lock_recover()
+                            .insert(attachment_id.clone());
+                    }
+                    break;
+                }
                 // A sweep armed this digest's delete before we recorded an
                 // intent. Writing bytes into an in-flight delete would lose
                 // them, so back off and re-acquire: the sweep releases the

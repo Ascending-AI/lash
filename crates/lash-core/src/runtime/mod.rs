@@ -174,8 +174,21 @@ mod store_commit_error_tests {
             node_error.code,
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded
         );
-        assert!(node_error.message.contains("513 graph nodes"));
-        assert!(node_error.message.contains("512-node transaction budget"));
+        assert!(
+            node_error
+                .message
+                .contains("records 513 rows for this attempt")
+        );
+        assert!(
+            node_error
+                .message
+                .contains("configured 512-row node budget")
+        );
+        assert!(
+            node_error
+                .message
+                .contains("including attachment-intent adoption")
+        );
 
         let byte_error = runtime_error_from_store_commit(StoreError::CommitByteBudgetExceeded {
             session_config_bytes: 0,
