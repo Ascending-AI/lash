@@ -110,8 +110,8 @@
 flowchart TD
   CBS["CodeBlockStarted<br/>graph_key = G"] --> T1["ToolCallStarted / Completed<br/>exec_command<br/>graph_key = G"]
   CBS --> B["ToolCallStarted / Completed<br/>batch (call: c-batch)<br/>graph_key = G"]
-  B --> C1["ToolCallStarted / Completed<br/>read_file<br/>graph_key = G · parent_call_id = c-batch"]
-  B --> C2["ToolCallStarted / Completed<br/>read_file<br/>graph_key = G · parent_call_id = c-batch"]
+  B --> C1["ToolCallStarted / Completed<br/>fetch_url<br/>graph_key = G · parent_call_id = c-batch"]
+  B --> C2["ToolCallStarted / Completed<br/>fetch_url<br/>graph_key = G · parent_call_id = c-batch"]
   T1 --> CBC["CodeBlockCompleted<br/>graph_key = G · tool_call_ids = [...]"]
   C1 --> CBC
   C2 --> CBC
@@ -134,7 +134,7 @@ flowchart TD
         "tool_call_count": 2,
         "tool_calls": [
           { "call_id": "call-3", "name": "exec_command", "duration_ms": 41, "status": "success" },
-          { "call_id": "call-4", "name": "read_file",    "duration_ms":  2, "status": "success" }
+          { "call_id": "call-4", "name": "fetch_url",    "duration_ms":  2, "status": "success" }
         ]
       }
     }

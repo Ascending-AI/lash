@@ -498,10 +498,10 @@ fn truncation_hint(ctx: Option<&ToolResultProjectionContext>, text: &str) -> Str
         .or_else(|| ctx.and_then(|ctx| spill_tool_output(&ctx.tool_name, &ctx.args, text)));
     match output_path {
         Some(path) => format!(
-            "The tool output was truncated. Full output saved to: {}\nUse `read_file` with `offset`/`limit` or `grep` to inspect specific sections instead of reading the whole file at once.",
+            "The tool output was truncated. Full output saved to: {}\nUse the shell tool or host-provided file access to inspect specific sections instead of reading the whole file at once.",
             path.display()
         ),
-        None => "The tool output was truncated. Use `read_file` with `offset`/`limit` or `grep` to inspect specific sections instead of reading the whole file at once.".to_string(),
+        None => "The tool output was truncated. Re-run the tool with narrower arguments, or use the shell tool or host-provided file access to inspect a smaller section.".to_string(),
     }
 }
 
@@ -831,6 +831,19 @@ mod tests {
         );
         let output = render_model_return_parts(&projected.parts);
         assert!(output.contains("Full output saved to: /tmp/existing-shell-output.log"));
+        assert!(output.contains("Use the shell tool or host-provided file access"));
+        assert!(!output.contains("read_file"));
+        assert!(!output.contains("grep"));
+    }
+
+    #[test]
+    fn truncation_hint_without_spill_names_only_surviving_access_surfaces() {
+        let hint = truncation_hint(None, "full output");
+
+        assert!(hint.contains("Re-run the tool with narrower arguments"));
+        assert!(hint.contains("shell tool or host-provided file access"));
+        assert!(!hint.contains("read_file"));
+        assert!(!hint.contains("grep"));
     }
 
     #[test]

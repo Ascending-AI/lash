@@ -50,13 +50,13 @@ const STANDARD_EXECUTION_SECTION: &str = r#"Use direct tool calls.
 - Use `batch` (up to 25 calls) for two or more independent tool calls. Serialize calls when later arguments depend on earlier results.
 - For direct conversational requests that need no tools, respond in prose only.
 
-Example — two independent reads in one `batch` call:
+Example — two independent web requests in one `batch` call:
 
 ```json
 {
   "tool_calls": [
-    { "tool": "read_file", "parameters": { "path": "src/main.rs" } },
-    { "tool": "grep", "parameters": { "query": "ToolProvider", "path": "crates/lash/src/" } }
+    { "tool": "fetch_url", "parameters": { "url": "https://example.com" } },
+    { "tool": "search_web", "parameters": { "query": "Lash ToolProvider" } }
   ]
 }
 ```"#;
@@ -728,6 +728,18 @@ mod tests {
 
         assert_eq!(factory.id(), STANDARD_PROTOCOL_PLUGIN_ID);
         assert_eq!(factory.id(), "standard_protocol");
+    }
+
+    #[test]
+    fn standard_execution_section_uses_only_surviving_tool_examples() {
+        for removed_tool in ["read_file", "\"edit\"", "\"write\"", "\"glob\""] {
+            assert!(
+                !STANDARD_EXECUTION_SECTION.contains(removed_tool),
+                "standard prompt should not mention removed tool `{removed_tool}`"
+            );
+        }
+        assert!(STANDARD_EXECUTION_SECTION.contains("fetch_url"));
+        assert!(STANDARD_EXECUTION_SECTION.contains("search_web"));
     }
 
     #[test]

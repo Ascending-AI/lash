@@ -17,5 +17,4 @@ pub use crate::plugin::{
     PluginOperationFailure, RuntimeServices, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt,
 };
-pub use crate::runtime::UnavailableProcessService;
-pub use lash_sansio::{SchemaDialect, ToolCatalogBuildInput, validate_tool_input};
+pub use lash_sansio::{SchemaDialect, ToolCatalogBuildInput};

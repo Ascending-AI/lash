@@ -316,7 +316,8 @@ fn execution_section_documents_static_label_annotations_when_enabled() {
     assert!(section.contains("prefix annotation, not a standalone statement"));
     assert!(section.contains("must appear immediately before the one statement"));
     assert!(section.contains("Do not emit `@label(...)` by itself"));
-    assert!(section.contains("paths = await files.glob"));
+    assert!(section.contains("query = \"runtime architecture\""));
+    assert!(!section.contains("files.glob"));
     assert!(section.contains("important Lashlang phases"));
     assert!(section.contains("At top level, label meaningful setup"));
     assert!(section.contains("string literals"));
@@ -499,30 +500,40 @@ fn execution_section_does_not_advertise_unregistered_peer_capability() {
 
 #[test]
 fn execution_section_keeps_tool_specific_examples_out_of_core_prompt() {
-    let section = rlm_execution_section_for_host_environment(
+    let default_section = rlm_execution_section_for_host_environment(
         RlmPromptFeatures::default(),
         &full_prompt_host_environment(),
     );
+    let label_surface = prompt_host_environment_with_features(
+        tool_resources(),
+        lashlang::LashlangAbilities::all(),
+        lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
+    );
+    let label_section =
+        rlm_execution_section_for_host_environment(RlmPromptFeatures::default(), &label_surface);
 
     for tool_name in [
         "read_file",
         "exec_command",
         "files.edit",
+        "files.glob",
         "files.write",
         "llm_query",
         "spawn_agent",
         "continue_as",
         "list_process_handles",
     ] {
-        assert!(
-            !section.contains(tool_name),
-            "core RLM prompt should not mention tool-specific example `{tool_name}`"
-        );
+        for section in [&default_section, &label_section] {
+            assert!(
+                !section.contains(tool_name),
+                "core RLM prompt should not mention tool-specific example `{tool_name}`"
+            );
+        }
     }
-    assert!(!section.contains("shell.exec"));
-    assert!(!section.contains("exit_code"));
-    assert!(!section.contains("full_output_path"));
-    assert!(!section.contains("nonzero exit"));
+    assert!(!default_section.contains("shell.exec"));
+    assert!(!default_section.contains("exit_code"));
+    assert!(!default_section.contains("full_output_path"));
+    assert!(!default_section.contains("nonzero exit"));
 }
 
 #[test]

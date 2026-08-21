@@ -289,8 +289,8 @@ hits = await web.search({ query: "rust async runtimes" })?
 
 notes = []
 for h in hits.results {
-  page = await files.read({ path: h.path })?   // large output, read lazily
-  notes = notes + [page.summary]
+  page = await web.fetch({ url: h.url })?   // large output, read lazily
+  notes = notes + [page.content]
 }
 
 finish notes</code></pre>

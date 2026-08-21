@@ -118,7 +118,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
                         "additionalProperties": false,
                         "properties": {
                             "tool_calls": {
-                                "description": "Array of 1-25 objects like { tool: \"read_file\", parameters: { path: \"src/main.rs\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error.",
+                                "description": "Array of 1-25 objects like { tool: \"fetch_url\", parameters: { url: \"https://example.com\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error.",
                                 "items": {
                                     "additionalProperties": false,
                                     "properties": {
@@ -146,9 +146,9 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             }]
         })
     );
-    assert_eq!(requests[1]["event"]["body_len"], 1267);
+    assert_eq!(requests[1]["event"]["body_len"], 1274);
     assert_eq!(
         requests[1]["event"]["body_sha256"],
-        "39a18fc22659824efc744c912175e72e7965bd928963764608a7b5bca10db383"
+        "410dda5916b09c89c5d2ec3a01f1f7d9621eaff7a696b05d20367e8dbd7ea43e"
     );
 }

@@ -24,12 +24,4 @@ workspace = true
 lash-core = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["rt"] }
-serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-schemars = { workspace = true }
-ignore = "0.4"
-similar = "2"
-
-[dev-dependencies]
-tempfile = { workspace = true }
