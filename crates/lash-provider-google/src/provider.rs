@@ -57,7 +57,7 @@ impl GoogleOAuthProvider {
             method,
             &request_body_bytes,
         );
-        let mut url = Self::method_url(method);
+        let mut url = self.method_url(method);
         if stream_events.is_some() {
             url.push_str("?alt=sse");
         }
@@ -132,7 +132,7 @@ impl GoogleOAuthProvider {
                     .retryable(false)
             })?;
             let origin_model = request.get("model").and_then(Value::as_str);
-            let parts = Self::response_parts_from_value(&value, origin_model);
+            let parts = self.response_parts_from_value(&value, origin_model);
             let full_text = lash_core::facade_support::visible_response_text_from_parts(&parts);
             let provider_usage = value.get("usageMetadata").cloned();
             let usage = provider_usage
@@ -204,7 +204,7 @@ impl GoogleOAuthProvider {
                 let prev_usage = usage.clone();
                 let prev_execution_evidence = execution_evidence.clone();
                 let first_new_tool_call = tool_call_parts.len();
-                Self::process_sse_event_with_text_parts(
+                self.process_sse_event_with_text_parts(
                     raw,
                     SseTextPartSink {
                         full: &mut full,
@@ -346,19 +346,15 @@ impl GoogleOAuthProvider {
     async fn resolve_project_id(
         &self,
         access_token: &str,
-        project_hint: Option<&str>,
     ) -> Result<Option<String>, LlmTransportError> {
-        let mut metadata = json!({
+        let metadata = json!({
             "ideType": "IDE_UNSPECIFIED",
             "platform": "PLATFORM_UNSPECIFIED",
             "pluginType": "GEMINI",
         });
-        if let Some(project) = project_hint.filter(|p| !p.trim().is_empty()) {
-            metadata["duetProject"] = json!(project);
-        }
 
         let req = json!({
-            "cloudaicompanionProject": project_hint,
+            "cloudaicompanionProject": null,
             "metadata": metadata,
         });
         let request_body_bytes = serde_json::to_vec(&req).map_err(|err| {
@@ -369,7 +365,7 @@ impl GoogleOAuthProvider {
         })?;
         let request_body = Some(String::from_utf8_lossy(&request_body_bytes).into_owned());
         let http_request =
-            LlmHttpRequest::post(Self::method_url("loadCodeAssist"), request_body_bytes)
+            LlmHttpRequest::post(self.method_url("loadCodeAssist"), request_body_bytes)
                 .with_header("Authorization", format!("Bearer {access_token}"))
                 .with_header("Content-Type", "application/json")
                 .with_body_for_error(request_body.clone().unwrap_or_default())
@@ -411,8 +407,7 @@ impl GoogleOAuthProvider {
         Ok(body
             .get("cloudaicompanionProject")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .or_else(|| project_hint.map(|s| s.to_string())))
+            .map(|s| s.to_string()))
     }
 }
 
@@ -423,7 +418,7 @@ impl Provider for GoogleOAuthProvider {
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
-        Self::route_identity_for_model(model)
+        self.route_identity_for_model(model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -449,6 +444,26 @@ impl Provider for GoogleOAuthProvider {
             "expires_at".to_string(),
             serde_json::Value::Number(credential.expires_at.into()),
         );
+        map.insert(
+            "oauth_client_id".to_string(),
+            serde_json::Value::String(self.oauth_client.id.clone()),
+        );
+        map.insert(
+            "oauth_client_secret".to_string(),
+            serde_json::Value::String(self.oauth_client.secret.clone()),
+        );
+        if self.endpoint != CODE_ASSIST_ENDPOINT {
+            map.insert(
+                "endpoint".to_string(),
+                serde_json::Value::String(self.endpoint.clone()),
+            );
+        }
+        if self.api_version != CODE_ASSIST_API_VERSION {
+            map.insert(
+                "api_version".to_string(),
+                serde_json::Value::String(self.api_version.clone()),
+            );
+        }
         if let Some(project_id) = &self.project_id {
             map.insert(
                 "project_id".to_string(),
@@ -466,7 +481,7 @@ impl Provider for GoogleOAuthProvider {
     }
 
     async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        Self::route_identity_for_model(&req.model)
+        self.route_identity_for_model(&req.model)
             .validate_endpoint()
             .map_err(|error| {
                 LlmTransportError::new(error.to_string())
@@ -517,12 +532,7 @@ impl Provider for GoogleOAuthProvider {
             ..
         } = credential.value;
         if self.project_id.is_none() {
-            let hint = std::env::var("GOOGLE_CLOUD_PROJECT")
-                .ok()
-                .or_else(|| std::env::var("GOOGLE_CLOUD_PROJECT_ID").ok());
-            self.project_id = self
-                .resolve_project_id(&access_token, hint.as_deref())
-                .await?;
+            self.project_id = self.resolve_project_id(&access_token).await?;
         }
         let project_id = self.project_id.clone();
 
@@ -532,13 +542,13 @@ impl Provider for GoogleOAuthProvider {
             .map(|source| Self::inline_attachment_part(&req, source))
             .collect::<Vec<_>>();
         let inline_contents =
-            Self::build_contents_with_attachment_parts(&req, &inline_attachment_parts);
+            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts);
 
         let (attachment_parts, used_uploaded_files) = self
             .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
             .await?;
         let contents = if used_uploaded_files {
-            Self::build_contents_with_attachment_parts(&req, &attachment_parts)
+            self.build_contents_with_attachment_parts(&req, &attachment_parts)
         } else {
             inline_contents.clone()
         };
@@ -606,8 +616,16 @@ mod error_detail_tests {
 
     #[tokio::test]
     async fn generate_content_error_surfaces_api_message() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", u64::MAX)
-            .with_transport(Arc::new(ApiErrorTransport));
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            u64::MAX,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(Arc::new(ApiErrorTransport));
         let error = provider
             .execute_request(
                 "access",
@@ -624,10 +642,18 @@ mod error_detail_tests {
 
     #[tokio::test]
     async fn load_code_assist_error_surfaces_api_message() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", u64::MAX)
-            .with_transport(Arc::new(ApiErrorTransport));
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            u64::MAX,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(Arc::new(ApiErrorTransport));
         let error = provider
-            .resolve_project_id("access", None)
+            .resolve_project_id("access")
             .await
             .expect_err("fixture is an HTTP error");
         assert!(error.message.contains("Gemini API detail"));

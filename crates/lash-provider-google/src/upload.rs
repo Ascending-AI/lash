@@ -323,8 +323,16 @@ mod error_detail_tests {
     }
 
     async fn upload_with(responses: Vec<LlmHttpResponse>) -> LlmTransportError {
-        let provider = GoogleOAuthProvider::new("access", "refresh", u64::MAX)
-            .with_transport(Arc::new(ResponseQueue(Mutex::new(responses.into()))));
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            u64::MAX,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(Arc::new(ResponseQueue(Mutex::new(responses.into()))));
         provider
             .upload_attachment(
                 "access",

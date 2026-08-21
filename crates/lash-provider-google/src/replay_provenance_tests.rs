@@ -77,7 +77,7 @@ fn foreign_anthropic_reasoning_signature_is_not_forwarded_to_google() {
         }],
     )];
 
-    let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
 
     assert_eq!(contents[0]["parts"][0]["text"], "neutral summary");
     assert!(contents[0]["parts"][0].get("thought").is_none());
@@ -98,7 +98,7 @@ fn raw_google_builder_drops_unstamped_reasoning_replay() {
         }],
     )];
 
-    let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
     assert_eq!(contents[0]["parts"][0]["text"], "portable summary");
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
     assert!(
@@ -136,11 +136,18 @@ async fn raw_provider_complete_drops_foreign_and_unstamped_replay_from_google_wi
         ],
     )];
     let bodies = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut provider = GoogleOAuthProvider::new("access", "refresh", u64::MAX).with_transport(
-        Arc::new(CapturingTransport {
-            bodies: Arc::clone(&bodies),
-        }),
-    );
+    let mut provider = GoogleOAuthProvider::new(
+        "access",
+        "refresh",
+        u64::MAX,
+        crate::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: "oauth-client-secret".into(),
+        },
+    )
+    .with_transport(Arc::new(CapturingTransport {
+        bodies: Arc::clone(&bodies),
+    }));
 
     Provider::complete(&mut provider, req)
         .await
@@ -173,14 +180,22 @@ fn foreign_openai_chat_opaque_tool_replay_is_not_forwarded_to_google() {
         }],
     )];
 
-    let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
 
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
 }
 
 #[test]
 fn same_route_reasoning_and_tool_replay_are_forwarded_to_google() {
-    let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+    let provider = GoogleOAuthProvider::new(
+        "access",
+        "refresh",
+        0,
+        crate::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: "oauth-client-secret".into(),
+        },
+    );
     let native_route = provider.route_identity("gemini-2.5-pro");
     let mut req = request();
     req.messages = vec![LlmMessage::new(
@@ -207,7 +222,7 @@ fn same_route_reasoning_and_tool_replay_are_forwarded_to_google() {
         ],
     )];
 
-    let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
 
     assert_eq!(
         contents[0]["parts"][0]["thoughtSignature"],
@@ -243,27 +258,28 @@ fn google_signature_only_thought_part_round_trips_from_streaming_and_batch() {
         let mut output_parts = Vec::new();
         let mut tool_call_parts = Vec::new();
         let mut finish_event = None;
-        GoogleOAuthProvider::process_sse_event_with_text_parts(
-            &streaming_event.to_string(),
-            crate::support::SseTextPartSink {
-                full: &mut full,
-                text_deltas: &mut text_deltas,
-                reasoning_deltas: &mut reasoning_deltas,
-                usage: &mut usage,
-                provider_usage: &mut provider_usage,
-                execution_evidence: &mut execution_evidence,
-                tool_call_parts: Some(&mut tool_call_parts),
-                output_parts: Some(&mut output_parts),
-                finish_event: &mut finish_event,
-            },
-            Some("gemini-test"),
-        )
-        .expect("streaming signature-only thought parses");
+        GoogleOAuthProvider::for_test()
+            .process_sse_event_with_text_parts(
+                &streaming_event.to_string(),
+                crate::support::SseTextPartSink {
+                    full: &mut full,
+                    text_deltas: &mut text_deltas,
+                    reasoning_deltas: &mut reasoning_deltas,
+                    usage: &mut usage,
+                    provider_usage: &mut provider_usage,
+                    execution_evidence: &mut execution_evidence,
+                    tool_call_parts: Some(&mut tool_call_parts),
+                    output_parts: Some(&mut output_parts),
+                    finish_event: &mut finish_event,
+                },
+                Some("gemini-test"),
+            )
+            .expect("streaming signature-only thought parses");
         assert!(
             text_deltas.is_empty() && reasoning_deltas.is_empty(),
             "a text-less thought part must not emit visible deltas"
         );
-        let batch_parts = GoogleOAuthProvider::response_parts_from_value(
+        let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
             &json!({"candidates":[{
                 "content":{"parts":[thought_part.clone()]},
                 "finishReason":"STOP"
@@ -281,7 +297,7 @@ fn google_signature_only_thought_part_round_trips_from_streaming_and_batch() {
                     }] if text.is_empty()
                         && replay.signature.as_deref() == Some(signature)
                         && replay.origin.as_ref()
-                            == Some(&GoogleOAuthProvider::route_identity_for_model("gemini-test"))
+                            == Some(&GoogleOAuthProvider::for_test().route_identity_for_model("gemini-test"))
                 ),
                 "{path} parser must retain the text-less thoughtSignature, got {parts:?}"
             );
@@ -330,27 +346,28 @@ fn google_signature_on_function_call_thought_part_yields_only_the_tool_call() {
     let mut output_parts = Vec::new();
     let mut tool_call_parts = Vec::new();
     let mut finish_event = None;
-    GoogleOAuthProvider::process_sse_event_with_text_parts(
-        &streaming_event.to_string(),
-        crate::support::SseTextPartSink {
-            full: &mut full,
-            text_deltas: &mut text_deltas,
-            reasoning_deltas: &mut reasoning_deltas,
-            usage: &mut usage,
-            provider_usage: &mut provider_usage,
-            execution_evidence: &mut execution_evidence,
-            tool_call_parts: Some(&mut tool_call_parts),
-            output_parts: Some(&mut output_parts),
-            finish_event: &mut finish_event,
-        },
-        Some("gemini-test"),
-    )
-    .expect("streaming functionCall thought part parses");
+    GoogleOAuthProvider::for_test()
+        .process_sse_event_with_text_parts(
+            &streaming_event.to_string(),
+            crate::support::SseTextPartSink {
+                full: &mut full,
+                text_deltas: &mut text_deltas,
+                reasoning_deltas: &mut reasoning_deltas,
+                usage: &mut usage,
+                provider_usage: &mut provider_usage,
+                execution_evidence: &mut execution_evidence,
+                tool_call_parts: Some(&mut tool_call_parts),
+                output_parts: Some(&mut output_parts),
+                finish_event: &mut finish_event,
+            },
+            Some("gemini-test"),
+        )
+        .expect("streaming functionCall thought part parses");
     // The streaming sink splits tool calls from the other output parts; both
     // sinks together are what the driver emits for the turn, so a duplicate
     // empty Reasoning part shows up here.
     let streaming_parts = [output_parts, tool_call_parts].concat();
-    let batch_parts = GoogleOAuthProvider::response_parts_from_value(
+    let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
         &json!({"candidates":[{
             "content":{"parts":[part]},
             "finishReason":"STOP"

@@ -121,9 +121,17 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
 
 fn complete_with_chunks(chunks: Vec<Vec<u8>>) -> (LlmResponse, Vec<String>) {
     let deltas = Arc::new(Mutex::new(Vec::new()));
-    let mut provider = GoogleOAuthProvider::new("access-token", "refresh-token", u64::MAX)
-        .with_project_id(Some("project-1".to_string()))
-        .with_transport(Arc::new(ScriptedSseTransport::new(chunks)));
+    let mut provider = GoogleOAuthProvider::new(
+        "access-token",
+        "refresh-token",
+        u64::MAX,
+        lash_provider_google::GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: "oauth-client-secret".into(),
+        },
+    )
+    .with_project_id(Some("project-1".to_string()))
+    .with_transport(Arc::new(ScriptedSseTransport::new(chunks)));
     let response = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

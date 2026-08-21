@@ -40,10 +40,8 @@ fn assert_inline_data(mime: &str) {
     GoogleOAuthProvider::validate_attachments(&request)
         .expect("allowlisted attachment MIME must validate");
     let part = GoogleOAuthProvider::inline_attachment_part(&request, &attachment);
-    let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(
-        &request,
-        std::slice::from_ref(&part),
-    );
+    let contents = GoogleOAuthProvider::for_test()
+        .build_contents_with_attachment_parts(&request, std::slice::from_ref(&part));
     let wire_part = &contents[0]["parts"][0];
 
     assert_eq!(wire_part["inlineData"]["mimeType"], mime, "MIME: {mime}");

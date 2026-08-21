@@ -427,9 +427,17 @@ where
             )
         }
         GOOGLE_OAUTH => {
-            let provider = GoogleOAuthProvider::new("access-token", "refresh-token", 0)
-                .with_project_id(Some("project-1".to_string()))
-                .with_transport(transport);
+            let provider = GoogleOAuthProvider::new(
+                "access-token",
+                "refresh-token",
+                0,
+                lash_provider_google::GoogleOAuthClient {
+                    id: "oauth-client-id".into(),
+                    secret: "oauth-client-secret".into(),
+                },
+            )
+            .with_project_id(Some("project-1".to_string()))
+            .with_transport(transport);
             (
                 ProviderHandle::new(provider.into_components()),
                 "gemini-3.1-pro-preview",

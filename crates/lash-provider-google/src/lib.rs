@@ -18,7 +18,7 @@ mod support;
 pub mod testing;
 mod upload;
 
-pub use config::{GoogleOAuthProvider, GoogleOAuthProviderFactory};
+pub use config::{GoogleOAuthClient, GoogleOAuthProvider, GoogleOAuthProviderFactory};
 pub use lash_core::llm::transport::{GOOGLE_FILE_MIMES, GOOGLE_IMAGE_MIMES, GOOGLE_MEDIA_FAMILIES};
 
 #[cfg(test)]
@@ -113,20 +113,28 @@ mod tests {
     #[tokio::test]
     async fn response_metadata_capture_respects_shared_allowlists() {
         let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]} }],\"billing\":{\"cost\":2},\"private\":\"hidden\"}}\n\n";
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_options(ProviderOptions {
-                response_metadata_headers: vec!["X-Request-Cost".to_string()],
-                response_metadata_body_paths: vec!["/response/billing/cost".to_string()],
-                ..ProviderOptions::default()
-            })
-            .with_transport(Arc::new(StaticSseTransport::with_headers(
-                body,
-                vec![
-                    ("content-type".to_string(), "text/event-stream".to_string()),
-                    ("x-request-cost".to_string(), "0.03".to_string()),
-                    ("set-cookie".to_string(), "secret".to_string()),
-                ],
-            )));
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_options(ProviderOptions {
+            response_metadata_headers: vec!["X-Request-Cost".to_string()],
+            response_metadata_body_paths: vec!["/response/billing/cost".to_string()],
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::new(StaticSseTransport::with_headers(
+            body,
+            vec![
+                ("content-type".to_string(), "text/event-stream".to_string()),
+                ("x-request-cost".to_string(), "0.03".to_string()),
+                ("set-cookie".to_string(), "secret".to_string()),
+            ],
+        )));
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
         let response = provider
@@ -173,8 +181,16 @@ mod tests {
     async fn google_default_tolerates_eof_but_strict_policy_retains_partial_usage() {
         let body = "data: {\"response\":{\"responseId\":\"google-partial-1\",\"modelVersion\":\"gemini-partial-served\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"legacy\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":0}}}\n\n";
         let wire_request = json!({ "model": "gemini-test" });
-        let tolerant = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_transport(Arc::new(StaticSseTransport::new(body)));
+        let tolerant = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(Arc::new(StaticSseTransport::new(body)));
         let response = tolerant
             .execute_request(
                 "access",
@@ -190,8 +206,16 @@ mod tests {
 
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let strict = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_transport(Arc::new(StaticSseTransport::new(body)));
+        let strict = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(Arc::new(StaticSseTransport::new(body)));
         let error = strict
             .execute_request(
                 "access",
@@ -254,8 +278,16 @@ mod tests {
         let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"before tool\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}]}}\n\n";
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_transport(Arc::new(StaticSseTransport::new(body)));
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(Arc::new(StaticSseTransport::new(body)));
         let completed = provider
             .execute_request(
                 "access",
@@ -283,8 +315,16 @@ mod tests {
         let body = "data: {\"response\":{\"responseId\":\"google-response-1\",\"modelVersion\":\"gemini-3.1-pro-served\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":0}}}\n\n";
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_transport(Arc::new(StaticSseTransport::new(body)));
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(Arc::new(StaticSseTransport::new(body)));
         let response = provider
             .execute_request(
                 "access",
@@ -436,13 +476,17 @@ mod tests {
         let mut req = request(None);
         req.model = "gemini-test".to_string();
         req.messages = lash_core::session_model::render_prompt(&durable_history).messages;
-        let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
-        GoogleOAuthProvider::build_request(
-            &GoogleOAuthProvider::new("access", "refresh", 0),
-            &req,
-            contents,
-            None,
-        )
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
+        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
+        GoogleOAuthProvider::build_request(&provider, &req, contents, None)
     }
 
     async fn streaming_reasoning_response(
@@ -451,12 +495,20 @@ mod tests {
     ) -> (lash_core::llm::types::LlmResponse, Vec<LlmStreamEvent>) {
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0)
-            .with_options(ProviderOptions {
-                expose_thinking,
-                ..ProviderOptions::default()
-            })
-            .with_transport(Arc::new(StaticSseTransport::new(sse_body(wire_events))));
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_options(ProviderOptions {
+            expose_thinking,
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::new(StaticSseTransport::new(sse_body(wire_events))));
         let response = provider
             .execute_request(
                 "access",
@@ -509,9 +561,7 @@ mod tests {
                 .1
                 .as_ref()
                 .and_then(|meta| meta.origin.as_ref()),
-            Some(&GoogleOAuthProvider::route_identity_for_model(
-                "gemini-test"
-            ))
+            Some(&GoogleOAuthProvider::for_test().route_identity_for_model("gemini-test"))
         );
         assert_eq!(reasoning[1].0, "carefully");
         assert_eq!(
@@ -556,8 +606,8 @@ mod tests {
         let wire_events = streaming_reasoning_events();
         let (streaming, _) = streaming_reasoning_response(&wire_events, true).await;
         let batch_value = batch_response_from_stream_events(&wire_events);
-        let non_streaming =
-            GoogleOAuthProvider::response_parts_from_value(&batch_value, Some("gemini-test"));
+        let non_streaming = GoogleOAuthProvider::for_test()
+            .response_parts_from_value(&batch_value, Some("gemini-test"));
         let non_streaming_terminal =
             GoogleOAuthProvider::terminal_reason_from_value(&batch_value, &non_streaming);
 
@@ -834,15 +884,16 @@ mod tests {
             r#"{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}"#,
             r#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#,
         ] {
-            GoogleOAuthProvider::process_sse_event(
-                raw,
-                &mut full,
-                &mut Vec::new(),
-                &mut usage,
-                Some(&mut tool_calls),
-                &mut finish_event,
-            )
-            .expect("sse event");
+            GoogleOAuthProvider::for_test()
+                .process_sse_event(
+                    raw,
+                    &mut full,
+                    &mut Vec::new(),
+                    &mut usage,
+                    Some(&mut tool_calls),
+                    &mut finish_event,
+                )
+                .expect("sse event");
         }
         assert!(
             finish_event.is_some(),
@@ -872,22 +923,23 @@ mod tests {
             // sidecar, mirroring the normalized-usage non-zero guard.
             json!({"response":{"usageMetadata": {}}}).to_string(),
         ] {
-            GoogleOAuthProvider::process_sse_event_with_text_parts(
-                &raw,
-                crate::support::SseTextPartSink {
-                    full: &mut full,
-                    text_deltas: &mut text_deltas,
-                    reasoning_deltas: &mut reasoning_deltas,
-                    usage: &mut usage,
-                    provider_usage: &mut provider_usage,
-                    execution_evidence: &mut execution_evidence,
-                    tool_call_parts: None,
-                    output_parts: None,
-                    finish_event: &mut finish_event,
-                },
-                None,
-            )
-            .expect("sse event");
+            GoogleOAuthProvider::for_test()
+                .process_sse_event_with_text_parts(
+                    &raw,
+                    crate::support::SseTextPartSink {
+                        full: &mut full,
+                        text_deltas: &mut text_deltas,
+                        reasoning_deltas: &mut reasoning_deltas,
+                        usage: &mut usage,
+                        provider_usage: &mut provider_usage,
+                        execution_evidence: &mut execution_evidence,
+                        tool_call_parts: None,
+                        output_parts: None,
+                        finish_event: &mut finish_event,
+                    },
+                    None,
+                )
+                .expect("sse event");
         }
         assert_eq!(provider_usage, Some(meta));
         assert_eq!(usage.input_tokens, 6);
@@ -903,33 +955,42 @@ mod tests {
         let mut provider_usage = None;
         let mut execution_evidence = None;
         let mut finish_event = None;
-        GoogleOAuthProvider::process_sse_event_with_text_parts(
-            &json!({"response":{"candidates":[{"content":{"parts":[{
-                "text":"thought",
-                "thought":true
-            }]}}]}})
-            .to_string(),
-            crate::support::SseTextPartSink {
-                full: &mut full,
-                text_deltas: &mut text_deltas,
-                reasoning_deltas: &mut reasoning_deltas,
-                usage: &mut usage,
-                provider_usage: &mut provider_usage,
-                execution_evidence: &mut execution_evidence,
-                tool_call_parts: None,
-                output_parts: None,
-                finish_event: &mut finish_event,
-            },
-            None,
-        )
-        .expect("reasoning event parses");
+        GoogleOAuthProvider::for_test()
+            .process_sse_event_with_text_parts(
+                &json!({"response":{"candidates":[{"content":{"parts":[{
+                    "text":"thought",
+                    "thought":true
+                }]}}]}})
+                .to_string(),
+                crate::support::SseTextPartSink {
+                    full: &mut full,
+                    text_deltas: &mut text_deltas,
+                    reasoning_deltas: &mut reasoning_deltas,
+                    usage: &mut usage,
+                    provider_usage: &mut provider_usage,
+                    execution_evidence: &mut execution_evidence,
+                    tool_call_parts: None,
+                    output_parts: None,
+                    finish_event: &mut finish_event,
+                },
+                None,
+            )
+            .expect("reasoning event parses");
 
         assert_eq!(reasoning_deltas, ["thought"]);
     }
 
     #[test]
     fn thinking_config_uses_effort_encoding_for_thinking_level() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
         let body = GoogleOAuthProvider::build_request(
             &provider,
             &request_with_capability(
@@ -953,7 +1014,15 @@ mod tests {
 
     #[test]
     fn thinking_config_uses_budget_encoding_for_variant_budget() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
         let body = GoogleOAuthProvider::build_request(
             &provider,
             &request_with_capability(
@@ -977,7 +1046,15 @@ mod tests {
 
     #[test]
     fn disabled_budget_model_emits_zero_thinking_budget() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
         let mut req = request_with_capability(
             None,
             budget_capability(&[("high", 16_000), ("max", 24_576)]),
@@ -994,7 +1071,15 @@ mod tests {
 
     #[test]
     fn thinking_config_is_omitted_without_capability() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
         let body = GoogleOAuthProvider::build_request(
             &provider,
             &request_with_capability(Some("medium"), ModelCapability::default()),
@@ -1011,7 +1096,15 @@ mod tests {
 
     #[test]
     fn thinking_config_omits_thoughts_unless_provider_exposes_thinking() {
-        let hidden_provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let hidden_provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
         let hidden = GoogleOAuthProvider::build_request(
             &hidden_provider,
             &request_with_capability(
@@ -1031,11 +1124,19 @@ mod tests {
                 .is_none()
         );
 
-        let exposed_provider =
-            GoogleOAuthProvider::new("access", "refresh", 0).with_options(ProviderOptions {
-                expose_thinking: true,
-                ..ProviderOptions::default()
-            });
+        let exposed_provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_options(ProviderOptions {
+            expose_thinking: true,
+            ..ProviderOptions::default()
+        });
         let exposed = GoogleOAuthProvider::build_request(
             &exposed_provider,
             &request_with_capability(
@@ -1053,11 +1154,19 @@ mod tests {
 
     #[test]
     fn output_token_cap_maps_to_max_output_tokens() {
-        let provider =
-            GoogleOAuthProvider::new("access", "refresh", 0).with_options(ProviderOptions {
-                max_output_tokens: Some(9999),
-                ..ProviderOptions::default()
-            });
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_options(ProviderOptions {
+            max_output_tokens: Some(9999),
+            ..ProviderOptions::default()
+        });
 
         let mut req = request(None);
         req.generation.output_token_cap = NonZeroUsize::new(4096);
@@ -1074,7 +1183,15 @@ mod tests {
 
     #[test]
     fn stop_sequences_reach_the_generation_config() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
         let mut req = request(None);
         req.generation.stop_sequences = vec!["</lashlang>".to_string()];
 
@@ -1092,7 +1209,15 @@ mod tests {
 
     #[test]
     fn caller_sampling_controls_reach_the_generation_config() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
 
         let defaulted = GoogleOAuthProvider::build_request(&provider, &request(None), vec![], None);
         assert_eq!(defaulted["request"]["generationConfig"]["temperature"], 0);
@@ -1145,8 +1270,8 @@ mod tests {
                 }
             }]
         });
-        let parts =
-            GoogleOAuthProvider::response_parts_from_value(&value, Some("gemini-3.1-pro-preview"));
+        let parts = GoogleOAuthProvider::for_test()
+            .response_parts_from_value(&value, Some("gemini-3.1-pro-preview"));
         let meta = match &parts[0] {
             LlmOutputPart::Text {
                 response_meta: Some(meta),
@@ -1157,9 +1282,9 @@ mod tests {
         assert_eq!(meta.provider_payload.as_deref(), Some(signature.as_str()));
         assert_eq!(
             meta.origin.as_ref(),
-            Some(&GoogleOAuthProvider::route_identity_for_model(
-                "gemini-3.1-pro-preview"
-            ))
+            Some(
+                &GoogleOAuthProvider::for_test().route_identity_for_model("gemini-3.1-pro-preview")
+            )
         );
 
         let mut req = request(None);
@@ -1171,7 +1296,8 @@ mod tests {
                 cache_breakpoint: false,
             }],
         )];
-        let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+        let contents =
+            GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
         assert_eq!(contents[0]["parts"][0]["thoughtSignature"], signature);
     }
 
@@ -1199,23 +1325,24 @@ mod tests {
         let mut output_parts = Vec::new();
         let mut streaming_parts = Vec::new();
         let mut finish_event = None;
-        GoogleOAuthProvider::process_sse_event_with_text_parts(
-            &streaming_event.to_string(),
-            crate::support::SseTextPartSink {
-                full: &mut full,
-                text_deltas: &mut text_deltas,
-                reasoning_deltas: &mut reasoning_deltas,
-                usage: &mut usage,
-                provider_usage: &mut provider_usage,
-                execution_evidence: &mut execution_evidence,
-                tool_call_parts: Some(&mut streaming_parts),
-                output_parts: Some(&mut output_parts),
-                finish_event: &mut finish_event,
-            },
-            Some("gemini-test"),
-        )
-        .expect("streaming function call parses");
-        let batch_parts = GoogleOAuthProvider::response_parts_from_value(
+        GoogleOAuthProvider::for_test()
+            .process_sse_event_with_text_parts(
+                &streaming_event.to_string(),
+                crate::support::SseTextPartSink {
+                    full: &mut full,
+                    text_deltas: &mut text_deltas,
+                    reasoning_deltas: &mut reasoning_deltas,
+                    usage: &mut usage,
+                    provider_usage: &mut provider_usage,
+                    execution_evidence: &mut execution_evidence,
+                    tool_call_parts: Some(&mut streaming_parts),
+                    output_parts: Some(&mut output_parts),
+                    finish_event: &mut finish_event,
+                },
+                Some("gemini-test"),
+            )
+            .expect("streaming function call parses");
+        let batch_parts = GoogleOAuthProvider::for_test().response_parts_from_value(
             &json!({"candidates":[{
                 "content":{"parts":[function_part]},
                 "finishReason":"STOP"
@@ -1232,7 +1359,7 @@ mod tests {
                         ..
                     }] if replay.opaque.as_deref() == Some(signature)
                         && replay.origin.as_ref()
-                            == Some(&GoogleOAuthProvider::route_identity_for_model("gemini-test"))
+                            == Some(&GoogleOAuthProvider::for_test().route_identity_for_model("gemini-test"))
                 ),
                 "{path} parser must retain the functionCall thoughtSignature"
             );
@@ -1251,9 +1378,10 @@ mod tests {
         for meta in [
             ResponseTextMeta {
                 provider_payload: Some("not base64!".to_string()),
-                origin: Some(GoogleOAuthProvider::route_identity_for_model(
-                    "gemini-3.1-pro-preview",
-                )),
+                origin: Some(
+                    GoogleOAuthProvider::for_test()
+                        .route_identity_for_model("gemini-3.1-pro-preview"),
+                ),
                 ..ResponseTextMeta::default()
             },
             ResponseTextMeta {
@@ -1267,9 +1395,9 @@ mod tests {
             },
             ResponseTextMeta {
                 provider_payload: Some(valid.clone()),
-                origin: Some(GoogleOAuthProvider::route_identity_for_model(
-                    "gemini-2.5-pro",
-                )),
+                origin: Some(
+                    GoogleOAuthProvider::for_test().route_identity_for_model("gemini-2.5-pro"),
+                ),
                 ..ResponseTextMeta::default()
             },
         ] {
@@ -1282,14 +1410,23 @@ mod tests {
                     cache_breakpoint: false,
                 }],
             )];
-            let contents = GoogleOAuthProvider::build_contents_with_attachment_parts(&req, &[]);
+            let contents =
+                GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
             assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
         }
     }
 
     #[test]
     fn google_claude_on_vertex_tool_parameters_strip_json_schema_meta_declarations() {
-        let provider = GoogleOAuthProvider::new("access", "refresh", 0);
+        let provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            0,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        );
         let mut claude_on_vertex = request(None);
         claude_on_vertex.model = "claude-sonnet-4-6".to_string();
         claude_on_vertex.tools = Arc::new(vec![LlmToolSpec {

@@ -871,10 +871,18 @@ fn http_provider(dialect: &str, transport: Arc<ScriptedLlmHttpTransport>) -> Pro
                 .into_components(),
         ),
         "google.generate-content" => ProviderHandle::new(
-            GoogleOAuthProvider::new("access", "refresh", 0)
-                .with_project_id(Some("matrix-project".to_string()))
-                .with_transport(transport)
-                .into_components(),
+            GoogleOAuthProvider::new(
+                "access",
+                "refresh",
+                0,
+                lash_provider_google::GoogleOAuthClient {
+                    id: "oauth-client-id".into(),
+                    secret: "oauth-client-secret".into(),
+                },
+            )
+            .with_project_id(Some("matrix-project".to_string()))
+            .with_transport(transport)
+            .into_components(),
         ),
         "openai.chat-completions" => ProviderHandle::new(
             OpenAiCompatibleProvider::new("matrix-key", "https://openai-chat.matrix")
