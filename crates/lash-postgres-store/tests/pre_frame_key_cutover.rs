@@ -153,7 +153,7 @@ async fn postgres_refuses_completed_pre_frame_key_continue_as_at_open_when_confi
     let result = PostgresStorage::from_pool(pool.clone()).await;
 
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = 55 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET version = 56 WHERE component = 'lash-postgres-store'",
     )
     .execute(&pool)
     .await

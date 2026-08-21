@@ -1967,7 +1967,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 55 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 56 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -2270,7 +2270,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=55"]
+    for field in ["component=lash-postgres-store", "expected_version=56"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)
