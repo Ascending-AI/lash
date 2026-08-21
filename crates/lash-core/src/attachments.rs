@@ -109,9 +109,10 @@ pub enum AttachmentStorePersistence {
 /// (which blobs may be deleted) lives above that in the host, via
 /// [`reclaim_unreferenced_attachments`].
 ///
-/// Conventions every backend upholds: `put` is idempotent (identical bytes are
-/// a no-op returning the same ref), `delete` is idempotent, and a missing blob
-/// maps to [`AttachmentStoreError::NotFound`].
+/// Conventions every backend upholds: `put` is content-idempotent (identical
+/// bytes return the same ref without creating a second blob) but refreshes any
+/// freshness signal the backend exposes, `delete` is idempotent, and a missing
+/// blob maps to [`AttachmentStoreError::NotFound`].
 ///
 /// Implementors that map an id into a namespaced storage path or object key
 /// must reject malformed ids *before* constructing that path or key. A storage
@@ -127,6 +128,12 @@ pub trait AttachmentStore: Send + Sync {
         AttachmentStorePersistence::Ephemeral
     }
 
+    /// Store bytes and return their content-addressed reference.
+    ///
+    /// Repeating a `put` for bytes already held must refresh the freshness
+    /// signal returned by [`Self::head`] when the backend exposes one. The GC
+    /// relies on that restamp to distinguish a newly referenced blob from the
+    /// older snapshot it is considering for deletion.
     async fn put(
         &self,
         bytes: Vec<u8>,

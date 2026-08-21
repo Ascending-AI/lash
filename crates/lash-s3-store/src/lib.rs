@@ -507,6 +507,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn s3_attachment_store_satisfies_conformance_with_in_memory_object_store() {
+        lash_core::testing::conformance::attachment_store(
+            || {
+                Arc::new(S3AttachmentStore::from_object_store(
+                    Arc::new(object_store::memory::InMemory::new()),
+                    Some("conformance".to_string()),
+                )) as Arc<dyn AttachmentStore>
+            },
+            AttachmentStorePersistence::Durable,
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn minio_attachment_store_satisfies_conformance_when_configured() {
         let Some(config) = minio_config_from_env() else {
             eprintln!("skipping MinIO conformance: LASH_MINIO_ENDPOINT is not set");
