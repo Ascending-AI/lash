@@ -24,7 +24,6 @@ testing = ["lash-core/testing"]
 [dependencies]
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
-hmac = { workspace = true }
 lash-core = { workspace = true }
 lashlang = { workspace = true }
 rmp-serde = { workspace = true }
