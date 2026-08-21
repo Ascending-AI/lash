@@ -349,17 +349,7 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
 }
 
 fn history_item_from_lashlang_step(entry: &RlmTrajectoryEntry) -> RlmHistoryItem {
-    RlmHistoryItem::LashlangStep {
-        id: entry.id.clone(),
-        protocol_iteration: entry.protocol_iteration,
-        code: entry.code.clone(),
-        output: entry.output.clone(),
-        images: entry.images.iter().map(image_ref).collect(),
-        calls: entry.calls.clone(),
-        calls_omitted: entry.calls_omitted,
-        error: entry.error.clone(),
-        final_output: entry.final_output.clone(),
-    }
+    RlmHistoryItem::from_trajectory_entry(entry, entry.images.iter().map(image_ref).collect())
 }
 
 fn message_history_text(message: &Message) -> String {
