@@ -819,8 +819,18 @@ impl InMemoryLiveReplayStore {
         &self,
         cursor: &ParsedSessionCursor,
     ) -> Option<LiveReplayGapReason> {
-        (cursor.replay_incarnation_id != self.replay_incarnation_id)
-            .then_some(LiveReplayGapReason::Unavailable)
+        if cursor.replay_incarnation_id == self.replay_incarnation_id {
+            return None;
+        }
+        tracing::info!(
+            event = "live_replay.incarnation_fence",
+            session_id = %cursor.session_id,
+            requested_replay_incarnation_id = %cursor.replay_incarnation_id,
+            current_replay_incarnation_id = %self.replay_incarnation_id,
+            outcome = "gap_unavailable",
+            "live replay cursor belongs to another incarnation; rerouting to snapshot recovery"
+        );
+        Some(LiveReplayGapReason::Unavailable)
     }
 }
 

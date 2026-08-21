@@ -3454,7 +3454,7 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
 async fn incarnation_change_invalidates_cursor() {
     let original = crate::observe::InMemoryLiveReplayStore::default();
     let preserved = original.reopen_preserving_history();
-    crate::testing::conformance::incarnation_change_invalidates_cursor(
+    lash_core::testing::conformance::incarnation_change_invalidates_cursor(
         Arc::new(original),
         Arc::new(crate::observe::InMemoryLiveReplayStore::default()),
         Arc::new(preserved),
