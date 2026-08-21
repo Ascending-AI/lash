@@ -8632,6 +8632,26 @@ usage = "examples/agent-workbench/src/main_sections/routes.rs:173#lash::attachme
 assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:182#assert_eq!((*width, *height), (Some(1), Some(1)));"
 
 [[api]]
+symbol = "lash::attachments::InvalidAttachmentId"
+kind = "struct"
+availability = "default+all-features"
+area = "attachments"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:384#assert!(<InvalidAttachmentId as Error>::source(&invalid_attachment_id).is_none());"
+assertion = "examples/docs-snippets/src/persistence.rs:384#assert!(<InvalidAttachmentId as Error>::source(&invalid_attachment_id).is_none());"
+reason = "The docs-snippets persistence example matches a real malformed attachment-id parse error and asserts its typed Error shape through the facade export."
+
+[[api]]
+symbol = "lash::attachments::InvalidMediaType"
+kind = "struct"
+availability = "default+all-features"
+area = "attachments"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:390#assert!(<InvalidMediaType as Error>::source(&invalid_media_type).is_none());"
+assertion = "examples/docs-snippets/src/persistence.rs:390#assert!(<InvalidMediaType as Error>::source(&invalid_media_type).is_none());"
+reason = "The docs-snippets persistence example matches a real malformed media-type parse error and asserts its typed Error shape through the facade export."
+
+[[api]]
 # The Workbench evidence below intentionally exercises its PNG-only upload surface.
 # Provider transport MIME coverage is maintained by the deterministic laws in the
 # provider crates and is not a claim that Lash's generic AttachmentSource is PNG-only.

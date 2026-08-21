@@ -373,6 +373,23 @@ fn adaptive_reasoning_capability() -> lash::provider::ModelCapability {
     }
 }
 
+fn assert_facade_exports_typed_attachment_parse_errors() {
+    use lash::attachments::{AttachmentId, InvalidAttachmentId, InvalidMediaType, MediaType};
+    use std::error::Error;
+
+    let invalid_attachment_id = match AttachmentId::parse("../escape") {
+        Err(error) => error,
+        Ok(_) => panic!("a path traversal id must be rejected"),
+    };
+    assert!(<InvalidAttachmentId as Error>::source(&invalid_attachment_id).is_none());
+
+    let invalid_media_type = match MediaType::parse("image//png") {
+        Err(error) => error,
+        Ok(_) => panic!("a malformed MIME type must be rejected"),
+    };
+    assert!(<InvalidMediaType as Error>::source(&invalid_media_type).is_none());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,5 +439,7 @@ mod tests {
         )
         .await
         .expect("shared-factory snippet must build");
+
+        assert_facade_exports_typed_attachment_parse_errors();
     }
 }

@@ -1,6 +1,11 @@
 use std::fmt;
 use std::str::FromStr;
 
+/// An attachment identifier failed validation.
+///
+/// [`AttachmentId::parse`] returns this error when the input is empty, exceeds
+/// the length bound, contains non-printable ASCII or path syntax, or cannot
+/// serve as a single namespace component.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidAttachmentId {
     value: String,
@@ -110,6 +115,10 @@ impl<'de> serde::Deserialize<'de> for AttachmentId {
     }
 }
 
+/// A MIME media type failed syntactic validation.
+///
+/// [`MediaType::parse`] returns this error when the input is not exactly two
+/// non-empty MIME token components separated by one slash.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvalidMediaType {
     value: String,
