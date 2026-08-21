@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use lash_core::sansio::{
@@ -46,14 +45,12 @@ use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rl
 
 #[derive(Clone)]
 pub struct RlmDriver {
-    redaction_roots: Arc<[PathBuf]>,
     dialect: Arc<dyn RlmDialect>,
 }
 
 impl RlmDriver {
-    pub fn new(redaction_roots: Arc<[PathBuf]>) -> Self {
+    pub fn new() -> Self {
         Self {
-            redaction_roots,
             dialect: Arc::new(LashlangDialect::prompt_only(
                 lash_lashlang_runtime::LashlangSurface::default(),
             )),
@@ -70,7 +67,7 @@ impl RlmDriver {
     ///
     /// Panics on an unregistered language id, which is a programming error:
     /// the registry is the authority and it is closed.
-    pub fn for_language(redaction_roots: Arc<[PathBuf]>, language: &str) -> Self {
+    pub fn for_language(language: &str) -> Self {
         let dialect: Arc<dyn RlmDialect> = match language {
             crate::dialect::typescript::LANGUAGE_ID => {
                 Arc::new(crate::dialect::TypescriptDialect::prompt_only(
@@ -82,23 +79,17 @@ impl RlmDriver {
             )),
             other => panic!("unregistered dialect `{other}`"),
         };
-        Self::with_dialect(redaction_roots, dialect)
+        Self::with_dialect(dialect)
     }
 
-    pub(crate) fn with_dialect(
-        redaction_roots: Arc<[PathBuf]>,
-        dialect: Arc<dyn RlmDialect>,
-    ) -> Self {
-        Self {
-            redaction_roots,
-            dialect,
-        }
+    pub(crate) fn with_dialect(dialect: Arc<dyn RlmDialect>) -> Self {
+        Self { dialect }
     }
 }
 
 impl Default for RlmDriver {
     fn default() -> Self {
-        Self::new(Arc::from([]))
+        Self::new()
     }
 }
 
@@ -561,7 +552,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
-                        &self.redaction_roots,
                         None,
                         None,
                     )));
@@ -598,7 +588,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
-                        &self.redaction_roots,
                         Some(error_text.clone()),
                         None,
                     ),
@@ -617,7 +606,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
-                &self.redaction_roots,
                 None,
                 Some(finish_value.clone()),
             )));
@@ -636,14 +624,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             self.dialect.as_ref(),
             &ctx,
             &mut actions,
-            trajectory_events(
-                ctx.turn_id(),
-                ctx.protocol_iteration(),
-                &state,
-                &self.redaction_roots,
-                None,
-                None,
-            ),
+            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None, None),
             Vec::new(),
             if state.exec_error.is_some() {
                 AttemptProgress::Stalled
@@ -1091,7 +1072,6 @@ fn trajectory_entry(
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
-    redaction_roots: &[PathBuf],
     validation_error: Option<String>,
     final_output: Option<Value>,
 ) -> RlmTrajectoryEntry {
@@ -1104,9 +1084,7 @@ fn trajectory_entry(
         images: state.images.clone(),
         calls: state.calls.clone(),
         calls_omitted: state.calls_omitted,
-        error: error
-            .as_deref()
-            .map(|error| crate::public_error::public_error_message(error, redaction_roots)),
+        error,
         final_output,
     }
 }
@@ -1119,7 +1097,6 @@ fn trajectory_events(
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
-    redaction_roots: &[PathBuf],
     validation_error: Option<String>,
     final_output: Option<Value>,
 ) -> Vec<SessionHistoryRecord> {
@@ -1133,7 +1110,6 @@ fn trajectory_events(
         turn_id,
         protocol_iteration,
         state,
-        redaction_roots,
         validation_error,
         final_output,
     )));
@@ -1486,26 +1462,17 @@ mod tests {
     }
 
     #[test]
-    fn trajectory_capture_redacts_model_visible_error_before_journaling() {
-        let workspace = std::path::PathBuf::from("/workspace");
-        let private_path = workspace.join("private").join("secret.txt");
+    fn trajectory_capture_preserves_model_visible_error() {
+        let raw_error = "read failed at /workspace/private/secret.txt";
         let state = RlmDriverState {
-            exec_error: Some(format!("read failed at {}", private_path.display())),
+            exec_error: Some(raw_error.to_string()),
             ..RlmDriverState::default()
         };
 
-        let entry = trajectory_entry(
-            "turn",
-            0,
-            &state,
-            std::slice::from_ref(&workspace),
-            None,
-            None,
-        );
+        let entry = trajectory_entry("turn", 0, &state, None, None);
         let error = entry.error.expect("captured public error");
 
-        assert!(!error.contains(&workspace.display().to_string()));
-        assert_eq!(error, "read failed at private/secret.txt");
+        assert_eq!(error, raw_error);
     }
 
     #[test]
