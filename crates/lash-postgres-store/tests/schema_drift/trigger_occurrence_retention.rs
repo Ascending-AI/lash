@@ -3,7 +3,7 @@
 use lash_core::{TriggerDeliveryRetentionCandidate, TriggerStore};
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaProvisioning};
 
-use crate::harness::{REWIND_PAST_56_ARTIFACTS, ScratchSchema};
+use crate::harness::{REWIND_PAST_55_ARTIFACTS, ScratchSchema};
 use crate::support::database_url;
 
 /// The immediate predecessor adds one nullable arming column and its partial
@@ -17,7 +17,7 @@ async fn main_component_55_store_upgrades_cleanly_to_57() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(&format!(
-            "{REWIND_PAST_56_ARTIFACTS}
+            "{REWIND_PAST_55_ARTIFACTS}
              UPDATE lash_schema_versions
                 SET version = 55
               WHERE component = 'lash-postgres-store'"
@@ -76,7 +76,7 @@ async fn populated_component_55_trigger_scope_arms_only_terminal_rows() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(&format!(
-            "{REWIND_PAST_56_ARTIFACTS}
+            "{REWIND_PAST_55_ARTIFACTS}
              INSERT INTO lash_trigger_occurrences (
                  occurrence_id, idempotency_key, source_type, source_key,
                  occurred_at_ms, record_json

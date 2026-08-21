@@ -22,7 +22,7 @@ const POST_MIGRATION_SIBLING: &str = "post-migration-projection-sibling";
 const SHARED_COMPONENT: &str = "law/legacy-shared-component";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_55_to_56_backfill_preserves_legacy_fork_components_when_new_sibling_is_deleted() {
+async fn postgres_56_to_57_backfill_preserves_legacy_fork_components_when_new_sibling_is_deleted() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping Postgres seeded legacy backfill law: database URL is not set");
         return;
@@ -41,7 +41,7 @@ async fn postgres_55_to_56_backfill_preserves_legacy_fork_components_when_new_si
         .apply(&format!(
             "{REWIND_PAST_56_ARTIFACTS}
              UPDATE lash_schema_versions
-             SET version = 55
+             SET version = 56
              WHERE component = 'lash-postgres-store'"
         ))
         .await;
@@ -54,7 +54,7 @@ async fn postgres_55_to_56_backfill_preserves_legacy_fork_components_when_new_si
         },
     )
     .await
-    .expect("migrate seeded Postgres component 55 to 56");
+    .expect("migrate seeded Postgres component 56 to 57");
     let foreign_key_actions = sqlx::query_as::<_, (String, String)>(
         "SELECT conname, confdeltype::TEXT
          FROM pg_catalog.pg_constraint
@@ -90,7 +90,7 @@ async fn postgres_55_to_56_backfill_preserves_legacy_fork_components_when_new_si
         .await
         .expect("read Postgres backfilled edge"),
         1,
-        "the legacy rooted manifest must be projected before component 56 is visible"
+        "the legacy rooted manifest must be projected before component 57 is visible"
     );
 
     let factory = Arc::new(migrated.session_store_factory());

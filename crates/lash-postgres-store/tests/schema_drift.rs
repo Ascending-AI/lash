@@ -29,8 +29,8 @@ mod harness;
 mod trigger_occurrence_retention;
 
 use harness::{
-    REWIND_PAST_54_ARTIFACTS, REWIND_PAST_55_ARTIFACTS, REWIND_PAST_56_ARTIFACTS, ScratchSchema,
-    assert_mutation_is_rejected, pool_with_search_path, postgres_server_version_num,
+    REWIND_PAST_54_ARTIFACTS, REWIND_PAST_55_ARTIFACTS, ScratchSchema, assert_mutation_is_rejected,
+    pool_with_search_path, postgres_server_version_num,
 };
 
 /// Append-request replay depends on one durable receipt per session and turn.
@@ -1298,7 +1298,7 @@ async fn main_component_55_store_upgrades_cleanly_to_57() {
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch
         .apply(&format!(
-            "{REWIND_PAST_56_ARTIFACTS}
+            "{REWIND_PAST_55_ARTIFACTS}
              UPDATE lash_schema_versions
                 SET version = 55
               WHERE component = 'lash-postgres-store'"

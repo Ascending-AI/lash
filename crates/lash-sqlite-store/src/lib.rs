@@ -1136,22 +1136,29 @@ async fn delete_session_from_catalog(
                 ],
             )
             .map_err(sqlite_error)?;
-            // The severed checkpoint root must go first: its outgoing manifest
-            // edges cascade away, so component predicates see only live
-            // referrers. Every predicate is an indexed NOT EXISTS over exact
-            // edges; no whole-catalog mark/sweep runs in this transaction.
-            let mut ordered_candidates = Vec::with_capacity(candidates.len());
-            if let Some(checkpoint_ref) = checkpoint_ref.as_ref()
-                && candidates.contains(checkpoint_ref)
-            {
-                ordered_candidates.push(checkpoint_ref.clone());
+            if let Some(checkpoint_ref) = checkpoint_ref.as_ref() {
+                // Sever this root's outgoing projection before any blob delete
+                // when the owner transaction removed its final head/anchor.
+                // The root bytes may remain as another root's opaque component;
+                // its projection no longer has a live root owner in that case.
+                tx.execute(
+                    "DELETE FROM checkpoint_blob_refs AS edge
+                     WHERE edge.checkpoint_ref = ?1
+                       AND NOT EXISTS (
+                           SELECT 1 FROM session_head AS head
+                           WHERE head.checkpoint_ref = edge.checkpoint_ref
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM node_anchors AS anchor
+                           WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                       )",
+                    params![checkpoint_ref],
+                )
+                .map_err(sqlite_error)?;
             }
-            ordered_candidates.extend(
-                candidates
-                    .into_iter()
-                    .filter(|candidate| Some(candidate) != checkpoint_ref.as_ref()),
-            );
-            for blob_ref in ordered_candidates {
+            // Every predicate is an indexed NOT EXISTS over exact edges; no
+            // whole-catalog mark/sweep runs in this transaction.
+            for blob_ref in candidates {
                 let deleted = tx
                     .execute(
                         "DELETE FROM blobs AS candidate

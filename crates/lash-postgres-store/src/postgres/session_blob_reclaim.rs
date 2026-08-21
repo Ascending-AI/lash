@@ -59,17 +59,34 @@ pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
     checkpoint_refs: &std::collections::BTreeSet<String>,
     report: &mut lash_core::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
-    let mut ordered_candidates = Vec::with_capacity(candidates.len());
-    // Roots go first so their outgoing projection edges cascade away before a
-    // component's exact-edge predicate runs. Blob row locks were already taken
-    // in global hash order; this is delete order only and cannot deadlock.
-    ordered_candidates.extend(checkpoint_refs.iter().cloned());
-    ordered_candidates.extend(
-        candidates
-            .into_iter()
-            .filter(|candidate| !checkpoint_refs.contains(candidate)),
-    );
-    for blob_ref in ordered_candidates {
+    if !checkpoint_refs.is_empty() {
+        let checkpoint_ref_vec = checkpoint_refs.iter().cloned().collect::<Vec<_>>();
+        // Sever every outgoing edge of every root that stopped being a live
+        // root in this owner transaction before any blob delete. A root may
+        // remain as another root's opaque component, so deleting roots one at
+        // a time cannot provide this ordering. Shared live roots keep both
+        // their row and projection edges.
+        sqlx::query(
+            "DELETE FROM lash_checkpoint_blob_refs AS edge
+             WHERE edge.checkpoint_ref = ANY($1::TEXT[])
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_sessions AS head
+                   WHERE head.checkpoint_ref = edge.checkpoint_ref
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_node_anchors AS anchor
+                   WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+               )",
+        )
+        .bind(checkpoint_ref_vec)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
+    // Publication and reclaim already locked this complete set in ascending
+    // hash order before owner rows were severed. Keep candidate row work in the
+    // same deterministic order after every dead root's edges are gone.
+    for blob_ref in candidates {
         let deleted = sqlx::query(
             "DELETE FROM lash_blobs AS candidate
              WHERE candidate.hash = $1

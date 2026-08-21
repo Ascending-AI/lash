@@ -777,7 +777,7 @@ async fn apply_schema_migration(
 }
 
 /// Arm exact-edge reclaim for every checkpoint manifest that was rooted before
-/// component 56 existed. This runs after the projection table is created and
+/// component 57 existed. This runs after the projection table is created and
 /// before the component stamp advances, inside the opener's schema transaction.
 ///
 /// Only the manifest envelope is decoded. Component codec compatibility remains

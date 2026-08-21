@@ -1,6 +1,4 @@
-//! Runs the backend-agnostic `ProcessRegistry` conformance suite against the
-//! Sqlite implementation. The same suite runs against the in-memory registry
-//! in lash-core, so both backends are held to one contract.
+//! Runs the shared `ProcessRegistry` conformance suite against SQLite.
 
 use lash_sansio::sync::MutexExt;
 use std::future::Future;

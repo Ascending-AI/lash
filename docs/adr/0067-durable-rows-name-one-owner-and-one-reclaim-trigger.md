@@ -72,7 +72,7 @@ The durable reference-edge inventory includes:
 
 | Row class | Exactly-one owner | Reclaim trigger |
 | --- | --- | --- |
-| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | Session: the session whose head or anchor owns the checkpoint root identified by `checkpoint_ref`; components may be shared, but each edge belongs to that session-owned root. | Owner-delete cascade: owner-scoped session delete or process prune deletes the unreferenced checkpoint root, cascading its projection edges in the same transaction. |
+| `checkpoint_blob_refs` / `lash_checkpoint_blob_refs` | Session: the session whose head or anchor owns the checkpoint root identified by `checkpoint_ref`; components may be shared, but each edge belongs to that session-owned root. | Owner-delete cascade: owner-scoped session delete or process prune deletes the unreferenced checkpoint root, cascading its projection edges in the same transaction. The host-invoked global GC additionally severs the outgoing edges of any root retaining neither a live session head nor a node anchor — content-aliased dead roots outside that cascade — and every such severance completes before any blob delete. |
 
 #### Reclaim is severance, not sweeping
 

@@ -2904,6 +2904,24 @@ impl PostgresSessionStore {
                 retained.insert(descriptor.blob_ref.0.clone());
             }
         }
+        // Projection edges belong to live head/anchor roots. Sever every dead
+        // root's complete outgoing set before hash-ordered blob deletion: a
+        // component can sort before its root, and its strict FK must never be
+        // weakened to accommodate stale ownership data.
+        sqlx::query(
+            "DELETE FROM lash_checkpoint_blob_refs AS edge
+             WHERE NOT EXISTS (
+                       SELECT 1 FROM lash_sessions AS head
+                       WHERE head.checkpoint_ref = edge.checkpoint_ref
+                   )
+               AND NOT EXISTS (
+                       SELECT 1 FROM lash_node_anchors AS anchor
+                       WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                   )",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let all_hashes =
             sqlx::query_scalar::<_, String>("SELECT hash FROM lash_blobs ORDER BY hash ASC")
                 .fetch_all(&mut *tx)
