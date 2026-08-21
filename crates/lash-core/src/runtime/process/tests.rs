@@ -201,6 +201,83 @@ fn selector_extracts_payload_pointer_const_template_and_present() {
 }
 
 #[test]
+fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
+    let record = ProcessRecord::from_registration(registration("process-repair-waiting"));
+    let wait = WaitState {
+        kind: WaitKind::Signal {
+            name: "ready".to_string(),
+            event_type: "signal.ready".to_string(),
+            key: "wait-key".to_string(),
+            ordinal: 1,
+        },
+        since_ms: 42,
+    };
+    let waiting_request = ProcessEventAppendRequest::wait_entered("process-repair-waiting", &wait);
+    let waiting =
+        prepare_process_event_append(&record, waiting_request.clone(), 1, None, None, 42, None)
+            .expect("prepare waiting event");
+    let ProcessEventAppendPlan::Insert {
+        event: waiting_event,
+        projected_record: waiting_record,
+        ..
+    } = waiting
+    else {
+        panic!("waiting event should insert");
+    };
+
+    let terminal = prepare_process_event_append(
+        &waiting_record,
+        ProcessEventAppendRequest::new(
+            "process.completed",
+            serde_json::json!({
+                "await_output": ProcessAwaitOutput::Success {
+                    value: serde_json::json!({"ok": true}),
+                    control: None,
+                },
+            }),
+        )
+        .with_replay_key("process-repair-waiting-terminal"),
+        2,
+        Some(1),
+        None,
+        43,
+        None,
+    )
+    .expect("prepare terminal event");
+    let ProcessEventAppendPlan::Insert {
+        projected_record: terminal_record,
+        ..
+    } = terminal
+    else {
+        panic!("terminal event should insert");
+    };
+
+    let replay = prepare_process_event_append(
+        &terminal_record,
+        waiting_request,
+        99,
+        Some(2),
+        Some(waiting_event),
+        100,
+        None,
+    )
+    .expect("stale waiting event should replay without repair");
+    let ProcessEventAppendPlan::Replay {
+        event,
+        repair_record,
+        ..
+    } = replay
+    else {
+        panic!("stale waiting keyed append should replay")
+    };
+    assert_eq!(event.sequence, 1);
+    assert!(
+        repair_record.is_none(),
+        "stale waiting replay must not repair a terminal projection"
+    );
+}
+
+#[test]
 fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     let record = ProcessRecord::from_registration(registration("process-repair"));
     let request = ProcessEventAppendRequest::new(
@@ -285,6 +362,70 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
             .expect("generic tail replay must repair the stale projection")
             .updated_at_ms,
         42
+    );
+}
+
+#[test]
+fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
+    let registration =
+        registration("process-generic-stale-replay").with_extra_event_types([ProcessEventType {
+            name: "producer.progress".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        }]);
+    let record = ProcessRecord::from_registration(registration);
+    let first_request =
+        ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
+            .with_replay_key("process-generic-stale-replay:1");
+    let first =
+        prepare_process_event_append(&record, first_request.clone(), 1, None, None, 42, None)
+            .expect("prepare first generic event");
+    let ProcessEventAppendPlan::Insert {
+        event: first_event,
+        projected_record: first_record,
+        ..
+    } = first
+    else {
+        panic!("first generic event should insert")
+    };
+
+    let second = prepare_process_event_append(
+        &first_record,
+        ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 2}))
+            .with_replay_key("process-generic-stale-replay:2"),
+        2,
+        Some(1),
+        None,
+        100,
+        None,
+    )
+    .expect("prepare second generic event");
+    let ProcessEventAppendPlan::Insert {
+        projected_record: current_record,
+        ..
+    } = second
+    else {
+        panic!("second generic event should insert")
+    };
+    assert_eq!(current_record.updated_at_ms, 100);
+
+    let replay = prepare_process_event_append(
+        &current_record,
+        first_request,
+        3,
+        Some(2),
+        Some(first_event),
+        200,
+        None,
+    )
+    .expect("stale generic event should replay without repair");
+    let ProcessEventAppendPlan::Replay { repair_record, .. } = replay else {
+        panic!("stale generic keyed append should replay")
+    };
+    assert_eq!(current_record.updated_at_ms, 100);
+    assert!(
+        repair_record.is_none(),
+        "stale non-tail replay must not propose a projection repair"
     );
 }
 

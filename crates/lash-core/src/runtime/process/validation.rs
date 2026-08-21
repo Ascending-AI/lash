@@ -297,6 +297,9 @@ pub fn apply_process_event_projection(
     }
 
     if let Some(terminal) = event.semantics.terminal.clone() {
+        if record.is_terminal() {
+            return Ok(());
+        }
         record.outcome = Some(terminal.outcome.clone());
         apply_process_status_projection(
             record,
@@ -354,47 +357,8 @@ fn repair_lifecycle_projection(
     event: &ProcessEvent,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     let mut repaired = record.clone();
-    let changed = match event.event_type.as_str() {
-        "process.first_started" => {
-            let value = Box::new(lifecycle_payload(event, "started")?);
-            let changed = repaired.first_started.as_ref() != Some(&value);
-            repaired.first_started = Some(value);
-            changed
-        }
-        "process.external_ref_set" => {
-            let value = lifecycle_payload(event, "external_ref")?;
-            let changed = repaired.external_ref.as_ref() != Some(&value);
-            repaired.external_ref = Some(value);
-            changed
-        }
-        "process.abandon_requested" => {
-            let value = Box::new(lifecycle_payload(event, "request")?);
-            let changed = repaired.abandon_request.as_ref() != Some(&value);
-            repaired.abandon_request = Some(value);
-            changed
-        }
-        "process.caller_departed" => {
-            let changed = repaired.status != ProcessStatus::CallerDeparted;
-            apply_caller_departure(&mut repaired)?;
-            changed
-        }
-        "process.waiting" => {
-            let value = lifecycle_payload(event, "wait")?;
-            let changed =
-                repaired.wait.as_ref() != Some(&value) || repaired.status != ProcessStatus::Waiting;
-            repaired.wait = Some(value);
-            repaired.status = ProcessStatus::Waiting;
-            changed
-        }
-        "process.resumed" => {
-            let changed = repaired.wait.is_some() || repaired.status != ProcessStatus::Running;
-            repaired.wait = None;
-            repaired.status = ProcessStatus::Running;
-            changed
-        }
-        _ => false,
-    };
-    Ok(changed.then_some(repaired))
+    apply_process_event_projection(&mut repaired, event)?;
+    Ok((repaired != *record).then_some(repaired))
 }
 
 pub fn prepare_process_event_append(
@@ -415,35 +379,9 @@ pub fn prepare_process_event_append(
         {
             let occurred_at_ms = epoch_ms_from_system_time(existing.occurred_at);
             let repair_record = if last_event_sequence == Some(existing.sequence) {
-                let mut projected = record.clone();
-                apply_process_event_projection(&mut projected, &existing)?;
-                let projected_value = serde_json::to_value(&projected).map_err(|err| {
-                    PluginError::Session(format!(
-                        "failed to compare replay projection for process `{process_id}`: {err}"
-                    ))
-                })?;
-                let record_value = serde_json::to_value(record).map_err(|err| {
-                    PluginError::Session(format!(
-                        "failed to compare stored projection for process `{process_id}`: {err}"
-                    ))
-                })?;
-                (projected_value != record_value).then_some(projected)
-            } else if !record.is_terminal() && existing.semantics.terminal.is_some() {
-                let mut projected = record.clone();
-                let terminal = existing
-                    .semantics
-                    .terminal
-                    .clone()
-                    .expect("terminal checked above");
-                projected.outcome = Some(terminal.outcome.clone());
-                apply_process_status_projection(
-                    &mut projected,
-                    ProcessStatus::from_terminal(terminal),
-                    occurred_at_ms,
-                );
-                Some(projected)
-            } else {
                 repair_lifecycle_projection(record, &existing)?
+            } else {
+                None
             };
             let wake_delivery = prepare_wake_delivery(
                 process_id,
