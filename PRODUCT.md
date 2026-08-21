@@ -2,14 +2,12 @@
 
 ### Users
 
-Engineers reading TUI design docs and architecture references during long
-working sessions, often at night, often in dim physical contexts. They are
-also the *operators* of the lash terminal agent itself — so the same audience
-sees the docs (web), the TUI (terminal), and any future landing surface
-(web). The job they're doing varies — *understand the runtime so I can change
-it safely*, *learn the design language before contributing UI*, *use the
-agent through a long task without my eyes burning out* — but the audience
-sensibility is consistent: technical, opinionated, willing to read.
+Engineers reading lash docs and ADRs to embed or change the substrate during
+long working sessions, often at night, often in dim physical contexts. The job
+they're doing varies — *understand the runtime so I can change it safely*,
+*learn the design language before contributing*, *embed the substrate in a
+product* — but the audience sensibility is consistent: technical, opinionated,
+willing to read.
 
 ### Brand Personality
 
@@ -36,7 +34,7 @@ Mono for labels and code.
 
 **Theme: dark.** Derived from audience and viewing context — engineers in
 dim rooms during long sessions. Not a default; a deliberate read of when
-this product is actually used.
+these docs are actually read.
 
 **Anti-references** (this is *not* what we're making):
 - Vercel / Next.js / generic dev-tool docs (Inter + gradient hero + identical
@@ -64,11 +62,9 @@ signage type.
 4. **Long sessions stay calm.** No high-saturation backgrounds, no fragile
    thin text, no ornamental overload. The palette and typography survive
    hours of reading.
-5. **Cross-surface continuity.** The TUI, the docs, and any future
-   landing/marketing site share the same brand vocabulary — sodium intent,
-   ash structure, chalk text, the slash device, Big Shoulders Display
-   headlines. If something looks at home in the docs but wrong in the TUI
-   (or vice versa), one of them is straying.
+5. **Cross-surface continuity.** The docs and any future landing page share
+   one vocabulary — sodium intent, ash structure, chalk text, the slash
+   device, Big Shoulders Display headlines.
 
 ### Constraints
 
