@@ -279,7 +279,6 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
 pub(crate) fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::ProviderHandle) {
     runtime.host.core.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider.clone()));
-    runtime.policy.provider_id = provider.kind().to_string();
     runtime.state.policy.provider_id = provider.kind().to_string();
 }
 

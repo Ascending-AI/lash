@@ -169,14 +169,14 @@ impl CurrentSessionCapability {
         );
         RuntimeSessionState {
             session_id: runtime.state.session_id.clone(),
-            policy: runtime.state.policy.clone(),
+            policy: runtime.state.effective_policy().clone(),
             agent_frames: runtime.state.agent_frames.clone(),
             current_frame_node_id: runtime.state.current_frame_node_id.clone(),
             session_graph,
             turn_index: runtime.state.turn_index,
             token_usage: runtime.state.token_usage.clone(),
             last_prompt_usage: runtime.state.last_prompt_usage.clone(),
-            protocol_turn_options: runtime.protocol_turn_options.clone(),
+            protocol_turn_options: runtime.state.effective_protocol_turn_options().clone(),
             checkpoint_components: runtime.state.checkpoint_components.clone(),
             plugin_snapshot_revision: runtime.state.plugin_snapshot_revision,
             token_ledger: runtime.state.token_ledger.clone(),
@@ -203,7 +203,7 @@ impl CurrentSessionCapability {
                     messages: read_model.messages,
                 }
             },
-            policy: runtime.policy.clone(),
+            policy: runtime.state.effective_policy().clone(),
             host: runtime.host.clone(),
             plugins,
             store: runtime.services.store.clone(),

@@ -49,8 +49,6 @@ impl LashRuntime {
             state.plugin_snapshot_revision =
                 Some(session.plugins().snapshot_revision_fingerprint());
         }
-        self.policy = state.policy.clone();
-        self.protocol_turn_options = state.protocol_turn_options.clone();
         self.state = state;
         Ok(())
     }
@@ -274,8 +272,6 @@ impl LashRuntime {
         state_before_append: RuntimeSessionState,
     ) -> Result<(), SessionError> {
         self.state = state_before_append;
-        self.policy = self.state.policy.clone();
-        self.protocol_turn_options = self.state.protocol_turn_options.clone();
         let state_for_restore = self.state.clone();
         if let Some(session) = self.session.as_mut() {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
