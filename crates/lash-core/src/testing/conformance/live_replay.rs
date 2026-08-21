@@ -177,6 +177,80 @@ where
     );
 }
 
+/// Law 9: a fresh replay incarnation invalidates an old cursor, while a store
+/// which genuinely preserves both history and incarnation may continue it.
+///
+/// `original` and `preserved` must be distinct handles over the same replay
+/// substrate. `fresh` must start empty with a new incarnation. The vector
+/// deliberately creates the same numeric position in `fresh`, so a backend
+/// which compares offsets but not incarnation returns a forbidden clean empty
+/// replay and fails deterministically.
+pub async fn incarnation_change_invalidates_cursor(
+    original: Arc<dyn LiveReplayStore>,
+    fresh: Arc<dyn LiveReplayStore>,
+    preserved: Arc<dyn LiveReplayStore>,
+) {
+    assert!(
+        !Arc::ptr_eq(&original, &preserved),
+        "preserved-history conformance requires a distinct reopened handle"
+    );
+    let revision = SessionRevision::new(9);
+    let session_id = "incarnation-change-session";
+    let old_event = publish_one(
+        &original,
+        session_id,
+        revision,
+        Some("old-turn"),
+        live_replay_text_payload("old incarnation"),
+    )
+    .expect("publish old-incarnation event");
+
+    let fresh_event = publish_one(
+        &fresh,
+        session_id,
+        revision,
+        Some("fresh-turn"),
+        live_replay_text_payload("fresh incarnation numeric collision"),
+    )
+    .expect("publish fresh-incarnation event");
+    assert_ne!(
+        old_event.cursor, fresh_event.cursor,
+        "equal numeric positions in different incarnations must produce distinct cursors"
+    );
+    expect_live_replay_gap(
+        fresh.replay_after_cursor(&old_event.cursor),
+        LiveReplayGapReason::Unavailable,
+        "fresh incarnation replay from old cursor",
+    );
+    expect_live_replay_subscribe_gap(
+        fresh.subscribe_after_cursor(&old_event.cursor),
+        LiveReplayGapReason::Unavailable,
+        "fresh incarnation subscribe from old cursor",
+    );
+
+    let preserved_tail = expect_live_replay_replayed(
+        preserved.replay_after_cursor(&old_event.cursor),
+        "preserved incarnation replay from old tail",
+    );
+    assert!(
+        preserved_tail.is_empty(),
+        "a preserved incarnation may prove its old tail is clean empty"
+    );
+    publish_one(
+        &preserved,
+        session_id,
+        revision,
+        Some("continued-turn"),
+        live_replay_text_payload("preserved continuation"),
+    )
+    .expect("publish through reopened preserved store");
+    let continuation = expect_live_replay_replayed(
+        preserved.replay_after_cursor(&old_event.cursor),
+        "preserved incarnation continuation",
+    );
+    assert_live_replay_labels(&continuation, &["text:preserved continuation"]);
+}
+
 async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
     let revision = SessionRevision::new(7);
     let start_a = store.current_cursor("session-a", revision);
@@ -414,7 +488,12 @@ async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveRepla
         "a proven tail subscription must remain live and empty"
     );
 
-    let ahead = crate::SessionCursor::new("ahead-session", revision, 99);
+    let ahead = crate::SessionCursor::new(
+        &existing.replay_incarnation_id,
+        "ahead-session",
+        revision,
+        99,
+    );
 
     expect_live_replay_gap(
         store.replay_after_cursor(&ahead),

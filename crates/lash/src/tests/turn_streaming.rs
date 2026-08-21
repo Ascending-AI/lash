@@ -3451,9 +3451,15 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "FIG-1663 must bind replay incarnation identity into cursor validity"]
 async fn incarnation_change_invalidates_cursor() {
-    unreachable!("documented conformance-law placeholder")
+    let original = crate::observe::InMemoryLiveReplayStore::default();
+    let preserved = original.reopen_preserving_history();
+    lash_core::testing::conformance::incarnation_change_invalidates_cursor(
+        Arc::new(original),
+        Arc::new(crate::observe::InMemoryLiveReplayStore::default()),
+        Arc::new(preserved),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3957,9 +3963,9 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     let crate::recoverable_chat::RecoverableChatUpdate::Event { id, event } = update else {
         panic!("expected post-restart provisional event");
     };
-    assert_eq!(
+    assert_ne!(
         id.cursor, old_id.cursor,
-        "the in-memory replay store deliberately reuses the pre-restart cursor"
+        "a fresh replay-store incarnation must change the opaque cursor even at the same numeric position"
     );
     assert_ne!(
         id, old_id,

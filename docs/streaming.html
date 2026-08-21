@@ -122,7 +122,7 @@ async fn reconnect_session(
 }</code></pre>
     <aside class="contract">
       <strong>Contract</strong>
-      <p>Store the latest session cursor after every folded event. Treat it as an opaque token scoped to one session; do not parse it, compare it across sessions, or use <code>RemoteTurnActivity.sequence</code> as a resume cursor.</p>
+      <p>Store the latest session cursor after every folded event. Treat it as one opaque token binding the session, replay incarnation, durable revision, and live position; do not parse it, compare it across sessions, or use <code>RemoteTurnActivity.sequence</code> as a resume cursor. A fresh replay-store incarnation invalidates an older token with <code>Gap(Unavailable)</code>. Only a host store that preserved both history and incarnation may keep those tokens valid across restart.</p>
     </aside>
     <aside class="contract">
       <strong>Advanced Primitives</strong>
@@ -130,7 +130,7 @@ async fn reconnect_session(
     </aside>
     <aside class="contract">
       <strong>Recoverable chat</strong>
-      <p><code>subscribe_recoverable_chat</code> assigns every event the restart-safe <code>RecoverableChatEventId { session_id, replay_incarnation_id, cursor }</code>, forwards a trimmed or unavailable window as <code>ReplayGap</code>, upgrades a durable commit into <code>TerminalReplacement</code>, and maps revision-stable authority to <code>ResidentReplacement</code>. Both replacements carry the authoritative read view, but only the terminal form settles provisional transcript rows. Hosts may persist already-applied identities to suppress at-least-once redelivery: every replay-store construction receives a fresh incarnation, so a cursor reused after restart cannot collide with an older identity. The subscription keeps its applied-identity window bounded. A replay gap still clears that window because the gap snapshot becomes authoritative. Dropping this stream disconnects observation only; cancellation is a separate <code>TurnWorkDriver</code> request.</p>
+      <p><code>subscribe_recoverable_chat</code> assigns every event the restart-safe <code>RecoverableChatEventId { session_id, replay_incarnation_id, cursor }</code>, forwards a trimmed or unavailable window as <code>ReplayGap</code>, upgrades a durable commit into <code>TerminalReplacement</code>, and maps revision-stable authority to <code>ResidentReplacement</code>. Both replacements carry the authoritative read view, but only the terminal form settles provisional transcript rows. Hosts may persist already-applied identities to suppress at-least-once redelivery: every fresh replay-store construction receives a new incarnation inside its cursor token, so an older cursor forces snapshot replacement rather than colliding or returning clean empty. The subscription keeps its applied-identity window bounded. A replay gap still clears that window because the gap snapshot becomes authoritative. Dropping this stream disconnects observation only; cancellation is a separate <code>TurnWorkDriver</code> request.</p>
     </aside>
   </div>
 

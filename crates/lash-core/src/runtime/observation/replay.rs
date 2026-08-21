@@ -14,7 +14,7 @@ use crate::runtime::LashRuntime;
 #[cfg(test)]
 use crate::runtime::RuntimeSessionState;
 
-const SESSION_CURSOR_PREFIX: &str = "lashsc1:";
+const SESSION_CURSOR_PREFIX: &str = "lashsc2:";
 const DEFAULT_LIVE_REPLAY_CAPACITY: usize = 2048;
 const DEFAULT_LIVE_REPLAY_TTL: Duration = Duration::from_secs(120);
 
@@ -61,12 +61,14 @@ pub struct SessionCursor(String);
 
 impl SessionCursor {
     pub(crate) fn new(
+        replay_incarnation_id: impl AsRef<str>,
         session_id: impl AsRef<str>,
         revision: SessionRevision,
         live_position: u64,
     ) -> Self {
         Self(format!(
-            "{SESSION_CURSOR_PREFIX}{}:{live_position}:{}",
+            "{SESSION_CURSOR_PREFIX}{}:{}:{live_position}:{}",
+            replay_incarnation_id.as_ref(),
             revision.0,
             session_id.as_ref()
         ))
@@ -116,7 +118,14 @@ impl SessionCursor {
                 message: "missing cursor prefix".to_string(),
             }
         })?;
-        let mut parts = payload.splitn(3, ':');
+        let mut parts = payload.splitn(4, ':');
+        let replay_incarnation_id = parts
+            .next()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| SessionCursorError::Malformed {
+                message: "missing replay incarnation id".to_string(),
+            })?
+            .to_string();
         let revision = parts
             .next()
             .ok_or_else(|| SessionCursorError::Malformed {
@@ -143,6 +152,7 @@ impl SessionCursor {
             })?
             .to_string();
         Ok(ParsedSessionCursor {
+            replay_incarnation_id,
             session_id,
             revision: SessionRevision(revision),
             live_position,
@@ -164,6 +174,7 @@ impl fmt::Display for SessionCursor {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ParsedSessionCursor {
+    pub replay_incarnation_id: String,
     pub session_id: String,
     pub revision: SessionRevision,
     pub live_position: u64,
@@ -617,6 +628,22 @@ impl InMemoryLiveReplayStore {
         self.before_notification_gate = Some(BeforeNotificationGate(Arc::new(gate)));
         self
     }
+
+    /// Clone this store while preserving its replay incarnation and history.
+    ///
+    /// This is deliberately restricted to test and conformance support; hosts
+    /// must construct a fresh store when retained history cannot be proven.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn clone_preserving_history(&self) -> Self {
+        Self {
+            replay_incarnation_id: self.replay_incarnation_id.clone(),
+            config: self.config.clone(),
+            clock: Arc::clone(&self.clock),
+            sessions: Arc::clone(&self.sessions),
+            #[cfg(any(test, feature = "testing"))]
+            before_notification_gate: self.before_notification_gate.clone(),
+        }
+    }
 }
 
 impl Default for InMemoryLiveReplayStore {
@@ -787,6 +814,24 @@ impl InMemoryLiveReplayStore {
             None
         }
     }
+
+    fn incarnation_gap_for_cursor(
+        &self,
+        cursor: &ParsedSessionCursor,
+    ) -> Option<LiveReplayGapReason> {
+        if cursor.replay_incarnation_id == self.replay_incarnation_id {
+            return None;
+        }
+        tracing::info!(
+            event = "live_replay.incarnation_fence",
+            session_id = %cursor.session_id,
+            requested_replay_incarnation_id = %cursor.replay_incarnation_id,
+            current_replay_incarnation_id = %self.replay_incarnation_id,
+            outcome = "gap_unavailable",
+            "live replay cursor belongs to another incarnation; rerouting to snapshot recovery"
+        );
+        Some(LiveReplayGapReason::Unavailable)
+    }
 }
 
 impl LiveReplayStore for InMemoryLiveReplayStore {
@@ -827,7 +872,12 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                     replay_incarnation_id: self.replay_incarnation_id.clone(),
                     turn_id: draft.turn_id,
                     revision,
-                    cursor: SessionCursor::new(session_id, revision, position),
+                    cursor: SessionCursor::new(
+                        &self.replay_incarnation_id,
+                        session_id,
+                        revision,
+                        position,
+                    ),
                     payload: draft.payload,
                 })
             })
@@ -926,6 +976,9 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     ) -> Result<LiveReplayOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
+        if let Some(reason) = self.incarnation_gap_for_cursor(&parsed) {
+            return Ok(LiveReplayOutcome::Gap(reason));
+        }
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         if let Some(buffer) = sessions.get_mut(&parsed.session_id) {
@@ -954,6 +1007,9 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let _cursor_revision = parsed.revision;
+        if let Some(reason) = self.incarnation_gap_for_cursor(&parsed) {
+            return Ok(LiveReplaySubscribeOutcome::Gap(reason));
+        }
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         let buffer = sessions
@@ -990,7 +1046,12 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                     })
             })
             .unwrap_or(0);
-        SessionCursor::new(session_id, revision, live_position)
+        SessionCursor::new(
+            &self.replay_incarnation_id,
+            session_id,
+            revision,
+            live_position,
+        )
     }
 
     fn trim_session(&self, session_id: &str) -> Result<(), LiveReplayStoreError> {
@@ -1061,7 +1122,12 @@ mod tests {
 
     #[test]
     fn session_cursor_round_trips_and_debug_is_opaque() {
-        let cursor = SessionCursor::new("session:with:colon", SessionRevision(3), 9);
+        let cursor = SessionCursor::new(
+            "replay-incarnation",
+            "session:with:colon",
+            SessionRevision(3),
+            9,
+        );
         let encoded = serde_json::to_string(&cursor).expect("serialize");
         let decoded: SessionCursor = serde_json::from_str(&encoded).expect("deserialize");
         assert_eq!(decoded, cursor);
@@ -1069,6 +1135,7 @@ mod tests {
         let parsed = cursor
             .parse_for_session("session:with:colon")
             .expect("parse");
+        assert_eq!(parsed.replay_incarnation_id, "replay-incarnation");
         assert_eq!(parsed.revision, SessionRevision(3));
         assert_eq!(parsed.live_position, 9);
         assert_eq!(
@@ -1185,7 +1252,7 @@ mod tests {
             malformed.parse_for_session("s"),
             Err(SessionCursorError::Malformed { .. })
         ));
-        let cursor = SessionCursor::new("actual", SessionRevision(0), 0);
+        let cursor = SessionCursor::new("replay-incarnation", "actual", SessionRevision(0), 0);
         assert!(matches!(
             cursor.parse_for_session("expected"),
             Err(SessionCursorError::WrongSession { .. })
@@ -1271,7 +1338,7 @@ mod tests {
     #[test]
     fn in_memory_replay_store_reports_unavailable_for_cursor_ahead_of_tail() {
         let store = InMemoryLiveReplayStore::default();
-        let ahead = SessionCursor::new("s", SessionRevision(0), 99);
+        let ahead = SessionCursor::new("replay-incarnation", "s", SessionRevision(0), 99);
         assert!(matches!(
             store.replay_after_cursor(&ahead).expect("gap"),
             LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable)

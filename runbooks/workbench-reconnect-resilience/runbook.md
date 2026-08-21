@@ -259,12 +259,11 @@ require the post-refetch provisional-row multiset to equal the pre-refetch multi
 resident replacement seen without provisional rows, but do not claim it exercised the
 preservation contract.
 
-Expect the gap's `latest_cursor` to sit **behind** the `requested_cursor`: live replay
-positions are per-incarnation and restart at zero in the replacement process, so the browser's
-retained cursor is ahead of anything the new process can serve. That inversion is normal here
-and is precisely why the observation channel recovers through a snapshot rather than by cursor
-comparison. Record both cursors; a run that reports only the reason has thrown away the
-evidence that distinguishes this fault from a trim.
+Do not order the gap's `latest_cursor` against its `requested_cursor`. The two opaque tokens
+belong to different replay incarnations, so neither "behind" nor "ahead" is meaningful. That
+lack of a defined ordering is precisely why the observation channel recovers through a
+snapshot instead of comparing cursors. Record both tokens verbatim; a run that reports only
+the reason has thrown away evidence that distinguishes this fault from a trim.
 
 **3b — force a gap deliberately if 3a saw none.** Optional, and only if the reconnect
 produced a plain reattach: reconnect the observation stream at a cursor the replacement
