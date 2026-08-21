@@ -794,9 +794,8 @@ const LIVE_LEASE_MS: u64 = 60_000;
 
 const POLL: Duration = Duration::from_millis(25);
 
-/// Every await is bounded: a host that never serves a rank must fail this suite
-/// as a timeout at the law that waited, not as a hung test binary.
-const AWAIT_BUDGET: Duration = Duration::from_secs(30);
+/// Hang detector for the entire conformance law, not a latency expectation.
+const AWAIT_BUDGET: Duration = Duration::from_secs(60);
 
 fn spec(lease_ttl_ms: u64, executors: &Arc<RecordingExecutors>) -> DrainWorldSpec {
     DrainWorldSpec {

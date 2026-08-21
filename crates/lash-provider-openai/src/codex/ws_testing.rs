@@ -18,6 +18,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::handshake::server::{
     Request as WsHandshakeRequest, Response as WsHandshakeResponse,
@@ -112,9 +113,10 @@ pub enum ScriptedWsAction {
         message_id: &'static str,
         text: &'static str,
     },
-    /// Accept the request and go silent before any output, forcing the
-    /// client's idle timeout.
-    IdleBeforeStart,
+    /// Accept the request, pause Tokio time, and signal the receiver before
+    /// going silent. The receiver advances time only after the WebSocket
+    /// request is captured, so connect cannot race the idle timeout.
+    IdleBeforeStart { ready: Arc<Notify> },
     /// Stream partial output, then go silent, forcing the idle timeout after
     /// output started.
     IdleAfterStart {
@@ -452,8 +454,10 @@ pub async fn spawn_scripted_websocket_with_injected_accept_faults(
                             let _ = ws.close(None).await;
                             break;
                         }
-                        ScriptedWsAction::IdleBeforeStart => {
-                            tokio::time::sleep(Duration::from_secs(60)).await;
+                        ScriptedWsAction::IdleBeforeStart { ready } => {
+                            tokio::time::pause();
+                            ready.notify_one();
+                            std::future::pending::<()>().await;
                         }
                         ScriptedWsAction::IdleAfterStart { message_id, text } => {
                             send_ws_json(

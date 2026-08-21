@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use ws_testing::{
     InjectedAcceptFault, ScriptedWsAction, assistant_item, spawn_scripted_websocket,
@@ -118,6 +119,13 @@ fn websocket_test_provider(
             ..ProviderOptions::default()
         })
         .with_endpoint_urls(responses_url, websocket_url)
+}
+
+async fn advance_scripted_websocket_idle_timeout(ready: &Notify) {
+    let reached_idle = tokio::time::timeout(Duration::from_secs(5), ready.notified()).await;
+    reached_idle.expect("scripted WebSocket must reach its idle state");
+    tokio::time::advance(Duration::from_millis(50)).await;
+    tokio::time::resume();
 }
 
 fn assistant_message_with_meta(
@@ -933,7 +941,11 @@ async fn codex_scripted_websocket_full_turn_sends_response_create() {
 
 #[tokio::test]
 async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
-    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::IdleBeforeStart]).await;
+    let idle_ready = Arc::new(Notify::new());
+    let idle = ScriptedWsAction::IdleBeforeStart {
+        ready: idle_ready.clone(),
+    };
+    let ws = spawn_scripted_websocket(vec![idle]).await;
     let mut provider = websocket_test_provider(
         CodexTransport::Websocket,
         "http://127.0.0.1:9/unused".to_string(),
@@ -946,9 +958,12 @@ async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
         event_sink.lock_recover().push(event);
     }));
 
-    let error = provider
-        .complete(req)
+    let completion = tokio::spawn(async move { provider.complete(req).await });
+    advance_scripted_websocket_idle_timeout(&idle_ready).await;
+    let error = tokio::time::timeout(Duration::from_secs(5), completion)
         .await
+        .expect("idle WebSocket completion must not hang")
+        .expect("join idle WebSocket completion")
         .expect_err("idle before response start must time out");
 
     assert_eq!(error.code.as_deref(), Some("websocket_idle_timeout"));
@@ -1678,14 +1693,22 @@ async fn codex_scripted_websocket_mid_stream_failure_does_not_fallback() {
 
 #[tokio::test]
 async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
-    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::IdleBeforeStart]).await;
+    let idle_ready = Arc::new(Notify::new());
+    let idle = ScriptedWsAction::IdleBeforeStart {
+        ready: idle_ready.clone(),
+    };
+    let ws = spawn_scripted_websocket(vec![idle]).await;
     let http = spawn_http_sse("resp_http", "msg_http", "fallback").await;
     let mut provider =
         websocket_test_provider(CodexTransport::Auto, http.url.clone(), ws.url.clone());
 
-    let response = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+    let request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let completion = tokio::spawn(async move { provider.complete(request).await });
+    advance_scripted_websocket_idle_timeout(&idle_ready).await;
+    let response = tokio::time::timeout(Duration::from_secs(5), completion)
         .await
+        .expect("idle WebSocket fallback must not hang")
+        .expect("join idle WebSocket fallback")
         .expect("sse fallback response");
 
     assert_eq!(response.full_text, "fallback");
