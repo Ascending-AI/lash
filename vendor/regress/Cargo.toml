@@ -1,4 +1,4 @@
-# Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation and standalone vendored manifest.
+# Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation, standalone vendored manifest, and package lint policy.
 [package]
 name = "regress"
 version = "0.11.1"
@@ -9,6 +9,11 @@ repository = "https://github.com/ridiculousfish/regress"
 keywords = ["regex", "regexp"]
 edition = "2024"
 readme = "README.md"
+
+# Vendored code is tested, not linted. Keep this at the package boundary so it
+# applies to the upstream integration-test crates as well as the library.
+[lints.clippy]
+all = "allow"
 
 [features]
 default = ["backend-pikevm", "std"]
