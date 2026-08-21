@@ -148,6 +148,46 @@ async fn resident_refresh_does_not_revert_live_uncommitted_prompt() {
 }
 
 #[tokio::test]
+async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_path() {
+    let (mut runtime, store) = freshness_runtime().await;
+    append_history(&mut runtime, 2).await;
+
+    let mut durable_head = store
+        .load_session_head_meta()
+        .await
+        .expect("read durable head")
+        .expect("session head exists");
+    durable_head.head_revision += 1;
+    durable_head.config.prompt = Some(crate::PromptLayer::new().with_contribution(
+        crate::PromptContribution::guidance("Durable base", "KEEP THE DURABLE PROMPT"),
+    ));
+    store.save_session_head_meta(durable_head).await;
+    runtime.invalidate_resident_session_state();
+
+    runtime
+        .add_prompt_contribution(crate::PromptContribution::guidance(
+            "Live edit",
+            "KEEP THE LIVE EDIT",
+        ))
+        .await
+        .expect("apply prompt edit after resident reload");
+
+    assert_eq!(
+        runtime.policy.prompt,
+        crate::PromptLayer::new()
+            .with_contribution(crate::PromptContribution::guidance(
+                "Durable base",
+                "KEEP THE DURABLE PROMPT",
+            ))
+            .with_contribution(crate::PromptContribution::guidance(
+                "Live edit",
+                "KEEP THE LIVE EDIT",
+            )),
+        "the helper must edit the prompt reloaded by the config applier"
+    );
+}
+
+#[tokio::test]
 async fn resident_refresh_does_not_revert_live_uncommitted_model() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;

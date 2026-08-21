@@ -57,6 +57,14 @@ impl LashRuntime {
         &mut self,
         patch: SessionConfigPatch,
     ) -> Result<(), SessionError> {
+        self.apply_session_config(patch, |_| {}).await
+    }
+
+    async fn apply_session_config(
+        &mut self,
+        patch: SessionConfigPatch,
+        mutate_prompt: impl FnOnce(&mut crate::PromptLayer),
+    ) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
         let previous = self.session_policy();
@@ -69,6 +77,7 @@ impl LashRuntime {
         if let Some(prompt) = patch.prompt {
             self.policy.prompt = prompt;
         }
+        mutate_prompt(&mut self.policy.prompt);
         if let Some(generation) = patch.generation {
             self.policy.generation = generation.resolve(&self.policy.generation);
         }
@@ -83,27 +92,27 @@ impl LashRuntime {
         &mut self,
         template: crate::PromptTemplate,
     ) -> Result<(), SessionError> {
-        let mut prompt = self.policy.prompt.clone();
-        prompt.template = Some(template);
-        self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await
+        self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
+            prompt.template = Some(template);
+        })
+        .await
     }
 
     pub async fn clear_prompt_template(&mut self) -> Result<(), SessionError> {
-        let mut prompt = self.policy.prompt.clone();
-        prompt.template = None;
-        self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await
+        self.apply_session_config(SessionConfigPatch::default(), |prompt| {
+            prompt.template = None;
+        })
+        .await
     }
 
     pub async fn add_prompt_contribution(
         &mut self,
         contribution: crate::PromptContribution,
     ) -> Result<(), SessionError> {
-        let mut prompt = self.policy.prompt.clone();
-        prompt.add_contribution(contribution);
-        self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await
+        self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
+            prompt.add_contribution(contribution);
+        })
+        .await
     }
 
     pub async fn replace_prompt_slot(
@@ -111,17 +120,17 @@ impl LashRuntime {
         slot: crate::PromptSlot,
         contributions: impl IntoIterator<Item = crate::PromptContribution>,
     ) -> Result<(), SessionError> {
-        let mut prompt = self.policy.prompt.clone();
-        prompt.replace_slot(slot, contributions);
-        self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await
+        self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
+            prompt.replace_slot(slot, contributions);
+        })
+        .await
     }
 
     pub async fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) -> Result<(), SessionError> {
-        let mut prompt = self.policy.prompt.clone();
-        prompt.clear_slot(slot);
-        self.update_session_config(SessionConfigPatch::with_prompt(prompt))
-            .await
+        self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
+            prompt.clear_slot(slot);
+        })
+        .await
     }
 
     /// Re-register the current tool catalog in the live protocol session.
