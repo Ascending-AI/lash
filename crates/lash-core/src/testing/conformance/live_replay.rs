@@ -5,6 +5,7 @@
 //! runtime seam rather than in a host-store fitness contract.
 
 use super::*;
+use crate::runtime::LiveReplayEventDraft;
 use futures_util::StreamExt as _;
 
 /// Run the full [`LiveReplayStore`] conformance suite against the backend
@@ -50,22 +51,22 @@ where
     let store = make();
     let revision = SessionRevision::new(1);
     let start = store.current_cursor("capacity-session", revision);
-    let first = store
-        .append(
-            "capacity-session",
-            revision,
-            Some("capacity-turn"),
-            live_replay_text_payload("capacity one"),
-        )
-        .expect("append first capacity event");
-    store
-        .append(
-            "capacity-session",
-            revision,
-            Some("capacity-turn"),
-            live_replay_text_payload("capacity two"),
-        )
-        .expect("append second capacity event");
+    let first = publish_one(
+        &store,
+        "capacity-session",
+        revision,
+        Some("capacity-turn"),
+        live_replay_text_payload("capacity one"),
+    )
+    .expect("append first capacity event");
+    publish_one(
+        &store,
+        "capacity-session",
+        revision,
+        Some("capacity-turn"),
+        live_replay_text_payload("capacity two"),
+    )
+    .expect("append second capacity event");
 
     expect_live_replay_gap(
         store.replay_after_cursor(&start),
@@ -130,14 +131,14 @@ where
     let store = make();
     let revision = SessionRevision::new(1);
     let start = store.current_cursor("ttl-session", revision);
-    store
-        .append(
-            "ttl-session",
-            revision,
-            Some("ttl-turn"),
-            live_replay_text_payload("ttl expired"),
-        )
-        .expect("append ttl event");
+    publish_one(
+        &store,
+        "ttl-session",
+        revision,
+        Some("ttl-turn"),
+        live_replay_text_payload("ttl expired"),
+    )
+    .expect("append ttl event");
     tokio::time::sleep(expiration_wait).await;
     store.trim_session("ttl-session").expect("trim ttl session");
 
@@ -186,36 +187,36 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
     );
     assert!(empty.is_empty(), "initial cursor must replay no events");
 
-    let first_a = store
-        .append(
-            "session-a",
-            revision,
-            Some("alpha-turn"),
-            live_replay_text_payload("alpha one"),
-        )
-        .expect("append first session-a event");
-    let first_b = store
-        .append(
-            "session-b",
-            revision,
-            None,
-            SessionObservationEventPayload::ProcessChanged {
-                kind: SessionProcessEventKind::Started,
-                process_ids: vec!["proc-b".to_string()],
-            },
-        )
-        .expect("append session-b event");
-    let second_a = store
-        .append(
-            "session-a",
-            SessionRevision::new(8),
-            None,
-            SessionObservationEventPayload::QueueChanged {
-                kind: SessionQueueEventKind::Enqueued,
-                batch_ids: vec!["batch-a".to_string()],
-            },
-        )
-        .expect("append second session-a event");
+    let first_a = publish_one(
+        &store,
+        "session-a",
+        revision,
+        Some("alpha-turn"),
+        live_replay_text_payload("alpha one"),
+    )
+    .expect("append first session-a event");
+    let first_b = publish_one(
+        &store,
+        "session-b",
+        revision,
+        None,
+        SessionObservationEventPayload::ProcessChanged {
+            kind: SessionProcessEventKind::Started,
+            process_ids: vec!["proc-b".to_string()],
+        },
+    )
+    .expect("append session-b event");
+    let second_a = publish_one(
+        &store,
+        "session-a",
+        SessionRevision::new(8),
+        None,
+        SessionObservationEventPayload::QueueChanged {
+            kind: SessionQueueEventKind::Enqueued,
+            batch_ids: vec!["batch-a".to_string()],
+        },
+    )
+    .expect("append second session-a event");
 
     assert_eq!(first_a.session_id, "session-a");
     assert_eq!(first_a.revision, revision);
@@ -297,14 +298,14 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
 }
 
 async fn live_replay_store_cursor_preserves_newer_revisions(store: Arc<dyn LiveReplayStore>) {
-    store
-        .append(
-            "stale-snapshot-session",
-            SessionRevision::new(2),
-            Some("worker-turn"),
-            live_replay_text_payload("newer worker commit"),
-        )
-        .expect("append newer worker event");
+    publish_one(
+        &store,
+        "stale-snapshot-session",
+        SessionRevision::new(2),
+        Some("worker-turn"),
+        live_replay_text_payload("newer worker commit"),
+    )
+    .expect("append newer worker event");
 
     let stale_snapshot_cursor =
         store.current_cursor("stale-snapshot-session", SessionRevision::new(1));
@@ -320,22 +321,22 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
 ) {
     let revision = SessionRevision::new(3);
     let start = store.current_cursor("subscribe-session", revision);
-    store
-        .append(
-            "subscribe-session",
-            revision,
-            Some("subscribe-turn"),
-            live_replay_text_payload("buffered one"),
-        )
-        .expect("append first buffered event");
-    store
-        .append(
-            "subscribe-session",
-            revision,
-            Some("subscribe-turn"),
-            live_replay_text_payload("buffered two"),
-        )
-        .expect("append second buffered event");
+    publish_one(
+        &store,
+        "subscribe-session",
+        revision,
+        Some("subscribe-turn"),
+        live_replay_text_payload("buffered one"),
+    )
+    .expect("append first buffered event");
+    publish_one(
+        &store,
+        "subscribe-session",
+        revision,
+        Some("subscribe-turn"),
+        live_replay_text_payload("buffered two"),
+    )
+    .expect("append second buffered event");
 
     let mut subscription = expect_live_replay_subscribed(
         store.subscribe_after_cursor(&start),
@@ -348,14 +349,14 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
         &["text:buffered one", "text:buffered two"],
     );
 
-    store
-        .append(
-            "subscribe-session",
-            revision,
-            Some("subscribe-turn"),
-            live_replay_text_payload("live three"),
-        )
-        .expect("append live event");
+    publish_one(
+        &store,
+        "subscribe-session",
+        revision,
+        Some("subscribe-turn"),
+        live_replay_text_payload("live three"),
+    )
+    .expect("append live event");
     let live = next_live_replay_event(&mut subscription, "live event after replay").await;
     assert_live_replay_labels(&[live], &["text:live three"]);
 }
@@ -386,14 +387,14 @@ async fn live_replay_store_rejects_malformed_cursors(store: Arc<dyn LiveReplaySt
 
 async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveReplayStore>) {
     let revision = SessionRevision::new(4);
-    let existing = store
-        .append(
-            "ahead-session",
-            revision,
-            Some("ahead-turn"),
-            live_replay_text_payload("existing"),
-        )
-        .expect("append existing event");
+    let existing = publish_one(
+        &store,
+        "ahead-session",
+        revision,
+        Some("ahead-turn"),
+        live_replay_text_payload("existing"),
+    )
+    .expect("append existing event");
     let tail_replay = expect_live_replay_replayed(
         store.replay_after_cursor(&existing.cursor),
         "replay from proven tail",
@@ -437,14 +438,14 @@ where
         let session_id = format!("subscribe-race-{race}");
         let revision = SessionRevision::new(5);
         let start = store.current_cursor(&session_id, revision);
-        let prior = store
-            .append(
-                &session_id,
-                revision,
-                Some("race-turn"),
-                live_replay_text_payload("prior"),
-            )
-            .expect("append prior event");
+        let prior = publish_one(
+            &store,
+            &session_id,
+            revision,
+            Some("race-turn"),
+            live_replay_text_payload("prior"),
+        )
+        .expect("append prior event");
         let barrier = Arc::new(std::sync::Barrier::new(3));
         let subscribe_store = Arc::clone(&store);
         let subscribe_cursor = start.clone();
@@ -458,7 +459,8 @@ where
         let append_barrier = Arc::clone(&barrier);
         let append = tokio::task::spawn_blocking(move || {
             append_barrier.wait();
-            append_store.append(
+            publish_one(
+                &append_store,
                 &append_session_id,
                 revision,
                 Some("race-turn"),
@@ -498,6 +500,25 @@ fn live_replay_text_payload(text: &str) -> SessionObservationEventPayload {
     SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
         TurnEvent::AssistantProseDelta { text: text.into() },
     ))
+}
+
+fn publish_one(
+    store: &Arc<dyn LiveReplayStore>,
+    session_id: &str,
+    revision: SessionRevision,
+    turn_id: Option<&str>,
+    payload: SessionObservationEventPayload,
+) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
+    let prepared = store.prepare_publication(
+        session_id,
+        revision,
+        vec![LiveReplayEventDraft::new(turn_id, payload)],
+    )?;
+    store
+        .publish_prepared(prepared)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| LiveReplayStoreError::Store("published batch was empty".to_string()))
 }
 
 fn expect_live_replay_replayed(
@@ -583,6 +604,7 @@ fn live_replay_event_label(event: &SessionObservationEvent) -> String {
             other => format!("turn:{other:?}"),
         },
         SessionObservationEventPayload::Committed { .. } => "committed".to_string(),
+        SessionObservationEventPayload::ResidentChanged { .. } => "resident_changed".to_string(),
         SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
             format!("frame:{frame_id}")
         }

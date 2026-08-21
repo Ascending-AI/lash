@@ -696,6 +696,10 @@ enum ObservationStreamItem {
         event: Box<RemoteSessionObservationEvent>,
         cursor: String,
     },
+    ResidentReplacement {
+        event: Box<RemoteSessionObservationEvent>,
+        cursor: String,
+    },
 }
 
 #[derive(Clone)]

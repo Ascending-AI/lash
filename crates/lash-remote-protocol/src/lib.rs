@@ -88,10 +88,10 @@ pub use usage_activity::*;
 // generation options, mirroring `SessionPolicy.generation`. A version 19 peer
 // would drop them on the way in and resume a session with uncontrolled
 // sampling instead of the caller's.
-// Bumped to 41: `RemoteProcessStatus` and `RemoteProcessStatusFilter` carry the
-// non-terminal `caller_departed` state. A version 40 peer cannot decode it and
-// would reject a listing containing one rather than mis-classify it.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 41;
+// Bumped to 42: session-observation events distinguish revision-stable
+// `resident_changed` replacements from durable `committed` replacements. A
+// version 41 peer has no resident signal and must never decode one as committed.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 42;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

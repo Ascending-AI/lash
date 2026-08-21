@@ -1577,17 +1577,22 @@ fn remote_turn_activity_sink_records_flush_error() {
 #[test]
 fn remote_session_observation_from_core_maps_snapshot_metadata() {
     let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
-    let event = lash_core::LiveReplayStore::append(
+    let prepared = lash_core::LiveReplayStore::prepare_publication(
         &store,
         "session",
         lash_core::SessionRevision::new(4),
-        None,
-        lash_core::SessionObservationEventPayload::QueueChanged {
-            kind: lash_core::SessionQueueEventKind::Enqueued,
-            batch_ids: vec!["batch-1".to_string()],
-        },
+        vec![lash_core::LiveReplayEventDraft::new(
+            None::<String>,
+            lash_core::SessionObservationEventPayload::QueueChanged {
+                kind: lash_core::SessionQueueEventKind::Enqueued,
+                batch_ids: vec!["batch-1".to_string()],
+            },
+        )],
     )
-    .expect("append observation event");
+    .expect("prepare observation event");
+    let event = lash_core::LiveReplayStore::publish_prepared(&store, prepared)
+        .expect("publish observation event")
+        .remove(0);
     let snapshot = lash_core::SessionSnapshot {
         session_id: "session".to_string(),
         turn_index: 12,
@@ -1627,14 +1632,16 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         payload: lash_core::SessionObservationEventPayload,
     ) -> Arc<lash_core::SessionObservationEvent> {
         let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
-        lash_core::LiveReplayStore::append(
+        let prepared = lash_core::LiveReplayStore::prepare_publication(
             &store,
             "session",
             lash_core::SessionRevision::new(4),
-            turn_id,
-            payload,
+            vec![lash_core::LiveReplayEventDraft::new(turn_id, payload)],
         )
-        .expect("append observation event")
+        .expect("prepare observation event");
+        lash_core::LiveReplayStore::publish_prepared(&store, prepared)
+            .expect("publish observation event")
+            .remove(0)
     }
 
     let activity =
@@ -1679,8 +1686,31 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         RemoteSessionObservationEventPayload::Committed
     ));
 
+    let resident_read_view =
+        lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
+            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        ));
     let remote = RemoteSessionObservationEvent::from_core(
         9,
+        event(
+            None,
+            lash_core::SessionObservationEventPayload::ResidentChanged {
+                read_view: resident_read_view,
+            },
+        ),
+    )
+    .expect("remote resident observation event");
+    assert_eq!(
+        serde_json::to_value(&remote.event).expect("serialize resident signal"),
+        serde_json::json!({ "type": "resident_changed" })
+    );
+    assert!(matches!(
+        remote.event,
+        RemoteSessionObservationEventPayload::ResidentChanged
+    ));
+
+    let remote = RemoteSessionObservationEvent::from_core(
+        10,
         event(
             None,
             lash_core::SessionObservationEventPayload::AgentFrameSwitched {
@@ -1705,7 +1735,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     ));
 
     let remote = RemoteSessionObservationEvent::from_core(
-        10,
+        11,
         event(
             None,
             lash_core::SessionObservationEventPayload::QueueChanged {

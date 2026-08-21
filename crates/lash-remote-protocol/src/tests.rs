@@ -1191,9 +1191,141 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     assert_eq!(decoded, process);
 }
 
+/// Frozen version-41 observation-envelope reader copied from
+/// `e4681ed877605ec094fc5a609f4425c6a5aeccc3`, the last pre-v42 protocol source.
+/// The literal version and closed payload vocabulary are deliberately
+/// independent of current protocol types.
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct Protocol41ObservationEnvelope {
+    protocol_version: u32,
+    session_id: String,
+    replay_incarnation_id: String,
+    #[serde(default)]
+    turn_id: Option<String>,
+    revision: u64,
+    cursor: String,
+    #[serde(flatten)]
+    event: Protocol41ObservationSignal,
+}
+
+impl Protocol41ObservationEnvelope {
+    fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        #[derive(serde::Deserialize)]
+        struct VersionProbe {
+            protocol_version: u32,
+        }
+
+        let probe: VersionProbe = serde_json::from_slice(bytes)?;
+        if probe.protocol_version != 41 {
+            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                actual: probe.protocol_version,
+                expected: 41,
+            });
+        }
+        Ok(serde_json::from_slice(bytes)?)
+    }
+}
+
+static PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[derive(Debug)]
+#[allow(dead_code)]
+struct Protocol41ObservationSignal(Protocol41ObservationSignalShape);
+
+impl<'de> serde::Deserialize<'de> for Protocol41ObservationSignal {
+    fn deserialize<Deserializer>(deserializer: Deserializer) -> Result<Self, Deserializer::Error>
+    where
+        Deserializer: serde::Deserializer<'de>,
+    {
+        PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(true, std::sync::atomic::Ordering::SeqCst);
+        <Protocol41ObservationSignalShape as serde::Deserialize>::deserialize(deserializer)
+            .map(Self)
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[allow(dead_code)]
+enum Protocol41ObservationSignalShape {
+    TurnActivity {
+        activity: serde_json::Value,
+    },
+    Committed,
+    AgentFrameSwitched {
+        frame_id: String,
+    },
+    QueueChanged {
+        kind: serde_json::Value,
+        batch_ids: Vec<String>,
+    },
+    ProcessChanged {
+        kind: serde_json::Value,
+        process_ids: Vec<String>,
+    },
+}
+
+/// A version 41 peer has no resident-replacement signal. Its frozen envelope
+/// reader must reject the complete v42 envelope at the version probe, before
+/// its closed payload decoder can see `resident_changed`.
+#[test]
+fn protocol_41_peer_rejects_protocol_42_resident_changed_without_commit_fallback() {
+    let resident = RemoteSessionObservationEvent {
+        protocol_version: REMOTE_PROTOCOL_VERSION,
+        session_id: "resident-session".to_string(),
+        replay_incarnation_id: "resident-incarnation".to_string(),
+        turn_id: None,
+        revision: 7,
+        cursor: "resident-cursor".to_string(),
+        event: RemoteSessionObservationEventPayload::ResidentChanged,
+    };
+    let wire = serde_json::to_vec(&resident).expect("serialize complete version 42 envelope");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
+        serde_json::json!({
+            "protocol_version": 42,
+            "session_id": "resident-session",
+            "replay_incarnation_id": "resident-incarnation",
+            "revision": 7,
+            "cursor": "resident-cursor",
+            "type": "resident_changed",
+        })
+    );
+
+    PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(false, std::sync::atomic::Ordering::SeqCst);
+    let error = Protocol41ObservationEnvelope::decode_json(&wire)
+        .expect_err("version 41 reader must reject a complete version 42 envelope");
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 42,
+            expected: 41,
+        }
+    ));
+    assert!(
+        !PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.load(std::sync::atomic::Ordering::SeqCst),
+        "version refusal must happen before the frozen payload decoder runs"
+    );
+
+    let mut mislabeled =
+        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect v42 fixture");
+    mislabeled["protocol_version"] = serde_json::json!(41);
+    PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.store(false, std::sync::atomic::Ordering::SeqCst);
+    let error = Protocol41ObservationEnvelope::decode_json(
+        &serde_json::to_vec(&mislabeled).expect("serialize mislabeled control envelope"),
+    )
+    .expect_err("the v41 payload vocabulary cannot decode resident_changed");
+    assert!(error.to_string().contains("unknown variant"), "{error}");
+    assert!(
+        PROTOCOL_41_OBSERVATION_PAYLOAD_DECODED.load(std::sync::atomic::Ordering::SeqCst),
+        "the control proves the frozen payload decoder records when it is reached"
+    );
+}
+
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 41, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 42, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1602,7 +1734,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 41,
+            expected: 42,
         })
     ));
 }
@@ -1642,7 +1774,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             ensure_protocol_version(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1678,7 +1810,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             ensure_protocol_version(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1734,7 +1866,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             ensure_protocol_version(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1766,7 +1898,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             ensure_protocol_version(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 41,
+                expected: 42,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"

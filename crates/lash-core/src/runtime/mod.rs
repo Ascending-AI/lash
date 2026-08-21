@@ -321,12 +321,12 @@ pub use in_memory_store::RawSessionExecutionLeaseRow;
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
 pub use observation::{
-    InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayGap, LiveReplayGapReason,
-    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, RuntimeHandle, RuntimeObservation, SessionCursor, SessionCursorError,
-    SessionObservation, SessionObservationEvent, SessionObservationEventPayload,
-    SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
-    SessionRevision,
+    InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, PreparedLiveReplayPublication,
+    RuntimeHandle, RuntimeObservation, SessionCursor, SessionCursorError, SessionObservation,
+    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
+    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use process::reconcile_pruned_trigger_deliveries_interleaved;

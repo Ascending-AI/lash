@@ -184,10 +184,10 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
             (&window[0].payload, &window[1].payload),
             (
                 lash_core::SessionObservationEventPayload::AgentFrameSwitched { .. },
-                lash_core::SessionObservationEventPayload::Committed { .. }
+                lash_core::SessionObservationEventPayload::ResidentChanged { .. }
             )
         )),
-        "expected AgentFrameSwitched immediately followed by Committed, got {events:?}"
+        "expected AgentFrameSwitched immediately followed by ResidentChanged, got {events:?}"
     );
 
     let after = session.admin().state().persist_current().await?;

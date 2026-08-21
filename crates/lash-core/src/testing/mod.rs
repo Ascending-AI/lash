@@ -14,6 +14,7 @@ pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
 pub mod conformance;
+mod live_replay;
 pub mod sansio_transcript;
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
