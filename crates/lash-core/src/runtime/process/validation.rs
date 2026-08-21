@@ -9,7 +9,8 @@ use super::events::{
 };
 use super::materialization::materialize_process_event_semantics;
 use super::model::{
-    ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus, RecoveryContract,
+    AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessStarted,
+    ProcessStatus, RecoveryContract, WaitState,
 };
 use super::time::{epoch_ms_from_system_time, system_time_from_epoch_ms};
 
@@ -51,6 +52,31 @@ pub enum ProcessStartPlan {
     AlreadyApplied,
     AlreadyStarted { by: crate::LeaseOwnerIdentity },
     AttemptsExhausted { attempts: u32, max_attempts: u32 },
+}
+
+/// A registry-owned lifecycle transition whose append disposition is shared
+/// across every process-store implementation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProcessTransition {
+    /// Bind the process to durable work owned by another backend.
+    SetExternalRef(ProcessExternalRef),
+    /// Record a request for recovery to abandon the process.
+    RequestAbandon(AbandonRequest),
+    /// Record that the caller of an externally-owned process departed.
+    RecordCallerDeparture,
+    /// Enter a durable wait state.
+    EnterWait(WaitState),
+    /// Clear the process's current wait state.
+    ClearWait,
+}
+
+/// The store action selected for a registry-owned lifecycle transition.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProcessTransitionPlan {
+    /// The requested transition is already reflected in the record.
+    Unchanged,
+    /// Append the supplied request through the normal process-event fold.
+    Append(ProcessEventAppendRequest),
 }
 
 /// Allocate the next process-event sequence from the live event tail and the
@@ -137,6 +163,72 @@ pub fn prepare_process_start(
         });
     }
     Ok(ProcessStartPlan::Append)
+}
+
+/// Prepare one registry-owned lifecycle transition for the shared append path.
+///
+/// This planner recognizes only idempotent no-ops. Illegal transitions remain
+/// append requests so [`apply_process_event_projection`] supplies the canonical
+/// refusal. When a refused request would reuse an already-persisted lifecycle
+/// replay key, the planner substitutes a deterministic validation-only key;
+/// otherwise replay validation would shadow the fold's more specific error.
+pub fn prepare_process_transition(
+    record: &ProcessRecord,
+    transition: ProcessTransition,
+) -> Result<ProcessTransitionPlan, PluginError> {
+    let append = match transition {
+        ProcessTransition::SetExternalRef(external_ref) => {
+            if record.external_ref.as_ref() == Some(&external_ref) {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            }
+            let mut append = ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref);
+            if record.external_ref.is_some() {
+                route_transition_refusal_to_fold(&mut append);
+            }
+            append
+        }
+        ProcessTransition::RequestAbandon(request) => {
+            if !record.is_terminal() && record.abandon_request.as_deref() == Some(&request) {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            }
+            let mut append = ProcessEventAppendRequest::abandon_requested(&record.id, &request);
+            if record.is_terminal() || record.abandon_request.is_some() {
+                route_transition_refusal_to_fold(&mut append);
+            }
+            append
+        }
+        ProcessTransition::RecordCallerDeparture => {
+            if record.status == ProcessStatus::CallerDeparted {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            }
+            ProcessEventAppendRequest::caller_departed(&record.id)
+        }
+        ProcessTransition::EnterWait(wait) => {
+            if record.status == ProcessStatus::Waiting && record.wait.as_ref() == Some(&wait) {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            }
+            let mut append = ProcessEventAppendRequest::wait_entered(&record.id, &wait);
+            if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
+                route_transition_refusal_to_fold(&mut append);
+            }
+            append
+        }
+        ProcessTransition::ClearWait => {
+            let Some(wait) = record.wait.as_ref() else {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            };
+            ProcessEventAppendRequest::wait_cleared(&record.id, wait)
+        }
+    };
+    Ok(ProcessTransitionPlan::Append(append))
+}
+
+fn route_transition_refusal_to_fold(append: &mut ProcessEventAppendRequest) {
+    let replay = append
+        .replay
+        .as_mut()
+        .expect("registry lifecycle transitions carry deterministic replay keys");
+    replay.key.push_str(":fold-validation");
 }
 
 pub fn apply_process_status_projection(

@@ -130,25 +130,27 @@ impl ProcessRegistry for SqliteProcessRegistry {
         let process_id = process_id.to_string();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
-        let (record, _changed) = self
+        let record = self
             .conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    if let Some(existing) = &record.external_ref {
-                        if existing == &external_ref {
-                            return Ok((record, false));
+                    match lash_core::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::SetExternalRef(external_ref),
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(request) => {
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                request,
+                                now,
+                                wake_delivery_config,
+                            )?;
                         }
-                        return Err(process_external_ref_conflict(
-                            &process_id,
-                            existing,
-                            &external_ref,
-                        ));
                     }
-                    let request =
-                        ProcessEventAppendRequest::external_ref_set(&process_id, &external_ref);
-                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
-                    Ok((record, true))
+                    Ok(record)
                 })()))
             })
             .await
@@ -725,17 +727,21 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    if record.is_terminal() {
-                        return Err(lash_core::PluginError::Session(format!(
-                            "terminal process `{process_id}` cannot accept an abandon request"
-                        )));
+                    match lash_core::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::RequestAbandon(request),
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(append) => {
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                append,
+                                now,
+                                wake_delivery_config,
+                            )?;
+                        }
                     }
-                    if record.abandon_request.is_some() {
-                        return Ok(record);
-                    }
-                    let append =
-                        ProcessEventAppendRequest::abandon_requested(&process_id, &request);
-                    Self::append_event_conn(tx, &mut record, append, now, wake_delivery_config)?;
                     Ok(record)
                 })()))
             })
@@ -754,11 +760,21 @@ impl ProcessRegistry for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    if record.status == lash_core::ProcessStatus::CallerDeparted {
-                        return Ok(record);
+                    match lash_core::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::RecordCallerDeparture,
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(append) => {
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                append,
+                                now,
+                                wake_delivery_config,
+                            )?;
+                        }
                     }
-                    let append = ProcessEventAppendRequest::caller_departed(&process_id);
-                    Self::append_event_conn(tx, &mut record, append, now, wake_delivery_config)?;
                     Ok(record)
                 })()))
             })
@@ -788,16 +804,21 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         None,
                         now,
                     )?;
-                    if record.is_terminal() {
-                        return Err(lash_core::PluginError::Session(format!(
-                            "terminal process `{process_id}` cannot enter a wait state"
-                        )));
+                    match lash_core::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::EnterWait(wait),
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(request) => {
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                request,
+                                now,
+                                wake_delivery_config,
+                            )?;
+                        }
                     }
-                    if record.wait.as_ref() == Some(&wait) {
-                        return Ok(record);
-                    }
-                    let request = ProcessEventAppendRequest::wait_entered(&process_id, &wait);
-                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
                     Ok(record)
                 })()))
             })
@@ -826,11 +847,21 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         None,
                         now,
                     )?;
-                    let Some(wait) = record.wait.clone() else {
-                        return Ok(record);
-                    };
-                    let request = ProcessEventAppendRequest::wait_cleared(&process_id, &wait);
-                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
+                    match lash_core::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::ClearWait,
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(request) => {
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                request,
+                                now,
+                                wake_delivery_config,
+                            )?;
+                        }
+                    }
                     Ok(record)
                 })()))
             })
@@ -1454,14 +1485,4 @@ fn validate_process_execution_authority_conn(
             )
         }
     }
-}
-
-fn process_external_ref_conflict(
-    process_id: &str,
-    existing: &ProcessExternalRef,
-    new: &ProcessExternalRef,
-) -> lash_core::PluginError {
-    lash_core::PluginError::Session(format!(
-        "process `{process_id}` external ref conflict: existing {existing:?}, new {new:?}"
-    ))
 }

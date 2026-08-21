@@ -7,9 +7,8 @@ use tokio::sync::Mutex;
 use crate::plugin::PluginError;
 
 use super::super::{
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessRecord, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
-    WaitState,
+    ProcessExecutionWriteAuthority, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessRecord, ProcessRegistry, ProcessStartOutcome, ProcessStarted, WaitState,
 };
 use super::{ManagedLeaseMap, TestLocalProcessRegistry};
 
@@ -306,16 +305,6 @@ pub(super) fn validate_in_memory_execution_authority(
             }
         }
     }
-}
-
-pub(super) fn process_external_ref_conflict(
-    process_id: &str,
-    existing: &ProcessExternalRef,
-    new: &ProcessExternalRef,
-) -> PluginError {
-    PluginError::Session(format!(
-        "process `{process_id}` external ref conflict: existing {existing:?}, new {new:?}"
-    ))
 }
 
 /// Explicit fixture-only conveniences for lifecycle writes whose production

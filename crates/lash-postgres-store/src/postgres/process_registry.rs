@@ -115,26 +115,25 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        if let Some(existing) = &record.external_ref {
-            if existing == &external_ref {
+        match lash_core::runtime::prepare_process_transition(
+            &record,
+            ProcessTransition::SetExternalRef(external_ref),
+        )? {
+            ProcessTransitionPlan::Unchanged => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(record);
             }
-            return Err(process_external_ref_conflict(
-                process_id,
-                existing,
-                &external_ref,
-            ));
+            ProcessTransitionPlan::Append(request) => {
+                append_process_event_tx(
+                    &mut tx,
+                    &mut record,
+                    request,
+                    self.clock.timestamp_ms(),
+                    self.wake_delivery_config,
+                )
+                .await?;
+            }
         }
-        let request = ProcessEventAppendRequest::external_ref_set(process_id, &external_ref);
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            request,
-            self.clock.timestamp_ms(),
-            self.wake_delivery_config,
-        )
-        .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
@@ -890,24 +889,25 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        if record.is_terminal() {
-            return Err(PluginError::Session(format!(
-                "terminal process `{process_id}` cannot accept an abandon request"
-            )));
+        match lash_core::runtime::prepare_process_transition(
+            &record,
+            ProcessTransition::RequestAbandon(request),
+        )? {
+            ProcessTransitionPlan::Unchanged => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(record);
+            }
+            ProcessTransitionPlan::Append(append) => {
+                append_process_event_tx(
+                    &mut tx,
+                    &mut record,
+                    append,
+                    self.clock.timestamp_ms(),
+                    self.wake_delivery_config,
+                )
+                .await?;
+            }
         }
-        if record.abandon_request.is_some() {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(record);
-        }
-        let append = ProcessEventAppendRequest::abandon_requested(process_id, &request);
-        append_process_event_tx(
-            &mut tx,
-            &mut record,
-            append,
-            self.clock.timestamp_ms(),
-            self.wake_delivery_config,
-        )
-        .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
@@ -918,11 +918,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        if record.status == lash_core::ProcessStatus::CallerDeparted {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(record);
-        }
-        let append = ProcessEventAppendRequest::caller_departed(process_id);
+        let append = match lash_core::runtime::prepare_process_transition(
+            &record,
+            ProcessTransition::RecordCallerDeparture,
+        )? {
+            ProcessTransitionPlan::Unchanged => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(record);
+            }
+            ProcessTransitionPlan::Append(append) => append,
+        };
         append_process_event_tx(
             &mut tx,
             &mut record,
@@ -948,16 +953,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
             &mut tx, process_id, &record, authority, None, lease_now,
         )
         .await?;
-        if record.is_terminal() {
-            return Err(PluginError::Session(format!(
-                "terminal process `{process_id}` cannot enter a wait state"
-            )));
-        }
-        if record.wait.as_ref() == Some(&wait) {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(record);
-        }
-        let request = ProcessEventAppendRequest::wait_entered(process_id, &wait);
+        let request = match lash_core::runtime::prepare_process_transition(
+            &record,
+            ProcessTransition::EnterWait(wait),
+        )? {
+            ProcessTransitionPlan::Unchanged => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(record);
+            }
+            ProcessTransitionPlan::Append(request) => request,
+        };
         append_process_event_tx(
             &mut tx,
             &mut record,
@@ -980,11 +985,16 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
             .await?;
-        let Some(wait) = record.wait.clone() else {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(record);
+        let request = match lash_core::runtime::prepare_process_transition(
+            &record,
+            ProcessTransition::ClearWait,
+        )? {
+            ProcessTransitionPlan::Unchanged => {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(record);
+            }
+            ProcessTransitionPlan::Append(request) => request,
         };
-        let request = ProcessEventAppendRequest::wait_cleared(process_id, &wait);
         append_process_event_tx(
             &mut tx,
             &mut record,
@@ -1553,14 +1563,4 @@ impl ProcessRegistry for PostgresProcessRegistry {
         );
         Ok(report)
     }
-}
-
-fn process_external_ref_conflict(
-    process_id: &str,
-    existing: &ProcessExternalRef,
-    new: &ProcessExternalRef,
-) -> PluginError {
-    PluginError::Session(format!(
-        "process `{process_id}` external ref conflict: existing {existing:?}, new {new:?}"
-    ))
 }

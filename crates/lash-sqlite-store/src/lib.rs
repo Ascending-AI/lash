@@ -80,7 +80,8 @@ use lash_core::{
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore,
-    VacuumReport, facade_support::ProcessStartPlan, facade_support::registry_transitions,
+    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
+    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};

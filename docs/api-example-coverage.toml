@@ -1006,7 +1006,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::count_non_terminal_processes"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1323#async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1333#async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {"
 
 [[api]]
 symbol = "lash::process::ProcessRegistry::wake_allocation_floor_for_testing"
@@ -1015,7 +1015,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::wake_allocation_floor_for_testing"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:401#async fn wake_allocation_floor_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:400#async fn wake_allocation_floor_for_testing("
 
 [[api]]
 symbol = "lash::provider::LlmRequest::drop_foreign_replay"
@@ -25928,7 +25928,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessEventAppendRequest::subscription_retargeted"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:331#ProcessEventAppendRequest::subscription_retargeted(process_id, target),"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:330#ProcessEventAppendRequest::subscription_retargeted(process_id, target),"
 
 [[api]]
 symbol = "lash::process::ProcessEventAppendRequest::wait_cleared"
@@ -26829,7 +26829,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::caused_by_occurrence_id"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1066#.bind(filter.caused_by_occurrence_id.as_deref())"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1076#.bind(filter.caused_by_occurrence_id.as_deref())"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::caused_by_subscription_id"
@@ -26838,7 +26838,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::caused_by_subscription_id"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1067#.bind(filter.caused_by_subscription_id.as_deref())"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1077#.bind(filter.caused_by_subscription_id.as_deref())"
 
 [[api]]
 symbol = "lash::process::ProcessListFilter::created_at_end_ms"
@@ -28191,7 +28191,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::retarget_subscription"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:311#async fn retarget_subscription("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:310#async fn retarget_subscription("
 
 [[api]]
 symbol = "lash::process::ProcessRegistry::set_external_ref"
@@ -28510,7 +28510,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessSessionDeleteReport::cleared_subscription_count"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:397#cleared_subscription_count,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:396#cleared_subscription_count,"
 
 [[api]]
 symbol = "lash::process::ProcessSessionDeleteReport::discarded_wake_delivery_count"
@@ -64632,7 +64632,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerStore::list_delivery_process_ids"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1147#Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1157#Some(trigger_store) => trigger_store.list_delivery_process_ids().await?,"
 
 [[api]]
 symbol = "lash::triggers::TriggerStore::list_delivery_retention_candidates"
@@ -70121,7 +70121,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:941#wait: lash_core::WaitState,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:946#wait: lash_core::WaitState,"
 
 [[api]]
 symbol = "lash_core::WaitState::key"
@@ -71441,7 +71441,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:604#facade_support::ProcessEventAppendPlan::Replay {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:603#facade_support::ProcessEventAppendPlan::Replay {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Insert"
@@ -71449,7 +71449,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:618#facade_support::ProcessEventAppendPlan::Insert {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:617#facade_support::ProcessEventAppendPlan::Insert {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Insert::event"
@@ -71457,7 +71457,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:619#event,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:618#event,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Insert::occurred_at_ms"
@@ -71465,7 +71465,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:621#occurred_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:620#occurred_at_ms,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Insert::projected_record"
@@ -71473,7 +71473,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:620#projected_record,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:619#projected_record,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Insert::wake_delivery"
@@ -71481,7 +71481,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:622#wake_delivery,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:621#wake_delivery,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Replay"
@@ -71489,7 +71489,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:604#facade_support::ProcessEventAppendPlan::Replay {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:603#facade_support::ProcessEventAppendPlan::Replay {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Replay::event"
@@ -71513,7 +71513,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:605#repair_record,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:604#repair_record,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan::Replay::wake_delivery"
@@ -71521,7 +71521,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:606#wake_delivery,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:605#wake_delivery,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessStartPlan"
@@ -71537,7 +71537,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:844#ProcessStartPlan::AlreadyApplied => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:843#ProcessStartPlan::AlreadyApplied => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessStartPlan::AlreadyStarted"
@@ -71545,7 +71545,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:848#ProcessStartPlan::AlreadyStarted { by } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:847#ProcessStartPlan::AlreadyStarted { by } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessStartPlan::AlreadyStarted::by"
@@ -71553,7 +71553,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:848#ProcessStartPlan::AlreadyStarted { by } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:847#ProcessStartPlan::AlreadyStarted { by } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessStartPlan::Append"
@@ -71561,7 +71561,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:866#ProcessStartPlan::Append => {}"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:865#ProcessStartPlan::Append => {}"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessStartPlan::AttemptsExhausted"
@@ -71569,7 +71569,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:855#ProcessStartPlan::AttemptsExhausted {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:854#ProcessStartPlan::AttemptsExhausted {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessStartPlan::AttemptsExhausted::attempts"
@@ -71585,7 +71585,111 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:857#max_attempts,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:856#max_attempts,"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition"
+kind = "enum"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/lib.rs:65#facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::ClearWait"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:990#ProcessTransition::ClearWait,"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::EnterWait"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:958#ProcessTransition::EnterWait(wait),"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::EnterWait::0"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:958#ProcessTransition::EnterWait(wait),"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::RecordCallerDeparture"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:923#ProcessTransition::RecordCallerDeparture,"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::RequestAbandon"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:894#ProcessTransition::RequestAbandon(request),"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::RequestAbandon::0"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:894#ProcessTransition::RequestAbandon(request),"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::SetExternalRef"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:120#ProcessTransition::SetExternalRef(external_ref),"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransition::SetExternalRef::0"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:120#ProcessTransition::SetExternalRef(external_ref),"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransitionPlan"
+kind = "enum"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/lib.rs:65#facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransitionPlan::Append"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:126#ProcessTransitionPlan::Append(request) => {"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransitionPlan::Append::0"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:126#ProcessTransitionPlan::Append(request) => {"
+
+[[api]]
+symbol = "lash_core::facade_support::ProcessTransitionPlan::Unchanged"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:122#ProcessTransitionPlan::Unchanged => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest"
@@ -75076,7 +75180,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1535#.flat_map(|process_id| facade_support::process_runtime_session_ids(process_id))"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1545#.flat_map(|process_id| facade_support::process_runtime_session_ids(process_id))"
 
 [[api]]
 symbol = "lash_core::facade_support::process_signal_event_type"
@@ -75294,7 +75398,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1343#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1353#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence"
@@ -75302,7 +75406,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1363#registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1373#registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease"
@@ -75310,7 +75414,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1343#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1353#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease::lease"
@@ -75318,7 +75422,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1343#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1353#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ReportBusy"
@@ -75326,7 +75430,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1359#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1369#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ReportBusy::holder"
@@ -75334,7 +75438,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1359#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1369#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision"
@@ -75342,7 +75446,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1389#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1399#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence"
@@ -75350,7 +75454,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1396#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1406#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence::fencing_token"
@@ -75358,7 +75462,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1397#fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1407#fencing_token,"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence"
@@ -75366,7 +75470,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1389#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1399#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::ReportBusy"
@@ -75374,7 +75478,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1399#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1409#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::ReportBusy::holder"
@@ -75382,7 +75486,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1399#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1409#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseRow"
@@ -75454,7 +75558,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1014#registry_transitions::ProcessTombstoneStamp {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1024#registry_transitions::ProcessTombstoneStamp {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessTombstoneStamp::pruned_at_ms"
@@ -75462,7 +75566,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1016#pruned_at_ms: plugin_u64_from_sql("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1026#pruned_at_ms: plugin_u64_from_sql("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessTombstoneStamp::terminal_label"
@@ -75470,7 +75574,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1015#terminal_label: row.get(0),"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1025#terminal_label: row.get(0),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow"
@@ -75582,7 +75686,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:717#registry_transitions::authorize_process_lease_write("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:716#registry_transitions::authorize_process_lease_write("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::decide_process_lease_claim"
@@ -75590,7 +75694,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1337#let fencing_token = match registry_transitions::decide_process_lease_claim("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1347#let fencing_token = match registry_transitions::decide_process_lease_claim("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::decide_process_lease_reclaim"
@@ -75598,7 +75702,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1388#match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now)? {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1398#match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now)? {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::next_process_lease_fencing_token"
@@ -75606,7 +75710,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1364#registry_transitions::next_process_lease_fencing_token("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1374#registry_transitions::next_process_lease_fencing_token("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::process_lease_still_holds"
@@ -75622,7 +75726,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1013#return Err(registry_transitions::process_no_longer_retained("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1023#return Err(registry_transitions::process_no_longer_retained("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::unknown_process"
@@ -75630,7 +75734,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:299#return Err(registry_transitions::unknown_process(process_id));"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:298#return Err(registry_transitions::unknown_process(process_id));"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::unknown_wake_delivery"
@@ -75703,7 +75807,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:583#facade_support::terminal_append_request(process_id, &await_output, Some(&authority));"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:582#facade_support::terminal_append_request(process_id, &await_output, Some(&authority));"
 
 [[api]]
 symbol = "lash_core::facade_support::tool_registry_manifests"
@@ -75751,7 +75855,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:424#facade_support::validate_generic_process_event_append(&request)?;"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:423#facade_support::validate_generic_process_event_append(&request)?;"
 
 [[api]]
 symbol = "lash_core::facade_support::validate_replayed_effect_envelope"
@@ -91278,8 +91382,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ProcessEventAppendRequest::caller_departed"]
 area = "processes"
-disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:925#let append = ProcessEventAppendRequest::caller_departed(process_id);"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
 symbol = "lash::process::ProcessRegistry::record_caller_departure"
@@ -91288,7 +91392,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::record_caller_departure"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/process_registry.rs:746#async fn record_caller_departure("
+usage = "crates/lash-sqlite-store/src/process_registry.rs:752#async fn record_caller_departure("
 
 [[api]]
 symbol = "lash::process::ProcessService::report_caller_departure"
@@ -91306,7 +91410,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatus::CallerDeparted"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:921#if record.status == lash_core::ProcessStatus::CallerDeparted {"
+usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:286#lash_core::ProcessStatus::CallerDeparted => Self::CallerDeparted,"
 
 [[api]]
 symbol = "lash::process::ProcessStatus::is_retired"

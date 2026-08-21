@@ -75,9 +75,10 @@ pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProces
 pub use testing::*;
 pub use time::{current_epoch_ms, epoch_ms_from_system_time, system_time_from_epoch_ms};
 pub use validation::{
-    ProcessEventAppendPlan, ProcessStartPlan, allocate_process_event_sequence,
-    apply_process_event_projection, apply_process_status_projection, fold_process_record,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    ProcessEventAppendPlan, ProcessStartPlan, ProcessTransition, ProcessTransitionPlan,
+    allocate_process_event_sequence, apply_process_event_projection,
+    apply_process_status_projection, fold_process_record, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_registration_fingerprint, require_event_replay, validate_generic_process_event_append,
 };
 pub use wake::{
