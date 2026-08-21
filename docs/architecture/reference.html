@@ -60,9 +60,9 @@
         <p>The workspace contains 37 members. Most are integrations a host composes through the facade (providers, plugins, tools, transports, stores, examples, and E2E harnesses), and applications do not import all of them directly.</p>
       </div>
       <ul class="bullets">
-        <li>Provider crates: <code>lash-provider-anthropic</code>, <code>lash-provider-openai</code> (which also ships the <code>codex</code> OAuth provider and OpenAI JSON Schema projection), <code>lash-provider-google</code>, and shared auth/transport support in <code>lash-provider-auth</code> and <code>lash-llm-transport</code>. The CLI wires provider factories for the compiled-in provider kinds directly.</li>
+        <li>Provider crates: <code>lash-provider-anthropic</code>, <code>lash-provider-openai</code> (which also ships the <code>codex</code> OAuth provider and OpenAI JSON Schema projection), <code>lash-provider-google</code>, and shared auth/transport support in <code>lash-provider-auth</code> and <code>lash-llm-transport</code>. Host applications wire provider factories for the provider kinds they use.</li>
         <li>Plugin crates: <code>lash-plugin-mcp</code>, <code>lash-plugin-process-controls</code>, and the <code>lash-standard-plugins</code> aggregator (which also bundles the rolling-history plugin).</li>
-        <li>Tool crates: <code>lash-tools</code> (shell, files, web, apply-patch modules), with shared scaffolding in <code>lash-tool-support</code> and <code>lash-llm-tools</code>. CLI-local grep belongs to the external Host Application.</li>
+        <li>Tool crates: <code>lash-tools</code> (shell, files, web modules), with shared scaffolding in <code>lash-tool-support</code> and <code>lash-llm-tools</code>. CLI-local grep belongs to the external Host Application.</li>
         <li>Mode crates: <code>lash-protocol-standard</code>, <code>lash-protocol-rlm</code>.</li>
         <li>Persistence, tracing, durable execution, profiling, and remote DTOs: <code>lash-sqlite-store</code>, <code>lash-postgres-store</code>, <code>lash-s3-store</code>, <code>lash-restate</code>, <code>lash-trace</code>, <code>lash-trace-viewer</code>, <code>lash-perf</code>, <code>lash-remote-protocol</code>.</li>
         <li>External hosts: terminal UI, export, indexing, and product-workflow crates live in their own Host Application repositories, not here.</li>
