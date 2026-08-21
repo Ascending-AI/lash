@@ -12383,7 +12383,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::payload"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:125#match &event.payload {"
+usage = "examples/docs-snippets/src/streaming.rs:131#match &event.payload {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::replay_incarnation_id"
@@ -12438,7 +12438,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::AgentFrameSwitched"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:135#SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {"
+usage = "examples/docs-snippets/src/streaming.rs:141#SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12448,7 +12448,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::AgentFrameSwitched::frame_id"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:135#SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {"
+usage = "examples/docs-snippets/src/streaming.rs:141#SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::Committed"
@@ -12467,7 +12467,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::Committed::read_view"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:129#SessionObservationEventPayload::Committed { read_view } => {"
+usage = "examples/docs-snippets/src/streaming.rs:135#SessionObservationEventPayload::Committed { read_view } => {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::ResidentChanged"
@@ -12476,7 +12476,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::ResidentChanged"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:132#SessionObservationEventPayload::ResidentChanged { read_view } => {"
+usage = "examples/docs-snippets/src/streaming.rs:138#SessionObservationEventPayload::ResidentChanged { read_view } => {"
 reason = "Syntax-only evidence: the streaming example distinguishes revision-stable resident replacement from a durable commit; add an outcome-driven example assertion before claiming asserted usage."
 
 [[api]]
@@ -12486,7 +12486,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::ResidentChanged::read_view"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:132#SessionObservationEventPayload::ResidentChanged { read_view } => {"
+usage = "examples/docs-snippets/src/streaming.rs:138#SessionObservationEventPayload::ResidentChanged { read_view } => {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::ProcessChanged"
@@ -12495,7 +12495,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::ProcessChanged"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:144#SessionObservationEventPayload::ProcessChanged { process_ids, .. } => {"
+usage = "examples/docs-snippets/src/streaming.rs:150#SessionObservationEventPayload::ProcessChanged { process_ids, .. } => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12514,7 +12514,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::ProcessChanged::process_ids"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:144#SessionObservationEventPayload::ProcessChanged { process_ids, .. } => {"
+usage = "examples/docs-snippets/src/streaming.rs:150#SessionObservationEventPayload::ProcessChanged { process_ids, .. } => {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::QueueChanged"
@@ -12523,7 +12523,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::QueueChanged"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:138#SessionObservationEventPayload::QueueChanged { batch_ids, .. } => {"
+usage = "examples/docs-snippets/src/streaming.rs:144#SessionObservationEventPayload::QueueChanged { batch_ids, .. } => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12533,7 +12533,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::QueueChanged::batch_ids"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/streaming.rs:138#SessionObservationEventPayload::QueueChanged { batch_ids, .. } => {"
+usage = "examples/docs-snippets/src/streaming.rs:144#SessionObservationEventPayload::QueueChanged { batch_ids, .. } => {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::QueueChanged::kind"

@@ -137,7 +137,7 @@ async fn reconnect_session(
   <div class="section" id="frontend-folding">
     <div class="section-header">
       <h2>Frontend Folding</h2>
-      <p>The frontend should fold live activity optimistically, then refresh settled state when the runtime commits.</p>
+      <p>The frontend should fold live activity optimistically. A durable commit may settle provisional rows; a resident-only change must reconcile the authoritative read view without deleting them.</p>
     </div>
     <pre data-lang="rust" data-snippet="streaming#fold-session-event"><code>match &amp;event.payload {
     SessionObservationEventPayload::TurnActivity(activity) =&gt; {
@@ -147,7 +147,7 @@ async fn reconnect_session(
         append_committed_view(read_view).await?;
     }
     SessionObservationEventPayload::ResidentChanged { read_view } =&gt; {
-        replace_from_read_view(read_view).await?;
+        reconcile_resident_view_preserving_provisional_rows(read_view).await?;
     }
     SessionObservationEventPayload::AgentFrameSwitched { frame_id } =&gt; {
         update_frame(frame_id).await?;
@@ -181,7 +181,7 @@ async fn reconnect_session(
       </div>
       <div class="listing__row">
         <div class="listing__label">resident changed</div>
-        <div class="listing__body"><p><code>ResidentChanged</code> means authoritative in-process state changed without advancing the durable revision. Refetch the read view while preserving provisional transcript rows.</p></div>
+        <div class="listing__body"><p><code>ResidentChanged</code> means authoritative in-process state changed without advancing the durable revision. Reconcile from the read view while preserving provisional transcript rows; this event cannot settle them.</p></div>
       </div>
       <div class="listing__row">
         <div class="listing__label">process and queue</div>

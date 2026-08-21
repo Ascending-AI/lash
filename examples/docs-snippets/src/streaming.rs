@@ -14,6 +14,12 @@ async fn replace_from_read_view(_view: &SessionReadView) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn reconcile_resident_view_preserving_provisional_rows(
+    _view: &SessionReadView,
+) -> anyhow::Result<()> {
+    Ok(())
+}
+
 async fn append_committed_view(_view: &SessionReadView) -> anyhow::Result<()> {
     Ok(())
 }
@@ -130,7 +136,7 @@ async fn fold_session_event(event: Arc<SessionObservationEvent>) -> anyhow::Resu
             append_committed_view(read_view).await?;
         }
         SessionObservationEventPayload::ResidentChanged { read_view } => {
-            replace_from_read_view(read_view).await?;
+            reconcile_resident_view_preserving_provisional_rows(read_view).await?;
         }
         SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
             update_frame(frame_id).await?;

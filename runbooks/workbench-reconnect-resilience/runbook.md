@@ -37,7 +37,8 @@ rejection, exponential state retry, and the manual "retry now" affordance.
   subscriber lags the broadcast), and `replay_gap` + `terminal_replacement` on the observation
   stream (from `RecoverableChatUpdate` in
   [`recoverable_chat.rs`](../../crates/lash/src/recoverable_chat.rs)). All three funnel into
-  the same `recoverFromState` single-flight snapshot recovery.
+  the same `recoverFromState` single-flight snapshot recovery. `resident_replacement` takes a
+  narrower path: it refetches resident authority while preserving provisional transcript rows.
 - **Snapshot recovery with staleness rejection.** `beginStateRecovery` /
   `recoveryResponseIsCurrent` / `snapshotApplication` decide whether a `/api/state` response
   is applied `initial`, applied `authoritative`, or dropped as `ignore`. The retry button, the
@@ -116,6 +117,9 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
      outage with later activity trims an existing buffer instead → `trimmed`.
    - `terminal_replacement` — **not** reconnect evidence. Every `Committed` observation
      becomes one, so it fires on every turn commit; a healthy run shows many.
+   - `resident_replacement` — revision-stable resident authority. It triggers an asynchronous
+     state refetch that must preserve every provisional transcript row; only a terminal
+     replacement may settle those rows.
    - `resync` — product-stream broadcast lag. It needs the client to fall behind the
      1024-deep registry and is not reliably reachable from a browser run.
    - a plain reattach with none of the above.
@@ -172,7 +176,8 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 - **Stream traffic** is evidence for golden rule 5: capture the response bodies of
   `/api/observations` and `/api/events` in the driver (a `page.on("response")` hook, or a
   parallel driver-side reader on the same cursors) and keep every non-`observation`,
-  non-`event` line.
+  non-`event` line. When `resident_replacement` appears, capture the provisional row multiset
+  before the refetch and after it resolves.
 - Teardown: `bash scripts/agent-workbench-dev.sh down --port <p>` and confirm the
   port-derived Restate container is gone.
 
@@ -242,11 +247,17 @@ carry a turn the trace has terminated. Save
 
 **3a — classify the recovery path.** From the captured stream traffic across the reconnect,
 record every `replay_gap` (with its `gap.reason`, `requested_cursor` and `latest_cursor`),
-`terminal_replacement`, and `resync` line, and classify the reconnect per golden rule 5. Save
+`terminal_replacement`, `resident_replacement`, and `resync` line, and classify the reconnect
+per golden rule 5. Save
 `06-recovery-paths.json`. If a `replay_gap` fired, additionally require that the rows it
 recovered onto are the **same** rows — the post-gap multiset equals the pre-kill multiset plus
 whatever the durable truth of 2d added, and nothing else. A `replay_gap` that lands on a
 different row multiset is the defect this phase exists to catch.
+
+If a `resident_replacement` fired while the in-flight turn still had provisional rows,
+require the post-refetch provisional-row multiset to equal the pre-refetch multiset. Record a
+resident replacement seen without provisional rows, but do not claim it exercised the
+preservation contract.
 
 Expect the gap's `latest_cursor` to sit **behind** the `requested_cursor`: live replay
 positions are per-incarnation and restart at zero in the replacement process, so the browser's
@@ -302,7 +313,7 @@ and the port-derived Restate container are both gone (`docker ps -a` shows no
 | Degraded shell told the truth | while degraded: banner visible, prior rows retained, never an empty idle session | | `03-degraded.png`, `04-phase-timeline.json` |
 | In-flight turn resolved from durable truth | trace/store decide the outcome; the rendered transcript agrees; no stale active address | | `05-postrestart-*.json` |
 | Three-layer cross-check | DOM vs durable vs trace reconcile pairwise on the final transcript; no duplicates, no losses | | `05-crosscheck.json` |
-| Recovery path recorded | the fired path(s) are named from captured stream traffic, and gap recovery landed on the same multiset | | `06-recovery-paths.json` |
+| Recovery path recorded | the fired path(s) are named from captured stream traffic; gap recovery landed on the same multiset; a resident replacement preserved any provisional rows | | `06-recovery-paths.json` |
 | "retry now" converges without re-deriving | phase returns to `live`; row multiset unchanged across the press | | `07-retry-now.png`, `07-retry-*.json` |
 | Reload identity | post-reload row multiset equals pre-reload multiset | | `08-after-reload.png`, `08-reload-multiset.json` |
 | Teardown | workbench and port-derived Restate container gone | | command log |
