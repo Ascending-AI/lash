@@ -24,6 +24,9 @@ mod lease_triage;
 mod raw_activities;
 #[cfg(feature = "restate")]
 mod restate;
+mod retention;
+#[cfg(test)]
+mod retention_tests;
 mod routes;
 mod state;
 mod ui;
@@ -219,11 +222,21 @@ async fn async_main() -> anyhow_like::Result<()> {
         &trigger_store_path,
     )
     .await?;
+    std::fs::create_dir_all(&session_store_root)
+        .map_err(|err| format!("create session store root: {err}"))?;
     let store_factory = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
             &session_store_root,
             &process_registry_path,
         ),
+    );
+    // An unbound handle is the factory-wide reachability-audit target. Vacuum
+    // deliberately uses separately opened, session-bound handles in the
+    // retention pass below.
+    let maintenance_store = Arc::new(
+        lash_sqlite_store::Store::open(&store_factory.catalog_path())
+            .await
+            .map_err(|err| err.to_string())?,
     );
     // Deployment-level Lashlang artifact store (compiled module cache), shared
     // across the session tree and durable in SQLite.
@@ -261,22 +274,28 @@ async fn async_main() -> anyhow_like::Result<()> {
         ),
         artifact_store,
     );
-    let core_builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .provider(provider)
-        .model(model_spec)
-        .store_factory(store_factory)
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            data_dir.join("attachments"),
-        )))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
-        .trace_sink(Arc::new(TeeTraceSink::new([
-            Arc::new(StderrTraceSink::default()) as Arc<dyn TraceSink>,
-            Arc::new(JsonlTraceSink::new(trace_path)),
-        ])))
-        .trace_level(TraceLevel::Extended)
-        .trigger_store(trigger_store);
+    let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
+        data_dir.join("attachments"),
+    ));
+    let core_builder =
+        lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .provider(provider)
+            .model(model_spec)
+            .store_factory(
+                Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>
+            )
+            .attachment_store(
+                Arc::clone(&attachment_store) as Arc<dyn lash::persistence::AttachmentStore>
+            )
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .process_env_store(process_env_store)
+            .trace_sink(Arc::new(TeeTraceSink::new([
+                Arc::new(StderrTraceSink::default()) as Arc<dyn TraceSink>,
+                Arc::new(JsonlTraceSink::new(trace_path)),
+            ])))
+            .trace_level(TraceLevel::Extended)
+            .trigger_store(trigger_store);
     let process_registry_store = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, session_store_root)
             .await
@@ -420,10 +439,17 @@ async fn async_main() -> anyhow_like::Result<()> {
         println!("agent-service Restate endpoint listening on http://{restate_endpoint_addr}");
     }
 
-    // Host-scheduled retention for terminal process rows (ADR 0017). This runs
-    // in both durability modes: whichever registry backs the deployment is the
-    // one that accumulates rows.
-    spawn_retention(retention_processes);
+    // Host-scheduled store and process retention runs in both durability modes:
+    // whichever durable stores back the deployment are the ones that grow.
+    crate::retention::spawn_retention(
+        state.clone(),
+        crate::retention::StoreRetentionTargets {
+            factory: store_factory,
+            gc_store: maintenance_store as Arc<dyn lash::persistence::StoreMaintenance>,
+            attachment_store,
+        },
+        retention_processes,
+    );
 
     // Keep a state clone for the drain; the router consumes the original.
     let drain_state = state.clone();
@@ -481,70 +507,6 @@ async fn async_main() -> anyhow_like::Result<()> {
     // Admission has stopped; run the teardown levers this process owns.
     drain(&drain_state, &drain_provider).await;
     Ok(())
-}
-
-/// Host-scheduled retention for terminal process rows (ADR 0017). The process
-/// registry keeps a row — plus its events, wake deliveries, observer edges, and leases
-/// — for every process this service ever started; once a run is terminal and
-/// its outcome has been consumed, those rows have no remaining reader and would
-/// grow without bound. `prune_terminal_processes` drops terminal rows older than
-/// a cutoff and never touches a non-terminal row. Retention is a host lever, not
-/// an automatic sweep inside the registry: only the host knows its window. Run
-/// it on the same maintenance cadence as the session-store `vacuum` /
-/// `gc_unreachable` reclamation (see docs/persistence.html).
-///
-/// Retention is driven through the public process facade rather than the raw
-/// store, so the example uses the same host surface every embedder does.
-/// Trigger mutation receipts deliberately remain unbounded until FIG-653 adds
-/// terminal-gated eligibility for deleting idempotency evidence.
-fn spawn_retention(processes: lash::process::Processes) {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    // The window must be comfortably longer than any wait: a cutoff shorter than
-    // a live `await_terminal` could prune a process out from under a late await,
-    // which then returns the typed `ProcessNoLongerRetained` outcome.
-    const RETENTION_WINDOW: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-    const PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
-
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(PRUNE_INTERVAL);
-        // Drop the immediate first tick: nothing is old enough on a fresh boot.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            let now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Ok(since) => since.as_millis() as u64,
-                Err(_) => continue,
-            };
-            let cutoff = now_ms.saturating_sub(RETENTION_WINDOW.as_millis() as u64);
-            // No filter: this service applies one uniform window to every
-            // terminal row. A host with differentiated policy passes a scoped
-            // filter here instead (ADR 0023).
-            let process_result = processes
-                .prune(
-                    cutoff,
-                    None,
-                    lash::process::ProjectionWatermark::NoProjector,
-                )
-                .await;
-            match process_result {
-                Ok(report)
-                    if report.pruned_processes > 0
-                        || report.pruned_events > 0
-                        || report.pruned_trigger_deliveries > 0 =>
-                {
-                    println!(
-                        "agent-service pruned {} terminal processes, {} events, and {} trigger deliveries (cutoff {cutoff}ms)",
-                        report.pruned_processes,
-                        report.pruned_events,
-                        report.pruned_trigger_deliveries
-                    );
-                }
-                Ok(_) => {}
-                Err(err) => eprintln!("agent-service: process retention prune failed: {err}"),
-            }
-        }
-    });
 }
 
 /// Resolve when the process receives Ctrl-C or SIGTERM — the host-owned signal

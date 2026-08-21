@@ -36,6 +36,22 @@ Validate the example build and unit tests:
 cargo test -p agent-service --all-targets
 ```
 
+## Retention
+
+The host runs one maintenance pass per hour. It audits the shared runtime
+catalog with `gc_unreachable`, vacuums terminal evidence for the app's chat
+sessions, reclaims unreferenced attachments after a 7-day grace window, and
+prunes terminal processes older than the same window. Attachment reclamation
+refuses and reports an empty live root set; it never treats an empty catalog as
+standing authorization to delete every eligible blob. A non-zero store-GC
+result is a verify/repair finding to investigate, not routine throughput.
+
+This example's chat list is the vacuum catalog. Process-owned sessions are not
+listed there and need retention owned by their process host. The attachment
+backend and session factory must also belong exclusively to the same
+deployment; pairing the backend with the wrong factory can classify live bytes
+as unreachable.
+
 ## Coverage
 
 The [example coverage matrix](../../runbooks/RULES.md#example-coverage-matrix) is the
