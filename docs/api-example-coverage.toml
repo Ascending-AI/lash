@@ -29,7 +29,7 @@ gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
 # vanishes among thousands; see the comment above the tombstones themselves.
-removal_verdicts_recorded = 767
+removal_verdicts_recorded = 769
 
 # The number of `file.rs::Symbol::path` citations the reasons carry. The citation
 # check only reads a reference that names a symbol, so stripping the `::path` off
@@ -46686,15 +46686,6 @@ disposition = "unused-add"
 reason = "Add lash::runtime::LashRuntime::session_state_service to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::runtime::LashRuntime::set_model"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::LashRuntime::set_model"]
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::runtime::LashRuntime::set_model to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::runtime::LashRuntime::set_persisted_state"
 kind = "function"
 availability = "default+all-features"
@@ -46729,15 +46720,6 @@ aliases = ["lash_core::facade_support::LashRuntime::set_protocol_turn_options_al
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::runtime::LashRuntime::set_protocol_turn_options_all_frames to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::runtime::LashRuntime::set_provider"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::LashRuntime::set_provider"]
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::runtime::LashRuntime::set_provider to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::runtime::LashRuntime::snapshot_execution_state"
@@ -87670,6 +87652,14 @@ kind = "function"
 
 [[removal_verdict]]
 symbol = "lash::runtime::ExecutionScope::journal_identity"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash::runtime::LashRuntime::set_model"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash::runtime::LashRuntime::set_provider"
 kind = "function"
 
 [[removal_verdict]]

@@ -54,7 +54,7 @@ Reopen follows ADR 0030 rather than inventing its own authority: **the host's co
 wins, for generation exactly as for the model and the prompt.** The facade reconciles the
 policy it resolves from the host's spec over loaded state, so a mid-run
 `update_session_config` change lasts until the host reopens with a spec that says otherwise
-— the same lifetime a mid-run `set_model` has. Pairing the host's new model with the
+— the same lifetime the since-removed `set_model` had. Pairing the host's new model with the
 store's old temperature would be the anomaly.
 
 That is the whole story on the durable side, because the session store is not a carrier of
@@ -99,8 +99,9 @@ rather than silently discarding the rolling RLM fence.
 a model can refuse arithmetically, and it was validated hard: a cap above the model's
 `output_token_capacity` failed the call non-retryably. As per-turn intent that was a loud,
 local error; as durable session policy it is a session that fails *every remaining turn*
-after a `set_model` to a smaller model, and the only fail-closed field in an otherwise
-fail-silent struct. The cap is a bound, not a demand — a request for at most 32k is
+after the since-removed `set_model` selected a smaller model, and the only
+fail-closed field in an otherwise fail-silent struct. The cap is a bound, not a
+demand — a request for at most 32k is
 satisfied by a model that can only produce 8k — so the turn sends the capacity and reports
 `ClampedToCapacity`. The runtime is the only layer that saw both numbers, so it narrows the
 adapter's `Applied` on the response and on every attempt of the ledger together, and
@@ -112,8 +113,9 @@ path that takes generation options *out of a session policy* applies it. The tur
 not the only such path: the direct requests plugins issue on the session's behalf carry the
 policy's options too, and `DirectRequest` has no `ModelLimits` to check a cap against. Left
 to the turn path alone, the fix would have produced the worse version of the same failure —
-after a `set_model` to a smaller model, turns clamp and proceed while every maintenance call
-fails at the provider. So the observational-memory workers and `ToolSessionAdmin` hand out
+after the since-removed `set_model` selected a smaller model, turns clamp and
+proceed while every maintenance call fails at the provider. So the observational-memory
+workers and `ToolSessionAdmin` hand out
 options already bounded by the model the same policy names, and a tool that substitutes its
 own model owns that pairing. Clamping is per request, against the model the request runs on;
 the session's stored intent is never rewritten.

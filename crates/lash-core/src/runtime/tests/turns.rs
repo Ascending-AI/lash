@@ -2114,7 +2114,7 @@ async fn enqueue_session_command(
 }
 
 #[tokio::test]
-async fn session_config_change_hook_receives_context_window_updates() {
+async fn every_session_config_patch_emits_a_lifecycle_event() {
     let observed = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let observed_hook = Arc::clone(&observed);
     let plugin = Arc::new(RuntimeTestPluginFactory {
@@ -2145,29 +2145,115 @@ async fn session_config_change_hook_receives_context_window_updates() {
     let alt_provider = TestProvider::builder()
         .kind("alt")
         .complete_error("alt provider not wired")
-        .build();
+        .build()
+        .into_handle();
     let alt_model = crate::ModelSpec::builder("alt-model")
         .context_window_tokens(123_456)
         .build()
         .expect("valid model spec");
     runtime
         .update_session_config(crate::SessionConfigPatch {
-            provider: Some(alt_provider.into_handle()),
             model: Some(alt_model.clone()),
             ..Default::default()
         })
         .await
-        .expect("update session config");
+        .expect("update model config");
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(alt_provider),
+            ..Default::default()
+        })
+        .await
+        .expect("update provider config");
+
+    assert_eq!(observed.lock().await.len(), 2);
+
+    let combined_provider = TestProvider::builder()
+        .kind("combined")
+        .complete_error("combined provider not wired")
+        .build()
+        .into_handle();
+    let combined_model = crate::ModelSpec::builder("combined-model")
+        .context_window_tokens(234_567)
+        .build()
+        .expect("valid combined model spec");
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            provider: Some(combined_provider),
+            model: Some(combined_model.clone()),
+            ..Default::default()
+        })
+        .await
+        .expect("update combined config");
+
+    assert_eq!(observed.lock().await.len(), 3);
+
+    let prompt = crate::PromptLayer::new().with_contribution(crate::PromptContribution::guidance(
+        "Patch",
+        "prompt-only session config",
+    ));
+    runtime
+        .update_session_config(crate::SessionConfigPatch::with_prompt(prompt.clone()))
+        .await
+        .expect("update prompt config");
+
+    assert_eq!(observed.lock().await.len(), 4);
+
+    let generation = crate::GenerationOptions {
+        seed: Some(42),
+        ..Default::default()
+    };
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            generation: Some(crate::GenerationOverlay::Replace(generation.clone())),
+            ..Default::default()
+        })
+        .await
+        .expect("update generation config");
+
+    assert_eq!(observed.lock().await.len(), 5);
+
+    let helper_template =
+        crate::PromptTemplate::new(vec![crate::PromptTemplateSection::untitled(vec![
+            crate::PromptTemplateEntry::text("prompt helper template"),
+        ])]);
+    runtime
+        .set_prompt_template(helper_template.clone())
+        .await
+        .expect("set prompt template");
 
     let changes = observed.lock().await;
-    assert_eq!(changes.len(), 1);
+    assert_eq!(changes.len(), 6);
     let (previous, current) = &changes[0];
     assert_eq!(previous.provider_id, "mock");
-    assert_eq!(current.provider_id, "alt");
+    assert_eq!(current.provider_id, "mock");
     assert_eq!(current.model.id, "alt-model");
     assert_ne!(
         previous.context_window_tokens(),
         current.context_window_tokens()
+    );
+    let (previous, current) = &changes[1];
+    assert_eq!(previous.provider_id, "mock");
+    assert_eq!(previous.model.id, "alt-model");
+    assert_eq!(current.provider_id, "alt");
+    assert_eq!(current.model.id, "alt-model");
+    let (previous, current) = &changes[2];
+    assert_eq!(previous.provider_id, "alt");
+    assert_eq!(previous.model.id, "alt-model");
+    assert_eq!(current.provider_id, "combined");
+    assert_eq!(current.model, combined_model);
+    let (previous, current) = &changes[3];
+    assert_eq!(previous.model.id, "combined-model");
+    assert_eq!(current.prompt, prompt);
+    let (previous, current) = &changes[4];
+    assert_eq!(previous.prompt, prompt);
+    assert_eq!(current.generation, generation);
+    let (previous, current) = &changes[5];
+    assert_eq!(previous.generation, generation);
+    assert_eq!(
+        current.prompt.template,
+        Some(helper_template),
+        "prompt helper changes emit SessionConfigChanged"
     );
 }
 
@@ -8881,9 +8967,9 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
     use std::sync::{Arc, Mutex};
 
     // The cap is a bound, not a demand, and it is durable session policy: a
-    // `set_model` to a smaller model must not leave the session failing every
-    // remaining turn. The turn sends what the model can produce and the
-    // disposition says the number was reduced.
+    // `update_session_config` selecting a smaller model must not leave the
+    // session failing every remaining turn. It sends what the model can
+    // produce, and the disposition says the number was reduced.
     let captured: Arc<Mutex<Vec<crate::GenerationOptions>>> = Arc::new(Mutex::new(Vec::new()));
     let captured_for_provider = Arc::clone(&captured);
     let provider = TestProvider::builder()
