@@ -154,17 +154,34 @@ fn find_compaction_cut_point(messages: &[Message], prefix_len: usize) -> usize {
     latest_user_index(messages).unwrap_or(messages.len())
 }
 
-fn pruning_needed(prompt_usage: Option<&PromptUsage>, max_context_tokens: Option<usize>) -> bool {
-    let Some(usage) = prompt_usage else {
-        return false;
-    };
-    let Some(max_context) = max_context_tokens else {
-        return false;
-    };
-    if max_context == 0 {
-        return false;
+/// The one context-pressure fact both rolling-history decisions consume: a known prompt usage
+/// measured against a context window that actually bounds it.  A window of zero bounds nothing,
+/// so it carries no pressure at all — the same filter the sans-io section builder applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ContextPressure {
+    context_budget_tokens: usize,
+    max_context_tokens: usize,
+}
+
+impl ContextPressure {
+    fn derive(
+        prompt_usage: Option<&PromptUsage>,
+        max_context_tokens: Option<usize>,
+    ) -> Option<Self> {
+        Some(Self {
+            context_budget_tokens: prompt_usage?.context_budget_tokens,
+            max_context_tokens: max_context_tokens.filter(|value| *value > 0)?,
+        })
     }
-    (usage.context_budget_tokens as f64 / max_context as f64) >= PRUNE_CONTEXT_THRESHOLD
+
+    fn pruning_needed(&self) -> bool {
+        (self.context_budget_tokens as f64 / self.max_context_tokens as f64)
+            >= PRUNE_CONTEXT_THRESHOLD
+    }
+
+    fn compaction_needed(&self) -> bool {
+        self.context_budget_tokens >= compaction_threshold(self.max_context_tokens)
+    }
 }
 
 fn extract_previous_summary(messages: &[Message]) -> Option<String> {
@@ -180,19 +197,6 @@ fn extract_previous_summary(messages: &[Message]) -> Option<String> {
                 .to_string()
         })
     })
-}
-
-fn compaction_needed(
-    prompt_usage: Option<&PromptUsage>,
-    max_context_tokens: Option<usize>,
-) -> bool {
-    let Some(usage) = prompt_usage else {
-        return false;
-    };
-    let Some(max_context) = max_context_tokens else {
-        return false;
-    };
-    usage.context_budget_tokens >= compaction_threshold(max_context)
 }
 
 fn compaction_threshold(max_context_tokens: usize) -> usize {
@@ -418,17 +422,17 @@ impl TurnContextTransform for RollingTurnTransform {
         ctx: &TurnTransformContext<'_>,
         mut input: PreparedContext,
     ) -> Result<PreparedContext, ContextError> {
-        let prompt_usage = ctx.prompt_usage.as_ref();
-        let max_context_tokens = ctx.max_context_tokens;
+        let Some(pressure) =
+            ContextPressure::derive(ctx.prompt_usage.as_ref(), ctx.max_context_tokens)
+        else {
+            return Ok(input);
+        };
 
-        let needs_pruning = pruning_needed(prompt_usage, max_context_tokens);
-        let needs_compaction = compaction_needed(prompt_usage, max_context_tokens);
+        let needs_pruning = pressure.pruning_needed();
+        let needs_compaction = pressure.compaction_needed();
         if !needs_pruning && !needs_compaction {
             return Ok(input);
         }
-        let (Some(usage), Some(max_context_tokens)) = (prompt_usage, max_context_tokens) else {
-            unreachable!("rolling-history decisions require prompt usage and a context window")
-        };
 
         let mut trace_context =
             lash_core::TraceContext::default().for_session(ctx.session_id.clone());
@@ -440,9 +444,9 @@ impl TurnContextTransform for RollingTurnTransform {
                 .emit_trace_event(
                     trace_context.clone(),
                     lash_core::TraceEvent::RollingHistoryCompactionNeeded {
-                        context_budget_tokens: usage.context_budget_tokens,
-                        max_context_tokens,
-                        threshold_tokens: compaction_threshold(max_context_tokens),
+                        context_budget_tokens: pressure.context_budget_tokens,
+                        max_context_tokens: pressure.max_context_tokens,
+                        threshold_tokens: compaction_threshold(pressure.max_context_tokens),
                     },
                 )
                 .await?;
@@ -466,8 +470,8 @@ impl TurnContextTransform for RollingTurnTransform {
                 .emit_trace_event(
                     trace_context,
                     lash_core::TraceEvent::RollingHistoryPromptPruned {
-                        context_budget_tokens: usage.context_budget_tokens,
-                        max_context_tokens,
+                        context_budget_tokens: pressure.context_budget_tokens,
+                        max_context_tokens: pressure.max_context_tokens,
                         dropped_prefix_messages: 0,
                         retained_messages: messages.len(),
                     },
@@ -485,8 +489,8 @@ impl TurnContextTransform for RollingTurnTransform {
             .emit_trace_event(
                 trace_context,
                 lash_core::TraceEvent::RollingHistoryPromptPruned {
-                    context_budget_tokens: usage.context_budget_tokens,
-                    max_context_tokens,
+                    context_budget_tokens: pressure.context_budget_tokens,
+                    max_context_tokens: pressure.max_context_tokens,
                     dropped_prefix_messages,
                     retained_messages,
                 },
@@ -571,6 +575,71 @@ mod tests {
     use lash_core::plugin::{SessionGraphService, SessionLifecycleService, SessionStateService};
     use lash_core::{SessionGraph, SessionPolicy};
     use serde_json::json;
+
+    fn prompt_usage(context_budget_tokens: usize) -> PromptUsage {
+        PromptUsage {
+            prompt_context_tokens: context_budget_tokens,
+            input_tokens: context_budget_tokens,
+            cache_read_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            context_budget_tokens,
+        }
+    }
+
+    /// Mirrors what the turn transform asks of the pressure: no pressure, no decisions.
+    fn rolling_history_decisions(
+        usage: Option<&PromptUsage>,
+        max_context_tokens: Option<usize>,
+    ) -> (bool, bool) {
+        ContextPressure::derive(usage, max_context_tokens)
+            .map(|pressure| (pressure.pruning_needed(), pressure.compaction_needed()))
+            .unwrap_or((false, false))
+    }
+
+    #[test]
+    fn zero_context_window_yields_no_pressure_and_no_decisions() {
+        let usage = prompt_usage(130_000);
+        assert_eq!(ContextPressure::derive(Some(&usage), Some(0)), None);
+        assert_eq!(
+            rolling_history_decisions(Some(&usage), Some(0)),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn missing_usage_or_window_yields_no_decisions() {
+        let usage = prompt_usage(130_000);
+        assert_eq!(
+            rolling_history_decisions(None, Some(200_000)),
+            (false, false)
+        );
+        assert_eq!(
+            rolling_history_decisions(Some(&usage), None),
+            (false, false)
+        );
+        assert_eq!(rolling_history_decisions(None, None), (false, false));
+    }
+
+    #[test]
+    fn non_zero_window_still_drives_both_decisions() {
+        let quiet = prompt_usage(10_000);
+        assert_eq!(
+            rolling_history_decisions(Some(&quiet), Some(200_000)),
+            (false, false)
+        );
+
+        let pruning_only = prompt_usage(130_000);
+        assert_eq!(
+            rolling_history_decisions(Some(&pruning_only), Some(200_000)),
+            (true, false)
+        );
+
+        let both = prompt_usage(190_000);
+        assert_eq!(
+            rolling_history_decisions(Some(&both), Some(200_000)),
+            (true, true)
+        );
+    }
 
     fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
         Message {
