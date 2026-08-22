@@ -648,10 +648,36 @@ pub use triggers::{
 };
 pub(crate) const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug)]
 pub struct ProtocolTurnOptions {
-    pub schema_version: u32,
     pub payload: serde_json::Value,
+}
+
+/// Emits the persisted wire shape for [`ProtocolTurnOptions`]: the schema version is stamped from
+/// the constant rather than carried in memory, so this body is the sole definition of the emitted
+/// field names, their order, and the stamped version's type. It is a named free function so the
+/// version-bump guard can cover it by symbol.
+fn serialize_protocol_turn_options<S>(
+    options: &ProtocolTurnOptions,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeStruct;
+    let mut state = serializer.serialize_struct("ProtocolTurnOptions", 2)?;
+    state.serialize_field("schema_version", &PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION)?;
+    state.serialize_field("payload", &options.payload)?;
+    state.end()
+}
+
+impl serde::Serialize for ProtocolTurnOptions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serialize_protocol_turn_options(self, serializer)
+    }
 }
 
 fn empty_protocol_turn_payload() -> serde_json::Value {
@@ -720,10 +746,9 @@ impl<'de> serde::Deserialize<'de> for ProtocolTurnOptions {
         }
 
         let wire = ProtocolTurnOptionsWire::deserialize(deserializer)?;
-        let schema_version = parse_protocol_turn_options_schema_version(wire.schema_version)
+        parse_protocol_turn_options_schema_version(wire.schema_version)
             .map_err(serde::de::Error::custom)?;
         Ok(Self {
-            schema_version,
             payload: wire.payload,
         })
     }
@@ -740,7 +765,6 @@ impl ProtocolTurnOptions {
     /// turn with no protocol-specific overrides.
     pub fn empty() -> Self {
         Self {
-            schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
             payload: serde_json::Value::Object(serde_json::Map::new()),
         }
     }
@@ -748,10 +772,7 @@ impl ProtocolTurnOptions {
     /// Wraps an arbitrary JSON payload at the current schema version for protocol implementors
     /// materializing turn-specific state.
     pub fn from_payload(payload: serde_json::Value) -> Self {
-        Self {
-            schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
-            payload,
-        }
+        Self { payload }
     }
 
     /// Reports empty only for an empty JSON object so protocol implementors do not confuse scalar,
@@ -770,26 +791,23 @@ impl ProtocolTurnOptions {
         T: serde::Serialize,
     {
         Ok(Self {
-            schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
             payload: serde_json::to_value(value)?,
         })
     }
 }
 
 impl ProtocolTurnOptions {
-    /// Checks the schema version before deserializing typed options for protocol implementors,
-    /// preserving version and payload errors separately.
+    /// Deserializes typed protocol options payload for protocol implementors.
     pub fn decode<T>(&self) -> Result<T, ProtocolTurnOptionsError>
     where
         T: serde::de::DeserializeOwned,
     {
-        ensure_protocol_turn_options_schema_version(self.schema_version)?;
         serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
     }
 }
 
 pub(crate) mod facade_ops {
-    use super::{PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions};
+    use super::ProtocolTurnOptions;
 
     /// Facade-internal operations for [`ProtocolTurnOptions`].
     ///
@@ -806,7 +824,6 @@ pub(crate) mod facade_ops {
                     let mut payload = base.clone();
                     payload.extend(overrides.clone());
                     Self {
-                        schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
                         payload: serde_json::Value::Object(payload),
                     }
                 }
@@ -1097,7 +1114,6 @@ mod tests {
         .expect("deserialize options");
 
         assert!(options.is_empty());
-        assert_eq!(options.schema_version, PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION);
         assert_eq!(options.payload, serde_json::json!({}));
     }
 
@@ -1139,6 +1155,22 @@ mod tests {
             err.to_string().contains("is not supported by this binary"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn protocol_turn_options_serialization_preserves_wire_shape() {
+        let options = ProtocolTurnOptions::from_payload(serde_json::json!({
+            "mode": "test"
+        }));
+        // Byte-level: `serde_json::Value` compares as a `BTreeMap` here, so only the emitted
+        // string pins field order — the property the persisted envelope actually depends on.
+        let encoded = serde_json::to_string(&options).expect("serialize options");
+        assert_eq!(encoded, r#"{"schema_version":1,"payload":{"mode":"test"}}"#);
+        assert_eq!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, 1);
+
+        let round_tripped: ProtocolTurnOptions =
+            serde_json::from_str(&encoded).expect("deserialize roundtrip");
+        assert_eq!(round_tripped.payload, serde_json::json!({ "mode": "test" }));
     }
 
     #[test]
