@@ -18,11 +18,7 @@ pub struct RuntimeExecutionContext<'run> {
     protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
     turn_context: crate::TurnContext,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
-    process_originator: Option<crate::ProcessOriginator>,
-    pub(super) runtime_process_id: Option<String>,
-    pub(super) process_event_context: Option<RuntimeExecutionProcessEventContext>,
-    process_env_ref: Option<crate::ProcessExecutionEnvRef>,
-    process_wake_session_id: Option<String>,
+    process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
@@ -58,8 +54,16 @@ pub struct RuntimeExecutionContext<'run> {
 }
 
 #[derive(Clone)]
-pub(super) struct RuntimeExecutionProcessEventContext {
+pub(crate) struct RuntimeProcessExecution {
     pub process_id: String,
+    pub originator: crate::ProcessOriginator,
+    pub env_ref: Option<crate::ProcessExecutionEnvRef>,
+    pub wake_session_id: Option<String>,
+    pub event_context: Option<RuntimeExecutionProcessEventContext>,
+}
+
+#[derive(Clone)]
+pub(crate) struct RuntimeExecutionProcessEventContext {
     pub execution_write_authority: crate::ProcessExecutionWriteAuthority,
     pub registry: Arc<dyn crate::ProcessRegistry>,
     pub awaiter: crate::ProcessAwaiter,
@@ -231,13 +235,9 @@ impl<'run> RuntimeExecutionContext<'run> {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            process_originator: None,
-            runtime_process_id: None,
-            process_event_context: None,
+            process_execution: None,
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
-            process_env_ref: None,
-            process_wake_session_id: None,
             parent_invocation: None,
             turn_phase_probe: None,
             turn_event_tx: None,
@@ -260,11 +260,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             protocol_extension: self.protocol_extension.clone(),
             turn_context: self.turn_context.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
-            process_originator: self.process_originator.clone(),
-            runtime_process_id: self.runtime_process_id.clone(),
-            process_event_context: self.process_event_context.clone(),
-            process_env_ref: self.process_env_ref.clone(),
-            process_wake_session_id: self.process_wake_session_id.clone(),
+            process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_event_tx: self.turn_event_tx.clone(),
@@ -412,40 +408,17 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    pub(crate) fn with_process_registration_context(
+    pub(crate) fn with_process_execution(
         mut self,
         registration: &crate::ProcessRegistration,
+        event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self {
-        self.process_originator = Some(registration.provenance.originator.clone());
-        self.runtime_process_id = Some(registration.id.clone());
-        self.process_env_ref = registration.env_ref.clone();
-        self.process_wake_session_id = registration.wake_session_id.clone();
-        self
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn with_process_event_context(
-        mut self,
-        process_id: impl Into<String>,
-        execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        registry: Arc<dyn crate::ProcessRegistry>,
-        awaiter: crate::ProcessAwaiter,
-        store: Option<Arc<dyn crate::RuntimePersistence>>,
-        session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-        queued_work_driver: Option<crate::QueuedWorkDriver>,
-        process_wake_delivery_policy: crate::DeliveryPolicy,
-        clock: Arc<dyn crate::Clock>,
-    ) -> Self {
-        self.process_event_context = Some(RuntimeExecutionProcessEventContext {
-            process_id: process_id.into(),
-            execution_write_authority,
-            registry,
-            awaiter,
-            store,
-            session_store_factory,
-            queued_work_driver,
-            process_wake_delivery_policy,
-            clock,
+        self.process_execution = Some(RuntimeProcessExecution {
+            process_id: registration.id.clone(),
+            originator: registration.provenance.originator.clone(),
+            env_ref: registration.env_ref.clone(),
+            wake_session_id: registration.wake_session_id.clone(),
+            event_context: event_context.into(),
         });
         self
     }
@@ -498,16 +471,28 @@ impl<'run> RuntimeExecutionContext<'run> {
         Arc::clone(&self.attachment_store)
     }
 
+    pub(super) fn process_id(&self) -> Option<&str> {
+        self.process_execution
+            .as_ref()
+            .map(|exec| exec.process_id.as_str())
+    }
+
+    pub(super) fn process_event_context(&self) -> Option<&RuntimeExecutionProcessEventContext> {
+        self.process_execution
+            .as_ref()
+            .and_then(|exec| exec.event_context.as_ref())
+    }
+
     pub(crate) fn is_run_local_process(&self, process_id: &str) -> bool {
         self.started_process_ids.lock_recover().contains(process_id)
     }
 
     pub(crate) fn process_spawn_provenance(&self) -> Option<crate::ProcessSpawnProvenance> {
-        self.process_originator
-            .clone()
-            .map(|originator| crate::ProcessSpawnProvenance {
-                originator,
-                wake_session_id: self.process_wake_session_id.clone(),
+        self.process_execution
+            .as_ref()
+            .map(|exec| crate::ProcessSpawnProvenance {
+                originator: exec.originator.clone(),
+                wake_session_id: exec.wake_session_id.clone(),
             })
     }
 
@@ -534,7 +519,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub async fn captured_process_execution_env_ref(
         &self,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
-        if let Some(env_ref) = self.process_env_ref.clone() {
+        if let Some(env_ref) = self
+            .process_execution
+            .as_ref()
+            .and_then(|exec| exec.env_ref.clone())
+        {
             return Ok(env_ref);
         }
         crate::persist_process_execution_env(
@@ -593,16 +582,18 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let context = self.process_event_context.as_ref().ok_or_else(|| {
-            crate::PluginError::Session(
-                "process event emission is unavailable outside a durable process execution"
-                    .to_string(),
-            )
-        })?;
+        let exec = self
+            .process_execution
+            .as_ref()
+            .ok_or_else(missing_process_execution_error)?;
+        let context = exec
+            .event_context
+            .as_ref()
+            .ok_or_else(missing_process_execution_error)?;
         let result = context
             .registry
             .append_event_with_authority(
-                &context.process_id,
+                &exec.process_id,
                 request,
                 &context.execution_write_authority,
             )
@@ -707,15 +698,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         payload: serde_json::Value,
     ) -> Result<crate::ProcessEvent, crate::RuntimeEffectControllerError> {
         let registry = self
-            .process_event_context
+            .process_execution
             .as_ref()
+            .and_then(|exec| exec.event_context.as_ref())
             .map(|context| Arc::clone(&context.registry))
-            .ok_or_else(|| {
-                crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::ProcessRegistryUnavailable,
-                    "process signalling is unavailable outside a durable process execution",
-                )
-            })?;
+            .ok_or_else(missing_process_execution_error)?;
         let event_type = crate::process_signal_event_type(signal_name)?;
         let replay_key = format!("process:{process_id}:signal.{signal_name}:{signal_id}");
         let command = crate::ProcessCommand::Signal {
@@ -902,23 +889,28 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// Exposes trigger actor to protocol and process-engine implementors while executing code
     /// against the session runtime.
     pub fn trigger_actor(&self) -> crate::ProcessOriginator {
-        self.process_originator
-            .clone()
+        self.process_execution
+            .as_ref()
+            .map(|exec| exec.originator.clone())
             .unwrap_or_else(|| crate::ProcessOriginator::session(self.session_scope()))
     }
 
     /// Exposes trigger owner scope to protocol and process-engine implementors while executing code
     /// against the session runtime.
     pub fn trigger_owner_scope(&self) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
-        resolve_trigger_owner_scope(&self.session_id, self.process_originator.as_ref())
+        resolve_trigger_owner_scope(
+            &self.session_id,
+            self.process_execution.as_ref().map(|exec| &exec.originator),
+        )
     }
 
     /// Exposes trigger registration wake target to protocol and process-engine implementors while
     /// executing code against the session runtime. Returns `None` when no trigger registration wake
     /// target is present.
     pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
-        self.process_wake_session_id
+        self.process_execution
             .as_ref()
+            .and_then(|exec| exec.wake_session_id.as_ref())
             .map(crate::SessionScope::new)
             .or_else(|| Some(self.session_scope()))
     }
@@ -928,6 +920,13 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn turn_context(&self) -> &crate::TurnContext {
         &self.turn_context
     }
+}
+
+fn missing_process_execution_error() -> crate::RuntimeEffectControllerError {
+    crate::RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::ProcessRegistryUnavailable,
+        "process execution is unavailable outside a durable process execution",
+    )
 }
 
 fn resolve_trigger_owner_scope(
@@ -1074,6 +1073,103 @@ mod tests {
         assert_eq!(
             ctx.tool_argument_projection_policy("missing"),
             crate::ToolArgumentProjectionPolicy::MaterializeProjectedValues
+        );
+    }
+
+    fn test_execution_context() -> RuntimeExecutionContext<'static> {
+        let plugins = crate::plugin::PluginHost::empty()
+            .build_session("session", None)
+            .expect("plugin session");
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
+        let dispatch = Arc::new(ToolDispatchContext {
+            plugins,
+            tools: Arc::new(NoopTools),
+            tool_registry: None,
+            tool_catalog: Arc::new(crate::ToolCatalog::from_tools(
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            )),
+            sessions: Arc::new(crate::testing::MockSessionManager::default()),
+            session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
+            session_graph: Arc::new(crate::testing::MockSessionManager::default()),
+            processes: Arc::new(crate::UnavailableProcessService),
+            trigger_router: None,
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
+                crate::InlineRuntimeEffectController::default(),
+            )),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            session_id: "session".to_string(),
+            agent_frame_id: String::new(),
+            event_tx,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
+            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: std::sync::Arc::new(crate::SystemClock),
+        });
+        RuntimeExecutionContext::new(
+            "session".to_string(),
+            dispatch,
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            Arc::new(crate::SessionAttachmentStore::in_memory()),
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn execution_context_without_process_execution_returns_typed_error_from_append_and_signal()
+     {
+        let ctx = test_execution_context();
+
+        let append_err = ctx
+            .append_process_event(crate::ProcessEventAppendRequest::new(
+                "test.event",
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap_err();
+
+        let crate::PluginError::RuntimeEffectController(append_effect_err) = append_err else {
+            panic!("expected PluginError::RuntimeEffectController, got {append_err:?}");
+        };
+        assert_eq!(
+            append_effect_err.code,
+            crate::RuntimeErrorCode::ProcessRegistryUnavailable
+        );
+        assert_eq!(
+            append_effect_err.message,
+            "process execution is unavailable outside a durable process execution"
+        );
+
+        let signal_err = ctx
+            .signal_process_by_id(
+                "proc-1",
+                "sig-1",
+                "sig-id-1".to_string(),
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            signal_err.code,
+            crate::RuntimeErrorCode::ProcessRegistryUnavailable
+        );
+        assert_eq!(
+            signal_err.message,
+            "process execution is unavailable outside a durable process execution"
         );
     }
 }

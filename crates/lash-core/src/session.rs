@@ -14,7 +14,7 @@ mod settlement_latency_tests;
 mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
-pub(crate) use execution_context::RuntimeExecutionTracing;
+pub(crate) use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 pub use tool_execution::{ToolInvocation, ToolInvocationReply};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

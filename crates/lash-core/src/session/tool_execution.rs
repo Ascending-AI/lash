@@ -448,12 +448,12 @@ impl RuntimeExecutionContext<'_> {
                 .runtime_execution_context(attempt_context.clone())
                 .prepared_call(&prepared)
                 .cancellation_token(self.cancellation_token.clone())
-                .runtime_process_id(self.runtime_process_id.clone())
+                .runtime_process_id(self.process_id().map(String::from))
                 .parent_invocation(Some(attempt_invocation))
                 .child_execution_trace_hook(child_execution_trace_hook);
-        if let Some(process_events) = self.process_event_context.as_ref() {
+        if let Some(process_events) = self.process_event_context() {
             tool_context = tool_context.process_events(
-                process_events.process_id.clone(),
+                self.process_id().unwrap(),
                 process_events.execution_write_authority.clone(),
                 std::sync::Arc::clone(&process_events.registry),
                 process_events.awaiter.clone(),
