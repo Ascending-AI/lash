@@ -21,7 +21,7 @@ pub fn batch_tool_definition() -> ToolDefinition {
                         "required": ["tool", "parameters"],
                         "additionalProperties": false
                     },
-                    "description": "Array of 1-25 objects like { tool: \"fetch_url\", parameters: { url: \"https://example.com\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error."
+                    "description": "Array of 1-25 objects like { tool: \"<tool_name>\", parameters: { <arg>: \"<value>\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error."
                 }
             }),
             &["tool_calls"],
@@ -29,7 +29,7 @@ pub fn batch_tool_definition() -> ToolDefinition {
         batch_output_schema(),
     )
     .with_examples(vec![
-            r#"await tools.batch({ tool_calls: [{ tool: "fetch_url", parameters: { url: "https://example.com" } }, { tool: "search_web", parameters: { query: "Lash ToolProvider" } }] })?"#.to_string(),
+            r#"await tools.batch({ tool_calls: [{ tool: "<first_tool>", parameters: { arg: "value" } }, { tool: "<second_tool>", parameters: { arg: "value" } }] })?"#.to_string(),
         ])
     .with_tool_binding(ToolBinding::new(["tools"], "batch"))
 }
@@ -100,13 +100,15 @@ mod tests {
             r#"tool: "edit""#,
             r#"tool: "write""#,
             r#"tool: "glob""#,
+            "fetch_url",
+            "search_web",
         ] {
             assert!(
                 !model_facing_text.contains(removed_tool),
                 "batch contract should not mention removed tool `{removed_tool}`"
             );
         }
-        assert!(model_facing_text.contains("fetch_url"));
-        assert!(model_facing_text.contains("search_web"));
+        assert!(model_facing_text.contains("<first_tool>"));
+        assert!(model_facing_text.contains("<second_tool>"));
     }
 }
