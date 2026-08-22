@@ -1,16 +1,11 @@
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
+use lash_core::SessionError;
 use lash_lashlang_runtime::{LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver};
-use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-use super::{BoundVariablesPromptRender, CellTags, RlmDialect, RlmDialectSession};
-use crate::executor::{
-    RlmExecutionState, RlmLashlangExecutionTraceConfig, execute_code_with_bounds,
-};
-use crate::projection::{ProjectionResolver, RlmProjectedBindings};
-use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
+use super::{CellTags, DialectSession, RlmDialect, RlmDialectSession};
+use crate::executor::{RlmLashlangExecutionTraceConfig, SourceDialect};
+use crate::projection::ProjectionResolver;
 
 pub(crate) const LANGUAGE_ID: &str = "lashlang";
 
@@ -92,14 +87,12 @@ impl RlmDialect for LashlangDialect {
                 "prompt-only Lashlang dialect cannot create an execution session".to_string(),
             )
         })?;
-        Ok(Box::new(LashlangDialectSession {
-            state: RlmExecutionState::for_engine(self.snapshot_engine_id()),
-            surface: self.surface.clone(),
+        Ok(Box::new(DialectSession::new(
+            SourceDialect::Lashlang,
+            self.snapshot_engine_id(),
+            self.surface.clone(),
             services,
-            bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
-                BoundVariableRenderCache::default(),
-            )),
-        }))
+        )))
     }
 
     fn render_execution_section(
@@ -213,108 +206,5 @@ Done. I inspected the value and summarized the result."#
 
     fn stream_cell_end_event_name(&self) -> &'static str {
         "rlm_lashlang_cell_end"
-    }
-}
-
-struct LashlangDialectSession {
-    state: RlmExecutionState,
-    surface: LashlangSurface,
-    services: LashlangDialectServices,
-    bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
-}
-
-#[async_trait::async_trait]
-impl RlmDialectSession for LashlangDialectSession {
-    async fn execute(
-        &mut self,
-        ctx: RuntimeExecutionContext<'_>,
-        request: ExecRequest,
-        session_projected_bindings: RlmProjectedBindings,
-    ) -> Result<ExecResponse, SessionError> {
-        // The state is borrowed, never moved out: a cell that is cancelled
-        // mid-flight leaves the session holding the same state it started
-        // with, and every other caller waits behind the session's own lock.
-        Ok(execute_code_with_bounds(
-            &mut self.state,
-            ctx,
-            request,
-            Arc::clone(&self.services.artifact_store),
-            self.surface.clone(),
-            self.services.deferred_tool_resolver.clone(),
-            session_projected_bindings,
-            Arc::clone(&self.services.projection_resolver),
-            self.services.execution_trace_config.clone(),
-            self.services.execution_bounds.into_engine(),
-        )
-        .await)
-    }
-
-    fn execution_state_dirty(&self) -> bool {
-        self.state.execution_state_dirty()
-    }
-
-    fn snapshot_execution_state(
-        &mut self,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state.snapshot_execution_state()
-    }
-
-    fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture()
-    }
-
-    fn hydrated_execution_state(
-        &self,
-    ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state.hydrated_execution_state()
-    }
-
-    fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.acknowledge_execution_state_capture();
-        Ok(())
-    }
-
-    fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.abort_execution_state_capture();
-        Ok(())
-    }
-
-    fn restore_execution_state(
-        &mut self,
-        state: &lash_core::plugin::HydratedExecutionState,
-    ) -> Result<(), SessionError> {
-        self.state
-            .restore_execution_state(state)
-            .map_err(|error| SessionError::Protocol(error.to_string()))
-    }
-
-    fn prune_protected_globals(
-        &mut self,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        self.state.prune_protected_globals(protected_names);
-        Ok(())
-    }
-
-    fn patch_globals(
-        &mut self,
-        patch: &RlmGlobalsPatchPluginBody,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        self.state.patch_globals(patch, protected_names)
-    }
-
-    fn prepare_bound_variables_prompt(
-        &self,
-        exclude: &BTreeSet<String>,
-    ) -> Result<BoundVariablesPromptRender, SessionError> {
-        let globals = self.state.bound_variable_values(exclude);
-        let cache = Arc::clone(&self.bound_variable_render_cache);
-        Ok(BoundVariablesPromptRender::new(move || {
-            let mut cache = cache
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            render_bound_variables(&mut cache, &globals, LASHLANG_PROMPT_VOCABULARY)
-        }))
     }
 }

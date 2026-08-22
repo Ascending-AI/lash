@@ -105,37 +105,14 @@ pub(crate) async fn execute_code_with_bounds(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_typescript_code_with_bounds(
-    state: &mut RlmExecutionState,
-    ctx: RuntimeExecutionContext<'_>,
-    request: ExecRequest,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    session_projected_bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
-    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-    execution_bounds: lashlang::ExecutionBounds,
-) -> ExecResponse {
-    execute_code_with_dialect_and_bounds(
-        state,
-        ctx,
-        request,
-        artifact_store,
-        lashlang_surface,
-        deferred_tool_resolver,
-        session_projected_bindings,
-        projection_resolver,
-        lashlang_execution_trace_config,
-        execution_bounds,
-        SourceDialect::Typescript,
-    )
-    .await
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceDialect {
+/// The source dialect a cell is written in.
+///
+/// This is the one two-way choice the RLM protocol makes per session, and it
+/// is carried as a value rather than as a second copy of every body that would
+/// otherwise fork on it: the execution session, the prompt vocabulary and the
+/// bound-variable filter all read it off this type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum SourceDialect {
     Lashlang,
     Typescript,
 }
@@ -149,16 +126,38 @@ impl SourceDialect {
     /// transcript badge had. The substrate under both dialects is the Lashlang
     /// VM, which is why the file name and the graph API keep their names; what
     /// was wrong is the claim about the *source* that ran.
-    fn language_id(self) -> &'static str {
+    pub(crate) fn language_id(self) -> &'static str {
         match self {
             Self::Lashlang => crate::dialect::lashlang::LANGUAGE_ID,
             Self::Typescript => crate::dialect::typescript::LANGUAGE_ID,
         }
     }
+
+    /// The words and call forms this dialect's prompt fragments are written in.
+    pub(crate) fn prompt_vocabulary(self) -> crate::dialect::DialectPromptVocabulary {
+        match self {
+            Self::Lashlang => crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            Self::Typescript => crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY,
+        }
+    }
+
+    /// The name prefix whose bindings never reach the model.
+    ///
+    /// A TypeScript block-scoped binding that shadows an outer name is lowered
+    /// to a generated slot. It is the author's value under a name the author
+    /// never wrote, and it is dead by the time any turn boundary renders, so it
+    /// is never a bound variable the model should see. Lashlang has no such
+    /// lowering and hides nothing.
+    pub(crate) fn hidden_binding_prefix(self) -> Option<&'static str> {
+        match self {
+            Self::Lashlang => None,
+            Self::Typescript => Some(lash_typescript::GENERATED_BINDING_PREFIX),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_code_with_dialect_and_bounds(
+pub(crate) async fn execute_code_with_dialect_and_bounds(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
@@ -1790,7 +1789,7 @@ mod tests {
             );
 
             let mut state = RlmExecutionState::for_engine("typescript");
-            let response = execute_typescript_code_with_bounds(
+            let response = execute_code_with_dialect_and_bounds(
                 &mut state,
                 ctx.clone(),
                 ExecRequest {
@@ -1805,6 +1804,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
+                SourceDialect::Typescript,
             )
             .await;
 
@@ -1954,7 +1954,7 @@ mod tests {
         block_on(async {
             let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
             let mut state = RlmExecutionState::for_engine("typescript");
-            let response = execute_typescript_code_with_bounds(
+            let response = execute_code_with_dialect_and_bounds(
                 &mut state,
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
@@ -1980,6 +1980,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
+                SourceDialect::Typescript,
             )
             .await;
             assert!(response.error.is_none(), "{:?}", response.error);
@@ -2363,7 +2364,7 @@ mod tests {
                 session_policy,
             ),
         );
-        let response = execute_typescript_code_with_bounds(
+        let response = execute_code_with_dialect_and_bounds(
             &mut RlmExecutionState::for_engine("typescript"),
             ctx,
             ExecRequest {
@@ -2387,6 +2388,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
+            SourceDialect::Typescript,
         )
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
@@ -2505,7 +2507,7 @@ mod tests {
                 session_policy,
             ),
         );
-        let response = execute_typescript_code_with_bounds(
+        let response = execute_code_with_dialect_and_bounds(
             &mut RlmExecutionState::for_engine("typescript"),
             ctx,
             ExecRequest {
@@ -2530,6 +2532,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
+            SourceDialect::Typescript,
         )
         .await;
 
@@ -2702,7 +2705,7 @@ mod tests {
 
     async fn execute_typescript_with_trigger_environment(code: &str) -> ExecResponse {
         let mut state = RlmExecutionState::for_engine("typescript");
-        execute_typescript_code_with_bounds(
+        execute_code_with_dialect_and_bounds(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
                 lash_core::facade_support::InMemoryTriggerStore::default(),
@@ -2725,6 +2728,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
+            SourceDialect::Typescript,
         )
         .await
     }
@@ -4824,7 +4828,7 @@ finish final_ids"#;
         mut state: RlmExecutionState,
         code: &str,
     ) -> (RlmExecutionState, ExecResponse) {
-        let response = execute_typescript_code_with_bounds(
+        let response = execute_code_with_dialect_and_bounds(
             &mut state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
@@ -4839,6 +4843,7 @@ finish final_ids"#;
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
+            SourceDialect::Typescript,
         )
         .await;
         (state, response)
