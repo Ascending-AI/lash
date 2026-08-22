@@ -67,6 +67,10 @@ configure_bindgen_headers() {
 # CI's Repository-gates job runs a longer list, and the remainder there covers
 # gates that only exist in CI (see the omissions block below) — a self-test
 # whose gate nobody runs locally proves nothing about a local push.
+#
+# `test_gate_scope.py` is deliberately absent: it guards the decider that
+# decides whether this leg runs at all, so it is dispatched unscoped near the
+# top of the script instead.
 run_release_script_tests() {
   step "Repository script tests"
   python3 scripts/test_check_durable_read_fixture_version.py
@@ -113,6 +117,161 @@ check_current_branch_release_notes() {
   base_ref="$(resolve_release_notes_base)"
   merge_base="$(git merge-base "$base_ref" HEAD)"
   python3 scripts/release_notes.py check-pr --range "${merge_base}..HEAD"
+}
+
+# Path-scoped gate selection. `scripts/gate_scope.py` maps this branch's
+# touched paths onto gate families and only ever answers `skip` for a family no
+# touched path can reach; every ambiguity -- a shared input, an unrecognised
+# path, an empty path set, its own failure -- answers `run`. Its table is
+# printed verbatim below, because a skipped leg that leaves no trace in the
+# gate log is a leg a reviewer cannot audit.
+gate_scope_apply() {
+  step "Gate scope"
+  GATE_RUN_RUST_COMPILE=1
+  GATE_RUN_DOCS_TEXT=1
+  GATE_RUN_SCRIPTS=1
+  GATE_RUN_REGISTRY=1
+  GATE_RUN_WORKFLOWS=1
+  GATE_SCOPE_CLASSIFICATION="run-everything"
+
+  local base_ref env_output
+  if ! base_ref="$(resolve_release_notes_base)"; then
+    echo "gate scope: base ref unresolved; running every gate family"
+    return
+  fi
+  # Two invocations of the same pure classification: the first is the audit
+  # trail a human reads, the second is the machine form this shell consumes.
+  if ! python3 scripts/gate_scope.py --base "$base_ref"; then
+    echo "gate scope: classification failed; running every gate family"
+    return
+  fi
+  if ! env_output="$(python3 scripts/gate_scope.py --base "$base_ref" --format env)"; then
+    echo "gate scope: env classification failed; running every gate family"
+    return
+  fi
+  eval "$env_output"
+}
+
+gate_family_runs() {
+  local variable="GATE_RUN_$1"
+  [ "${!variable:-1}" = "1" ]
+}
+
+# scoped <FAMILY> <label> <command...>
+scoped() {
+  local family="$1" label="$2"
+  shift 2
+  if gate_family_runs "$family"; then
+    "$@"
+    return
+  fi
+  printf '\n==> skipped: %s (gate scope: no touched path affects %s)\n' \
+    "$label" "$family"
+}
+
+run_formatting_gates() {
+  step "Formatting"
+  cargo fmt --all --check
+  python3 scripts/check_included_file_formatting.py
+  rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
+}
+
+run_clippy_gate() {
+  step "Clippy"
+  # shellcheck disable=SC2086
+  heavy cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
+}
+
+# Guards whose inputs are Rust sources, the crate-adjacent schema artefacts
+# beside them, or the recipes that build them.
+run_rust_source_guards() {
+  step "Restate handler panic boundary"
+  python3 scripts/check-restate-handler-panics.py
+
+  step "PostgreSQL payload-shape component version"
+  python3 scripts/check-postgres-json-carrier-coverage.py
+  python3 scripts/check-postgres-payload-shape-version.py
+
+  step "Core/UI boundary guard"
+  bash scripts/check-core-ui-boundary.sh
+
+  step "Workflow graph model guard"
+  bash scripts/check-workflow-graph-model.sh
+
+  step "Test quarantine metadata"
+  python3 scripts/check_test_quarantines.py
+
+  step "Judged build geometry"
+  python3 scripts/check_judged_build_geometry.py
+}
+
+run_docs_text_gates() {
+  step "Production file-size budget guard"
+  bash scripts/check-production-file-size.sh
+
+  step "Docs lint"
+  python3 scripts/lint_docs.py
+
+  step "Documented format versions"
+  python3 scripts/check_format_versions.py
+}
+
+run_rustdoc_gate() {
+  step "Rustdoc lint"
+  heavy bash scripts/check-rustdoc.sh
+}
+
+run_workflow_gates() {
+  step "Service gate pinning"
+  python3 scripts/check_service_gate_pinning.py
+}
+
+run_workspace_check() {
+  step "Workspace check"
+  # shellcheck disable=SC2086
+  heavy cargo check --workspace --all-targets --locked ${ci_features}
+}
+
+run_workspace_doctests() {
+  step "Workspace doctests"
+  # shellcheck disable=SC2086
+  heavy cargo test --doc --workspace --locked ${ci_features}
+}
+
+run_workflow_graph_integration() {
+  step "Workflow graph example integration"
+  just workflow-graph-integration-verify
+}
+
+run_e2e_suite() {
+  step "Restate e2e: agent-service"
+  RESTATE_ADMIN_PORT="${RESTATE_ADMIN_PORT:-$((port_base + 20))}" \
+  RESTATE_INGRESS_PORT="${RESTATE_INGRESS_PORT:-$((port_base + 21))}" \
+  RESTATE_NODE_PORT="${RESTATE_NODE_PORT:-$((port_base + 22))}" \
+  AGENT_SERVICE_E2E_ENDPOINT_BIND="${AGENT_SERVICE_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 23))}" \
+  AGENT_SERVICE_E2E_ENDPOINT_URL="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 23))}" \
+    just agent-service-restate-e2e
+
+  step "Restate e2e: agent-workbench"
+  AGENT_WORKBENCH_RESTATE_ADMIN_PORT="${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-$((port_base + 30))}" \
+  AGENT_WORKBENCH_RESTATE_INGRESS_PORT="${AGENT_WORKBENCH_RESTATE_INGRESS_PORT:-$((port_base + 31))}" \
+  AGENT_WORKBENCH_RESTATE_NODE_PORT="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-$((port_base + 32))}" \
+  AGENT_WORKBENCH_E2E_ENDPOINT_BIND="${AGENT_WORKBENCH_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 33))}" \
+  AGENT_WORKBENCH_E2E_ENDPOINT_URL="${AGENT_WORKBENCH_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 33))}" \
+    just agent-workbench-restate-e2e
+
+  step "Restate/Postgres/MinIO workers e2e"
+  LASH_E2E_MINIO_PORT="${LASH_E2E_MINIO_PORT:-$((port_base + 40))}" \
+    bash scripts/restate-postgres-workers-e2e.sh
+
+  step "Process operations e2e"
+  LASH_PROCESS_OPERATIONS_MINIO_PORT="${LASH_PROCESS_OPERATIONS_MINIO_PORT:-$((port_base + 41))}" \
+  LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="${LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT:-$((port_base + 42))}" \
+  LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((port_base + 43))}" \
+  LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((port_base + 44))}" \
+  LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((port_base + 45))}" \
+  LASH_PROCESS_OPERATIONS_POSTGRES_PORT="${LASH_PROCESS_OPERATIONS_POSTGRES_PORT:-$((port_base + 46))}" \
+    bash scripts/process-operations-e2e.sh
 }
 
 run_runtime_feature_boundary_check() {
@@ -292,49 +451,29 @@ run_minio_conformance() {
 
 configure_bindgen_headers
 
-step "Formatting"
-cargo fmt --all --check
-python3 scripts/check_included_file_formatting.py
-rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
+# Unscoped by construction, and deliberately ahead of the classification it
+# validates: this is the self-test of the code that decides what the rest of
+# this script runs. Dispatching it under `scoped SCRIPTS` would mean that on
+# every branch which touches neither `scripts/**` nor `.github/**` nor a
+# manifest, the gate guarding the gate-decider executes nowhere locally. A
+# decider nobody tests is a decider nobody can audit, so it runs on every push
+# and its failure aborts before a single skip decision is taken.
+step "Gate scope self-test"
+python3 scripts/test_gate_scope.py
 
-step "Clippy"
-# shellcheck disable=SC2086
-heavy cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
+gate_scope_apply
 
-step "Restate handler panic boundary"
-python3 scripts/check-restate-handler-panics.py
+scoped RUST_COMPILE "Formatting" run_formatting_gates
+scoped RUST_COMPILE "Clippy" run_clippy_gate
+scoped RUST_COMPILE "Rust source guards" run_rust_source_guards
+scoped DOCS_TEXT "Docs and text gates" run_docs_text_gates
+scoped RUST_COMPILE "Rustdoc lint" run_rustdoc_gate
+scoped WORKFLOWS "Workflow guards" run_workflow_gates
 
-step "PostgreSQL payload-shape component version"
-python3 scripts/check-postgres-json-carrier-coverage.py
-python3 scripts/check-postgres-payload-shape-version.py
-
-step "Core/UI boundary guard"
-bash scripts/check-core-ui-boundary.sh
-
-step "Workflow graph model guard"
-bash scripts/check-workflow-graph-model.sh
-
-step "Production file-size budget guard"
-bash scripts/check-production-file-size.sh
-
-step "Docs lint"
-python3 scripts/lint_docs.py
-
-step "Documented format versions"
-python3 scripts/check_format_versions.py
-
-step "Rustdoc lint"
-heavy bash scripts/check-rustdoc.sh
-
-step "Test quarantine metadata"
-python3 scripts/check_test_quarantines.py
-
-step "Judged build geometry"
-python3 scripts/check_judged_build_geometry.py
-
-step "Service gate pinning"
-python3 scripts/check_service_gate_pinning.py
-
+# The two gates below are commit-scoped, not path-scoped: they read the commit
+# range's messages and the semantics of the diff rather than the set of paths
+# it touches, so every non-empty change affects them and no classification can
+# narrow them away.
 step "Durable transcript classification"
 # CI runs this gate as `--enforce` (ci.yml, Lint). Enforcement is a question
 # about the pull request, not about the tree: the `Transcript:` justification
@@ -346,52 +485,16 @@ step "Durable transcript classification"
 # decides.
 python3 scripts/check-transcript-diff.py --advisory
 
-run_release_script_tests
+scoped SCRIPTS "Repository script tests" run_release_script_tests
 check_current_branch_release_notes
 
-step "Workspace check"
-# shellcheck disable=SC2086
-heavy cargo check --workspace --all-targets --locked ${ci_features}
+scoped RUST_COMPILE "Workspace check" run_workspace_check
+scoped RUST_COMPILE "lash-runtime feature boundary" run_runtime_feature_boundary_check
+scoped RUST_COMPILE "Postgres conformance" run_postgres_conformance
+scoped RUST_COMPILE "MinIO/S3 conformance" run_minio_conformance
+scoped RUST_COMPILE "Workspace tests" run_workspace_tests
+scoped RUST_COMPILE "Workspace doctests" run_workspace_doctests
+scoped RUST_COMPILE "Workflow graph example integration" run_workflow_graph_integration
+scoped RUST_COMPILE "Restate and process e2e suite" run_e2e_suite
 
-run_runtime_feature_boundary_check
-run_postgres_conformance
-run_minio_conformance
-run_workspace_tests
-
-step "Workspace doctests"
-# shellcheck disable=SC2086
-heavy cargo test --doc --workspace --locked ${ci_features}
-
-step "Workflow graph example integration"
-just workflow-graph-integration-verify
-
-step "Restate e2e: agent-service"
-RESTATE_ADMIN_PORT="${RESTATE_ADMIN_PORT:-$((port_base + 20))}" \
-RESTATE_INGRESS_PORT="${RESTATE_INGRESS_PORT:-$((port_base + 21))}" \
-RESTATE_NODE_PORT="${RESTATE_NODE_PORT:-$((port_base + 22))}" \
-AGENT_SERVICE_E2E_ENDPOINT_BIND="${AGENT_SERVICE_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 23))}" \
-AGENT_SERVICE_E2E_ENDPOINT_URL="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 23))}" \
-  just agent-service-restate-e2e
-
-step "Restate e2e: agent-workbench"
-AGENT_WORKBENCH_RESTATE_ADMIN_PORT="${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-$((port_base + 30))}" \
-AGENT_WORKBENCH_RESTATE_INGRESS_PORT="${AGENT_WORKBENCH_RESTATE_INGRESS_PORT:-$((port_base + 31))}" \
-AGENT_WORKBENCH_RESTATE_NODE_PORT="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-$((port_base + 32))}" \
-AGENT_WORKBENCH_E2E_ENDPOINT_BIND="${AGENT_WORKBENCH_E2E_ENDPOINT_BIND:-127.0.0.1:$((port_base + 33))}" \
-AGENT_WORKBENCH_E2E_ENDPOINT_URL="${AGENT_WORKBENCH_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 33))}" \
-  just agent-workbench-restate-e2e
-
-step "Restate/Postgres/MinIO workers e2e"
-LASH_E2E_MINIO_PORT="${LASH_E2E_MINIO_PORT:-$((port_base + 40))}" \
-  bash scripts/restate-postgres-workers-e2e.sh
-
-step "Process operations e2e"
-LASH_PROCESS_OPERATIONS_MINIO_PORT="${LASH_PROCESS_OPERATIONS_MINIO_PORT:-$((port_base + 41))}" \
-LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="${LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT:-$((port_base + 42))}" \
-LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((port_base + 43))}" \
-LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((port_base + 44))}" \
-LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((port_base + 45))}" \
-LASH_PROCESS_OPERATIONS_POSTGRES_PORT="${LASH_PROCESS_OPERATIONS_POSTGRES_PORT:-$((port_base + 46))}" \
-  bash scripts/process-operations-e2e.sh
-
-step "Push gate passed"
+step "Push gate passed (scope: ${GATE_SCOPE_CLASSIFICATION})"

@@ -278,6 +278,7 @@ jobs:
           python3 scripts/test_check_version_bumps.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_transcript_diff.py
+          python3 scripts/test_gate_scope.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_confidence_gate_ci_contract.py
