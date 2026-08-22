@@ -565,6 +565,49 @@ fn bound_instance_stdlib_methods_still_lower_to_stdlib() {
     }
 }
 
+/// Which methods a literal receiver carries used to be a hand-written table
+/// beside the signature table, and the two disagreed: `valueOf` was listed for
+/// string, number and the remaining literals but not for arrays, so
+/// `[1].valueOf()` was refused as unavailable on this literal receiver while
+/// the same call on a bound array lowered and ran (FIG-1718). Both spellings
+/// are the same call and must answer the same.
+#[test]
+fn array_literal_value_of_matches_the_bound_array_path() {
+    let expected = Value::List(vec![Value::Number(1.0), Value::Number(2.0)].into());
+    assert_eq!(finished("finish([1, 2].valueOf());"), expected);
+    assert_eq!(
+        finished("const items = [1, 2]; finish(items.valueOf());"),
+        expected
+    );
+}
+
+/// `Array.prototype.valueOf` hands back the receiver, not a copy of it. The
+/// value is the weaker half of the claim — a detached copy satisfies the
+/// assertion above — so pin the two properties only identity has: a write
+/// through the result reaches the original, and `===` holds. `slice()` is the
+/// control, a genuine copy that must fail both.
+#[test]
+fn array_value_of_returns_the_receiver_rather_than_a_copy() {
+    assert_eq!(
+        finished("const a = [1, 2]; const b = a.valueOf(); b.push(3); finish(a.length);"),
+        Value::Number(3.0),
+        "a write through valueOf() must reach the receiver"
+    );
+    assert_eq!(
+        finished("const a = [1, 2]; finish(a.valueOf() === a);"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        finished("const a = [1, 2]; const b = a.slice(); b.push(3); finish(a.length);"),
+        Value::Number(2.0),
+        "slice() is a copy, so the control must not alias"
+    );
+    assert_eq!(
+        finished("const a = [1, 2]; finish(a.slice() === a);"),
+        Value::Bool(false)
+    );
+}
+
 #[test]
 fn instance_stdlib_collision_matrix_guard_sweeps_all_stdlib_methods() {
     let methods = lash_typescript::accepted_instance_methods();

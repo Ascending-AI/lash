@@ -147,6 +147,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 values[index] = value.clone();
                 self.heap.allocate_list(values)?
             }
+            // `Array.prototype.valueOf` is the receiver itself, so it has to be
+            // answered here where the heap id is in hand. Routing it through the
+            // value path handed back a detached copy, and `a.valueOf().push(x)`
+            // then wrote to something the original never sees.
+            "valueOf" if args.is_empty() => Value::Ref(receiver),
             _ => return Ok(false),
         };
         self.stack.push(result);
