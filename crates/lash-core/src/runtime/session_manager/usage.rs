@@ -1,6 +1,5 @@
 use super::*;
 use lash_sansio::sync::MutexExt;
-use std::sync::atomic::Ordering;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
@@ -155,35 +154,17 @@ impl UsageCapability {
                 current.host.core.durability.commit_budget,
             )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-        // Dual-context site: ordinary host services are lane-less, but a
-        // TurnPersisted observer may finish managed-child usage while the
-        // parent lane is still held. Select authority from the explicit
-        // service context, never from scheduling or elapsed time.
-        let result = if let Some(lease) = &current.held_session_execution_lease {
-            let result = commit_runtime_state_with_borrowed_lease(
-                lease,
-                Arc::clone(store),
-                commit,
-                &current.runtime_lease_owner,
-            )
-            .await;
-            if result.is_ok() {
-                current
-                    .resident_graph_head_stale
-                    .store(true, Ordering::Release);
-            }
-            result
-        } else {
-            commit_runtime_state_with_fresh_session_execution_lease(
-                Arc::clone(store),
-                commit,
-                &current.runtime_lease_owner,
-                &current.runtime_lease_executor_id,
-                current.host.core.control.lease_timings,
-                Arc::clone(&current.host.core.clock),
-            )
-            .await
-        }
+        let result = super::super::state::commit_in_lane_context(
+            current.held_session_execution_lease.as_ref(),
+            Arc::clone(store),
+            commit,
+            &current.runtime_lease_owner,
+            &current.runtime_lease_executor_id,
+            current.host.core.control.lease_timings,
+            Arc::clone(&current.host.core.clock),
+            &current.resident_graph_head_stale,
+        )
+        .await
         .map_err(|err| match err {
             crate::StoreError::SessionExecutionLeaseExpired { session_id } => {
                 crate::PluginError::SessionExecutionLeaseLost { session_id }

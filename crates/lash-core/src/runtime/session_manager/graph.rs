@@ -102,37 +102,17 @@ impl CurrentSessionCapability {
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         commit.turn_commit = append_stamp;
         commit.debug_assert_append_envelope_scope();
-        // Dual-context site: TurnPersisted observers run under the parent
-        // turn's held lane, while host-created graph services are lane-less.
-        // Keep the distinction explicit so timing can never select authority.
-        let commit_result = if let Some(lease) = &self.held_session_execution_lease {
-            let result = commit_runtime_state_with_borrowed_lease(
-                lease,
-                Arc::clone(store),
-                commit,
-                &self.runtime_lease_owner,
-            )
-            .await;
-            if result.is_ok() {
-                // The guard remains current, but this service committed from a
-                // snapshot outside the owning runtime. Force a deliberate head
-                // reload before its next physical turn; planner CAS is not the
-                // graph-freshness discovery mechanism.
-                self.resident_graph_head_stale
-                    .store(true, Ordering::Release);
-            }
-            result
-        } else {
-            commit_runtime_state_with_fresh_session_execution_lease(
-                Arc::clone(store),
-                commit,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
-            .await
-        };
+        let commit_result = super::super::state::commit_in_lane_context(
+            self.held_session_execution_lease.as_ref(),
+            Arc::clone(store),
+            commit,
+            &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
+            self.host.core.control.lease_timings,
+            Arc::clone(&self.host.core.clock),
+            &self.resident_graph_head_stale,
+        )
+        .await;
         let result = match commit_result {
             Ok(result) => result,
             Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
@@ -172,12 +152,9 @@ impl CurrentSessionCapability {
                 .confirm_identities(&result.committed_usage_delta_identities)
                 .map_err(super::usage::plugin_error_from_usage_confirmation)?;
         }
-        let node_ids = if receipt_replayed {
-            super::super::state::receipt_append_node_ids(&result, requested_node_count)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?
-        } else {
-            locally_derived_node_ids
-        };
+        let node_ids =
+            super::super::state::resolve_append_node_ids(&result, locally_derived_node_ids)
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         if !receipt_replayed {
             super::super::state::apply_graph_commit_node_id_mapping(&mut state, &node_id_mapping)
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
