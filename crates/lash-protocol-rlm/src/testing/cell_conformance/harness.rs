@@ -90,7 +90,7 @@ impl CellOutcome {
 pub(crate) struct Session {
     dialect: Dialect,
     mode: HarnessMode,
-    state: Option<RlmExecutionState>,
+    state: RlmExecutionState,
     /// Cells run so far, so a failure names the sequence that produced it.
     history: Vec<String>,
 }
@@ -100,7 +100,7 @@ impl Session {
         Self {
             dialect,
             mode,
-            state: Some(RlmExecutionState::for_engine(dialect.language_id())),
+            state: RlmExecutionState::for_engine(dialect.language_id()),
             history: Vec::new(),
         }
     }
@@ -111,14 +111,14 @@ impl Session {
     /// about what the *next* cell sees, so a scenario has to be able to run a
     /// failing cell without the harness deciding that is a test failure.
     pub(crate) fn run(&mut self, code: &str) -> CellOutcome {
-        let state = self.state.take().expect("session state is resident");
         let request = ExecRequest {
             language: self.dialect.language_id().to_string(),
             code: code.to_string(),
             accept_finish: true,
         };
         let dialect = self.dialect;
-        let (state, response) = block_on(async move {
+        let state = &mut self.state;
+        let response = block_on(async move {
             let context = lash_core::testing::code_execution_context();
             let artifact_store = lashlang::global_in_memory_lashlang_artifact_store();
             match dialect {
@@ -153,9 +153,7 @@ impl Session {
                     .await
                 }
             }
-        })
-        .expect("the executor answers every cell");
-        self.state = Some(state);
+        });
         self.history.push(code.to_string());
         if self.mode == HarnessMode::RestartBetweenCells {
             self.restart();
@@ -198,15 +196,15 @@ impl Session {
     /// production path: the same capture the runtime persists, hydrated back
     /// through the same restore a rehydrating worker uses.
     pub(crate) fn restart(&mut self) {
-        let state = self.state.take().expect("session state is resident");
-        let hydrated = state
+        let hydrated = self
+            .state
             .hydrated_execution_state()
             .expect("capture the RLM execution state");
         let mut restored = RlmExecutionState::for_engine(self.dialect.language_id());
         restored
             .restore_execution_state(&hydrated)
             .expect("restore the RLM execution state");
-        self.state = Some(restored);
+        self.state = restored;
     }
 
     /// The session's bindings as a host sees them.
@@ -215,8 +213,9 @@ impl Session {
     /// is exactly the surface the cross-cell laws are stated over: what a later
     /// cell and a reading host can both observe.
     pub(crate) fn globals(&self) -> BTreeMap<String, serde_json::Value> {
-        let state = self.state.as_ref().expect("session state is resident");
-        let bindings = state.bound_variable_values(&std::collections::BTreeSet::new());
+        let bindings = self
+            .state
+            .bound_variable_values(&std::collections::BTreeSet::new());
         block_on(async move {
             let mut out = BTreeMap::new();
             for (name, value) in bindings {
@@ -244,8 +243,7 @@ impl Session {
     /// The session's persisted execution state: the root record and every leaf
     /// body, exactly as a host would store them.
     pub(crate) fn persisted_state(&self) -> lash_core::plugin::HydratedExecutionState {
-        let state = self.state.as_ref().expect("session state is resident");
-        state
+        self.state
             .hydrated_execution_state()
             .expect("capture the RLM execution state")
     }

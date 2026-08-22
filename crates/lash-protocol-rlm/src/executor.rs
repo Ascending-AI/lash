@@ -11,10 +11,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{
-    ExecRequest, ExecResponse, RuntimeEffectKind, RuntimeExecutionContext, SessionError,
-    TraceContext, facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+    ExecRequest, ExecResponse, RuntimeEffectKind, RuntimeExecutionContext, TraceContext,
+    facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
     facade_support::TraceSink,
 };
+// Cell execution itself is infallible, so the only fallible surface left in
+// this module is the feature-gated performance fixture.
+#[cfg(feature = "testing")]
+use lash_core::SessionError;
 use lash_lashlang_runtime::{
     LashlangSurface, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
@@ -47,7 +51,7 @@ pub(crate) struct RlmLashlangExecutionTraceConfig {
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
 async fn execute_code_unbounded_for_tests(
-    state: RlmExecutionState,
+    state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
@@ -56,7 +60,7 @@ async fn execute_code_unbounded_for_tests(
     session_projected_bindings: RlmProjectedBindings,
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
-) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
+) -> ExecResponse {
     execute_code_with_bounds(
         state,
         ctx,
@@ -74,7 +78,7 @@ async fn execute_code_unbounded_for_tests(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_code_with_bounds(
-    state: RlmExecutionState,
+    state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
@@ -84,7 +88,7 @@ pub(crate) async fn execute_code_with_bounds(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
-) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
+) -> ExecResponse {
     execute_code_with_dialect_and_bounds(
         state,
         ctx,
@@ -103,7 +107,7 @@ pub(crate) async fn execute_code_with_bounds(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_typescript_code_with_bounds(
-    state: RlmExecutionState,
+    state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
@@ -113,7 +117,7 @@ pub(crate) async fn execute_typescript_code_with_bounds(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
-) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
+) -> ExecResponse {
     execute_code_with_dialect_and_bounds(
         state,
         ctx,
@@ -155,7 +159,7 @@ impl SourceDialect {
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_code_with_dialect_and_bounds(
-    mut state: RlmExecutionState,
+    state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
@@ -166,11 +170,11 @@ async fn execute_code_with_dialect_and_bounds(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     source_dialect: SourceDialect,
-) -> Result<(RlmExecutionState, ExecResponse), SessionError> {
+) -> ExecResponse {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
-    let response = Box::pin(execute_code_inner(
-        &mut state,
+    Box::pin(execute_code_inner(
+        state,
         ctx,
         &clean_code,
         start,
@@ -183,8 +187,7 @@ async fn execute_code_with_dialect_and_bounds(
         execution_bounds,
         source_dialect,
     ))
-    .await;
-    Ok((state, response))
+    .await
 }
 
 /// Feature-gated fixture that lets the repository's performance harness drive
@@ -192,7 +195,7 @@ async fn execute_code_with_dialect_and_bounds(
 /// internals as public protocol API.
 #[cfg(feature = "testing")]
 pub struct RlmCheckpointPerfFixture {
-    state: Option<RlmExecutionState>,
+    state: RlmExecutionState,
     binding_count: usize,
     payload_bytes: usize,
 }
@@ -216,38 +219,28 @@ impl RlmCheckpointPerfFixture {
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
         }
         Ok(Self {
-            state: Some(state),
+            state,
             binding_count,
             payload_bytes,
         })
     }
 
     pub fn capture(&mut self) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state
-            .as_mut()
-            .expect("RLM checkpoint perf fixture state present")
-            .snapshot_execution_state()
+        self.state.snapshot_execution_state()
     }
 
     pub fn acknowledge_capture(&mut self) {
-        self.state
-            .as_mut()
-            .expect("RLM checkpoint perf fixture state present")
-            .acknowledge_execution_state_capture();
+        self.state.acknowledge_execution_state_capture();
     }
 
     pub async fn assign_one(&mut self, index: usize, turn: usize) -> Result<(), SessionError> {
         let binding = index % self.binding_count.max(1);
-        let state = self
-            .state
-            .take()
-            .expect("RLM checkpoint perf fixture state present");
         let code = format!(
             "mid_{binding} = push(mid_{binding}, \"turn-{turn}-{}\")",
             "y".repeat(self.payload_bytes / 8)
         );
-        let (state, response) = execute_code_with_bounds(
-            state,
+        let response = execute_code_with_bounds(
+            &mut self.state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
                 language: "lashlang".to_string(),
@@ -262,8 +255,7 @@ impl RlmCheckpointPerfFixture {
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
         )
-        .await?;
-        self.state = Some(state);
+        .await;
         if let Some(error) = response.error {
             return Err(SessionError::Protocol(format!(
                 "RLM checkpoint perf assignment failed: {error}"
@@ -273,10 +265,7 @@ impl RlmCheckpointPerfFixture {
     }
 
     pub fn absorb_dirty_assignments(&mut self) {
-        self.state
-            .as_mut()
-            .expect("RLM checkpoint perf fixture state present")
-            .absorb_pending_assignments_for_perf();
+        self.state.absorb_pending_assignments_for_perf();
     }
 
     pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
@@ -1084,8 +1073,8 @@ mod tests {
                 catalog,
                 invocation,
             );
-        let (_, response) = execute_code_unbounded_for_tests(
-            RlmExecutionState::new(),
+        let response = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
             context,
             ExecRequest {
                 language: "lashlang".to_string(),
@@ -1103,8 +1092,7 @@ mod tests {
                 trace_context: TraceContext::default(),
             },
         )
-        .await
-        .expect("execute continue_as");
+        .await;
         assert_eq!(response.error, None);
         assert_eq!(response.tool_calls.len(), 1);
         response
@@ -1153,9 +1141,9 @@ mod tests {
         });
     }
 
-    async fn execute_test_code(state: RlmExecutionState, code: String) -> RlmExecutionState {
-        let (state, response) = Box::pin(execute_code_unbounded_for_tests(
-            state,
+    async fn execute_test_code(mut state: RlmExecutionState, code: String) -> RlmExecutionState {
+        let response = Box::pin(execute_code_unbounded_for_tests(
+            &mut state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
                 language: "lashlang".to_string(),
@@ -1169,8 +1157,7 @@ mod tests {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         ))
-        .await
-        .expect("execute test Lashlang");
+        .await;
         assert_eq!(response.error, None, "test Lashlang execution failed");
         state
     }
@@ -1267,7 +1254,7 @@ mod tests {
         abilities: lashlang::LashlangAbilities,
         resources: lashlang::LashlangHostCatalog,
     ) -> ExecResponse {
-        let state = RlmExecutionState::new();
+        let mut state = RlmExecutionState::new();
         let ctx = if abilities.triggers {
             lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
                 lash_core::facade_support::InMemoryTriggerStore::default(),
@@ -1280,8 +1267,8 @@ mod tests {
             lashlang::LashlangLanguageFeatures::default(),
             resources,
         );
-        let (_, response) = execute_code_with_bounds(
-            state,
+        execute_code_with_bounds(
+            &mut state,
             ctx,
             ExecRequest {
                 language: "lashlang".to_string(),
@@ -1301,8 +1288,6 @@ mod tests {
             ),
         )
         .await
-        .expect("execute code");
-        response
     }
 
     #[test]
@@ -1311,7 +1296,7 @@ mod tests {
         let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
         block_on(async {
             let _ = execute_code_with_bounds(
-                RlmExecutionState::new(),
+                &mut RlmExecutionState::new(),
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -1340,7 +1325,7 @@ mod tests {
         block_on(async {
             let previous = set_execution_bound_exhaustion_loud(false);
             let result = execute_code_with_bounds(
-                RlmExecutionState::new(),
+                &mut RlmExecutionState::new(),
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -1359,12 +1344,10 @@ mod tests {
                     lashlang::ExecutionBound::Unbounded,
                 ),
             )
-            .await
-            .expect("execution response");
+            .await;
             set_execution_bound_exhaustion_loud(previous);
             assert!(
                 result
-                    .1
                     .error
                     .as_deref()
                     .is_some_and(|error| error.contains("instruction budget"))
@@ -1375,7 +1358,7 @@ mod tests {
     #[test]
     fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         block_on(async {
-            let state = RlmExecutionState::new();
+            let mut state = RlmExecutionState::new();
             let request = || ExecRequest {
                 language: "lashlang".to_string(),
                 code: "finish 1".to_string(),
@@ -1390,8 +1373,8 @@ mod tests {
                 )
             };
 
-            let (state, first) = execute_code_unbounded_for_tests(
-                state,
+            let first = execute_code_unbounded_for_tests(
+                &mut state,
                 lash_core::testing::code_execution_context(),
                 request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1401,16 +1384,15 @@ mod tests {
                 resolver(),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("first execution should succeed");
+            .await;
             assert!(first.error.is_none(), "{:?}", first.error);
             assert_eq!(first.terminal_finish, Some(serde_json::json!(1)));
             let first_stats = state.linked_programs.stats();
             assert_eq!(first_stats.hits, 0);
             assert_eq!(first_stats.misses, 1);
 
-            let (state, second) = execute_code_unbounded_for_tests(
-                state,
+            let second = execute_code_unbounded_for_tests(
+                &mut state,
                 lash_core::testing::code_execution_context(),
                 request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1420,8 +1402,7 @@ mod tests {
                 resolver(),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("second execution should succeed");
+            .await;
             assert!(second.error.is_none(), "{:?}", second.error);
             assert_eq!(second.terminal_finish, Some(serde_json::json!(1)));
             let second_stats = state.linked_programs.stats();
@@ -1595,8 +1576,9 @@ mod tests {
             let first_ctx =
                 lash_core::testing::code_execution_context_with_invocation(first_invocation);
             assert!(first_ctx.tool_catalog().tools.is_empty());
-            let (mut state, first) = execute_code_unbounded_for_tests(
-                RlmExecutionState::new(),
+            let mut state = RlmExecutionState::new();
+            let first = execute_code_unbounded_for_tests(
+                &mut state,
                 first_ctx.clone(),
                 deferred_matrix_request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1606,8 +1588,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("first drive");
+            .await;
             assert!(first.error.is_some(), "mystery.x must remain unresolved");
             assert_eq!(calls.load(Ordering::SeqCst), 1, "one batch per link");
             assert_eq!(installed.load(Ordering::SeqCst), 0);
@@ -1633,8 +1614,8 @@ mod tests {
 
             // Same stable link: both positive and negative outcomes survive the
             // snapshot and win without another authorization decision.
-            let (restored, replay) = execute_code_unbounded_for_tests(
-                restored,
+            let replay = execute_code_unbounded_for_tests(
+                &mut restored,
                 first_ctx.clone(),
                 deferred_matrix_request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1644,8 +1625,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("same-link replay");
+            .await;
             assert!(replay.error.is_some());
             assert_eq!(calls.load(Ordering::SeqCst), 1, "same link must replay");
             assert_eq!(installed.load(Ordering::SeqCst), 1);
@@ -1662,8 +1642,8 @@ mod tests {
                     "replay:effect-2",
                 ),
             );
-            let (restored, second_link) = execute_code_unbounded_for_tests(
-                restored,
+            let second_link = execute_code_unbounded_for_tests(
+                &mut restored,
                 second_ctx.clone(),
                 deferred_matrix_request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1673,8 +1653,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("different link");
+            .await;
             assert!(second_link.error.is_some());
             assert_eq!(calls.load(Ordering::SeqCst), 2);
             assert_eq!(installed.load(Ordering::SeqCst), 1);
@@ -1692,8 +1671,8 @@ mod tests {
                     "replay:effect-3",
                 ),
             );
-            let (restored, next_turn) = execute_code_unbounded_for_tests(
-                restored,
+            let next_turn = execute_code_unbounded_for_tests(
+                &mut restored,
                 next_turn_ctx.clone(),
                 deferred_matrix_request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1703,8 +1682,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("new turn");
+            .await;
             assert!(next_turn.error.is_some());
             assert_eq!(calls.load(Ordering::SeqCst), 3);
             assert_eq!(installed.load(Ordering::SeqCst), 1);
@@ -1742,8 +1720,9 @@ mod tests {
             );
             assert!(ctx.tool_catalog().tools.is_empty());
 
-            let (state, response) = execute_code_unbounded_for_tests(
-                RlmExecutionState::new(),
+            let mut state = RlmExecutionState::new();
+            let response = execute_code_unbounded_for_tests(
+                &mut state,
                 ctx.clone(),
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -1761,8 +1740,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute code");
+            .await;
 
             assert!(response.error.is_none(), "{:?}", response.error);
             assert_eq!(
@@ -1811,8 +1789,9 @@ mod tests {
                 lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
             );
 
-            let (state, response) = execute_typescript_code_with_bounds(
-                RlmExecutionState::for_engine("typescript"),
+            let mut state = RlmExecutionState::for_engine("typescript");
+            let response = execute_typescript_code_with_bounds(
+                &mut state,
                 ctx.clone(),
                 ExecRequest {
                     language: "typescript".to_string(),
@@ -1827,8 +1806,7 @@ mod tests {
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
             )
-            .await
-            .expect("execute TypeScript deferred call");
+            .await;
 
             assert!(response.error.is_none(), "{:?}", response.error);
             assert_eq!(
@@ -1865,8 +1843,8 @@ mod tests {
                 lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
             );
 
-            let (_state, response) = execute_code_unbounded_for_tests(
-                RlmExecutionState::new(),
+            let response = execute_code_unbounded_for_tests(
+                &mut RlmExecutionState::new(),
                 ctx,
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -1885,8 +1863,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute code");
+            .await;
 
             assert!(
                 response.error.is_some(),
@@ -1921,7 +1898,7 @@ mod tests {
     #[test]
     fn execute_code_stores_process_module_artifact_once() {
         block_on(async {
-            let state = RlmExecutionState::new();
+            let mut state = RlmExecutionState::new();
             let request = || ExecRequest {
                 language: "lashlang".to_string(),
                 code: "process later() { finish 1 }\nfinish 1".to_string(),
@@ -1937,8 +1914,8 @@ mod tests {
                 )
             };
 
-            let (state, first) = execute_code_unbounded_for_tests(
-                state,
+            let first = execute_code_unbounded_for_tests(
+                &mut state,
                 context(),
                 request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1948,13 +1925,12 @@ mod tests {
                 resolver(),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("first process module execution should succeed");
+            .await;
             assert!(first.error.is_none(), "{:?}", first.error);
             assert_eq!(state.stored_lashlang_modules.len(), 1);
 
-            let (state, second) = execute_code_unbounded_for_tests(
-                state,
+            let second = execute_code_unbounded_for_tests(
+                &mut state,
                 context(),
                 request(),
                 lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1964,8 +1940,7 @@ mod tests {
                 resolver(),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("second process module execution should succeed");
+            .await;
             assert!(second.error.is_none(), "{:?}", second.error);
             assert_eq!(state.stored_lashlang_modules.len(), 1);
             let stats = state.linked_programs.stats();
@@ -1978,8 +1953,9 @@ mod tests {
     fn typescript_executor_stores_a_typescript_process_artifact() {
         block_on(async {
             let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
-            let (state, response) = execute_typescript_code_with_bounds(
-                RlmExecutionState::for_engine("typescript"),
+            let mut state = RlmExecutionState::for_engine("typescript");
+            let response = execute_typescript_code_with_bounds(
+                &mut state,
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
                     language: "typescript".to_string(),
@@ -2005,8 +1981,7 @@ mod tests {
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
             )
-            .await
-            .expect("execute TypeScript process declaration");
+            .await;
             assert!(response.error.is_none(), "{:?}", response.error);
             let module_ref = state
                 .stored_lashlang_modules
@@ -2388,8 +2363,8 @@ mod tests {
                 session_policy,
             ),
         );
-        let (_, response) = execute_typescript_code_with_bounds(
-            RlmExecutionState::for_engine("typescript"),
+        let response = execute_typescript_code_with_bounds(
+            &mut RlmExecutionState::for_engine("typescript"),
             ctx,
             ExecRequest {
                 language: "typescript".to_string(),
@@ -2413,8 +2388,7 @@ mod tests {
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
         )
-        .await
-        .expect("execute TypeScript signal round-trip");
+        .await;
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(
             response.terminal_finish,
@@ -2531,8 +2505,8 @@ mod tests {
                 session_policy,
             ),
         );
-        let (_, response) = execute_typescript_code_with_bounds(
-            RlmExecutionState::for_engine("typescript"),
+        let response = execute_typescript_code_with_bounds(
+            &mut RlmExecutionState::for_engine("typescript"),
             ctx,
             ExecRequest {
                 language: "typescript".to_string(),
@@ -2557,8 +2531,7 @@ mod tests {
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
         )
-        .await
-        .expect("execute TypeScript start handle id cell");
+        .await;
 
         assert!(response.error.is_none(), "{:?}", response.error);
         let finish = response.terminal_finish.expect("finish result");
@@ -2685,7 +2658,7 @@ mod tests {
         code: &str,
         controller: CapturingTriggerEffectController,
     ) -> ExecResponse {
-        let state = RlmExecutionState::new();
+        let mut state = RlmExecutionState::new();
         let ctx =
             lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
                 Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
@@ -2698,8 +2671,8 @@ mod tests {
             lashlang::LashlangLanguageFeatures::default(),
             timer_trigger_resources(),
         );
-        let (_, response) = execute_code_unbounded_for_tests(
-            state,
+        execute_code_unbounded_for_tests(
+            &mut state,
             ctx,
             ExecRequest {
                 language: "lashlang".to_string(),
@@ -2714,8 +2687,6 @@ mod tests {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await
-        .expect("execute trigger code");
-        response
     }
 
     async fn execute_with_trigger_environment(code: &str) -> ExecResponse {
@@ -2730,9 +2701,9 @@ mod tests {
     }
 
     async fn execute_typescript_with_trigger_environment(code: &str) -> ExecResponse {
-        let state = RlmExecutionState::for_engine("typescript");
-        let (_, response) = execute_typescript_code_with_bounds(
-            state,
+        let mut state = RlmExecutionState::for_engine("typescript");
+        execute_typescript_code_with_bounds(
+            &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
                 lash_core::facade_support::InMemoryTriggerStore::default(),
             )),
@@ -2756,8 +2727,6 @@ mod tests {
             lashlang::ExecutionBounds::unbounded(),
         )
         .await
-        .expect("execute TypeScript trigger code");
-        response
     }
 
     #[test]
@@ -2879,8 +2848,8 @@ mod tests {
                 lashlang::LashlangLanguageFeatures::default(),
                 timer_trigger_resources(),
             );
-            let (_, response) = execute_code_unbounded_for_tests(
-                RlmExecutionState::new(),
+            let response = execute_code_unbounded_for_tests(
+                &mut RlmExecutionState::new(),
                 ctx,
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -2904,8 +2873,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute keyless trigger registration");
+            .await;
             assert!(response.error.is_none(), "{:?}", response.error);
 
             let expected_key =
@@ -3033,8 +3001,8 @@ mod tests {
             );
             let mut state = RlmExecutionState::new();
 
-            let (next, first) = execute_code_unbounded_for_tests(
-                state,
+            let first = execute_code_unbounded_for_tests(
+                &mut state,
                 lash_core::testing::code_execution_context_with_trigger_store(
                     trigger_store.clone(),
                 ),
@@ -3061,13 +3029,11 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute original trigger artifact");
+            .await;
             assert!(first.error.is_none(), "{:?}", first.error);
-            state = next;
 
-            let (_next, replacement) = execute_code_unbounded_for_tests(
-                state,
+            let replacement = execute_code_unbounded_for_tests(
+                &mut state,
                 lash_core::testing::code_execution_context_with_trigger_store(
                     trigger_store.clone(),
                 ),
@@ -3094,8 +3060,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute replacement trigger artifact");
+            .await;
 
             assert!(replacement.error.is_none(), "{:?}", replacement.error);
             assert!(
@@ -4428,10 +4393,10 @@ mod tests {
     #[test]
     fn bound_variables_prompt_renders_live_globals_after_execution() {
         block_on(async {
-            let state = RlmExecutionState::new();
+            let mut state = RlmExecutionState::new();
             let ctx = lash_core::testing::code_execution_context();
-            let (state, response) = execute_code_unbounded_for_tests(
-                state,
+            let response = execute_code_unbounded_for_tests(
+                &mut state,
                 ctx,
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -4449,8 +4414,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute");
+            .await;
             assert_eq!(response.error, None);
 
             let globals = state.bound_variable_values(&BTreeSet::new());
@@ -4473,7 +4437,7 @@ mod tests {
     #[ignore = "microbenchmark; run with `-- --ignored --nocapture`"]
     fn bench_bound_variables_render_cost() {
         block_on(async {
-            let state = RlmExecutionState::new();
+            let mut state = RlmExecutionState::new();
             let ctx = lash_core::testing::code_execution_context();
             // Realistic mid-game RLM state: a ~25-room map, a 67-entry notes
             // log, and a small inventory.
@@ -4487,8 +4451,8 @@ mod tests {
                 }\n\
                 inventory = [\"brass lantern\", \"elvish sword\", \"leaflet\"]"
                 .to_string();
-            let (state, response) = execute_code_unbounded_for_tests(
-                state,
+            let response = execute_code_unbounded_for_tests(
+                &mut state,
                 ctx,
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -4506,8 +4470,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute");
+            .await;
             assert_eq!(response.error, None);
 
             let exclude = BTreeSet::new();
@@ -4572,7 +4535,7 @@ mod tests {
     #[test]
     fn bound_variables_prompt_degrades_large_live_globals() {
         block_on(async {
-            let state = RlmExecutionState::new();
+            let mut state = RlmExecutionState::new();
             let ctx = lash_core::testing::code_execution_context();
             // Same constructs the runtime-perf `rlm_globals` scenario seeds:
             // a large record and a large list that exceed the inline budget.
@@ -4585,8 +4548,8 @@ mod tests {
                   big_notes = push(big_notes, format(\"note {}: observation\", i))\n\
                 }"
             .to_string();
-            let (state, response) = execute_code_unbounded_for_tests(
-                state,
+            let response = execute_code_unbounded_for_tests(
+                &mut state,
                 ctx,
                 ExecRequest {
                     language: "lashlang".to_string(),
@@ -4604,8 +4567,7 @@ mod tests {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
-            .await
-            .expect("execute");
+            .await;
             assert_eq!(response.error, None);
 
             let globals = state.bound_variable_values(&BTreeSet::new());
@@ -4859,11 +4821,11 @@ finish final_ids"#;
     const TRIVIAL_NEXT_CELL: &str = "finish(6 * 7);";
 
     async fn execute_typescript_test_cell(
-        state: RlmExecutionState,
+        mut state: RlmExecutionState,
         code: &str,
     ) -> (RlmExecutionState, ExecResponse) {
-        execute_typescript_code_with_bounds(
-            state,
+        let response = execute_typescript_code_with_bounds(
+            &mut state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
                 language: "typescript".to_string(),
@@ -4878,8 +4840,8 @@ finish final_ids"#;
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
         )
-        .await
-        .expect("execute TypeScript cell")
+        .await;
+        (state, response)
     }
 
     /// A closure allocated by one cell must not fail validation of the next

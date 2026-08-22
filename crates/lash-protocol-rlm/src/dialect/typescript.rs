@@ -341,7 +341,7 @@ impl RlmDialect for TypescriptDialect {
 
     fn create_session(&self) -> Result<Box<dyn RlmDialectSession>, SessionError> {
         Ok(Box::new(TypescriptDialectSession {
-            state: Some(RlmExecutionState::for_engine(LANGUAGE_ID)),
+            state: RlmExecutionState::for_engine(LANGUAGE_ID),
             surface: self.surface.clone(),
             services: self.services.clone(),
             bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
@@ -491,24 +491,10 @@ Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), names
 }
 
 struct TypescriptDialectSession {
-    state: Option<RlmExecutionState>,
+    state: RlmExecutionState,
     surface: LashlangSurface,
     services: LashlangDialectServices,
     bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
-}
-
-impl TypescriptDialectSession {
-    fn state(&self) -> Result<&RlmExecutionState, SessionError> {
-        self.state
-            .as_ref()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))
-    }
-
-    fn state_mut(&mut self) -> Result<&mut RlmExecutionState, SessionError> {
-        self.state
-            .as_mut()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))
-    }
 }
 
 #[async_trait::async_trait]
@@ -519,18 +505,11 @@ impl RlmDialectSession for TypescriptDialectSession {
         request: ExecRequest,
         session_projected_bindings: RlmProjectedBindings,
     ) -> Result<ExecResponse, SessionError> {
-        if self.state.is_none() {
-            return Err(SessionError::Protocol(
-                "RLM execution state is busy".to_string(),
-            ));
-        }
-        let reset_state = RlmExecutionState::for_engine(LANGUAGE_ID);
-        let state = self
-            .state
-            .take()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
-        let result = execute_typescript_code_with_bounds(
-            state,
+        // The state is borrowed, never moved out: a cell that is cancelled
+        // mid-flight leaves the session holding the same state it started
+        // with, and every other caller waits behind the session's own lock.
+        Ok(execute_typescript_code_with_bounds(
+            &mut self.state,
             ctx,
             request,
             Arc::clone(&self.services.artifact_store),
@@ -541,49 +520,36 @@ impl RlmDialectSession for TypescriptDialectSession {
             self.services.execution_trace_config.clone(),
             self.services.execution_bounds.into_engine(),
         )
-        .await;
-        match result {
-            Ok((state, response)) => {
-                self.state = Some(state);
-                Ok(response)
-            }
-            Err(error) => {
-                self.state = Some(reset_state);
-                Err(error)
-            }
-        }
+        .await)
     }
 
     fn execution_state_dirty(&self) -> bool {
-        self.state
-            .as_ref()
-            .map(RlmExecutionState::execution_state_dirty)
-            .unwrap_or(true)
+        self.state.execution_state_dirty()
     }
 
     fn snapshot_execution_state(
         &mut self,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state_mut()?.snapshot_execution_state()
+        self.state.snapshot_execution_state()
     }
 
     fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state_mut()?.probe_execution_state_capture()
+        self.state.probe_execution_state_capture()
     }
 
     fn hydrated_execution_state(
         &self,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state()?.hydrated_execution_state()
+        self.state.hydrated_execution_state()
     }
 
     fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state_mut()?.acknowledge_execution_state_capture();
+        self.state.acknowledge_execution_state_capture();
         Ok(())
     }
 
     fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state_mut()?.abort_execution_state_capture();
+        self.state.abort_execution_state_capture();
         Ok(())
     }
 
@@ -591,7 +557,7 @@ impl RlmDialectSession for TypescriptDialectSession {
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
-        self.state_mut()?
+        self.state
             .restore_execution_state(state)
             .map_err(|error| SessionError::Protocol(error.to_string()))
     }
@@ -600,7 +566,7 @@ impl RlmDialectSession for TypescriptDialectSession {
         &mut self,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        self.state_mut()?.prune_protected_globals(protected_names);
+        self.state.prune_protected_globals(protected_names);
         Ok(())
     }
 
@@ -609,14 +575,14 @@ impl RlmDialectSession for TypescriptDialectSession {
         patch: &RlmGlobalsPatchPluginBody,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        self.state_mut()?.patch_globals(patch, protected_names)
+        self.state.patch_globals(patch, protected_names)
     }
 
     fn prepare_bound_variables_prompt(
         &self,
         exclude: &BTreeSet<String>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
-        let mut globals = self.state()?.bound_variable_values(exclude);
+        let mut globals = self.state.bound_variable_values(exclude);
         // A block-scoped binding that shadows an outer name is lowered to a
         // generated slot. It is the author's value under a name the author
         // never wrote, and it is dead by the time any turn boundary renders,

@@ -7,15 +7,13 @@ use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
 use crate::dialect::{RlmDialect, RlmDialectRegistry, RlmDialectSession};
 use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
-use crate::rlm_support::{
-    BoundVariableRenderCache, SharedBoundVariablesPrompt, render_bound_variables,
-};
+use crate::rlm_support::SharedBoundVariablesPrompt;
 
 pub(super) struct RlmRuntimeState {
     dialect_registry: RlmDialectRegistry,
     dialect: Arc<dyn RlmDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
-    execution: tokio::sync::Mutex<Option<Box<dyn RlmDialectSession>>>,
+    execution: tokio::sync::Mutex<Box<dyn RlmDialectSession>>,
     active_agent_frame_id: tokio::sync::Mutex<Option<String>>,
     bound_variables_prompt: SharedBoundVariablesPrompt,
 }
@@ -32,7 +30,7 @@ impl RlmRuntimeState {
                 .render(),
         ));
         Ok(Self {
-            execution: tokio::sync::Mutex::new(Some(execution)),
+            execution: tokio::sync::Mutex::new(execution),
             dialect_registry,
             dialect,
             session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
@@ -48,10 +46,24 @@ impl RlmRuntimeState {
 
     #[cfg(test)]
     fn new_for_tests(active_language: &str) -> Result<Self, SessionError> {
+        Self::new_for_tests_with_resolver(active_language, None)
+    }
+
+    /// A test session whose deferred-tool resolver can park a cell mid-flight.
+    ///
+    /// The resolver is awaited inside `execute_code_inner`, which is the only
+    /// suspension point a unit test can reach without a live host: it lets a
+    /// test hold a cell open and observe what a second caller — or a caller
+    /// arriving after the first was cancelled — actually sees.
+    #[cfg(test)]
+    fn new_for_tests_with_resolver(
+        active_language: &str,
+        deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    ) -> Result<Self, SessionError> {
         let services = crate::dialect::LashlangDialectServices {
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
-            deferred_tool_resolver: None,
+            deferred_tool_resolver,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         };
@@ -91,20 +103,12 @@ impl RlmRuntimeState {
 
     async fn refresh_bound_variables_prompt(&self) -> Result<(), SessionError> {
         let exclude = self.protected_projected_binding_names().await;
-        let prepared = self
+        let rendered = self
             .execution
             .lock()
             .await
-            .as_ref()
-            .map(|execution| execution.prepare_bound_variables_prompt(&exclude))
-            .transpose()?;
-        let rendered = prepared.map_or_else(
-            || {
-                let mut cache = BoundVariableRenderCache::default();
-                render_bound_variables(&mut cache, &[], self.dialect.prompt_vocabulary())
-            },
-            crate::dialect::BoundVariablesPromptRender::render,
-        );
+            .prepare_bound_variables_prompt(&exclude)?
+            .render();
         *self
             .bound_variables_prompt
             .write()
@@ -172,9 +176,7 @@ impl RlmRuntimeState {
     ) -> Result<(), SessionError> {
         let mut active_agent_frame_id = self.active_agent_frame_id.lock().await;
         let mut execution_guard = self.execution.lock().await;
-        let execution = execution_guard
-            .as_mut()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
+        let execution = &mut *execution_guard;
         if *active_agent_frame_id != state.current_frame_node_id {
             *execution = self.dialect.create_session()?;
             *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
@@ -211,9 +213,7 @@ impl RlmRuntimeState {
         nodes: &[lash_core::SessionAppendNode],
     ) -> Result<(), SessionError> {
         let mut execution_guard = self.execution.lock().await;
-        let execution = execution_guard
-            .as_mut()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
+        let execution = &mut *execution_guard;
         let protected_names = self.protected_projected_binding_names().await;
         execution.prune_protected_globals(&protected_names)?;
         for node in nodes {
@@ -238,50 +238,36 @@ impl RlmRuntimeState {
             .resolve_active(&request.language, self.dialect.language_id())
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let session_projected_bindings = self.session_projected_bindings.lock().await.clone();
+        // The guard is held across the whole cell: a second caller waits for
+        // the cell to finish instead of being told the state is busy, and a
+        // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
-        let mut state = guard
-            .take()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?;
-
-        let result = state
+        let result = guard
+            .as_mut()
             .execute(ctx, request, session_projected_bindings)
             .await;
-        *guard = Some(state);
         drop(guard);
         self.refresh_bound_variables_prompt().await?;
         result
     }
 
     pub(super) fn execution_state_dirty(&self) -> bool {
+        // A contended `try_lock` means a cell is running, and a running cell
+        // is dirty by construction.
         self.execution
             .try_lock()
-            .map(|execution| {
-                execution
-                    .as_ref()
-                    .map(|execution| execution.execution_state_dirty())
-                    .unwrap_or(true)
-            })
+            .map(|execution| execution.execution_state_dirty())
             .unwrap_or(true)
     }
 
     pub(super) async fn snapshot_execution_state(
         &self,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.execution
-            .lock()
-            .await
-            .as_mut()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
-            .snapshot_execution_state()
+        self.execution.lock().await.snapshot_execution_state()
     }
 
     pub(super) async fn probe_execution_state_capture(&self) -> Result<(), SessionError> {
-        self.execution
-            .lock()
-            .await
-            .as_mut()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
-            .probe_execution_state_capture()
+        self.execution.lock().await.probe_execution_state_capture()
     }
 
     pub(super) async fn hydrated_execution_state(
@@ -290,22 +276,20 @@ impl RlmRuntimeState {
         self.execution
             .lock()
             .await
-            .as_ref()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
             .hydrated_execution_state()
             .map(Some)
     }
 
     pub(super) async fn acknowledge_execution_state_capture(&self) {
-        if let Some(execution) = self.execution.lock().await.as_mut() {
-            let _ = execution.acknowledge_execution_state_capture();
-        }
+        let _ = self
+            .execution
+            .lock()
+            .await
+            .acknowledge_execution_state_capture();
     }
 
     pub(super) async fn abort_execution_state_capture(&self) {
-        if let Some(execution) = self.execution.lock().await.as_mut() {
-            let _ = execution.abort_execution_state_capture();
-        }
+        let _ = self.execution.lock().await.abort_execution_state_capture();
     }
 
     pub(super) async fn restore_execution_state(
@@ -313,10 +297,7 @@ impl RlmRuntimeState {
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
         let mut execution = self.execution.lock().await;
-        execution
-            .as_mut()
-            .ok_or_else(|| SessionError::Protocol("RLM execution state is busy".to_string()))?
-            .restore_execution_state(state)?;
+        execution.restore_execution_state(state)?;
         drop(execution);
         self.refresh_bound_variables_prompt().await?;
         Ok(())
@@ -458,29 +439,215 @@ pub(super) fn reject_reserved_projected_binding_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Waker};
 
+    /// A cell that references an unresolved module call-path, so the deferred
+    /// resolver is consulted before anything is linked or run.
+    const PARKING_CELL: &str = "await web.fetch({})?";
+
+    /// A deferred-tool resolver that parks a cell inside `resolve` until it is
+    /// released.
+    ///
+    /// This is the only suspension point a unit test can plant in the middle of
+    /// a cell without a live host, and it is what makes the two properties
+    /// under test observable at all: what a *second* caller sees while a cell
+    /// is running, and what the session looks like after a cell is cancelled
+    /// while running.
+    #[derive(Default)]
+    struct ParkingResolver {
+        entered: AtomicUsize,
+        released: AtomicBool,
+    }
+
+    impl ParkingResolver {
+        fn entered(&self) -> usize {
+            self.entered.load(Ordering::SeqCst)
+        }
+
+        fn release(&self) {
+            self.released.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl lash_lashlang_runtime::DeferredToolResolver for ParkingResolver {
+        async fn resolve(
+            &self,
+            paths: &[&str],
+        ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            // A self-waking park: every poll re-reads the flag, so a release
+            // is never missed whichever waker happens to drive the future.
+            std::future::poll_fn(|cx| {
+                if self.released.load(Ordering::SeqCst) {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            })
+            .await;
+            paths
+                .iter()
+                .map(|path| {
+                    (
+                        (*path).to_string(),
+                        lash_lashlang_runtime::Resolution::NotAvailable,
+                    )
+                })
+                .collect()
+        }
+    }
+
+    fn parked_session() -> (Arc<ParkingResolver>, RlmRuntimeState) {
+        let resolver = Arc::new(ParkingResolver::default());
+        let state = RlmRuntimeState::new_for_tests_with_resolver(
+            "lashlang",
+            Some(Arc::clone(&resolver) as lash_lashlang_runtime::SharedDeferredToolResolver),
+        )
+        .expect("runtime state");
+        (resolver, state)
+    }
+
+    fn cell(code: &str) -> lash_core::ExecRequest {
+        lash_core::ExecRequest {
+            language: "lashlang".to_string(),
+            code: code.to_string(),
+            accept_finish: true,
+        }
+    }
+
+    /// Drive `future` until it is parked inside the resolver, i.e. suspended in
+    /// the middle of a cell with the execution state in hand.
+    fn poll_until_parked<F: Future>(
+        future: &mut Pin<Box<F>>,
+        cx: &mut Context<'_>,
+        resolver: &ParkingResolver,
+    ) {
+        for _ in 0..64 {
+            if resolver.entered() > 0 {
+                return;
+            }
+            assert!(
+                future.as_mut().poll(cx).is_pending(),
+                "a cell parked in the resolver cannot complete"
+            );
+        }
+        panic!("the cell never reached the deferred resolver");
+    }
+
+    /// The regression test for the defect FIG-1729 fixes.
+    ///
+    /// The old code moved the execution state out of its holder for the
+    /// duration of the cell, so a future dropped mid-cell dropped the state
+    /// with it and left `None` behind for good: every later call on that
+    /// session failed with the busy protocol error, permanently. The state is
+    /// now only borrowed, so a cancelled cell leaves it exactly where it was
+    /// and the next cell runs.
+    ///
+    /// This test fails on the parent commit and passes here.
     #[test]
-    fn missing_dialect_session_renders_canonical_empty_bound_variables_prompt() {
+    fn a_cancelled_cell_leaves_the_session_usable() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
-                *state.execution.lock().await = None;
+                let (resolver, state) = parked_session();
+                let mut cx = Context::from_waker(Waker::noop());
 
-                state
-                    .refresh_bound_variables_prompt()
-                    .await
-                    .expect("refresh empty prompt");
+                // Drive a cell until it is suspended mid-flight, then drop it:
+                // a cancellation with the execution state in the cell's hands.
+                {
+                    let mut cancelled = Box::pin(state.execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell(PARKING_CELL),
+                    ));
+                    poll_until_parked(&mut cancelled, &mut cx, &resolver);
+                }
 
-                let prompt = state.bound_variables_prompt.read().unwrap().clone();
-                assert!(prompt.starts_with("These variables are already bound in lashlang."));
-                assert!(
-                    prompt.contains(
-                        "Available variables:\n- `history`: `list[HistoryItem]`, read-only"
+                // The state was borrowed, never moved out, so the session is
+                // still whole and the next cell runs normally.
+                let next = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("survivor = 1\nfinish survivor"),
                     )
+                    .await
+                    .expect("the session survives a cell cancelled mid-flight");
+                assert_eq!(next.error, None);
+                assert_eq!(next.terminal_finish, Some(serde_json::json!(1)));
+            });
+    }
+
+    #[test]
+    fn a_second_concurrent_cell_waits_and_then_runs() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let (resolver, state) = parked_session();
+                let mut cx = Context::from_waker(Waker::noop());
+
+                // One cell is running: parked mid-flight, holding the state.
+                let mut running = Box::pin(state.execute_code(
+                    lash_core::testing::code_execution_context(),
+                    cell(PARKING_CELL),
+                ));
+                poll_until_parked(&mut running, &mut cx, &resolver);
+
+                // A second cell arrives while the first is still running. It
+                // makes no progress whatsoever: it is queued behind the running
+                // cell rather than answered — with a result or with an error.
+                {
+                    let mut waiting = Box::pin(state.execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("second_cell = 2"),
+                    ));
+                    for _ in 0..16 {
+                        assert!(
+                            waiting.as_mut().poll(&mut cx).is_pending(),
+                            "a cell arriving mid-cell must wait for the running cell"
+                        );
+                    }
+                    assert_eq!(
+                        resolver.entered(),
+                        1,
+                        "the waiting cell never began executing beside the running one"
+                    );
+                }
+
+                // The running cell finishes and hands the state back, live.
+                resolver.release();
+                let first = running.await.expect("the parked cell completes");
+                assert!(
+                    first.error.is_some(),
+                    "`web.fetch` resolves to nothing, so the parked cell ends in a link error"
                 );
+
+                // The waiting cell, re-driven, now runs — on that same state.
+                let second = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("second_cell = 2"),
+                    )
+                    .await
+                    .expect("the cell that waited now runs");
+                assert_eq!(second.error, None);
+
+                let total = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("finish second_cell"),
+                    )
+                    .await
+                    .expect("execute code");
+                assert_eq!(total.error, None);
+                assert_eq!(total.terminal_finish, Some(serde_json::json!(2)));
             });
     }
 
