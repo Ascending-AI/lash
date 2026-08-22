@@ -18,7 +18,7 @@ mod execution_context_builder;
 mod live_replay;
 pub mod sansio_transcript;
 
-use execution_context_builder::*;
+pub(crate) use execution_context_builder::*;
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::future::Future;

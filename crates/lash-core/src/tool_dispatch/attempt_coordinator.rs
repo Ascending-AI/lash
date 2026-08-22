@@ -548,11 +548,13 @@ async fn sleep_before_retry(
                     duration_ms: retry_after_ms,
                 },
             ),
-            RuntimeEffectLocalExecutor::sleep_with_clock(
-                cancellation.unwrap_or_default(),
+            RuntimeEffectLocalExecutor::sleep_under(
+                &context
+                    .effect_controller
+                    .scoped()
+                    .turn_cancel_wait(cancellation.unwrap_or_default()),
                 std::sync::Arc::clone(&context.clock),
-            )
-            .with_turn_cancel_scope(context.effect_controller.scoped().execution_scope().clone()),
+            ),
         )
         .await?;
     match outcome {

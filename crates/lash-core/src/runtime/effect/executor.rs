@@ -108,6 +108,64 @@ impl ProcessTurnCancellation {
     }
 }
 
+/// The complete turn-cancel trio for one wait: the cancellation token the wait
+/// races against, whether the wait observes turn cancellation, and the
+/// execution scope its turn-cancel gate registers under.
+///
+/// The observation flag is the presence of the scope, so a wait that observes
+/// turn cancellation without naming a durable scope — and, more importantly, a
+/// wait that stamps the scope while silently keeping the executor's default
+/// observation — is unrepresentable. Every in-workspace wait builder takes this
+/// value whole (`RuntimeEffectLocalExecutor::sleep_under`,
+/// `RuntimeEffectLocalExecutor::await_event_under`,
+/// `ProcessOpScope::with_turn_cancellation`), and it is produced by a single
+/// accessor on the execution that owns the observation decision
+/// (`RuntimeExecutionContext::turn_cancel_wait`, or
+/// `ScopedEffectController::turn_cancel_wait` where no execution context
+/// exists).
+#[derive(Clone)]
+pub(crate) struct TurnCancelWait {
+    cancellation: CancellationToken,
+    /// `Some` when the wait attaches the turn-cancel gate for that scope;
+    /// `None` when the enclosing execution runs without turn observation, as
+    /// process bodies do.
+    observed_scope: Option<crate::ExecutionScope>,
+}
+
+impl TurnCancelWait {
+    /// The wait races `cancellation` and observes the turn-cancel gate of
+    /// `scope`.
+    pub(crate) fn observing(cancellation: CancellationToken, scope: crate::ExecutionScope) -> Self {
+        Self {
+            cancellation,
+            observed_scope: Some(scope),
+        }
+    }
+
+    /// The wait races `cancellation` and never attaches a turn-cancel gate.
+    pub(crate) fn unobserved(cancellation: CancellationToken) -> Self {
+        Self {
+            cancellation,
+            observed_scope: None,
+        }
+    }
+
+    /// The turn cancellation a process operation observes, if any.
+    pub(crate) fn process_turn_cancellation(&self) -> Option<ProcessTurnCancellation> {
+        self.observed_scope
+            .as_ref()
+            .map(|scope| ProcessTurnCancellation::new(self.cancellation.clone(), scope.clone()))
+    }
+
+    fn controls(&self) -> WaitControls {
+        WaitControls {
+            cancellation: self.cancellation.clone(),
+            observe_turn_cancel: self.observed_scope.is_some(),
+            turn_cancel_scope: self.observed_scope.clone(),
+        }
+    }
+}
+
 /// Observer invoked after a process side effect and before durable outcome
 /// recording.
 ///
@@ -299,6 +357,35 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     observe_turn_cancel: true,
                     turn_cancel_scope: None,
                 },
+                deadline,
+                clock,
+            }),
+            replay_trace: None,
+        }
+    }
+
+    /// Builds the inline sleep path from the complete turn-cancel trio, so an
+    /// in-workspace sleep cannot be journaled with a half-stamped one.
+    pub(crate) fn sleep_under(wait: &TurnCancelWait, clock: Arc<dyn crate::Clock>) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::SleepOnly {
+                controls: wait.controls(),
+                clock,
+            }),
+            replay_trace: None,
+        }
+    }
+
+    /// Builds the inline durable-wait path from the complete turn-cancel trio,
+    /// so an in-workspace wait cannot be journaled with a half-stamped one.
+    pub(crate) fn await_event_under(
+        wait: &TurnCancelWait,
+        deadline: Option<Instant>,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ExternalWaitOptions {
+                controls: wait.controls(),
                 deadline,
                 clock,
             }),

@@ -35,7 +35,7 @@ removal_verdicts_recorded = 769
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2788
+prose_citations_recorded = 2792
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -1105,7 +1105,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::with_turn_cancel_observation"]
 area = "processes"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-restate/src/tests.rs::Fig788TerminalRedriveRunner::run_process_segment#`RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "FIG-1759 read the line the FIG-1223 round could not resolve mechanically and anchored the row on it. Consumer class: host-side effect adapters, which build their own local executors and cannot reach the crate-internal `TurnCancelWait` accessor that in-workspace wait builders now take whole. Three sites in the Restate adapter's process-runner test doubles exercise this path: crates/lash-restate/src/tests.rs::Fig788TerminalRedriveRunner::run_process_segment#`RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),`, crates/lash-restate/src/tests.rs::Fig811EffectfulOrdinalOneTerminalRunner::run_process_segment#`RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),`, and crates/lash-restate/src/tests.rs::Fig779SuspendingProcessRunner::run_process_segment#`.with_turn_cancel_observation(false),`. No example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase"
@@ -48794,8 +48794,8 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::with_turn_cancel_scope"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "unused-justify"
+reason = "FIG-1759 did what the FIG-1223 verdict asked for: it read the candidate call sites, and real consumers turned up, so the row re-anchors instead of removing. Consumer class: host-side effect adapters, which build their own local executors and cannot reach the crate-internal `TurnCancelWait` accessor that in-workspace wait builders now take whole. Nine sites in the Restate adapter's controller test doubles exercise this path, among them crates/lash-restate/src/tests.rs::Fig1126PendingToolRedriveImpl::run#`.with_turn_cancel_scope(scope),` and crates/lash-restate/src/tests.rs::restate_suspended_timer_is_woken_by_the_durable_turn_cancel_gate#`.with_turn_cancel_scope(durable_turn_scope(\"session\", \"turn\")),`. No example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::with_process_outcome_observer"
@@ -77060,7 +77060,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::effect::executor::ProcessTurnCancellation::new"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::runtime::effect::executor::ProcessLocalExecution::turn_cancellation` hands `ProcessTurnCancellation` to hosts (runtime embedders). Consumer class: core runtime internals and the Restate durable effect-host adapter -- this function is exercised at crates/lash-core/src/runtime/process/op_scope.rs::ProcessOpScope::with_turn_cancellation#`self.turn_cancellation = Some(crate::ProcessTurnCancellation::new(cancellation, scope));` and crates/lash-restate/src/tests.rs::Fig790ProcessAwaitRedriveImpl::run#`lash_core::facade_support::ProcessTurnCancellation::new(`, not by any example, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::runtime::effect::executor::ProcessLocalExecution::turn_cancellation` hands `ProcessTurnCancellation` to hosts (runtime embedders). Consumer class: core runtime internals and the Restate durable effect-host adapter -- this function is exercised at crates/lash-core/src/runtime/effect/executor.rs::TurnCancelWait::process_turn_cancellation#`.map(|scope| ProcessTurnCancellation::new(self.cancellation.clone(), scope.clone()))` and crates/lash-restate/src/tests.rs::Fig790ProcessAwaitRedriveImpl::run#`lash_core::facade_support::ProcessTurnCancellation::new(`, not by any example, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessTurnCancellation::scope"
@@ -87939,6 +87939,8 @@ kind = "function"
 [[removal_verdict]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_scope"
 kind = "function"
+superseded_by = "unused-justify"
+reason = "The FIG-1223 verdict rested on finding no line that ties the leaf name to the type owning it. FIG-1759 read the candidate call sites, as that verdict required before deleting: nine of them are real consumers in the Restate adapter's controller test doubles, host-side code that builds its own local executors. The removal is not owed; the row is re-anchored at checked evidence."
 
 [[removal_verdict]]
 symbol = "lash::runtime::RuntimeEffectOutcome::SyncExecutionEnvironment"
