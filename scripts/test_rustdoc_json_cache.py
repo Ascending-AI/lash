@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from typing import Callable
 import unittest
 import unittest.mock
 
@@ -22,6 +23,30 @@ SPEC.loader.exec_module(MODULE)
 
 #: The rustdoc invocation the fixtures pretend to run.
 COMMAND = ("cargo", "rustdoc", "-p", "lash-core", "--lib")
+
+
+def document(marker: object = "baseline") -> str:
+    """A rustdoc-shaped document the cache will accept, tagged with `marker`.
+
+    Entries are sanity-checked before use, so a fixture document has to have
+    the shape a real one has: a `root` that resolves in `index` to a module
+    holding items.  The marker rides in an item name so a test can tell two
+    generations apart.
+    """
+    return json.dumps(
+        {
+            "root": "0",
+            "index": {
+                "0": {"id": "0", "name": "lash_core", "inner": {"module": {"items": ["1"]}}},
+                "1": {"id": "1", "name": str(marker), "inner": {"function": {}}},
+            },
+        }
+    )
+
+
+def marker_of(path: Path) -> str:
+    """The marker `document` wrote into the document at `path`."""
+    return json.loads(path.read_text(encoding="utf-8"))["index"]["1"]["name"]
 
 
 def git(repo: Path, *arguments: str) -> None:
@@ -119,17 +144,29 @@ class CacheFixture:
     def destination(self) -> Path:
         return self.target / "doc" / "lash_core.json"
 
-    def ensure(self, body: str = "{}", package: str = "lash-core") -> tuple[Path, list[int]]:
-        """Run `ensure`, writing `body` at the destination on every generation."""
+    def ensure(
+        self,
+        body: str | None = None,
+        package: str = "lash-core",
+        during: Callable[[], None] | None = None,
+    ) -> tuple[Path, list[int]]:
+        """Run `ensure`, writing `body` at the destination on every generation.
+
+        `during` runs inside the generation window, which is where an edit that
+        the pre-generation guard cannot have seen would land.
+        """
         calls: list[int] = []
+        contents = document() if body is None else body
 
         def generate() -> None:
             calls.append(1)
             destination = self.destination()
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(body, encoding="utf-8")
+            destination.write_text(contents, encoding="utf-8")
+            if during is not None:
+                during()
 
-        document = MODULE.ensure(
+        served = MODULE.ensure(
             repo=self.repo,
             package=package,
             crate_name="lash_core",
@@ -137,7 +174,7 @@ class CacheFixture:
             destination=self.destination(),
             generate=generate,
         )
-        return document, calls
+        return served, calls
 
 
 class RustdocJsonCacheTest(unittest.TestCase):
@@ -206,6 +243,43 @@ class RustdocJsonCacheTest(unittest.TestCase):
         self.fixture.commit("move the lockfile")
         self.assertNotEqual(baseline, self.fixture.key())
 
+    def test_key_follows_the_flag_and_target_environment(self) -> None:
+        """Everything reaching rustdoc off the command line moves the key."""
+        baseline = self.fixture.key()
+        for variable in (
+            "RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_ENCODED_RUSTDOCFLAGS",
+            "CARGO_BUILD_TARGET",
+        ):
+            with unittest.mock.patch.dict(os.environ, {variable: "-C target-cpu=fixture"}):
+                self.assertNotEqual(baseline, self.fixture.key(), variable)
+
+    def test_key_follows_the_repositorys_cargo_configuration(self) -> None:
+        """`.cargo/config.toml` carries build flags from outside every keyed path."""
+        baseline = self.fixture.key()
+        self.fixture.write(".cargo/config.toml", "[build]\nrustflags = ['-C debuginfo=0']\n")
+        self.fixture.commit("add a cargo configuration")
+        self.assertNotEqual(baseline, self.fixture.key())
+
+    def test_a_path_dependency_outside_the_repository_refuses_to_key(self) -> None:
+        """Unkeyable sources must abort keying, not vanish silently."""
+        metadata = self.fixture.metadata()
+        for entry in metadata["packages"]:
+            if entry["name"] == "dep":
+                entry["manifest_path"] = str(Path(self.directory.name) / "outside" / "Cargo.toml")
+        MODULE._METADATA[self.fixture.repo] = metadata
+
+        with self.assertRaises(KeyError):
+            MODULE.keyed_paths(self.fixture.repo, "lash-core")
+
+        # And the cache degrades to plain generation rather than keying on a
+        # path set that silently omits the dependency.
+        _, calls = self.fixture.ensure()
+        self.assertEqual(calls, [1])
+        self.assertEqual(list(Path(os.environ["LASH_RUSTDOC_CACHE_DIR"]).glob("*.json")), [])
+        self.assertIn("keying unavailable", self.reported.getvalue())
+
     def test_registry_package_is_keyed_on_workspace_manifests(self) -> None:
         """A third-party document contributes no crate directory of its own."""
         paths = MODULE.keyed_paths(self.fixture.repo, "schemars@0.8")
@@ -225,42 +299,39 @@ class RustdocJsonCacheTest(unittest.TestCase):
     # -- hit, miss, bypass ----------------------------------------------
 
     def test_miss_generates_and_populates_then_hit_reuses(self) -> None:
-        document, calls = self.fixture.ensure(body='{"root": 1}')
+        served, calls = self.fixture.ensure(body=document("first"))
         self.assertEqual(calls, [1])
-        self.assertEqual(document, self.fixture.destination())
+        self.assertEqual(served, self.fixture.destination())
         entry = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"]) / f"{self.fixture.key()}.json"
         self.assertTrue(entry.exists())
 
-        document, calls = self.fixture.ensure(body='{"root": 2}')
+        served, calls = self.fixture.ensure(body=document("second"))
         self.assertEqual(calls, [])
-        self.assertEqual(document, entry)
-        self.assertEqual(json.loads(document.read_text(encoding="utf-8")), {"root": 1})
+        self.assertEqual(served, entry)
+        self.assertEqual(marker_of(served), "first")
 
     def test_hit_leaves_cargos_own_output_untouched(self) -> None:
         """Cargo's freshness is fingerprint-based, so its output must stay its own."""
-        self.fixture.ensure(body='{"root": 1}')
-        self.fixture.destination().write_text('{"other-configuration": true}', encoding="utf-8")
-        document, calls = self.fixture.ensure()
+        self.fixture.ensure(body=document("first"))
+        self.fixture.destination().write_text(document("other-configuration"), encoding="utf-8")
+        served, calls = self.fixture.ensure()
         self.assertEqual(calls, [])
-        self.assertNotEqual(document, self.fixture.destination())
-        self.assertEqual(
-            json.loads(self.fixture.destination().read_text(encoding="utf-8")),
-            {"other-configuration": True},
-        )
+        self.assertNotEqual(served, self.fixture.destination())
+        self.assertEqual(marker_of(self.fixture.destination()), "other-configuration")
 
     def test_dirty_tree_bypasses_the_cache_entirely(self) -> None:
         self.fixture.write("crates/lash-core/src/lib.rs", "pub fn one() { /* edited */ }\n")
-        document, calls = self.fixture.ensure(body='{"dirty": true}')
+        served, calls = self.fixture.ensure(body=document("dirty"))
         self.assertEqual(calls, [1])
-        self.assertEqual(document, self.fixture.destination())
+        self.assertEqual(served, self.fixture.destination())
         self.assertIn("bypass -- 1 uncommitted path(s)", self.reported.getvalue())
         self.assertEqual(list(Path(os.environ["LASH_RUSTDOC_CACHE_DIR"]).glob("*.json")), [])
 
         # And a bypassed run does not read a previously stored entry either.
         self.fixture.commit("record the edit")
-        self.fixture.ensure(body='{"clean": true}')
+        self.fixture.ensure(body=document("clean"))
         self.fixture.write("crates/dep/src/lib.rs", "pub fn two() { /* edited */ }\n")
-        _, calls = self.fixture.ensure(body='{"dirty": true}')
+        _, calls = self.fixture.ensure(body=document("dirty"))
         self.assertEqual(calls, [1])
 
     def test_untracked_file_under_a_keyed_crate_bypasses(self) -> None:
@@ -307,6 +378,99 @@ class RustdocJsonCacheTest(unittest.TestCase):
         _, calls = self.fixture.ensure(package="not-a-package")
         self.assertEqual(calls, [1])
 
+    # -- the generation window -------------------------------------------
+
+    def test_an_edit_during_generation_is_not_stored_under_the_clean_key(self) -> None:
+        """The pre-generation dirty check cannot see a minutes-later edit."""
+        cache = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"])
+        source = self.fixture.repo / "crates" / "lash-core" / "src" / "lib.rs"
+        original = source.read_text(encoding="utf-8")
+
+        def edit_mid_generation() -> None:
+            source.write_text("pub fn one() { /* edited mid-generation */ }\n", encoding="utf-8")
+
+        served, calls = self.fixture.ensure(
+            body=document("built-from-an-edited-tree"), during=edit_mid_generation
+        )
+        self.assertEqual(calls, [1])
+        # The fresh artifact still serves this run; only the store is skipped.
+        self.assertEqual(served, self.fixture.destination())
+        self.assertEqual(list(cache.glob("*.json")), [])
+        self.assertIn("path(s) changed during generation", self.reported.getvalue())
+
+        # The scenario in full: the edit is reverted, the tree is clean again,
+        # and the next run must not be handed the edited tree's document.
+        source.write_text(original, encoding="utf-8")
+        self.assertEqual(MODULE.dirty_paths(self.fixture.repo, ["crates"]), [])
+        served, calls = self.fixture.ensure(body=document("built-from-the-clean-tree"))
+        self.assertEqual(calls, [1])
+        self.assertEqual(marker_of(served), "built-from-the-clean-tree")
+
+    def test_a_commit_during_generation_is_not_stored_under_the_old_key(self) -> None:
+        """A tree that is clean again at store time can still be a different tree."""
+        cache = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"])
+
+        def commit_mid_generation() -> None:
+            self.fixture.write("crates/dep/src/lib.rs", "pub fn two() { /* moved */ }\n")
+            self.fixture.commit("land a commit during generation")
+
+        _, calls = self.fixture.ensure(
+            body=document("built-before-the-commit"), during=commit_mid_generation
+        )
+        self.assertEqual(calls, [1])
+        self.assertEqual(list(cache.glob("*.json")), [])
+        self.assertIn("key moved during generation", self.reported.getvalue())
+
+    # -- entry integrity --------------------------------------------------
+
+    def test_a_vacuous_entry_is_regenerated_rather_than_served(self) -> None:
+        """A valid-but-empty document would make a coverage gate pass over nothing."""
+        self.fixture.ensure(body=document("honest"))
+        entry = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"]) / f"{self.fixture.key()}.json"
+        entry.write_text(
+            json.dumps({"root": "0", "index": {"0": {"inner": {"module": {"items": []}}}}}),
+            encoding="utf-8",
+        )
+
+        served, calls = self.fixture.ensure(body=document("regenerated"))
+        self.assertEqual(calls, [1])
+        self.assertEqual(served, self.fixture.destination())
+        self.assertIn("unusable entry", self.reported.getvalue())
+        # And the poisoned entry is replaced rather than rejected forever.
+        self.assertEqual(marker_of(entry), "regenerated")
+
+    def test_a_corrupt_entry_is_regenerated_rather_than_served(self) -> None:
+        self.fixture.ensure(body=document("honest"))
+        entry = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"]) / f"{self.fixture.key()}.json"
+        entry.write_text('{"root": "0", "index": {"0": {"inn', encoding="utf-8")
+        _, calls = self.fixture.ensure(body=document("regenerated"))
+        self.assertEqual(calls, [1])
+        self.assertEqual(marker_of(entry), "regenerated")
+
+    def test_usable_rejects_every_shape_a_document_must_not_have(self) -> None:
+        root = Path(self.directory.name) / "probe.json"
+        for description, body in (
+            ("not json", "{"),
+            ("not an object", "[]"),
+            ("no index", '{"root": "0"}'),
+            ("root absent from the index", '{"root": "0", "index": {"1": {}}}'),
+            ("root is not a module", '{"root": "0", "index": {"0": {"inner": {"struct": {}}}}}'),
+            (
+                "empty root module",
+                '{"root": "0", "index": {"0": {"inner": {"module": {"items": []}}}}}',
+            ),
+        ):
+            root.write_text(body, encoding="utf-8")
+            self.assertFalse(MODULE.usable(root), description)
+        root.write_text(document(), encoding="utf-8")
+        self.assertTrue(MODULE.usable(root))
+
+    def test_an_unusable_generated_document_is_never_stored(self) -> None:
+        _, calls = self.fixture.ensure(body="{}")
+        self.assertEqual(calls, [1])
+        self.assertEqual(list(Path(os.environ["LASH_RUSTDOC_CACHE_DIR"]).glob("*.json")), [])
+        self.assertIn("not usable rustdoc JSON", self.reported.getvalue())
+
     # -- storage ---------------------------------------------------------
 
     def test_populate_is_atomic_and_leaves_no_partial_files(self) -> None:
@@ -321,7 +485,7 @@ class RustdocJsonCacheTest(unittest.TestCase):
             return real_replace(source, destination, *arguments, **keywords)
 
         with unittest.mock.patch.object(MODULE.os, "replace", side_effect=record):
-            self.fixture.ensure(body='{"root": 1}')
+            self.fixture.ensure(body=document("first"))
 
         self.assertEqual(len(replaced), 1)
         source, destination = replaced[0]
@@ -358,6 +522,30 @@ class RustdocJsonCacheTest(unittest.TestCase):
             [f"{2:064x}.json", f"{3:064x}.json"],
         )
 
+    def test_prune_sweeps_stale_staging_files_and_budgets_live_ones(self) -> None:
+        """A killed publish leaves debris that must not hide from the budget."""
+        cache = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"])
+        cache.mkdir(parents=True, exist_ok=True)
+        for index in range(2):
+            entry = cache / f"{index:064x}.json"
+            entry.write_bytes(b"x" * 100)
+            os.utime(entry, (index + 1, index + 1))
+
+        stale = cache / ".abandoned.1234.tmp"
+        stale.write_bytes(b"x" * 100)
+        os.utime(stale, (0, 0))
+        live = cache / ".inflight.5678.tmp"
+        live.write_bytes(b"x" * 100)
+
+        removed = MODULE.prune(cache, budget=250)
+
+        self.assertFalse(stale.exists(), "an hours-old staging file is debris")
+        self.assertTrue(live.exists(), "a publish in flight must not be unlinked")
+        # 100 live staging bytes plus 200 of entries exceeds the budget, so the
+        # oldest entry goes: staging files are counted, not invisible.
+        self.assertEqual(removed, 2)
+        self.assertEqual([path.name for path in cache.glob("*.json")], [f"{1:064x}.json"])
+
     def test_a_hit_refreshes_the_entry_against_pruning(self) -> None:
         self.fixture.ensure()
         entry = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"]) / f"{self.fixture.key()}.json"
@@ -370,6 +558,7 @@ class RustdocJsonCacheTest(unittest.TestCase):
     def test_command_line_runs_the_command_then_reports_the_hit_path(self) -> None:
         destination = self.fixture.destination()
         destination.parent.mkdir(parents=True, exist_ok=True)
+        payload = document("command-line")
         argv = [
             "--repo",
             str(self.fixture.repo),
@@ -382,7 +571,7 @@ class RustdocJsonCacheTest(unittest.TestCase):
             "--",
             sys.executable,
             "-c",
-            f"open({str(destination)!r}, 'w').write('{{\"root\": 7}}')",
+            f"open({str(destination)!r}, 'w').write({payload!r})",
         ]
         with unittest.mock.patch("sys.stdout", new=io.StringIO()) as first:
             self.assertEqual(MODULE.main(argv), 0)
@@ -393,7 +582,7 @@ class RustdocJsonCacheTest(unittest.TestCase):
             self.assertEqual(MODULE.main(argv), 0)
         reported = Path(second.getvalue().strip())
         self.assertFalse(destination.exists(), "a hit must not re-run the command")
-        self.assertEqual(json.loads(reported.read_text(encoding="utf-8")), {"root": 7})
+        self.assertEqual(marker_of(reported), "command-line")
 
 
 if __name__ == "__main__":
