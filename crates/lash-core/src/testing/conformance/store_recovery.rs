@@ -5,6 +5,35 @@ use std::time::Duration;
 
 const RECOVERY_TTL: Duration = Duration::from_millis(300);
 const RECOVERY_RENEW: Duration = Duration::from_millis(100);
+const RECOVERY_SUCCESSOR_TTL_MS: u64 = 60_000;
+const RECOVERY_ACQUIRE_DEADLINE: Duration = Duration::from_secs(3);
+
+/// How store-recovery conformance drives the predecessor lease to expiry.
+#[derive(Clone)]
+pub enum StoreRecoveryLeaseTiming {
+    /// Let a realtime backend's authoritative clock advance explicitly.
+    Realtime,
+    /// Advance the injected embedded-backend clock by the exact semantic TTL.
+    Controlled(std::sync::Arc<dyn Fn(u64) + Send + Sync>),
+}
+
+impl StoreRecoveryLeaseTiming {
+    /// Construct controlled timing from an injected-clock advancement hook.
+    pub fn controlled(advance: impl Fn(u64) + Send + Sync + 'static) -> Self {
+        Self::Controlled(std::sync::Arc::new(advance))
+    }
+
+    async fn expire_predecessor(&self) {
+        match self {
+            Self::Realtime => tokio::time::sleep(RECOVERY_TTL).await,
+            Self::Controlled(advance) => advance(RECOVERY_TTL.as_millis() as u64),
+        }
+    }
+
+    fn is_realtime(&self) -> bool {
+        matches!(self, Self::Realtime)
+    }
+}
 
 /// Prove durable recovery across claim, checkpoint, commit, and settlement
 /// boundaries through independently constructed persistence handles.
@@ -16,7 +45,7 @@ const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 /// instrument.
 ///
 /// Integrator class: conformance-suite embedders (ADR 0051 class 4).
-pub async fn runtime_persistence_recovery_laws<F>(make: F)
+pub async fn runtime_persistence_recovery_laws<F>(make: F, lease_timing: StoreRecoveryLeaseTiming)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
@@ -26,8 +55,8 @@ where
     drop((first, second));
 
     let prefix = format!("store-recovery-{}", uuid::Uuid::new_v4());
-    expired_claim_is_recoverable_once(&make, &prefix).await;
-    checkpoint_survives_before_claim_settlement(&make, &prefix).await;
+    expired_claim_is_recoverable_once(&make, &prefix, &lease_timing).await;
+    checkpoint_survives_before_claim_settlement(&make, &prefix, &lease_timing).await;
     atomic_commit_settles_claim_once(&make, &prefix).await;
     recorded_commit_replay_is_idempotent(&make, &prefix).await;
 }
@@ -59,6 +88,7 @@ async fn seed_and_claim(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &str,
     source: &str,
+    lease_ttl_ms: u64,
 ) -> (crate::SessionExecutionLease, crate::QueuedWorkClaim) {
     bind_conformance_session(store, session_id).await;
     let batch = store
@@ -71,7 +101,7 @@ async fn seed_and_claim(
             session_id,
             &lease_owner,
             "seed-and-claim-executor",
-            recovery_timings().ttl_ms(),
+            lease_ttl_ms,
         )
         .await
         .expect("claim store-recovery session lease")
@@ -96,12 +126,14 @@ async fn acquire_successor<F>(
     make: &F,
     session_id: &str,
     source: &str,
+    lease_timing: &StoreRecoveryLeaseTiming,
 ) -> (Arc<dyn RuntimePersistence>, crate::SessionExecutionLease)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let successor = owner(format!("{source}:owner-b"));
-    tokio::time::timeout(Duration::from_secs(3), async {
+    lease_timing.expire_predecessor().await;
+    tokio::time::timeout(RECOVERY_ACQUIRE_DEADLINE, async {
         loop {
             let store = make(session_id);
             bind_conformance_session(&store, session_id).await;
@@ -110,7 +142,7 @@ where
                     session_id,
                     &successor,
                     "acquire-successor-executor",
-                    recovery_timings().ttl_ms(),
+                    RECOVERY_SUCCESSOR_TTL_MS,
                 )
                 .await
                 .expect("retry expired session lease")
@@ -119,7 +151,10 @@ where
                 break (store, lease);
             }
             drop(store);
-            tokio::time::sleep(recovery_timings().renew_interval()).await;
+            if !lease_timing.is_realtime() {
+                panic!("controlled predecessor expiry must make the successor claimable");
+            }
+            tokio::time::sleep(RECOVERY_RENEW).await;
         }
     })
     .await
@@ -181,18 +216,26 @@ async fn assert_settled_once(make: impl Fn(&str) -> Arc<dyn RuntimePersistence>,
     );
 }
 
-async fn expired_claim_is_recoverable_once<F>(make: &F, prefix: &str)
-where
+async fn expired_claim_is_recoverable_once<F>(
+    make: &F,
+    prefix: &str,
+    lease_timing: &StoreRecoveryLeaseTiming,
+) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = format!("{prefix}:claim-expiry");
     let writer = make(&session_id);
-    let (_expired_lease, expired_claim) =
-        seed_and_claim(&writer, &session_id, "claim-expiry").await;
+    let (_expired_lease, expired_claim) = seed_and_claim(
+        &writer,
+        &session_id,
+        "claim-expiry",
+        recovery_timings().ttl_ms(),
+    )
+    .await;
     drop(writer);
 
     let (successor_store, successor_lease) =
-        acquire_successor(make, &session_id, "claim-expiry").await;
+        acquire_successor(make, &session_id, "claim-expiry", lease_timing).await;
     let successor_owner = owner("claim-expiry:owner-b");
     let batch_ids = claimed_batch_ids(&expired_claim);
     let successor_claim = successor_store
@@ -231,14 +274,22 @@ where
     assert_settled_once(make, &session_id).await;
 }
 
-async fn checkpoint_survives_before_claim_settlement<F>(make: &F, prefix: &str)
-where
+async fn checkpoint_survives_before_claim_settlement<F>(
+    make: &F,
+    prefix: &str,
+    lease_timing: &StoreRecoveryLeaseTiming,
+) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = format!("{prefix}:checkpoint-before-settlement");
     let writer = make(&session_id);
-    let (_expired_lease, expired_claim) =
-        seed_and_claim(&writer, &session_id, "checkpoint-before-settlement").await;
+    let (_expired_lease, expired_claim) = seed_and_claim(
+        &writer,
+        &session_id,
+        "checkpoint-before-settlement",
+        recovery_timings().ttl_ms(),
+    )
+    .await;
     writer
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &committed_state(&session_id, "checkpoint-committed"),
@@ -262,8 +313,13 @@ where
     );
     drop(cold_reader);
 
-    let (successor_store, successor_lease) =
-        acquire_successor(make, &session_id, "checkpoint-before-settlement").await;
+    let (successor_store, successor_lease) = acquire_successor(
+        make,
+        &session_id,
+        "checkpoint-before-settlement",
+        lease_timing,
+    )
+    .await;
     let successor_owner = owner("checkpoint-before-settlement:owner-b");
     let batch_ids = claimed_batch_ids(&expired_claim);
     let successor_claim = successor_store
@@ -305,7 +361,13 @@ where
 {
     let session_id = format!("{prefix}:atomic-settlement");
     let writer = make(&session_id);
-    let (lease, claim) = seed_and_claim(&writer, &session_id, "atomic-settlement").await;
+    let (lease, claim) = seed_and_claim(
+        &writer,
+        &session_id,
+        "atomic-settlement",
+        RECOVERY_SUCCESSOR_TTL_MS,
+    )
+    .await;
     writer
         .commit_runtime_state(
             crate::RuntimeCommit::persisted_state_for_test(
@@ -344,7 +406,13 @@ where
 {
     let session_id = format!("{prefix}:commit-replay");
     let writer = make(&session_id);
-    let (lease, claim) = seed_and_claim(&writer, &session_id, "commit-replay").await;
+    let (lease, claim) = seed_and_claim(
+        &writer,
+        &session_id,
+        "commit-replay",
+        RECOVERY_SUCCESSOR_TTL_MS,
+    )
+    .await;
     let operation = crate::OperationId::turn(&session_id, "recorded-commit", "final");
     let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(
         &committed_state(&session_id, "recorded-commit"),

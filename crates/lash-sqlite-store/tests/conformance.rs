@@ -235,6 +235,18 @@ fn open_store(path: &Path) -> Arc<dyn RuntimePersistence> {
     })) as Arc<dyn RuntimePersistence>
 }
 
+fn open_store_with_clock(
+    path: &Path,
+    clock: Arc<dyn lash_core::Clock>,
+) -> Arc<dyn RuntimePersistence> {
+    let path = path.to_path_buf();
+    Arc::new(sync_await(async move {
+        Store::open_with_clock(&path, clock)
+            .await
+            .expect("clock-driven file store")
+    })) as Arc<dyn RuntimePersistence>
+}
+
 struct SqliteSessionExecutionLeaseRenewalZeroRowInjector {
     path: PathBuf,
     _dir: TempDir,
@@ -1280,9 +1292,19 @@ async fn sqlite_store_enforces_core_lease_fence_authority() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_runtime_persistence_recovery_laws() {
     let dir = tempfile::tempdir().expect("store-recovery tempdir");
-    lash_core::testing::conformance::runtime_persistence_recovery_laws(|scenario| {
-        open_store(&dir.path().join(format!("store-recovery-{scenario}.db")))
-    })
+    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let store_clock = Arc::clone(&clock);
+    lash_core::testing::conformance::runtime_persistence_recovery_laws(
+        move |scenario| {
+            open_store_with_clock(
+                &dir.path().join(format!("store-recovery-{scenario}.db")),
+                Arc::clone(&store_clock) as Arc<dyn lash_core::Clock>,
+            )
+        },
+        lash_core::testing::conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {
+            clock.advance(duration_ms)
+        }),
+    )
     .await;
 }
 
