@@ -2,6 +2,9 @@
 
 import contextlib
 import io
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest import mock
 
@@ -2559,6 +2562,106 @@ class RemovalVerdictTests(unittest.TestCase):
             "AcceptedInjectedTurnInput::id",
         )
         self.assertEqual(relocation_key("lash_core::AgentFrameRun", "struct"), "AgentFrameRun")
+
+
+class RustdocIsolationTests(unittest.TestCase):
+    """FIG-1823: the document this gate reads is the one this gate asked for.
+
+    `<target>/doc/<crate>.json` is written by every documentation build in a
+    checkout, so the gate builds under a subdirectory of its own and reads its
+    document from there. The cache key must not move with it: it names the
+    command, and the command is what decides the document.
+    """
+
+    def rustdoc(self, **environment):
+        """Run `rustdoc()` against a stubbed cache, returning what it saw."""
+        seen = {}
+        served = Path(self.enterContext(tempfile.TemporaryDirectory())) / "document.json"
+        served.write_text("{}", encoding="utf-8")
+
+        def ensure(*, repo, package, crate_name, command, destination, generate):
+            seen["command"] = list(command)
+            seen["destination"] = destination
+            generate()
+            return served
+
+        def run_command(command, *, cwd, env=None):
+            seen["env"] = dict(env or {})
+            seen["cwd"] = cwd
+
+        with mock.patch.dict(os.environ, environment, clear=False):
+            with mock.patch.object(
+                check_api_example_coverage.rustdoc_json_cache, "ensure", ensure
+            ), mock.patch.object(
+                check_api_example_coverage.rustdoc_json_cache, "run_command", run_command
+            ):
+                check_api_example_coverage.rustdoc("lash-core", "lash_core", False)
+        return seen
+
+    def test_builds_under_a_subdirectory_of_the_checkouts_target_directory(self):
+        self.assertEqual(
+            check_api_example_coverage.GATE_TARGET,
+            check_api_example_coverage.TARGET / "coverage-gate",
+        )
+        self.assertTrue(check_api_example_coverage.GATE_TARGET.is_absolute())
+
+    def test_generation_runs_cargo_at_the_repository_root(self):
+        # The only reason resolving a relative `CARGO_TARGET_DIR` against the
+        # repository is right: cargo resolves it against its own working
+        # directory, and that is where this gate puts cargo. Move generation to
+        # another cwd and the destination stops naming cargo's output.
+        self.assertEqual(self.rustdoc()["cwd"], check_api_example_coverage.REPO)
+
+    def test_a_relative_target_directory_is_resolved_against_the_repository(self):
+        # Where cargo lands a relative value, given the cwd pinned above.
+        repo = check_api_example_coverage.REPO
+        self.assertEqual(
+            check_api_example_coverage.target_directory({"CARGO_TARGET_DIR": "shared-target"}),
+            repo / "shared-target",
+        )
+        self.assertEqual(check_api_example_coverage.target_directory({}), repo / "target")
+        self.assertEqual(
+            check_api_example_coverage.target_directory({"CARGO_TARGET_DIR": "/elsewhere"}),
+            Path("/elsewhere"),
+        )
+
+    def test_generation_and_the_read_share_the_isolated_target_directory(self):
+        seen = self.rustdoc()
+        self.assertEqual(
+            seen["env"]["CARGO_TARGET_DIR"], str(check_api_example_coverage.GATE_TARGET)
+        )
+        self.assertEqual(
+            seen["destination"],
+            check_api_example_coverage.GATE_TARGET / "doc" / "lash_core.json",
+        )
+
+    def test_the_isolation_never_reaches_the_cache_key(self):
+        # An absolute target path on the command line would key every checkout
+        # separately and cost the cache its cross-worktree reuse.
+        command = self.rustdoc()["command"]
+        self.assertEqual(
+            command,
+            [
+                "cargo",
+                "rustdoc",
+                "-p",
+                "lash-core",
+                "--lib",
+                "--",
+                "-Z",
+                "unstable-options",
+                "--output-format",
+                "json",
+                "--document-hidden-items",
+            ],
+        )
+        self.assertFalse([argument for argument in command if "coverage-gate" in argument])
+
+    def test_an_ambient_target_directory_does_not_leak_into_generation(self):
+        seen = self.rustdoc(CARGO_TARGET_DIR="/somewhere/else")
+        self.assertEqual(
+            seen["env"]["CARGO_TARGET_DIR"], str(check_api_example_coverage.GATE_TARGET)
+        )
 
 
 if __name__ == "__main__":

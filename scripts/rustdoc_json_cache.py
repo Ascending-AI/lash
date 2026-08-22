@@ -45,6 +45,10 @@ repository and survives `cargo clean`.  Operator surface:
 - The cache holds at most `CACHE_BUDGET_BYTES` (5 GiB), pruning
   least-recently-used entries; documents run ~25 MB each.
 - To purge it, delete that directory.  Nothing else in the tree depends on it.
+- `CACHE_KEY_VERSION` orphans the whole back catalogue when entries stored by an
+  older version of this repository can no longer be trusted; bumping it is how a
+  fix reaches entries already on disk, since the key cannot see why they are
+  wrong.
 
 Neither the hit path nor the miss path can fail a gate on its own: an unusable
 cache directory, an unreadable entry, or a package `cargo metadata` does not
@@ -85,6 +89,21 @@ CACHE_BUDGET_BYTES = 5 * 1024 * 1024 * 1024
 #: debris of a killed process.  Generation takes minutes, so an hour is far
 #: beyond any live publish.
 TEMPORARY_MAX_AGE_SECONDS = 60 * 60
+
+#: Salt over every key, bumped when previously stored entries can no longer be
+#: trusted for a reason the key itself cannot see.
+#:
+#: `3` (FIG-1823): until the API-coverage gate built under a target directory of
+#: its own, it read `<target>/doc/<crate>.json` -- a path every `cargo doc` in
+#: the checkout writes -- so an all-features document that another
+#: documentation build had left there could be stored under a default-features
+#: key.  Nothing in the key distinguishes such an entry from an honest one:
+#: `usable()` accepts any structurally sound document, and the target directory
+#: is deliberately not keyed.  Isolating the build stops new entries like that
+#: from being made; only moving the salt stops the existing ones from being
+#: served.  The cost is one regeneration per key on a developer box, and none
+#: on CI, which never had the cache.
+CACHE_KEY_VERSION = b"3"
 
 _METADATA: dict[Path, dict] = {}
 _TOOLCHAIN: dict[Path, str] = {}
@@ -314,7 +333,7 @@ def cache_key(
         digest.update(len(payload).to_bytes(8, "big"))
         digest.update(payload)
 
-    absorb("version", b"2")
+    absorb("version", CACHE_KEY_VERSION)
     absorb("package", package.encode("utf-8"))
     absorb("crate", crate_name.encode("utf-8"))
     absorb("command", "\0".join(command).encode("utf-8"))

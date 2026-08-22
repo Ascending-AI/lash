@@ -255,6 +255,39 @@ class RustdocJsonCacheTest(unittest.TestCase):
             with unittest.mock.patch.dict(os.environ, {variable: "-C target-cpu=fixture"}):
                 self.assertNotEqual(baseline, self.fixture.key(), variable)
 
+    def test_key_ignores_where_the_artifacts_are_built(self) -> None:
+        """`CARGO_TARGET_DIR` decides where cargo writes, not what rustdoc says.
+
+        FIG-1823: the API-coverage gate isolates its builds by pointing this
+        variable at a subdirectory of its own. That must leave the key alone,
+        or one entry per checkout replaces the cross-worktree reuse this cache
+        exists for.
+        """
+        baseline = self.fixture.key()
+        with unittest.mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": "/somewhere/else"}):
+            self.assertEqual(baseline, self.fixture.key())
+
+    def test_the_salt_orphans_entries_stored_under_the_previous_version(self) -> None:
+        """FIG-1823: a salt bump is how a fix reaches entries already on disk.
+
+        The API-coverage gate used to read a `doc/` path other documentation
+        builds also wrote, so entries stored before it built under a directory
+        of its own can hold another feature set's document. Nothing in the key
+        or in `usable()` can tell such an entry from an honest one, so the salt
+        has to move — and moving it has to actually orphan the old entries,
+        which is what this pins.
+        """
+        cache = Path(os.environ["LASH_RUSTDOC_CACHE_DIR"])
+        cache.mkdir(parents=True, exist_ok=True)
+        with unittest.mock.patch.object(MODULE, "CACHE_KEY_VERSION", b"2"):
+            poisoned = self.fixture.key()
+        (cache / f"{poisoned}.json").write_text(document("poisoning-era"), encoding="utf-8")
+
+        self.assertNotEqual(poisoned, self.fixture.key())
+        served, calls = self.fixture.ensure()
+        self.assertEqual(calls, [1], "the pre-bump entry must not be served")
+        self.assertEqual(marker_of(served), "baseline")
+
     def test_key_follows_the_repositorys_cargo_configuration(self) -> None:
         """`.cargo/config.toml` carries build flags from outside every keyed path."""
         baseline = self.fixture.key()
