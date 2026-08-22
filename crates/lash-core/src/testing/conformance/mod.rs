@@ -38,6 +38,7 @@ mod live_replay;
 mod observer_intent;
 mod process_change_feed;
 mod process_continuation_store;
+mod process_event_append_arms;
 mod process_filters;
 mod process_prune_reclaim;
 mod process_references;

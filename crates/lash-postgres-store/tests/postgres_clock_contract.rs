@@ -210,6 +210,18 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // covered by a dedicated end-of-file region after this loop: it must
         // read the SERVER clock, so the client-clock ban applies to its body
         // too, and appending helpers after it cannot escape the fence.
+        // The one process-event append sequence. Every entry point routes
+        // through it, including the leased terminal append whose lease fence
+        // it re-checks, so the `now` it authorizes against must keep coming
+        // from its caller's clock parameter. It sits above the lease atoms and
+        // outside every region below, so without this entry the shared body
+        // that decides a lease write would be the only unfenced step on the
+        // leased path.
+        (
+            PROCESS_HELPERS_SOURCE,
+            "async fn apply_process_event_append_tx(",
+            "async fn append_process_event_tx(",
+        ),
         (
             PROCESS_HELPERS_SOURCE,
             "async fn load_process_lease_tx(",

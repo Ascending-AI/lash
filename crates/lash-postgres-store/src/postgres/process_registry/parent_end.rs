@@ -5,7 +5,7 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use crate::{plugin_sqlx_error, process_decode_error};
 
-pub(super) async fn insert(
+pub(crate) async fn insert(
     tx: &mut Transaction<'_, Postgres>,
     process_id: &str,
     actions: &[ToolIntentParentEndAction],

@@ -3,7 +3,7 @@ use lash_core::facade_support;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
 #[path = "process_registry/parent_end.rs"]
-mod parent_end;
+pub(crate) mod parent_end;
 mod prune;
 mod retention;
 #[path = "process_registry/tool_intent_submission.rs"]
@@ -580,78 +580,26 @@ impl ProcessRegistry for PostgresProcessRegistry {
         authority.validate(process_id, record.disposition, &await_output)?;
         let request =
             facade_support::terminal_append_request(process_id, &await_output, Some(&authority));
-        let replay_lookup =
-            if let Some(replay_key) = request.replay.as_ref().map(|r| r.key.as_str()) {
-                load_event_by_key_tx(&mut tx, process_id, replay_key).await?
-            } else {
-                None
-            };
         let occurred_at_ms = self.clock.timestamp_ms();
-        let wake_session_id = wake_session_id_tx(&mut tx, process_id).await?;
-        let (last_sequence, sequence) =
-            next_process_event_sequence_tx(&mut tx, process_id, wake_session_id.as_deref()).await?;
-        let prepared = lash_core::runtime::prepare_process_event_append(
-            &record,
+        let (_, arm) = apply_process_event_append_tx(
+            &mut tx,
+            &mut record,
             request,
-            sequence,
-            last_sequence,
-            replay_lookup,
             occurred_at_ms,
-            wake_session_id.as_deref(),
-        )?;
-        match prepared {
-            facade_support::ProcessEventAppendPlan::Replay {
-                repair_record,
-                wake_delivery,
-                ..
-            } => {
-                insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
-                    .await?;
-                if let Some(repaired) = repair_record {
-                    record = repaired;
-                    save_process_tx(&mut tx, &record).await?;
-                }
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record })
+            self.wake_delivery_config,
+            ProcessEventWriteAuthorization::Preauthorized,
+            &parent_end_actions,
+        )
+        .await?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(match arm {
+            ProcessEventAppendArm::Replayed => {
+                lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record }
             }
-            facade_support::ProcessEventAppendPlan::Insert {
-                event,
-                projected_record,
-                occurred_at_ms,
-                wake_delivery,
-            } => {
-                sqlx::query(
-                    "INSERT INTO lash_process_events (
-                        process_id, sequence, event_type, idempotency_key,
-                        occurred_at_ms, event_json
-                     )
-                     VALUES ($1, $2, $3, $4, $5, $6)",
-                )
-                .bind(process_id)
-                .bind(sequence as i64)
-                .bind(event.event_type.as_str())
-                .bind(event.invocation.replay_key())
-                .bind(occurred_at_ms as i64)
-                .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
-                record = projected_record;
-                save_process_tx(&mut tx, &record).await?;
-                parent_end::insert(&mut tx, process_id, &parent_end_actions).await?;
-                insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
-                    .await?;
-                advance_wake_allocation_floor_tx(
-                    &mut tx,
-                    wake_session_id.as_deref(),
-                    process_id,
-                    sequence,
-                )
-                .await?;
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                Ok(lash_core::ProcessCompletionOutcome::Committed(record))
+            ProcessEventAppendArm::Inserted => {
+                lash_core::ProcessCompletionOutcome::Committed(record)
             }
-        }
+        })
     }
 
     async fn complete_process_with_lease(
@@ -680,76 +628,24 @@ impl ProcessRegistry for PostgresProcessRegistry {
             ));
         }
         let request = facade_support::terminal_append_request(process_id, &await_output, None);
-        let replay_lookup =
-            if let Some(replay_key) = request.replay.as_ref().map(|r| r.key.as_str()) {
-                load_event_by_key_tx(&mut tx, process_id, replay_key).await?
-            } else {
-                None
-            };
+        // A successful prior terminal append is replay-idempotent even though
+        // that transaction already cleared the lease, so the lease fence is
+        // re-checked inside the append sequence on the insert arm only.
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let wake_session_id = wake_session_id_tx(&mut tx, process_id).await?;
-        let (last_sequence, sequence) =
-            next_process_event_sequence_tx(&mut tx, process_id, wake_session_id.as_deref()).await?;
-        let prepared = lash_core::runtime::prepare_process_event_append(
-            &record,
+        let (_, arm) = apply_process_event_append_tx(
+            &mut tx,
+            &mut record,
             request,
-            sequence,
-            last_sequence,
-            replay_lookup,
             now,
-            wake_session_id.as_deref(),
-        )?;
-        if let facade_support::ProcessEventAppendPlan::Replay {
-            repair_record,
-            wake_delivery,
-            ..
-        } = prepared
-        {
-            insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config)
-                .await?;
-            apply_process_replay_repair_tx(&mut tx, &mut record, repair_record).await?;
+            self.wake_delivery_config,
+            ProcessEventWriteAuthorization::Lease(lease),
+            &parent_end_actions,
+        )
+        .await?;
+        if arm == ProcessEventAppendArm::Replayed {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record });
         }
-
-        let current = load_process_lease_tx(&mut tx, process_id).await?;
-        registry_transitions::authorize_process_lease_write(
-            process_id,
-            lease,
-            current.as_ref(),
-            now,
-        )?;
-
-        let facade_support::ProcessEventAppendPlan::Insert {
-            event,
-            projected_record,
-            occurred_at_ms,
-            wake_delivery,
-        } = prepared
-        else {
-            unreachable!("replay returned above")
-        };
-        sqlx::query(
-            "INSERT INTO lash_process_events (
-                process_id, sequence, event_type, idempotency_key,
-                occurred_at_ms, event_json
-             ) VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(process_id)
-        .bind(sequence as i64)
-        .bind(event.event_type.as_str())
-        .bind(event.invocation.replay_key())
-        .bind(occurred_at_ms as i64)
-        .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        record = projected_record;
-        save_process_tx(&mut tx, &record).await?;
-        parent_end::insert(&mut tx, process_id, &parent_end_actions).await?;
-        insert_wake_delivery_tx(&mut tx, wake_delivery.as_ref(), self.wake_delivery_config).await?;
-        advance_wake_allocation_floor_tx(&mut tx, wake_session_id.as_deref(), process_id, sequence)
-            .await?;
         let released = sqlx::query(
             "UPDATE lash_process_leases
              SET lease_owner_id = NULL,

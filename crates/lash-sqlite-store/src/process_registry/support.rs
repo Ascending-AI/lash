@@ -1,5 +1,39 @@
 use super::*;
 
+/// Which arm of the prepared append plan the store actually applied.
+///
+/// Entry points map this onto their own outcome type; the shared append
+/// sequence never decides what a caller returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessEventAppendArm {
+    /// The replay arm. No event row was written, so the wake allocation floor
+    /// stays where the original insert left it. `repaired` reports whether the
+    /// stale record projection was repaired from the persisted tail event.
+    Replayed { repaired: bool },
+    /// The insert arm. Exactly one event row was written and the wake
+    /// allocation floor advanced to its sequence.
+    Inserted,
+}
+
+impl ProcessEventAppendArm {
+    /// Did this append rewrite the stored process projection?
+    pub(crate) fn record_changed(self) -> bool {
+        match self {
+            Self::Replayed { repaired } => repaired,
+            Self::Inserted => true,
+        }
+    }
+}
+
+/// Where the write authority for one process-event append is settled.
+pub(crate) enum ProcessEventWriteAuthorization<'a> {
+    /// The entry point authorized the write before the append sequence began.
+    Preauthorized,
+    /// Re-read the persisted lease and authorize against it after the
+    /// replay-or-insert decision and before the first row is written.
+    Lease(&'a ProcessLease),
+}
+
 pub(super) async fn recent_events(
     registry: &SqliteProcessRegistry,
     process_id: &str,
@@ -371,13 +405,28 @@ impl SqliteProcessRegistry {
             .transpose()
     }
 
-    pub(crate) fn append_event_conn(
+    /// The one process-event append sequence for the SQLite store.
+    ///
+    /// Every entry point runs these steps, in this order: replay-key lookup,
+    /// wake session id, next sequence number, prepare, the replay-or-insert
+    /// decision, the six-bind event insert, the process save, the parent-end
+    /// retention, the wake-delivery insert, and the wake allocation floor.
+    /// Entry points keep their own prologue, transaction lifetime and outcome
+    /// mapping.
+    ///
+    /// `occurred_at_ms` is the caller's clock and the only clock this function
+    /// sees; it never reads one itself. The `Lease` authorization compares that
+    /// same value against the stored lease, exactly as the leased entry point
+    /// did inline.
+    pub(crate) fn apply_process_event_append_conn(
         conn: &Connection,
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core::WakeDeliveryConfig,
-    ) -> Result<(ProcessEventAppendReceipt, bool), lash_core::PluginError> {
+        authorization: ProcessEventWriteAuthorization<'_>,
+        parent_end_actions: &[lash_core::ToolIntentParentEndAction],
+    ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core::PluginError> {
         let process_id = record.id.clone();
         let replay_lookup =
             if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
@@ -421,15 +470,27 @@ impl SqliteProcessRegistry {
                         event,
                         wake_delivery,
                     },
-                    repaired,
+                    ProcessEventAppendArm::Replayed { repaired },
                 ))
             }
             lash_core::facade_support::ProcessEventAppendPlan::Insert {
                 event,
                 projected_record,
                 wake_delivery,
-                occurred_at_ms,
+                occurred_at_ms: event_occurred_at_ms,
             } => {
+                match authorization {
+                    ProcessEventWriteAuthorization::Preauthorized => {}
+                    ProcessEventWriteAuthorization::Lease(lease) => {
+                        let current = Self::load_process_lease_conn(conn, &process_id)?;
+                        registry_transitions::authorize_process_lease_write(
+                            &process_id,
+                            lease,
+                            current.as_ref(),
+                            occurred_at_ms,
+                        )?;
+                    }
+                }
                 conn.execute(
                     "INSERT INTO process_events (
                         process_id, sequence, event_type, idempotency_key,
@@ -441,13 +502,21 @@ impl SqliteProcessRegistry {
                         sequence as i64,
                         event.event_type.as_str(),
                         event.invocation.replay_key(),
-                        occurred_at_ms as i64,
+                        event_occurred_at_ms as i64,
                         process_encode_json(&event)?,
                     ],
                 )
                 .map_err(process_sqlite_error)?;
                 *record = projected_record;
                 Self::save_process_conn(conn, record)?;
+                if !parent_end_actions.is_empty() {
+                    conn.execute(
+                        "INSERT INTO process_parent_end_plans (process_id, actions_json)
+                         VALUES (?1, ?2)",
+                        params![process_id, process_encode_json(&parent_end_actions)?],
+                    )
+                    .map_err(process_sqlite_error)?;
+                }
                 Self::insert_wake_delivery_conn(
                     conn,
                     wake_delivery.as_ref(),
@@ -464,10 +533,29 @@ impl SqliteProcessRegistry {
                         event,
                         wake_delivery,
                     },
-                    true,
+                    ProcessEventAppendArm::Inserted,
                 ))
             }
         }
+    }
+
+    pub(crate) fn append_event_conn(
+        conn: &Connection,
+        record: &mut ProcessRecord,
+        request: ProcessEventAppendRequest,
+        occurred_at_ms: u64,
+        wake_delivery_config: lash_core::WakeDeliveryConfig,
+    ) -> Result<(ProcessEventAppendReceipt, bool), lash_core::PluginError> {
+        let (receipt, arm) = Self::apply_process_event_append_conn(
+            conn,
+            record,
+            request,
+            occurred_at_ms,
+            wake_delivery_config,
+            ProcessEventWriteAuthorization::Preauthorized,
+            &[],
+        )?;
+        Ok((receipt, arm.record_changed()))
     }
 
     pub(crate) fn insert_wake_delivery_conn(

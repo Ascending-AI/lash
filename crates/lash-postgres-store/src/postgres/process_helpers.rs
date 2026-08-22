@@ -195,13 +195,51 @@ pub(crate) async fn next_process_event_sequence_tx(
     Ok((last_sequence, sequence))
 }
 
-pub(crate) async fn append_process_event_tx(
+/// Which arm of the prepared append plan the store actually applied.
+///
+/// Entry points map this onto their own outcome type; the shared append
+/// sequence never decides what a caller returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessEventAppendArm {
+    /// The replay arm. No event row was written, so the wake allocation floor
+    /// stays where the original insert left it.
+    Replayed,
+    /// The insert arm. Exactly one event row was written and the wake
+    /// allocation floor advanced to its sequence.
+    Inserted,
+}
+
+/// Where the write authority for one process-event append is settled.
+pub(crate) enum ProcessEventWriteAuthorization<'a> {
+    /// The entry point authorized the write before the append sequence began.
+    Preauthorized,
+    /// Re-read the persisted lease and authorize against it after the
+    /// replay-or-insert decision and before the first row is written.
+    Lease(&'a ProcessLease),
+}
+
+/// The one process-event append sequence for the PostgreSQL store.
+///
+/// Every entry point runs these steps, in this order: replay-key lookup, wake
+/// session id, next sequence number, prepare, the replay-or-insert decision,
+/// the six-bind event insert, the process save, the parent-end retention, the
+/// wake-delivery insert, and the wake allocation floor. Entry points keep their
+/// own prologue, transaction lifetime and outcome mapping.
+///
+/// `occurred_at_ms` is the caller's clock and the only clock this function
+/// sees: each entry point keeps its own source (the injected store clock, or
+/// the sanctioned PostgreSQL lease clock), and this function never reads one.
+/// The `Lease` authorization compares that same value against the stored lease,
+/// exactly as the leased entry point did inline.
+pub(crate) async fn apply_process_event_append_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
     wake_delivery_config: lash_core::WakeDeliveryConfig,
-) -> Result<ProcessEventAppendReceipt, PluginError> {
+    authorization: ProcessEventWriteAuthorization<'_>,
+    parent_end_actions: &[lash_core::ToolIntentParentEndAction],
+) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
         if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
@@ -229,21 +267,33 @@ pub(crate) async fn append_process_event_tx(
             ..
         } => {
             insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
-            if let Some(repaired) = repair_record {
-                *record = repaired;
-                save_process_tx(tx, record).await?;
-            }
-            Ok(ProcessEventAppendReceipt {
-                event,
-                wake_delivery,
-            })
+            apply_process_replay_repair_tx(tx, record, repair_record).await?;
+            Ok((
+                ProcessEventAppendReceipt {
+                    event,
+                    wake_delivery,
+                },
+                ProcessEventAppendArm::Replayed,
+            ))
         }
         lash_core::facade_support::ProcessEventAppendPlan::Insert {
             event,
             projected_record,
             wake_delivery,
-            occurred_at_ms,
+            occurred_at_ms: event_occurred_at_ms,
         } => {
+            match authorization {
+                ProcessEventWriteAuthorization::Preauthorized => {}
+                ProcessEventWriteAuthorization::Lease(lease) => {
+                    let current = load_process_lease_tx(tx, &process_id).await?;
+                    registry_transitions::authorize_process_lease_write(
+                        &process_id,
+                        lease,
+                        current.as_ref(),
+                        occurred_at_ms,
+                    )?;
+                }
+            }
             sqlx::query(
                 "INSERT INTO lash_process_events (
                     process_id, sequence, event_type, idempotency_key,
@@ -255,22 +305,47 @@ pub(crate) async fn append_process_event_tx(
             .bind(sequence as i64)
             .bind(event.event_type.as_str())
             .bind(event.invocation.replay_key())
-            .bind(occurred_at_ms as i64)
+            .bind(event_occurred_at_ms as i64)
             .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
             .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
             *record = projected_record;
             save_process_tx(tx, record).await?;
+            crate::process_registry::parent_end::insert(tx, &process_id, parent_end_actions)
+                .await?;
             insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
             advance_wake_allocation_floor_tx(tx, wake_session_id.as_deref(), &process_id, sequence)
                 .await?;
-            Ok(ProcessEventAppendReceipt {
-                event,
-                wake_delivery,
-            })
+            Ok((
+                ProcessEventAppendReceipt {
+                    event,
+                    wake_delivery,
+                },
+                ProcessEventAppendArm::Inserted,
+            ))
         }
     }
+}
+
+pub(crate) async fn append_process_event_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    record: &mut ProcessRecord,
+    request: ProcessEventAppendRequest,
+    occurred_at_ms: u64,
+    wake_delivery_config: lash_core::WakeDeliveryConfig,
+) -> Result<ProcessEventAppendReceipt, PluginError> {
+    apply_process_event_append_tx(
+        tx,
+        record,
+        request,
+        occurred_at_ms,
+        wake_delivery_config,
+        ProcessEventWriteAuthorization::Preauthorized,
+        &[],
+    )
+    .await
+    .map(|(receipt, _)| receipt)
 }
 
 pub(crate) async fn advance_wake_allocation_floor_tx(

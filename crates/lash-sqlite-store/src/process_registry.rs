@@ -12,7 +12,7 @@ mod tool_intent_submission;
 mod wake_delivery;
 mod worklist;
 
-pub(crate) use support::tx_outcome;
+pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
 use support::{process_status_label, wake_allocation_floor_for_testing};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
