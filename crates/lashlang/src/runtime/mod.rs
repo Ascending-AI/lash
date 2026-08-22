@@ -73,7 +73,8 @@ pub use record::Record;
 pub(crate) use record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};
 #[allow(unused_imports)]
 pub(crate) use schema::{
-    ValidationPlan, compile_schema_value, execute_validate_builtin, execute_validation_plan,
+    SchemaScalarKind, ValidationPlan, compile_schema_value, execute_validate_builtin,
+    execute_validation_plan,
 };
 pub(crate) use vm::SlotState;
 #[allow(unused_imports)]
