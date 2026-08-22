@@ -56,8 +56,8 @@ the explicit cache miss reason, such as `input_prefix_mismatch`.
 Codex exposes two constructor-level injection seams, both in the same spirit
 as `CodexProvider::with_http_transport`: explicit builder calls on an
 in-process provider instance, never env vars, and never serialized into user
-config (`CodexProviderFactory` always rebuilds with the production endpoints
-and the default HTTP transport).
+config, so a host that rebuilds the provider from its own stored config always
+gets the production endpoints and the default HTTP transport.
 
 - `CodexProvider::with_endpoint_urls(responses_url, websocket_url)` points the
   provider at alternative Responses HTTP and WebSocket endpoints, e.g. local

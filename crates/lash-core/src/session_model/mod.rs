@@ -175,7 +175,7 @@ impl SessionPolicy {
 }
 
 /// Runtime-only policy resolved against host-owned live dependencies.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct RuntimeSessionPolicy {
     pub policy: SessionPolicy,
     pub binding: ProviderBinding,

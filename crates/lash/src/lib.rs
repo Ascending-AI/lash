@@ -667,8 +667,7 @@ pub mod provider {
         ReasoningEncoding, ReasoningSelection, SamplingCapability, StreamTermination,
         facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
         facade_support::Provider, facade_support::ProviderComponents,
-        facade_support::ProviderFactory, facade_support::ProviderHandle,
-        facade_support::ProviderOptions, facade_support::ProviderSpec,
+        facade_support::ProviderHandle, facade_support::ProviderOptions,
     };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission

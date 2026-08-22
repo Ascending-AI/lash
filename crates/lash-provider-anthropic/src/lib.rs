@@ -13,7 +13,7 @@ mod support;
 #[cfg(feature = "testing")]
 pub mod testing;
 
-pub use config::{AnthropicProvider, AnthropicProviderFactory, DEFAULT_BASE_URL};
+pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
 pub use lash_core::llm::transport::{ANTHROPIC_FILE_MIMES, ANTHROPIC_IMAGE_MIMES};
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::ProviderHandle;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ProviderBinding {
     pub provider_id: String,
     pub provider: ProviderHandle,

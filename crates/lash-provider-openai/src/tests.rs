@@ -1,5 +1,4 @@
 use crate::support::*;
-use crate::{OpenAiCompatibleProviderFactory, OpenAiProviderFactory};
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmJsonSchema, LlmMessage, LlmToolChoice, LlmToolSpec};
 use lash_core::provider::{
@@ -654,42 +653,6 @@ fn providers_serialize_distinct_config_shapes() {
 }
 
 #[test]
-fn provider_factories_reject_stale_wire_api_configs() {
-    let direct_err = OpenAiProviderFactory
-        .deserialize(json!({
-            "api_key": "key",
-            "wire_api": "responses"
-        }))
-        .expect_err("direct OpenAI rejects wire_api");
-    assert!(direct_err.contains("wire_api"));
-
-    let compatible_err = OpenAiCompatibleProviderFactory
-        .deserialize(json!({
-            "api_key": "key",
-            "base_url": OPENROUTER_BASE_URL,
-            "wire_api": "chat-completions"
-        }))
-        .expect_err("compatible OpenAI rejects wire_api");
-    assert!(compatible_err.contains("wire_api"));
-}
-
-#[test]
-fn provider_factories_materialize_distinct_kinds() {
-    let direct = OpenAiProviderFactory
-        .deserialize(json!({ "api_key": "key" }))
-        .expect("direct config");
-    assert_eq!(direct.provider.kind(), "openai");
-
-    let compatible = OpenAiCompatibleProviderFactory
-        .deserialize(json!({
-            "api_key": "key",
-            "base_url": OPENROUTER_BASE_URL
-        }))
-        .expect("compatible config");
-    assert_eq!(compatible.provider.kind(), "openai-compatible");
-}
-
-#[test]
 fn chat_body_uses_messages_and_not_responses_input() {
     let mut req = request(vec![
         LlmMessage::text(LlmRole::System, "system prompt"),
@@ -1335,52 +1298,6 @@ fn openai_compat_config_serializes_when_non_default() {
         config["options"]["response_metadata_body_paths"],
         json!(["/cost"])
     );
-
-    let round_trip = OpenAiCompatibleProviderFactory
-        .deserialize(config)
-        .expect("response metadata allowlists deserialize");
-    let serialized = round_trip.provider.serialize_config();
-    assert_eq!(
-        serialized["options"]["response_metadata_headers"],
-        json!(["X-Opper-Cost"])
-    );
-    assert_eq!(
-        serialized["compat"]["provider_routing"],
-        json!({ "require_parameters": true })
-    );
-    assert_eq!(
-        serialized["options"]["response_metadata_body_paths"],
-        json!(["/cost"])
-    );
-}
-
-#[test]
-fn provider_routing_config_rejects_unknown_sibling_keys() {
-    let nested_error = OpenAiCompatibleProviderFactory
-        .deserialize(json!({
-            "api_key": "key",
-            "base_url": "https://proxy.example/v1",
-            "compat": {
-                "provider_routing": {
-                    "require_parameters": true,
-                    "unknown_preference": true
-                }
-            }
-        }))
-        .expect_err("unknown provider routing preference must be rejected");
-    assert!(nested_error.contains("unknown_preference"));
-
-    let compat_error = OpenAiCompatibleProviderFactory
-        .deserialize(json!({
-            "api_key": "key",
-            "base_url": "https://proxy.example/v1",
-            "compat": {
-                "provider_routing": { "require_parameters": true },
-                "unknown_compat_policy": true
-            }
-        }))
-        .expect_err("unknown compat policy must still be rejected");
-    assert!(compat_error.contains("unknown_compat_policy"));
 }
 
 #[test]
@@ -1396,7 +1313,7 @@ fn reasoning_wire_format_equality_uses_name_identity() {
 }
 
 #[test]
-fn reasoning_formats_round_trip_through_compatible_factory() {
+fn built_in_reasoning_formats_serialize_under_their_name() {
     for format in [
         ReasoningWireFormat::openrouter(),
         ReasoningWireFormat::openai(),
@@ -1404,31 +1321,46 @@ fn reasoning_formats_round_trip_through_compatible_factory() {
         let name = format.name().to_string();
         let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
             .with_reasoning_format(format);
-        let config = provider.serialize_config();
-        assert_eq!(config["compat"]["reasoning_format"], name);
 
-        let round_trip = OpenAiCompatibleProviderFactory
-            .deserialize(config)
-            .expect("built-in reasoning format round trip");
-        assert_eq!(
-            round_trip.provider.serialize_config()["compat"]["reasoning_format"],
-            name
-        );
+        let config = provider.serialize_config();
+
+        assert_eq!(config["compat"]["reasoning_format"], name);
     }
 }
 
 #[test]
-fn compatible_factory_rejects_unknown_reasoning_format() {
-    let error = OpenAiCompatibleProviderFactory
-        .deserialize(json!({
-            "api_key": "key",
-            "base_url": "https://proxy.example/v1",
-            "compat": { "reasoning_format": "qwen3" }
-        }))
+fn built_in_reasoning_formats_deserialize_by_name_and_unknown_names_are_rejected() {
+    for expected in [
+        ReasoningWireFormat::none(),
+        ReasoningWireFormat::openai(),
+        ReasoningWireFormat::openrouter(),
+    ] {
+        let compat =
+            serde_json::from_value::<OpenAiCompat>(json!({ "reasoning_format": expected.name() }))
+                .expect("built-in reasoning formats deserialize under their name");
+
+        assert_eq!(compat.reasoning_format, Some(expected));
+    }
+
+    let error = serde_json::from_value::<OpenAiCompat>(json!({ "reasoning_format": "qwen3" }))
         .expect_err("custom reasoning formats are programmatic only");
 
-    assert!(error.contains("unknown reasoning format `qwen3`"));
-    assert!(error.contains("none/openai/openrouter"));
+    let message = error.to_string();
+    assert!(message.contains("unknown reasoning format `qwen3`"));
+    assert!(message.contains("none/openai/openrouter"));
+}
+
+#[test]
+fn provider_routing_config_rejects_unknown_sibling_keys() {
+    let error = serde_json::from_value::<OpenAiCompat>(json!({
+        "provider_routing": {
+            "require_parameters": true,
+            "unknown_preference": true
+        }
+    }))
+    .expect_err("unknown provider routing preference must be rejected");
+
+    assert!(error.to_string().contains("unknown_preference"));
 }
 
 #[derive(Debug)]
@@ -1473,19 +1405,15 @@ fn custom_reasoning_encoder_is_attached_programmatically() {
 }
 
 #[test]
-fn custom_reasoning_format_serializes_but_cannot_be_deserialized() {
+fn custom_reasoning_format_serializes_under_its_encoder_name() {
     let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
         .with_reasoning_format(ReasoningWireFormat::custom(Arc::new(
             DeepSeekTestReasoningEncoder,
         )));
 
     let config = provider.serialize_config();
+
     assert_eq!(config["compat"]["reasoning_format"], json!("deepseek-test"));
-    let error = OpenAiCompatibleProviderFactory
-        .deserialize(config)
-        .expect_err("custom reasoning format cannot round trip through serde");
-    assert!(error.contains("unknown reasoning format `deepseek-test`"));
-    assert!(error.contains("none/openai/openrouter"));
 }
 
 #[test]

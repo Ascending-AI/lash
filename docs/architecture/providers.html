@@ -270,7 +270,7 @@ let handle = ProviderHandle::new(components.map_provider(|inner| {
             </div>
             <div class="listing__row">
               <div class="listing__label">re-wrap on rebuild</div>
-              <div class="listing__body"><p><code>serialize_config</code> forwards to the inner provider, so a <code>ProviderSpec</code> round-trip rebuilds the bare provider — the wrapper does not survive persistence. Apply <code>map_provider</code> at every construction site (factory resolution, resume paths), not once at startup.</p></div>
+              <div class="listing__body"><p><code>serialize_config</code> forwards to the inner provider, so a host that persists that config and rebuilds from it gets the bare provider — the wrapper does not survive persistence. Apply <code>map_provider</code> at every construction site (host provider resolution, resume paths), not once at startup.</p></div>
             </div>
             <div class="listing__row">
               <div class="listing__label">cancellation-safe admission</div>

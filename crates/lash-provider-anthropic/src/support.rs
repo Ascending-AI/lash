@@ -4,7 +4,6 @@
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use base64::Engine;
-pub(crate) use serde::Deserialize;
 pub(crate) use serde_json::{Value, json};
 
 pub(crate) use lash_core::llm::transport::{
@@ -18,9 +17,8 @@ pub(crate) use lash_core::llm::types::{
     ProviderReasoningReplay, ProviderRouteIdentity,
 };
 pub(crate) use lash_core::provider::{
-    CacheRetention, Provider, ProviderComponents, ProviderFactory, ProviderOptions,
-    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, StreamTermination,
-    resolve_generation_policy,
+    CacheRetention, Provider, ProviderComponents, ProviderOptions, ReasoningDisableEncoding,
+    ReasoningEncoding, ReasoningSelection, StreamTermination, resolve_generation_policy,
 };
 pub(crate) use lash_core::{
     facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,

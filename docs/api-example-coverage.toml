@@ -35,7 +35,7 @@ removal_verdicts_recorded = 769
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2798
+prose_citations_recorded = 2790
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -9421,7 +9421,7 @@ availability = "default+all-features"
 aliases = ["lash_core::direct::DirectRequest::json", "lash_core::facade_support::DirectRequest::json"]
 area = "protocol"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::direct::DirectRequest::json` directly; the gate reaches the same item a second time through `lash_core::runtime::session_manager::direct::DirectCompletionClient::direct_completion`. Consumer class: this module's own unit tests -- this function is exercised at crates/lash-core/src/direct.rs::tests::direct_client_provider_accessors_expose_owned_provider_handle#`json!({\"provider\": \"owned\"})`, not by any example, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::direct::DirectRequest::json` directly; the gate reaches the same item a second time through `lash_core::runtime::session_manager::direct::DirectCompletionClient::direct_completion`. Consumer class: this module's own unit tests -- this function is exercised at crates/lash-core/src/direct.rs::tests::direct_client_complete_delegates_to_provider_and_returns_response#`DirectRequest::json(\"direct-model\", \"answer as json\")`, not by any example, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::direct::DirectRequest::json_schema"
@@ -31998,33 +31998,6 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::provider::ProviderComponents::with_failure_classifier` directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::new`. Consumer class: the first-party provider crates -- this function is exercised in-repo at crates/lash-provider-openai/src/codex.rs::CodexProvider::into_components#`.with_failure_classifier(std::sync::Arc::new(CodexFailureClassifier))`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash::provider::ProviderFactory"
-kind = "trait"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::ProviderFactory"]
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::provider::ProviderFactory to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::provider::ProviderFactory::deserialize"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::ProviderFactory::deserialize"]
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::provider::ProviderFactory::deserialize to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::provider::ProviderFactory::kind"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::ProviderFactory::kind"]
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::provider::ProviderFactory::kind to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::provider::ProviderFailureClassifier"
 kind = "trait"
 availability = "default+all-features"
@@ -32237,15 +32210,6 @@ aliases = ["lash_core::facade_support::ProviderHandle::set_options", "lash_core:
 area = "plugins"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::provider::ProviderHandle::set_options` directly; the gate reaches the same item a second time through `lash_core::TurnContext::set_provider`. Consumer class: the documentation-snippet example host and core runtime internals -- this function is exercised in-repo at examples/docs-snippets/src/architecture_providers.rs::AdmissionGate::set_options#`self.inner.set_options(options);`, crates/lash-core/src/direct.rs::tests::direct_client_provider_accessors_expose_owned_provider_handle#`client.provider_mut().set_options(options.clone());`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
-
-[[api]]
-symbol = "lash::provider::ProviderHandle::to_spec"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::ProviderHandle::to_spec", "lash_core::provider::handle::ProviderHandle::to_spec"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::provider::ProviderHandle::to_spec` directly; the gate reaches the same item a second time through `lash_core::TurnContext::set_provider`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/direct.rs::tests::direct_client_provider_accessors_expose_owned_provider_handle#`client.provider().to_spec().config,`, crates/lash-core/src/provider/tests.rs::transport_mutations_are_visible_after_completion_returns#`handle.to_spec().config[\"marker\"],`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::unconfigured"
@@ -32728,33 +32692,6 @@ disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:234#.throttle_wait_budget_ms(30_000)"
 assertion = "examples/docs-snippets/src/architecture_providers.rs:308#assert_eq!(options_wire[\"reliability\"][\"retry\"][\"max_attempts\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/architecture_providers.rs::asserted_examples::provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values#`.max_attempts(6)`; the assertion at examples/docs-snippets/src/architecture_providers.rs::asserted_examples::provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values#`ProviderOptions::llm_timeouts(&options).request_timeout,` in `provider_policy_resolves_host_capabilities_into_runtime_limits_and_wire_values` observes that `options_wire[\"reliability\"][\"retry\"][\"max_attempts\"]` equals `3`."
-
-[[api]]
-symbol = "lash::provider::ProviderSpec"
-kind = "struct"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::ProviderSpec", "lash_core::provider::spec::ProviderSpec"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::provider::ProviderSpec` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::to_spec` because its canonical identity is the lash-core one. Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/provider/handle.rs::ProviderHandle::complete_prepared#`Ok(result) => (result, None),`, crates/lash-core/src/provider/handle.rs::ProviderHandle::complete_prepared#`Err(payload) => {`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::provider::ProviderSpec::config"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::ProviderSpec::config", "lash_core::provider::spec::ProviderSpec::config"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::provider::ProviderSpec::config` directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::to_spec`. Consumer class: the first-party provider crates and core runtime internals -- this field is exercised in-repo at crates/lash-provider-openai/src/codex.rs::CodexProvider::build_request_body#`if let Some(config) = policy.thinking {`, crates/lash-provider-openai/src/codex.rs::CodexProviderFactory::deserialize#`serde_json::from_value(config).map_err(|err| err.to_string())?;`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::provider::ProviderSpec::kind"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::ProviderSpec::kind", "lash_core::provider::spec::ProviderSpec::kind"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::provider::ProviderSpec::kind` directly; the gate reaches the same item a second time through `lash_core::provider::handle::ProviderHandle::to_spec`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/provider/traits.rs::DefaultProviderFailureClassifier::classify#`failure.kind,`, crates/lash-core/src/provider/traits.rs::DefaultProviderFailureClassifier::classify#`failure.kind,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::provider::ReasoningCapability"
@@ -71822,7 +71759,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-test-only"
-usage = "crates/lash-provider-openai/src/tests.rs:1108#lash_core::facade_support::ProviderSchemaCapabilities::bedrock_claude(),"
+usage = "crates/lash-provider-openai/src/tests.rs:1071#lash_core::facade_support::ProviderSchemaCapabilities::bedrock_claude(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]

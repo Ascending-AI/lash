@@ -640,13 +640,6 @@ impl ProviderHandle {
             .await
             .unwrap_or_else(provider_close_panicked)
     }
-
-    pub fn to_spec(&self) -> ProviderSpec {
-        ProviderSpec {
-            kind: self.kind().to_string(),
-            config: self.components.provider.serialize_config(),
-        }
-    }
 }
 
 fn provider_close_panicked(
@@ -969,14 +962,6 @@ impl Clone for ProviderHandle {
         }
     }
 }
-
-impl PartialEq for ProviderHandle {
-    fn eq(&self, other: &Self) -> bool {
-        self.kind() == other.kind() && self.to_spec().config == other.to_spec().config
-    }
-}
-
-impl Eq for ProviderHandle {}
 
 /// Placeholder provider used by runtime policy defaults before a host resolver
 /// installs the executable provider. Every transport-level method errors;

@@ -277,10 +277,8 @@ pub mod facade_support {
     pub use crate::provider::ModelEffortValidationCategory;
     pub use crate::provider::Provider;
     pub use crate::provider::ProviderComponents;
-    pub use crate::provider::ProviderFactory;
     pub use crate::provider::ProviderHandle;
     pub use crate::provider::ProviderOptions;
-    pub use crate::provider::ProviderSpec;
     pub use crate::provider::SingleProviderResolver;
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;

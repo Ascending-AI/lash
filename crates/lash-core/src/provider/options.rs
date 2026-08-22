@@ -334,8 +334,8 @@ pub struct ProviderRetryPolicy {
     /// the host accepts that a hostile header can stall a completion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_cap_ms: Option<u64>,
-    /// Cumulative time [`ProviderHandle::complete`] may spend honoring
-    /// provider throttle waits — a retryable [`ProviderFailureKind::Quota`]
+    /// Cumulative time [`ProviderHandle::complete`](super::ProviderHandle::complete)
+    /// may spend honoring provider throttle waits — a retryable [`ProviderFailureKind::Quota`]
     /// failure carrying `Retry-After` — without consuming retry attempts.
     /// Only waits of at least one second qualify, and each deferred wait
     /// charges what it actually waits. No more than eight calls are deferred;

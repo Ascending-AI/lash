@@ -59,8 +59,8 @@ into attempt exhaustion.
   independently of `Retry-After`; after either courtesy bound is exhausted,
   throttles count as ordinary retryable failures.
 - Nothing in core recognizes an admission decorator, so nothing in core can
-  observe or persist one: hosts own the wrapper's metrics, and a provider
-  rebuilt from a `ProviderSpec` comes back unwrapped.
+  observe or persist one: hosts own the wrapper's metrics, and a provider a
+  host rebuilds from its own stored config comes back unwrapped.
 
 ## Considered Alternatives
 

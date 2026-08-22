@@ -36,7 +36,7 @@
             <div class="mermaid">
 flowchart TD
   CLI["external Host Application"] --> Config["host-local config"]
-  Config --> Providers["host-local ProviderSpec -> ProviderHandle"]
+  Config --> Providers["host-local provider config -> ProviderHandle"]
   Providers --> OpenAI["OpenAI-compatible<br/>Responses + Chat Completions"]
   Providers --> Codex["OpenAI Codex OAuth<br/>chatgpt.com backend responses"]
   Providers --> Anthropic["Anthropic Messages<br/>/v1/messages"]

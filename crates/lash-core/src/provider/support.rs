@@ -12,8 +12,8 @@ pub(super) use crate::llm::types::{
     ProviderReplayOriginConflict, ProviderRouteIdentity, RetryDecision,
 };
 
+#[cfg(test)]
 pub(super) use super::handle::*;
 pub(super) use super::options::*;
 pub(super) use super::rate_limit::*;
-pub(super) use super::spec::*;
 pub(super) use super::traits::*;

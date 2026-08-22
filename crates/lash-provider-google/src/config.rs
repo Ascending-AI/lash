@@ -1,6 +1,5 @@
 //! Provider construction: the [`GoogleOAuthProvider`] struct, its builders,
-//! endpoint-URL helpers, the uploaded-attachment cache types, and the
-//! [`GoogleOAuthProviderFactory`].
+//! endpoint-URL helpers, and the uploaded-attachment cache types.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -250,66 +249,6 @@ impl GoogleOAuthProvider {
     }
 }
 
-#[derive(Deserialize)]
-struct GoogleProviderConfig {
-    access_token: String,
-    refresh_token: String,
-    expires_at: u64,
-    #[serde(flatten)]
-    oauth_client: GoogleOAuthClient,
-    #[serde(default = "default_code_assist_endpoint")]
-    endpoint: String,
-    #[serde(default = "default_code_assist_api_version")]
-    api_version: String,
-    #[serde(default)]
-    project_id: Option<String>,
-    #[serde(default)]
-    options: ProviderOptions,
-    #[serde(default = "default_stream_termination")]
-    stream_termination: StreamTermination,
-}
-
-fn default_code_assist_endpoint() -> String {
-    CODE_ASSIST_ENDPOINT.to_string()
-}
-
-fn default_code_assist_api_version() -> String {
-    CODE_ASSIST_API_VERSION.to_string()
-}
-
-fn default_stream_termination() -> StreamTermination {
-    StreamTermination::EofTolerated
-}
-
-pub struct GoogleOAuthProviderFactory;
-
-impl ProviderFactory for GoogleOAuthProviderFactory {
-    fn kind(&self) -> &'static str {
-        "google_oauth"
-    }
-    fn deserialize(&self, config: serde_json::Value) -> Result<ProviderComponents, String> {
-        let cfg: GoogleProviderConfig = serde_json::from_value(config).map_err(|err| {
-            format!(
-                "Google provider config is invalid ({err}). Re-create the provider with \
-                 `oauth_client_id` and `oauth_client_secret` from the host's Google OAuth app \
-                 registration."
-            )
-        })?;
-        Ok(GoogleOAuthProvider::new(
-            cfg.access_token,
-            cfg.refresh_token,
-            cfg.expires_at,
-            cfg.oauth_client,
-        )
-        .with_endpoint(cfg.endpoint)
-        .with_api_version(cfg.api_version)
-        .with_project_id(cfg.project_id)
-        .with_options(cfg.options)
-        .with_stream_termination(cfg.stream_termination)
-        .into_components())
-    }
-}
-
 #[cfg(test)]
 mod credential_tests {
     use super::*;
@@ -402,23 +341,5 @@ mod credential_tests {
         assert_eq!(config["oauth_client_secret"], "oauth-client-secret");
         assert_eq!(config["endpoint"], "https://code-assist.example");
         assert_eq!(config["api_version"], "v2");
-    }
-
-    #[test]
-    fn google_legacy_config_without_oauth_credentials_is_rejected_actionably() {
-        let error = GoogleOAuthProviderFactory
-            .deserialize(serde_json::json!({
-                "access_token": "access",
-                "refresh_token": "refresh",
-                "expires_at": 0,
-            }))
-            .expect_err("legacy provider config must fail closed");
-
-        assert_eq!(
-            error,
-            "Google provider config is invalid (missing field `oauth_client_id`). Re-create the \
-             provider with `oauth_client_id` and `oauth_client_secret` from the host's Google \
-             OAuth app registration."
-        );
     }
 }
