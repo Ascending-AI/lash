@@ -25658,7 +25658,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessChangeHub::subscribe", "lash_core::runtime::process::awaiter::change_hub::ProcessChangeHub::subscribe"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessChangeHub::subscribe` directly; the gate reaches the same item a second time through `lash_core::runtime::process_work_driver::ProcessWorkDriver::from_watched`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/process/awaiter.rs::ProcessAwaiter::await_event_inner#`let mut rx = hub.subscribe(process_id);`, crates/lash-core/src/runtime/process/awaiter.rs::ProcessAwaiter::await_terminal_inner#`let mut rx = hub.subscribe(process_id);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessChangeHub::subscribe` directly; the gate reaches the same item a second time through `lash_core::runtime::process_work_driver::ProcessWorkDriver::from_watched`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/process/awaiter.rs::ProcessAwaiter::wait_for#`let mut rx = hub.subscribe(process_id);`, crates/lash-core/src/runtime/process/awaiter.rs::ProcessAwaiter::wait_for#`if let Some(hub) = self.hub.as_ref() {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::process::ProcessCompletionAuthority"

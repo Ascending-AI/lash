@@ -114,41 +114,17 @@ impl ProcessWorkDriver {
         &self,
         process_id: &str,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        let record = match self.registry.get_process(process_id).await {
-            Ok(Some(record)) => record,
-            Ok(None) => {
-                return Err(PluginError::Session(format!(
-                    "unknown process `{process_id}`"
-                )));
+        if let Some(attach) = self.attach.as_ref() {
+            if let Some(output) = self.awaiter.try_terminal(process_id).await? {
+                return Ok(output);
             }
-            Err(PluginError::ProcessNoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            }) => {
-                return Ok(ProcessAwaitOutput::NoLongerRetained {
-                    terminal_label,
-                    pruned_at_ms,
-                });
-            }
-            Err(error) => return Err(error),
-        };
-        if let Some(output) = record.outcome.as_ref() {
-            return Ok(output.clone());
-        }
-        // Refuse before parking: nothing can ever terminalize a caller-departed
-        // row, so the wait would never resolve (FIG-1383).
-        if record.status == crate::ProcessStatus::CallerDeparted {
-            return Err(PluginError::ProcessCallerDeparted {
-                process_id: process_id.to_string(),
-            });
-        }
-        crate::runtime::process_worker::release_process_execution_permit_while(async {
-            if let Some(attach) = self.attach.as_ref() {
-                return attach.await_terminal(process_id).await;
-            }
+            crate::runtime::process_worker::release_process_execution_permit_while(
+                attach.await_terminal(process_id),
+            )
+            .await
+        } else {
             self.awaiter.await_terminal(process_id).await
-        })
-        .await
+        }
     }
 
     /// Wait for the first event of `event_type` on `process_id` with a sequence
