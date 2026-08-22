@@ -588,7 +588,7 @@ jobs:
       - name: Test workspace shard
         run: |
           # shellcheck disable=SC2086
-          cargo nextest run --workspace --locked ${LASH_CI_FEATURES} \
+          cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
             --no-fail-fast --partition count:${{ matrix.shard }}/4
 
       - name: Report sccache stats
@@ -1034,7 +1034,7 @@ jobs:
       - name: Test cross-backend store differential
         if: matrix.postgres == '16'
         run: >-
-          cargo nextest run -p lash-sim
+          cargo nextest run --profile ci -p lash-sim
           --test cross_backend_store_differential
           --locked -j1 --no-capture --run-ignored all
         env:
