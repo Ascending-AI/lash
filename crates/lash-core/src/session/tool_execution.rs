@@ -1,5 +1,4 @@
 use super::execution_context::RuntimeExecutionContext;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use crate::tool_dispatch::{
     ToolAttemptEffectIdentity, ToolCallLaunch, ToolDispatchOutcome, ToolPreparationOutcome,
     coordinate_tool_invocation, finalize_tool_result_with_execution_context,
@@ -380,6 +379,9 @@ impl ToolBatchReplies {
 
 #[path = "tool_execution/batch.rs"]
 mod batch;
+#[cfg(test)]
+#[path = "tool_execution/turn_cancel_gate_tests.rs"]
+mod turn_cancel_gate_tests;
 
 impl RuntimeExecutionContext<'_> {
     async fn emit_tool_call_started(
@@ -670,17 +672,10 @@ impl RuntimeExecutionContext<'_> {
                     invocation,
                     crate::RuntimeEffectCommand::AwaitEvent { key: pending.key },
                 ),
-                crate::RuntimeEffectLocalExecutor::await_event_with_clock(
-                    cancellation,
+                crate::RuntimeEffectLocalExecutor::await_event_under(
+                    &self.turn_cancel_wait(cancellation),
                     deadline,
                     std::sync::Arc::clone(&self.dispatch.clock),
-                )
-                .with_turn_cancel_scope(
-                    self.dispatch
-                        .effect_controller
-                        .scoped()
-                        .execution_scope()
-                        .clone(),
                 ),
             )
             .await;
@@ -743,16 +738,9 @@ impl RuntimeExecutionContext<'_> {
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         let _phase = self.named_phase("process.await_handle");
         let cancellation = cancellation.unwrap_or_default();
-        let turn_cancel_scope = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .execution_scope()
-            .clone();
-        let mut process_scope = self.process_scope(parent_invocation);
-        if self.observe_turn_cancel {
-            process_scope = process_scope.with_turn_cancellation(cancellation, turn_cancel_scope);
-        }
+        let process_scope = self
+            .process_scope(parent_invocation)
+            .with_turn_cancellation(&self.turn_cancel_wait(cancellation));
         crate::runtime::release_process_execution_permit_while(
             self.dispatch
                 .processes

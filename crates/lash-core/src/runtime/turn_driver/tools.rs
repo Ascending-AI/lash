@@ -1,5 +1,4 @@
 use super::*;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 
 pub(in crate::runtime) struct ToolBatchRunOutcome {
     pub launches: Vec<crate::runtime::ToolCallLaunch>,
@@ -263,12 +262,11 @@ impl RuntimeTurnDriver<'_> {
             .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
-                crate::RuntimeEffectLocalExecutor::await_event_with_clock(
-                    cancel.clone(),
+                crate::RuntimeEffectLocalExecutor::await_event_under(
+                    &scoped_effect_controller.turn_cancel_wait(cancel.clone()),
                     deadline,
                     Arc::clone(&self.host.core.clock),
-                )
-                .with_turn_cancel_scope(scoped_effect_controller.execution_scope().clone()),
+                ),
             )
             .await?;
         RuntimeEffectOutcome::into_await_event(outcome)

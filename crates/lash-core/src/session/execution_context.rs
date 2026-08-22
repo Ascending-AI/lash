@@ -452,6 +452,29 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    /// The complete turn-cancel trio for one wait built from this execution:
+    /// the token the wait races against, whether this execution observes turn
+    /// cancellation, and the execution scope its turn-cancel gate registers
+    /// under.
+    ///
+    /// Every wait this execution builds takes the trio whole. A wait that took
+    /// only the scope inherited the executor's observing default and attached
+    /// the turn-cancel gate an execution built with
+    /// `without_turn_cancel_observation` had switched off.
+    pub(crate) fn turn_cancel_wait(
+        &self,
+        cancellation: CancellationToken,
+    ) -> crate::runtime::TurnCancelWait {
+        if self.observe_turn_cancel {
+            self.dispatch
+                .effect_controller
+                .scoped()
+                .turn_cancel_wait(cancellation)
+        } else {
+            crate::runtime::TurnCancelWait::unobserved(cancellation)
+        }
+    }
+
     pub(crate) fn with_process_work_driver(
         mut self,
         process_work_driver: Option<crate::ProcessWorkDriver>,
@@ -650,18 +673,10 @@ impl<'run> RuntimeExecutionContext<'run> {
                     invocation,
                     crate::RuntimeEffectCommand::AwaitEvent { key },
                 ),
-                crate::RuntimeEffectLocalExecutor::await_event_with_clock(
-                    cancellation,
+                crate::RuntimeEffectLocalExecutor::await_event_under(
+                    &self.turn_cancel_wait(cancellation),
                     None,
                     std::sync::Arc::clone(&self.dispatch.clock),
-                )
-                .with_turn_cancel_observation(self.observe_turn_cancel)
-                .with_turn_cancel_scope(
-                    self.dispatch
-                        .effect_controller
-                        .scoped()
-                        .execution_scope()
-                        .clone(),
                 ),
             )
             .await?;
@@ -794,17 +809,9 @@ impl<'run> RuntimeExecutionContext<'run> {
                     invocation,
                     crate::RuntimeEffectCommand::Sleep { duration_ms },
                 ),
-                crate::RuntimeEffectLocalExecutor::sleep_with_clock(
-                    cancellation,
+                crate::RuntimeEffectLocalExecutor::sleep_under(
+                    &self.turn_cancel_wait(cancellation),
                     std::sync::Arc::clone(&self.dispatch.clock),
-                )
-                .with_turn_cancel_observation(self.observe_turn_cancel)
-                .with_turn_cancel_scope(
-                    self.dispatch
-                        .effect_controller
-                        .scoped()
-                        .execution_scope()
-                        .clone(),
                 ),
             )
             .await?;

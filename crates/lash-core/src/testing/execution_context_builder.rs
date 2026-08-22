@@ -27,6 +27,11 @@ pub(crate) struct TestExecutionContextBuilder<'run> {
     runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     clock: Arc<dyn crate::Clock>,
+    /// Protocol factories the session is built from. `None` takes the code
+    /// protocol these contexts default to; lash-core's own `cfg(test)` binary
+    /// already carries a builtin protocol factory and passes an empty vec so
+    /// the two do not both claim the protocol-session capability.
+    plugin_factories: Option<Vec<Arc<dyn crate::plugin::PluginFactory>>>,
 }
 
 pub(crate) struct BuiltTestExecutionContext<'run> {
@@ -59,6 +64,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             runtime_parent_invocation: None,
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             clock: Arc::new(crate::SystemClock),
+            plugin_factories: None,
         }
     }
 
@@ -148,15 +154,31 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
+    /// Only lash-core's own `cfg(test)` binary needs this: its builtin factory
+    /// list already carries a protocol factory, so a context built there must
+    /// not add the code protocol on top. Outside that binary the default is the
+    /// only correct choice, and the setter does not exist.
+    #[cfg(test)]
+    pub(crate) fn plugin_factories(
+        mut self,
+        factories: Vec<Arc<dyn crate::plugin::PluginFactory>>,
+    ) -> Self {
+        self.plugin_factories = Some(factories);
+        self
+    }
+
     pub(crate) fn clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
         self.clock = clock;
         self
     }
 
     pub(crate) fn build(self) -> BuiltTestExecutionContext<'run> {
-        let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
-            .build_session(&self.session_id, None)
-            .expect("test plugin session");
+        let plugins = crate::plugin::PluginHost::new(
+            self.plugin_factories
+                .unwrap_or_else(test_code_protocol_factories),
+        )
+        .build_session(&self.session_id, None)
+        .expect("test plugin session");
         let (sessions, session_lifecycle, session_graph): (
             Arc<dyn crate::plugin::SessionStateService>,
             Arc<dyn crate::plugin::SessionLifecycleService>,

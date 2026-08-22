@@ -1,5 +1,4 @@
 use super::*;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::sync::Arc;
 
 impl RuntimeSessionServices {
@@ -166,20 +165,16 @@ impl RuntimeSessionServices {
                             invocation,
                             crate::RuntimeEffectCommand::AwaitEvent { key: pending.key },
                         ),
-                        crate::RuntimeEffectLocalExecutor::await_event_with_clock(
-                            await_cancellation.clone(),
+                        crate::RuntimeEffectLocalExecutor::await_event_under(
+                            &dispatch
+                                .effect_controller
+                                .scoped()
+                                .turn_cancel_wait(await_cancellation.clone()),
                             pending
                                 .pending
                                 .deadline
                                 .map(|duration| dispatch.clock.now() + duration),
                             std::sync::Arc::clone(&dispatch.clock),
-                        )
-                        .with_turn_cancel_scope(
-                            dispatch
-                                .effect_controller
-                                .scoped()
-                                .execution_scope()
-                                .clone(),
                         ),
                     ),
                 )

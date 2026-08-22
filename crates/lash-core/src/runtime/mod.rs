@@ -305,7 +305,6 @@ pub use builder::EmbeddedRuntimeBuilder;
 pub use causal::process_event_invocation;
 pub(crate) use causal::tool_retry_sleep_invocation;
 pub use clock::{Clock, SystemClock};
-pub(crate) use effect::RuntimeEffectControllerHandle;
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
     BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet,
@@ -324,6 +323,7 @@ pub use effect::{
     ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
     refuse_unhonored_group_membership, validate_replayed_effect_envelope,
 };
+pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
 #[doc(hidden)]

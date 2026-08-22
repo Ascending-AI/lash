@@ -37,12 +37,11 @@ impl<'scope> ProcessOpScope<'scope> {
         self
     }
 
-    pub(crate) fn with_turn_cancellation(
-        mut self,
-        cancellation: tokio_util::sync::CancellationToken,
-        scope: crate::ExecutionScope,
-    ) -> Self {
-        self.turn_cancellation = Some(crate::ProcessTurnCancellation::new(cancellation, scope));
+    /// Attaches the turn cancellation this operation observes, taken from the
+    /// complete turn-cancel trio so an operation that must not observe the
+    /// turn gate cannot be handed a token-and-scope pair anyway.
+    pub(crate) fn with_turn_cancellation(mut self, wait: &crate::runtime::TurnCancelWait) -> Self {
+        self.turn_cancellation = wait.process_turn_cancellation();
         self
     }
 
