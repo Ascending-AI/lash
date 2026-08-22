@@ -21,8 +21,16 @@ cargo doc -p lash-runtime -p lash-core --no-deps --all-features --locked
 # ADR 0051's member-level closure. Generate rustdoc JSON instead so the
 # compiler resolves root exports, ownership, visibility, and inherent impls;
 # the targeted check then fails every future undocumented core-owned member.
-RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="${RUSTDOCFLAGS} -Z unstable-options --output-format json" \
-  cargo doc -p lash-core --no-deps --all-features --locked
 target_dir="$({ cargo metadata --no-deps --format-version 1; } | \
   python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-python3 scripts/check_core_public_member_docs.py "$target_dir/doc/lash_core.json"
+# Routed through the content-addressed cache: a later run on an unchanged tree
+# reuses the document this pass produced. The key covers the rustdoc command
+# line verbatim, so this pass keeps its own entry rather than sharing the
+# API-coverage gate's differently-invoked one -- the cheap, honest direction.
+# The member check below always runs against whichever copy the cache names.
+core_json="$(RUSTDOCFLAGS="${RUSTDOCFLAGS} -Z unstable-options --output-format json" \
+  python3 scripts/rustdoc_json_cache.py \
+    --package lash-core --crate-name lash_core \
+    --destination "$target_dir/doc/lash_core.json" \
+    -- cargo doc -p lash-core --no-deps --all-features --locked)"
+python3 scripts/check_core_public_member_docs.py "$core_json"

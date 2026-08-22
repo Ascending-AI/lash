@@ -243,6 +243,12 @@ import tomllib
 from typing import Any, NamedTuple
 
 
+SCRIPTS = Path(__file__).resolve().parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import rustdoc_json_cache  # noqa: E402  (sibling script, located above)
+
 REPO = Path(__file__).resolve().parents[1]
 INVENTORY = REPO / "docs" / "api-example-coverage.toml"
 TARGET = Path(os.environ.get("CARGO_TARGET_DIR", REPO / "target"))
@@ -869,19 +875,18 @@ def rustdoc(
         command.append("--document-hidden-items")
     env = os.environ.copy()
     env["RUSTC_BOOTSTRAP"] = "1"
-    completed = subprocess.run(
-        command,
-        cwd=REPO,
-        env=env,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+    # Generation is the whole cost of this gate on an unchanged tree; the walk
+    # below still runs, against whichever copy of the compiler's answer the
+    # cache hands back.
+    document = rustdoc_json_cache.ensure(
+        repo=REPO,
+        package=package,
+        crate_name=crate_name,
+        command=command,
+        destination=TARGET / "doc" / f"{crate_name}.json",
+        generate=lambda: rustdoc_json_cache.run_command(command, cwd=REPO, env=env),
     )
-    if completed.returncode:
-        print(completed.stdout, file=sys.stderr, end="")
-        completed.check_returncode()
-    with (TARGET / "doc" / f"{crate_name}.json").open("rb") as handle:
+    with document.open("rb") as handle:
         return json.load(handle)
 
 

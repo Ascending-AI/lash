@@ -16,6 +16,14 @@ from pathlib import Path
 from typing import Any
 
 
+#: The fewest root-export inherent members a genuine lash-core document can
+#: hold.  The honest number is in the hundreds (722 at the time of writing);
+#: anything near zero means the document is empty, truncated, or otherwise not
+#: lash-core, and a check that reports "0 documented, 0 missing" over it would
+#: be passing vacuously rather than passing.  Raise this floor when the real
+#: number moves far enough that it stops being a tripwire.
+MINIMUM_INSPECTED_MEMBERS = 400
+
 DOCUMENTED_MEMBER_KINDS = {"function", "assoc_const"}
 ROOT_MEMBER_TYPE_KINDS = {"struct", "enum", "union"}
 
@@ -89,6 +97,13 @@ def main() -> int:
     with args.rustdoc_json.open("rb") as source:
         document = json.load(source)
     inspected, missing = undocumented_root_members(document)
+    if inspected < MINIMUM_INSPECTED_MEMBERS:
+        print(
+            f"lash-core public member rustdoc: only {inspected} member(s) inspected, "
+            f"below the {MINIMUM_INSPECTED_MEMBERS} floor -- "
+            f"{args.rustdoc_json} is not a usable lash-core document"
+        )
+        return 1
     if missing:
         print(
             "lash-core root-export inherent members missing integrator-class rustdoc:"
