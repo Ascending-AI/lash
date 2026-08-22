@@ -202,10 +202,10 @@ where
                     self.emit_instant(record, "lash.turn.started", None);
                 }
             }
-            TraceEvent::TurnCompleted { status, .. } => {
+            TraceEvent::TurnCompleted { .. } => {
                 let ended = turn_key(&record.context)
                     .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, status != "failed"));
+                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
                 if !ended {
                     self.emit_instant(record, "lash.turn.completed", None);
                 }
@@ -220,7 +220,7 @@ where
             TraceEvent::LlmCallCompleted { response, .. } => {
                 let ended = llm_key(&record.context)
                     .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, true));
+                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
                 if !ended {
                     self.emit_instant(record, "lash.llm", Some(response.duration_ms));
                 }
@@ -228,7 +228,7 @@ where
             TraceEvent::LlmCallFailed { .. } => {
                 let ended = llm_key(&record.context)
                     .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, false));
+                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
                 if !ended {
                     self.emit_instant(record, "lash.llm", None);
                 }
@@ -263,14 +263,10 @@ where
                     self.emit_instant(record, "lash.tool.started", None);
                 }
             }
-            TraceEvent::ToolCallCompleted {
-                duration_ms,
-                output,
-                ..
-            } => {
+            TraceEvent::ToolCallCompleted { duration_ms, .. } => {
                 let ended = tool_key(&record.event)
                     .as_deref()
-                    .is_some_and(|key| self.end_active(key, record, output.is_success()));
+                    .is_some_and(|key| self.end_active(key, record, !record.event.is_failed()));
                 if !ended {
                     self.emit_instant(record, "lash.tool", Some(*duration_ms));
                 }
@@ -1244,18 +1240,7 @@ fn event_type(event: &TraceEvent) -> &'static str {
 }
 
 fn is_error_event(event: &TraceEvent) -> bool {
-    match event {
-        TraceEvent::LlmCallFailed { .. }
-        | TraceEvent::EffectEnvelopeDiff { .. }
-        | TraceEvent::StoreErrorObserved { .. } => true,
-        TraceEvent::JournaledEffectSettled { status, .. }
-        | TraceEvent::DurableTimerResolved { status, .. } => status == "failed",
-        TraceEvent::DurableWaitResolved { resolution, .. } => resolution == "failed",
-        TraceEvent::ToolCallStarted { .. } => false,
-        TraceEvent::ToolCallCompleted { output, .. } => !output.is_success(),
-        TraceEvent::TurnCompleted { status, .. } => status == "failed",
-        _ => false,
-    }
+    event.is_failed()
 }
 
 fn error_status(record: &TraceRecord) -> Status {
@@ -1277,6 +1262,18 @@ fn error_status(record: &TraceRecord) -> Status {
         }
         TraceEvent::DurableTimerResolved { .. } => Status::error("durable timer failed"),
         TraceEvent::StoreErrorObserved { message, .. } => Status::error(message.clone()),
+        TraceEvent::LanguageExecution { event, .. } => match &event.payload {
+            crate::TraceLanguageExecutionPayload::NodeFailed { error, .. } => {
+                Status::error(error.clone())
+            }
+            crate::TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => Status::error(
+                error
+                    .as_deref()
+                    .unwrap_or("language execution failed")
+                    .to_string(),
+            ),
+            _ => Status::error("language execution failed"),
+        },
         _ => Status::error("lash trace event failed"),
     }
 }
@@ -1429,5 +1426,83 @@ mod tests {
         .unwrap();
 
         assert!(sink.active.lock_recover().is_empty());
+    }
+
+    #[test]
+    fn failed_language_execution_yields_error_span() {
+        use crate::{
+            TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
+            TraceLanguageExecutionStatus, TraceRuntimeScope, TraceRuntimeSubject,
+        };
+        use opentelemetry_sdk::trace::{
+            InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor,
+        };
+
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+            .build();
+        let tracer = provider.tracer("test");
+        let sink = OtelTraceSink::new(tracer);
+
+        let identity = TraceLanguageExecutionIdentity {
+            scope: TraceRuntimeScope::new("s1"),
+            subject: TraceRuntimeSubject::Process {
+                process_id: "p1".to_string(),
+            },
+            module_ref: "module".to_string(),
+            entry_kind: "process".to_string(),
+            entry_ref: Some("component:0".to_string()),
+            entry_name: "main".to_string(),
+        };
+
+        // 1. Failed node execution
+        let failed_node = TraceRecord::new(
+            TraceContext::default().for_session("s1"),
+            TraceEvent::LanguageExecution {
+                language: "lashlang".to_string(),
+                event: TraceLanguageExecution {
+                    event_key: "process:p1:node:n1:1:failed".to_string(),
+                    identity: identity.clone(),
+                    payload: TraceLanguageExecutionPayload::NodeFailed {
+                        node_id: "n1".to_string(),
+                        node_kind: "resource_operation".to_string(),
+                        label: "eval".to_string(),
+                        occurrence: 1,
+                        error: "syntax error".to_string(),
+                    },
+                },
+            },
+        );
+        sink.append(&failed_node).unwrap();
+
+        // 2. Failed execution finished
+        let failed_execution = TraceRecord::new(
+            TraceContext::default().for_session("s1"),
+            TraceEvent::LanguageExecution {
+                language: "lashlang".to_string(),
+                event: TraceLanguageExecution {
+                    event_key: "process:p1:finished".to_string(),
+                    identity,
+                    payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                        status: TraceLanguageExecutionStatus::Failed,
+                        error: Some("execution crashed".to_string()),
+                    },
+                },
+            },
+        );
+        sink.append(&failed_execution).unwrap();
+
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 2);
+
+        assert_eq!(
+            spans[0].status,
+            opentelemetry::trace::Status::error("syntax error")
+        );
+        assert_eq!(
+            spans[1].status,
+            opentelemetry::trace::Status::error("execution crashed")
+        );
     }
 }

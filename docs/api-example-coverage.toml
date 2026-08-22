@@ -61274,6 +61274,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
 
 [[api]]
+symbol = "lash::tracing::TraceEvent::is_failed"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::TraceEvent::is_failed"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
+
+[[api]]
 symbol = "lash::tracing::TraceLabelMetadata"
 kind = "struct"
 availability = "default+all-features"
@@ -65840,7 +65849,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TokenUsage"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-trace/src/otel.rs:322#TraceEvent::TokenUsage { .. } => self.emit_instant(record, \"lash.token_usage\", None),"
+usage = "crates/lash-trace/src/otel.rs:318#TraceEvent::TokenUsage { .. } => self.emit_instant(record, \"lash.token_usage\", None),"
 
 [[api]]
 symbol = "lash::usage::TokenUsage::cache_read_input_tokens"
