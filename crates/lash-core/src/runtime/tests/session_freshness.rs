@@ -38,6 +38,62 @@ async fn append_history(runtime: &mut LashRuntime, depth: usize) {
 }
 
 #[tokio::test]
+async fn frame_switch_refreshes_policy_readers_from_target_frame() {
+    let (mut runtime, _store) = freshness_runtime().await;
+    let initial_frame_node_id = runtime
+        .state
+        .current_frame_node_id
+        .clone()
+        .expect("runtime initializes the initial frame");
+    let initial_policy = runtime.state.effective_policy().clone();
+
+    let opened = runtime
+        .open_agent_frame(crate::OpenAgentFrameRequest::new(
+            "changed-policy-frame",
+            crate::AgentFrameReason::new("test"),
+        ))
+        .await
+        .expect("open a second agent frame");
+    assert!(opened.opened, "the second frame must be newly opened");
+
+    let changed_model = crate::ModelSpec::builder("changed-frame-model")
+        .context_window_tokens(123_456)
+        .build()
+        .expect("changed model");
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(changed_model.clone()),
+            ..Default::default()
+        })
+        .await
+        .expect("change the live policy on the second frame");
+    assert_eq!(runtime.state.effective_policy().model, changed_model);
+
+    runtime
+        .open_agent_frame(crate::OpenAgentFrameRequest::new(
+            "initial-frame",
+            crate::AgentFrameReason::new("test"),
+        ))
+        .await
+        .expect("switch back to the pre-existing initial frame");
+
+    assert_eq!(
+        runtime.state.current_frame_node_id.as_deref(),
+        Some(initial_frame_node_id.as_str())
+    );
+    assert_eq!(
+        runtime.state.effective_policy(),
+        &initial_policy,
+        "the state accessor must expose the switched-to frame policy"
+    );
+    assert_eq!(
+        runtime.session_policy(),
+        initial_policy,
+        "session_policy must expose the switched-to frame policy"
+    );
+}
+
+#[tokio::test]
 async fn unchanged_session_freshness_is_independent_of_history_depth() {
     for depth in [10, 256] {
         let (mut runtime, store) = freshness_runtime().await;
@@ -125,7 +181,7 @@ async fn resident_refresh_does_not_revert_live_uncommitted_prompt() {
         ))
         .await
         .expect("apply live prompt change");
-    let live_prompt = runtime.policy.prompt.clone();
+    let live_prompt = runtime.state.effective_policy().prompt.clone();
 
     let mut durable_head = store
         .load_session_head_meta()
@@ -143,8 +199,7 @@ async fn resident_refresh_does_not_revert_live_uncommitted_prompt() {
         .await
         .expect("refresh resident graph");
 
-    assert_eq!(runtime.policy.prompt, live_prompt);
-    assert_eq!(runtime.state.policy.prompt, live_prompt);
+    assert_eq!(runtime.state.effective_policy().prompt, live_prompt);
 }
 
 #[tokio::test]
@@ -173,7 +228,7 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
         .expect("apply prompt edit after resident reload");
 
     assert_eq!(
-        runtime.policy.prompt,
+        runtime.state.effective_policy().prompt,
         crate::PromptLayer::new()
             .with_contribution(crate::PromptContribution::guidance(
                 "Durable base",
@@ -220,8 +275,7 @@ async fn resident_refresh_does_not_revert_live_uncommitted_model() {
         .await
         .expect("refresh resident graph");
 
-    assert_eq!(runtime.policy.model, live_model);
-    assert_eq!(runtime.state.policy.model, live_model);
+    assert_eq!(runtime.state.effective_policy().model, live_model);
 }
 
 #[tokio::test]
@@ -255,9 +309,8 @@ async fn resident_refresh_does_not_revert_live_uncommitted_provider() {
         .await
         .expect("refresh resident graph");
 
-    assert_eq!(runtime.policy.provider_id, "live-uncommitted-provider");
     assert_eq!(
-        runtime.state.policy.provider_id,
+        runtime.state.effective_policy().provider_id,
         "live-uncommitted-provider"
     );
 }

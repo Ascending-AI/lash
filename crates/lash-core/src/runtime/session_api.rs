@@ -61,13 +61,12 @@ impl LashRuntime {
     }
     /// Override protocol-owned turn options for this session.
     pub fn set_protocol_turn_options(&mut self, options: crate::ProtocolTurnOptions) {
-        self.state.protocol_turn_options = options.clone();
-        self.protocol_turn_options = options;
+        self.state.protocol_turn_options = options;
     }
 
     /// The durable protocol turn options recorded on the session.
     pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
-        &self.state.protocol_turn_options
+        self.state.effective_protocol_turn_options()
     }
 
     /// Override protocol-owned turn options during materialization.
@@ -75,8 +74,7 @@ impl LashRuntime {
     /// Existing `FrameOpen` nodes are immutable historical snapshots; the next
     /// opened frame captures this live value.
     pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
-        self.state.protocol_turn_options = options.clone();
-        self.protocol_turn_options = options;
+        self.state.protocol_turn_options = options;
     }
 
     /// Run the protocol plugin's materialization hook against this runtime.
@@ -156,7 +154,6 @@ impl LashRuntime {
     pub async fn export_persisted_state(&mut self) -> Result<RuntimeSessionState, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
         let mut state = self.state.clone();
-        state.protocol_turn_options = self.protocol_turn_options.clone();
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
             state.set_tool_state_snapshot(Some(snapshot));
@@ -248,7 +245,7 @@ impl LashRuntime {
         // they reach the next commit boundary. Preserve prompt, model, and
         // provider id as one authority unit; the provider resolver is already
         // live-owned and is not part of the durable head.
-        let live_policy = self.policy.clone();
+        let live_policy = self.state.effective_policy().clone();
         apply_session_head(&mut self.state, &head);
         self.state.policy.prompt = live_policy.prompt;
         self.state.policy.model = live_policy.model;
@@ -259,8 +256,6 @@ impl LashRuntime {
                 source,
             }
         })?;
-        self.policy = self.state.effective_policy().clone();
-        self.protocol_turn_options = self.state.effective_protocol_turn_options().clone();
         self.resident_graph_head_stale
             .store(false, Ordering::Release);
         Ok(())
@@ -460,7 +455,7 @@ impl LashRuntime {
     }
 
     pub(super) fn session_policy(&self) -> SessionPolicy {
-        self.policy.clone()
+        self.state.effective_policy().clone()
     }
 
     pub(super) async fn notify_session_config_changed(
@@ -501,7 +496,7 @@ impl LashRuntime {
         let Ok(services) = self.runtime_session_services() else {
             return;
         };
-        self.policy = session
+        self.state.policy = session
             .plugins()
             .mutate_session_config(
                 SessionConfigChangedContext {
@@ -510,10 +505,9 @@ impl LashRuntime {
                     current,
                     sessions: services.state_service(),
                 },
-                self.policy.clone(),
+                self.state.effective_policy().clone(),
             )
             .await;
-        self.state.policy = self.policy.clone();
     }
 }
 

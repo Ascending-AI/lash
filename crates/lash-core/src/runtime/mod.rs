@@ -1551,7 +1551,6 @@ pub(crate) enum ResidentSessionState {
 /// Runtime session orchestration over host-supplied services and policy.
 pub struct LashRuntime {
     pub(in crate::runtime) session: Option<Session>,
-    pub(in crate::runtime) policy: SessionPolicy,
     pub(in crate::runtime) host: RuntimeHost,
     pub(in crate::runtime) services: RuntimeServices,
     pub(in crate::runtime) state: RuntimeSessionState,
@@ -1565,8 +1564,6 @@ pub struct LashRuntime {
     /// mutex so a `ManagedTurnLease` can release its registration from `Drop`:
     /// a cancelled child turn must never leave a ghost "running turn" behind.
     pub(in crate::runtime) managed_turns: Arc<StdMutex<HashMap<String, ManagedSessionTurn>>>,
-    /// Protocol-owned turn options for this session.
-    pub(in crate::runtime) protocol_turn_options: crate::ProtocolTurnOptions,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here

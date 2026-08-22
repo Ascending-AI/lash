@@ -187,10 +187,7 @@ impl LashRuntime {
             state.policy = policy.clone();
         }
         state.ensure_agent_frame_initialized();
-        state.policy = state.effective_policy().clone();
-        state.protocol_turn_options = state.effective_protocol_turn_options().clone();
-        let policy = state.effective_policy().clone();
-        if policy.model.id.trim().is_empty() {
+        if state.effective_policy().model.id.trim().is_empty() {
             return Err(SessionError::Protocol(
                 "session policy missing model spec; hosts must supply explicit model metadata"
                     .to_string(),
@@ -271,10 +268,8 @@ impl LashRuntime {
             ))
             .await
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        let protocol_turn_options = state.protocol_turn_options.clone();
         Ok(Self {
             session: Some(session),
-            policy,
             host,
             services,
             state,
@@ -282,7 +277,6 @@ impl LashRuntime {
             runtime_lease_executor_id,
             managed_sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_turns: Arc::new(StdMutex::new(HashMap::new())),
-            protocol_turn_options,
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             resident_graph_head_stale: Arc::new(AtomicBool::new(false)),
@@ -594,7 +588,7 @@ impl LashRuntime {
             )
         })?;
         let session_id = self.state.session_id.clone();
-        let policy = self.policy.clone();
+        let policy = self.state.effective_policy().clone();
         // Under the settled-state contract every durable mutation commits at
         // its own boundary (turn final commit, config updates, queued-work
         // drains), so a runtime between boundaries already equals its last

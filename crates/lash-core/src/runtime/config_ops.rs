@@ -57,19 +57,18 @@ impl LashRuntime {
         if let Some(provider) = patch.provider {
             self.host.core.providers.provider_resolver =
                 std::sync::Arc::new(crate::SingleProviderResolver::new(provider.clone()));
-            self.policy.provider_id = provider.kind().to_string();
+            self.state.policy.provider_id = provider.kind().to_string();
         }
         if let Some(model) = patch.model {
-            self.policy.model = model;
+            self.state.policy.model = model;
         }
         if let Some(prompt) = patch.prompt {
-            self.policy.prompt = prompt;
+            self.state.policy.prompt = prompt;
         }
-        mutate_prompt(&mut self.policy.prompt);
+        mutate_prompt(&mut self.state.policy.prompt);
         if let Some(generation) = patch.generation {
-            self.policy.generation = generation.resolve(&self.policy.generation);
+            self.state.policy.generation = generation.resolve(&self.state.policy.generation);
         }
-        self.state.policy = self.policy.clone();
         self.apply_session_config_mutations(previous.clone()).await;
         self.notify_session_config_changed(previous)
             .await

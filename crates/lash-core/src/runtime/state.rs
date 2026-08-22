@@ -979,14 +979,18 @@ impl RuntimeSessionState {
         })
     }
 
-    /// Exposes effective policy to protocol and process-engine implementors while materializing or
-    /// restoring protocol session state.
+    /// Returns the live policy stored in runtime state.
+    ///
+    /// This is a raw field read with no layering and is the single source of truth for live
+    /// policy.
     pub fn effective_policy(&self) -> &SessionPolicy {
         &self.policy
     }
 
-    /// Exposes the protocol options captured for the current agent frame so protocol implementors
-    /// restore the frame's durable turn configuration.
+    /// Returns the live protocol turn options stored in runtime state.
+    ///
+    /// This is a raw field read with no layering and is the single source of truth for live
+    /// protocol turn options.
     pub fn effective_protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         &self.protocol_turn_options
     }

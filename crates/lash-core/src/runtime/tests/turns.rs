@@ -2297,8 +2297,10 @@ async fn turn_provider_override_does_not_persist_into_session_policy_or_agent_fr
 
     assert_eq!(turn.assistant_output.safe_text, "alt response");
     assert_eq!(turn.state.policy.recorded_provider_id(), "mock");
-    assert_eq!(runtime.policy.recorded_provider_id(), "mock");
-    assert_eq!(runtime.state.policy.recorded_provider_id(), "mock");
+    assert_eq!(
+        runtime.state.effective_policy().recorded_provider_id(),
+        "mock"
+    );
     assert!(
         runtime.state.agent_frames.iter().all(|frame| frame
             .assignment
@@ -8498,7 +8500,7 @@ async fn runtime_can_activate_managed_child_session() {
             crate::SessionCreateRequest::child(
                 runtime.session_id(),
                 crate::SessionStartPoint::Empty,
-                runtime.policy.clone(),
+                runtime.state.effective_policy().clone(),
                 crate::PluginOptions::default(),
                 "test",
             )
@@ -8554,7 +8556,7 @@ async fn failed_managed_session_activation_leaves_the_child_activatable() {
             crate::SessionCreateRequest::child(
                 runtime.session_id(),
                 crate::SessionStartPoint::Empty,
-                runtime.policy.clone(),
+                runtime.state.effective_policy().clone(),
                 crate::PluginOptions::default(),
                 "test",
             )

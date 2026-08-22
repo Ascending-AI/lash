@@ -808,8 +808,6 @@ impl LashRuntime {
                         ),
                     )
                 })?;
-            self.policy = durable_state.effective_policy().clone();
-            self.protocol_turn_options = durable_state.effective_protocol_turn_options().clone();
             self.state = durable_state;
             self.graph_loaded_from_store = false;
             self.resident_session_state = ResidentSessionState::Valid;
@@ -1319,8 +1317,7 @@ impl LashRuntime {
             turn_index,
             trace_turn_id,
         } = finish;
-        self.policy = self.state.effective_policy().clone();
-        turn_pipeline.state_mut().policy = self.policy.clone();
+        turn_pipeline.state_mut().policy = self.state.effective_policy().clone();
         turn_pipeline.state_mut().turn_index = turn_index;
 
         if !assembler.token_usage.is_zero() {
