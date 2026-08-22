@@ -4,6 +4,8 @@
 
 accepted
 
+> Historical note (2026-08-21): The workspace-only `lash-trace-viewer` crate was removed; tracing remains available through the typed JSONL schema and sinks.
+
 ## Decision
 
 Per-tool reporting is emitted once, from the shared tool-execution seam, and
@@ -25,7 +27,8 @@ hand.
   it from emission order.
 - **Consumers derive from the typed model.** `TraceEvent::kind()` is the single
   source of truth for the `type` tag strings; the trace viewer builds a typed
-  `RenderModel` by matching `TraceEvent`; the OpenTelemetry sink maps the same
+  `RenderModel` *(Superseded on this point by the 2026-08-21 removal note.)*
+  by matching `TraceEvent`; the OpenTelemetry sink maps the same
   typed events to spans (`lash.tool` for tool calls in both modes, the
   `lash.exec_code` family for exec diagnostics with the precise phase carried on
   the `lash.protocol.diagnostic_phase` attribute); and the remote wire mirror is
@@ -48,21 +51,21 @@ per-driver convention. A regression test
 one-pair-per-call guarantee.
 
 Deriving consumer schemas from the typed model is the other half. The trace
-viewer, the OTel span names, the JSONL `type` tags, and the wire DTO all describe
-the same events; if each re-derived its own strings and field lists, they would
-disagree the first time an event changed. Routing every consumer through
-`TraceEvent::kind()`, an exhaustive `TraceEvent` match, or an exhaustive
-`From<TurnEvent>` turns "keep the consumers in sync" into a compile error instead
-of a code-review hope.
+viewer *(Superseded on this point by the 2026-08-21 removal note.)*, the OTel span
+names, the JSONL `type` tags, and the wire DTO all describe the same events; if
+each re-derived its own strings and field lists, they would disagree the first
+time an event changed. Routing every consumer through `TraceEvent::kind()`, an
+exhaustive `TraceEvent` match, or an exhaustive `From<TurnEvent>` turns "keep the
+consumers in sync" into a compile error instead of a code-review hope.
 
 ## Consequences
 
 - **Adding a tool-reporting channel is one edit at the seam,** not one per
   protocol driver. Everything downstream inherits the new record.
 - **A new `TurnEvent` variant is compile-forced** into `TraceEvent::kind()`, the
-  trace-viewer `RenderModel`, and `From<TurnEvent> for RemoteTurnEvent`. The
-  exhaustive match is the drift guard; there is no version number on `TurnEvent`
-  itself.
+  trace-viewer `RenderModel` *(Superseded on this point by the 2026-08-21 removal note.)*,
+  and `From<TurnEvent> for RemoteTurnEvent`. The exhaustive match is the drift
+  guard; there is no version number on `TurnEvent` itself.
 - **Exec-diagnostic detail stays additive.** The `exec_code_completed`
   diagnostic carries its per-tool `tool_calls` list inside the free-form
   `ProtocolStep` payload, so richer per-tool reporting shipped without bumping
@@ -81,7 +84,7 @@ of a code-review hope.
   block. The one guarantee that matters — exactly one Started/Completed pair per
   call on every channel — becomes unenforceable.
 - **String-keyed consumer schemas (each consumer re-derives its own tag strings
-  and field lists).** Rejected: nothing forces the trace viewer, the OTel span
-  names, and the JSONL tags to agree. A renamed field or new variant drifts
-  silently. `TraceEvent::kind()` plus exhaustive matches make the same drift a
-  build failure.
+  and field lists).** Rejected: nothing forces the trace viewer *(Superseded on
+  this point by the 2026-08-21 removal note.)*, the OTel span names, and the
+  JSONL tags to agree. A renamed field or new variant drifts silently.
+  `TraceEvent::kind()` plus exhaustive matches make the same drift a build failure.

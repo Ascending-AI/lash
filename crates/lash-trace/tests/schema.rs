@@ -1,7 +1,7 @@
 //! Golden schema pins for the on-disk trace format.
 //!
 //! Trace records are a durable, cross-tool contract (JSONL files consumed by
-//! the trace viewer, exporters, and the OTel bridge). These tests pin the
+//! trace sinks, exporters, and the OTel bridge). These tests pin the
 //! `schema_version` tripwire, the `type` tag for every [`TraceEvent`] variant,
 //! the full payload shape of the load-bearing variants, and a JSONL round-trip
 //! carrying an `exec_code_completed` diagnostic.

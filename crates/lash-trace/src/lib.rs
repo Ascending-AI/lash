@@ -450,7 +450,7 @@ pub struct TraceExecutionEvidence {
 
 impl TraceEvent {
     /// The `type` tag serde writes for this variant. This is the single source
-    /// of truth for event-kind strings — consumers (e.g. the trace viewer)
+    /// of truth for event-kind strings — typed JSONL consumers (e.g. trace sinks)
     /// match on the enum and read the kind from here rather than re-deriving
     /// tag strings by hand. The match is exhaustive on purpose: a new variant
     /// fails to compile here until it is given a kind.

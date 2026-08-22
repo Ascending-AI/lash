@@ -159,7 +159,7 @@
         {
           title: "Tracing",
           href: "tracing.html",
-          summary: "Attach TraceSink, write JSONL, inspect Lashlang execution graphs, and render trace reports.",
+          summary: "Attach TraceSink, write JSONL, and inspect Lashlang execution graphs.",
           kind: "guide",
         },
         {
