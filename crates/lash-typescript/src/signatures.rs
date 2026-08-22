@@ -2,20 +2,82 @@ use crate::{Diagnostic, DiagnosticCode};
 use lashlang::{TypeExpr, TypeField, json_schema_to_type_expr};
 use serde_json::Value;
 
+/// Shorthand for the receiver-kind column of [`INSTANCE_STDLIB_SIGNATURES`],
+/// so a signature row stays readable at one line.
+use self::LiteralReceivers as On;
+
+/// The literal receiver shapes an instance method may be called on.
+///
+/// A receiver written as a literal is the one case where the lowerer knows the
+/// receiver's type outright, so it can refuse `[1].toUpperCase()` at compile
+/// time instead of shaping-failing at run time. Which methods each shape
+/// carries used to be a second hand-maintained table beside
+/// [`INSTANCE_STDLIB_SIGNATURES`], and the two drifted: `valueOf` was listed
+/// for every literal shape except arrays, so `[1].valueOf()` was refused while
+/// the same call on a bound array was accepted (FIG-1718). Storing the answer
+/// as a column on the signature row leaves one home for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LiteralReceivers(u8);
+
+impl LiteralReceivers {
+    /// No literal receiver carries this method — it needs a value only a
+    /// binding or constructor can produce (a `Map`, a `Set`, a `Date`, a
+    /// `RegExp`, a `URLSearchParams`).
+    pub(crate) const NONE: Self = Self(0);
+    pub(crate) const STRING: Self = Self(1 << 0);
+    pub(crate) const ARRAY: Self = Self(1 << 1);
+    pub(crate) const NUMBER: Self = Self(1 << 2);
+    /// Boolean, `null`, `undefined` and object literals. They share one row of
+    /// the matrix because the dialect accepts the same three methods on all of
+    /// them.
+    pub(crate) const OTHER: Self = Self(1 << 3);
+    pub(crate) const ALL: Self = Self(0b1111);
+
+    pub(crate) const fn or(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub(crate) const fn contains(self, kind: Self) -> bool {
+        self.0 & kind.0 == kind.0
+    }
+}
+
 /// One accepted standard-library call shape. `arguments` is intentionally
 /// human-readable: this table is the dialect contract as well as the lowerer's
 /// name inventory, so optional forms cannot hide behind a comment saying
 /// "ECMA optional arguments".
+///
+/// `receivers` answers which literal receivers carry the method. It is
+/// meaningful only for the instance table; a static call has an owner
+/// namespace rather than a receiver, so those rows carry
+/// [`LiteralReceivers::NONE`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct StdlibSignature {
     pub(crate) owner: &'static str,
     pub(crate) method: &'static str,
     pub(crate) arguments: &'static str,
+    pub(crate) receivers: LiteralReceivers,
 }
 
 macro_rules! signatures {
     ($(($owner:literal, $method:literal, $arguments:literal)),+ $(,)?) => {
-        &[$(StdlibSignature { owner: $owner, method: $method, arguments: $arguments }),+]
+        &[$(StdlibSignature {
+            owner: $owner,
+            method: $method,
+            arguments: $arguments,
+            receivers: LiteralReceivers::NONE,
+        }),+]
+    };
+}
+
+macro_rules! instance_signatures {
+    ($(($method:literal, $arguments:literal, $receivers:expr)),+ $(,)?) => {
+        &[$(StdlibSignature {
+            owner: "instance",
+            method: $method,
+            arguments: $arguments,
+            receivers: $receivers,
+        }),+]
     };
 }
 
@@ -90,108 +152,108 @@ pub(crate) const STATIC_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
     ("URL", "canParse", "input[, base]"),
 ];
 
-pub(crate) const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = signatures![
-    ("instance", "at", "[index]"),
-    ("instance", "concat", "...values"),
-    ("instance", "charAt", "[index]"),
-    ("instance", "charCodeAt", "[index]"),
-    ("instance", "codePointAt", "[index]"),
-    ("instance", "append", "name, value"),
-    ("instance", "add", "value"),
-    ("instance", "clear", ""),
-    ("instance", "delete", "key[, value]"),
-    ("instance", "entries", ""),
-    ("instance", "exec", "input"),
-    ("instance", "endsWith", "search[, endPosition]"),
-    ("instance", "filter", "callback[, thisArg]"),
-    ("instance", "fill", "[value[, start[, end]]]"),
-    ("instance", "find", "callback[, thisArg]"),
-    ("instance", "findIndex", "callback[, thisArg]"),
-    ("instance", "findLast", "callback[, thisArg]"),
-    ("instance", "findLastIndex", "callback[, thisArg]"),
-    ("instance", "flat", "[depth]"),
-    ("instance", "flatMap", "callback[, thisArg]"),
-    ("instance", "forEach", "callback[, thisArg]"),
-    ("instance", "get", "key"),
-    ("instance", "getAll", "name"),
-    ("instance", "has", "key[, value]"),
-    ("instance", "includes", "value[, fromIndex]"),
-    ("instance", "indexOf", "value[, fromIndex]"),
-    ("instance", "join", "[separator]"),
-    ("instance", "lastIndexOf", "value[, fromIndex]"),
-    ("instance", "map", "callback[, thisArg]"),
-    ("instance", "match", "regexp"),
-    ("instance", "matchAll", "globalRegExp"),
-    ("instance", "every", "callback[, thisArg]"),
-    ("instance", "padEnd", "length[, padString]"),
-    ("instance", "padStart", "length[, padString]"),
-    ("instance", "repeat", "[count]"),
+pub(crate) const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = instance_signatures![
+    ("at", "[index]", On::STRING.or(On::ARRAY)),
+    ("concat", "...values", On::STRING.or(On::ARRAY)),
+    ("charAt", "[index]", On::STRING),
+    ("charCodeAt", "[index]", On::STRING),
+    ("codePointAt", "[index]", On::STRING),
+    ("append", "name, value", On::NONE),
+    ("add", "value", On::NONE),
+    ("clear", "", On::NONE),
+    ("delete", "key[, value]", On::NONE),
+    ("entries", "", On::NONE),
+    ("exec", "input", On::NONE),
+    ("endsWith", "search[, endPosition]", On::STRING),
+    ("filter", "callback[, thisArg]", On::ARRAY),
+    ("fill", "[value[, start[, end]]]", On::ARRAY),
+    ("find", "callback[, thisArg]", On::ARRAY),
+    ("findIndex", "callback[, thisArg]", On::ARRAY),
+    ("findLast", "callback[, thisArg]", On::ARRAY),
+    ("findLastIndex", "callback[, thisArg]", On::ARRAY),
+    ("flat", "[depth]", On::ARRAY),
+    ("flatMap", "callback[, thisArg]", On::ARRAY),
+    ("forEach", "callback[, thisArg]", On::ARRAY),
+    ("get", "key", On::NONE),
+    ("getAll", "name", On::NONE),
+    ("has", "key[, value]", On::NONE),
+    ("includes", "value[, fromIndex]", On::STRING.or(On::ARRAY)),
+    ("indexOf", "value[, fromIndex]", On::STRING.or(On::ARRAY)),
+    ("join", "[separator]", On::ARRAY),
     (
-        "instance",
+        "lastIndexOf",
+        "value[, fromIndex]",
+        On::STRING.or(On::ARRAY)
+    ),
+    ("map", "callback[, thisArg]", On::ARRAY),
+    ("match", "regexp", On::STRING),
+    ("matchAll", "globalRegExp", On::STRING),
+    ("every", "callback[, thisArg]", On::ARRAY),
+    ("padEnd", "length[, padString]", On::STRING),
+    ("padStart", "length[, padString]", On::STRING),
+    ("repeat", "[count]", On::STRING),
+    (
         "replace",
-        "[search[, replacement|callback(match, offset, string)]]"
+        "[search[, replacement|callback(match, offset, string)]]",
+        On::STRING
     ),
     (
-        "instance",
         "replaceAll",
-        "[searchString[, replacementString]]"
+        "[searchString[, replacementString]]",
+        On::STRING
     ),
-    ("instance", "reduce", "callback[, initialValue]"),
-    ("instance", "reduceRight", "callback[, initialValue]"),
-    ("instance", "reverse", ""),
-    ("instance", "slice", "[start[, end]]"),
-    ("instance", "sort", "[compareFn]"),
-    ("instance", "some", "callback[, thisArg]"),
-    ("instance", "splice", "[start[, deleteCount[, ...items]]]"),
-    ("instance", "push", "...values"),
-    ("instance", "pop", ""),
-    ("instance", "shift", ""),
-    ("instance", "unshift", "...values"),
-    ("instance", "split", "[separator[, limit]]"),
-    ("instance", "search", "regexp"),
-    ("instance", "startsWith", "search[, position]"),
-    ("instance", "substring", "[start[, end]]"),
-    ("instance", "toExponential", "[fractionDigits]"),
-    ("instance", "toFixed", "[digits]"),
-    ("instance", "toPrecision", "[precision]"),
-    ("instance", "toReversed", ""),
-    ("instance", "toSorted", "[compareFn]"),
-    (
-        "instance",
-        "toSpliced",
-        "[start[, deleteCount[, ...items]]]"
-    ),
-    ("instance", "set", "key, value"),
-    ("instance", "keys", ""),
-    ("instance", "toLowerCase", ""),
-    ("instance", "toUpperCase", ""),
-    ("instance", "toString", ""),
-    ("instance", "trim", ""),
-    ("instance", "trimEnd", ""),
-    ("instance", "trimStart", ""),
-    ("instance", "test", "input"),
-    ("instance", "valueOf", ""),
-    ("instance", "values", ""),
-    ("instance", "with", "index, value"),
-    ("instance", "hasOwnProperty", "key"),
-    ("instance", "union", "set"),
-    ("instance", "intersection", "set"),
-    ("instance", "difference", "set"),
-    ("instance", "symmetricDifference", "set"),
-    ("instance", "isSubsetOf", "set"),
-    ("instance", "isSupersetOf", "set"),
-    ("instance", "isDisjointFrom", "set"),
-    ("instance", "toJSON", "[key]"),
-    ("instance", "getTime", ""),
-    ("instance", "getUTCFullYear", ""),
-    ("instance", "getUTCMonth", ""),
-    ("instance", "getUTCDate", ""),
-    ("instance", "getUTCDay", ""),
-    ("instance", "getUTCHours", ""),
-    ("instance", "getUTCMinutes", ""),
-    ("instance", "getUTCSeconds", ""),
-    ("instance", "getUTCMilliseconds", ""),
-    ("instance", "toISOString", ""),
+    ("reduce", "callback[, initialValue]", On::ARRAY),
+    ("reduceRight", "callback[, initialValue]", On::ARRAY),
+    ("reverse", "", On::ARRAY),
+    ("slice", "[start[, end]]", On::STRING.or(On::ARRAY)),
+    ("sort", "[compareFn]", On::ARRAY),
+    ("some", "callback[, thisArg]", On::ARRAY),
+    ("splice", "[start[, deleteCount[, ...items]]]", On::ARRAY),
+    ("push", "...values", On::ARRAY),
+    ("pop", "", On::ARRAY),
+    ("shift", "", On::ARRAY),
+    ("unshift", "...values", On::ARRAY),
+    ("split", "[separator[, limit]]", On::STRING),
+    ("search", "regexp", On::STRING),
+    ("startsWith", "search[, position]", On::STRING),
+    ("substring", "[start[, end]]", On::STRING),
+    ("toExponential", "[fractionDigits]", On::NUMBER),
+    ("toFixed", "[digits]", On::NUMBER),
+    ("toPrecision", "[precision]", On::NUMBER),
+    ("toReversed", "", On::ARRAY),
+    ("toSorted", "[compareFn]", On::ARRAY),
+    ("toSpliced", "[start[, deleteCount[, ...items]]]", On::ARRAY),
+    ("set", "key, value", On::NONE),
+    ("keys", "", On::NONE),
+    ("toLowerCase", "", On::STRING),
+    ("toUpperCase", "", On::STRING),
+    ("toString", "", On::ALL),
+    ("trim", "", On::STRING),
+    ("trimEnd", "", On::STRING),
+    ("trimStart", "", On::STRING),
+    ("test", "input", On::NONE),
+    ("valueOf", "", On::ALL),
+    ("values", "", On::NONE),
+    ("with", "index, value", On::ARRAY),
+    ("hasOwnProperty", "key", On::OTHER),
+    ("union", "set", On::NONE),
+    ("intersection", "set", On::NONE),
+    ("difference", "set", On::NONE),
+    ("symmetricDifference", "set", On::NONE),
+    ("isSubsetOf", "set", On::NONE),
+    ("isSupersetOf", "set", On::NONE),
+    ("isDisjointFrom", "set", On::NONE),
+    ("toJSON", "[key]", On::NONE),
+    ("getTime", "", On::NONE),
+    ("getUTCFullYear", "", On::NONE),
+    ("getUTCMonth", "", On::NONE),
+    ("getUTCDate", "", On::NONE),
+    ("getUTCDay", "", On::NONE),
+    ("getUTCHours", "", On::NONE),
+    ("getUTCMinutes", "", On::NONE),
+    ("getUTCSeconds", "", On::NONE),
+    ("getUTCMilliseconds", "", On::NONE),
+    ("toISOString", "", On::NONE),
 ];
 
 /// Renders the standard-library inventory used by the model prompt.
@@ -620,5 +682,120 @@ mod tests {
             );
         }
         assert!(EXPRESSION_RESERVED_WORDS.len() < RESERVED_WORDS.len());
+    }
+
+    /// The literal-receiver matrix the hand-written arms in the lowerer used to
+    /// carry, transcribed once. The size of each column is the whole claim: the
+    /// arms held 28 string, 33 array, 5 number and 3 remaining-literal names,
+    /// and this table restates them with array `valueOf` added, which is the
+    /// one divergence FIG-1718 resolves. A method widened onto a shape it did
+    /// not carry moves a count and fails here rather than quietly enlarging the
+    /// accepted surface.
+    #[test]
+    fn literal_receiver_column_restates_the_matrix_it_replaced() {
+        let carrying = |kind: LiteralReceivers| {
+            INSTANCE_STDLIB_SIGNATURES
+                .iter()
+                .filter(|signature| signature.receivers.contains(kind))
+                .count()
+        };
+        assert_eq!(carrying(On::STRING), 28, "string literal receivers");
+        assert_eq!(carrying(On::ARRAY), 34, "array literal receivers");
+        assert_eq!(carrying(On::NUMBER), 5, "number literal receivers");
+        assert_eq!(carrying(On::OTHER), 3, "remaining literal receivers");
+
+        // Cardinality alone lets a compensating swap through — one method moved
+        // off arrays and another moved on keeps the count. The array column is
+        // the one this ticket changed, so pin its membership outright; the other
+        // three are small enough that a swap inside them is caught by the string
+        // and number columns disagreeing about the same name.
+        let carried_by = |kind: LiteralReceivers| {
+            let mut names = INSTANCE_STDLIB_SIGNATURES
+                .iter()
+                .filter(|signature| signature.receivers.contains(kind))
+                .map(|signature| signature.method)
+                .collect::<Vec<_>>();
+            names.sort_unstable();
+            names
+        };
+        assert_eq!(
+            carried_by(On::ARRAY),
+            [
+                "at",
+                "concat",
+                "every",
+                "fill",
+                "filter",
+                "find",
+                "findIndex",
+                "findLast",
+                "findLastIndex",
+                "flat",
+                "flatMap",
+                "forEach",
+                "includes",
+                "indexOf",
+                "join",
+                "lastIndexOf",
+                "map",
+                "pop",
+                "push",
+                "reduce",
+                "reduceRight",
+                "reverse",
+                "shift",
+                "slice",
+                "some",
+                "sort",
+                "splice",
+                "toReversed",
+                "toSorted",
+                "toSpliced",
+                "toString",
+                "unshift",
+                "valueOf",
+                "with",
+            ]
+        );
+        assert_eq!(
+            carried_by(On::NUMBER),
+            [
+                "toExponential",
+                "toFixed",
+                "toPrecision",
+                "toString",
+                "valueOf"
+            ]
+        );
+        assert_eq!(
+            carried_by(On::OTHER),
+            ["hasOwnProperty", "toString", "valueOf"]
+        );
+    }
+
+    /// The receiver-kind column is keyed by method name, so a second row for a
+    /// name already in the table would answer the lookup only by accident of
+    /// ordering.
+    #[test]
+    fn instance_method_names_are_unique() {
+        let mut names = INSTANCE_STDLIB_SIGNATURES
+            .iter()
+            .map(|signature| signature.method)
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        let total = names.len();
+        names.dedup();
+        assert_eq!(names.len(), total, "duplicate instance method name");
+    }
+
+    /// A static call names an owner namespace rather than a receiver, so its
+    /// rows must not claim a literal receiver shape.
+    #[test]
+    fn static_signatures_carry_no_receiver_kind() {
+        assert!(
+            STATIC_STDLIB_SIGNATURES
+                .iter()
+                .all(|signature| signature.receivers == LiteralReceivers::NONE)
+        );
     }
 }
