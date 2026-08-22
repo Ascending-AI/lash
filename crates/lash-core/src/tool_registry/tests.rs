@@ -53,6 +53,10 @@ mod tests {
     struct CountingManifestProvider {
         manifest_reads: Arc<AtomicUsize>,
     }
+    struct CountingPrepareProvider {
+        prepares: Arc<AtomicUsize>,
+        defer_queries: Arc<AtomicUsize>,
+    }
     struct LeafBatchTool;
     struct LazyLeafBatchTool;
     struct LazyOrchestratingBatchSource;
@@ -475,6 +479,34 @@ mod tests {
     }
 
     #[async_trait::async_trait]
+    impl ToolProvider for CountingPrepareProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            manifests(vec![test_tool("advertised", "advertised tool")])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            contract_from(vec![test_tool("advertised", "advertised tool")], name)
+        }
+
+        async fn prepare_tool_call(
+            &self,
+            call: crate::ToolPrepareCall<'_>,
+        ) -> Result<PreparedToolCall, ToolOutcome> {
+            self.prepares.fetch_add(1, Ordering::SeqCst);
+            Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+        }
+
+        fn attempt_may_defer(&self, _tool_id: &crate::ToolId) -> bool {
+            self.defer_queries.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("ok"))
+        }
+    }
+
+    #[async_trait::async_trait]
     impl ToolSourceExecutor for ExternalMockSource {
         fn id(&self) -> &str {
             "external"
@@ -694,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_contract_lookup_reuses_the_indexed_manifest() {
+    fn indexed_contract_lookup_reuses_the_indexed_manifest() {
         let manifest_reads = Arc::new(AtomicUsize::new(0));
         let registry = ToolRegistry::from_tool_providers(vec![Arc::new(
             CountingManifestProvider {
@@ -751,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_contract_lookup_falls_back_to_by_id_resolution() {
+    fn indexed_contract_lookup_falls_back_to_by_id_resolution() {
         struct ByIdOnlyProvider;
 
         impl ByIdOnlyProvider {
@@ -784,7 +816,7 @@ mod tests {
             .expect("registry");
         let actual = registry
             .resolve_contract("deferred_contract")
-            .expect("by-id-only contract should resolve through the group");
+            .expect("by-id-only contract should resolve through the source index");
 
         assert_eq!(
             serde_json::to_value(actual.as_ref()).expect("serialize actual contract"),
@@ -794,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_contract_lookup_does_not_cross_identity_after_name_drift() {
+    fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
         struct DriftingProvider {
             definitions: Arc<std::sync::Mutex<Vec<ToolDefinition>>>,
         }
@@ -1048,13 +1080,89 @@ mod tests {
         assert!(matches!(err, ReconfigureError::Validation(_)));
     }
 
+    #[tokio::test]
+    async fn single_provider_source_refuses_unknown_id_without_calling_the_provider() {
+        let prepares = Arc::new(AtomicUsize::new(0));
+        let defer_queries = Arc::new(AtomicUsize::new(0));
+        let source = ToolProviderSource::new(
+            "single",
+            vec![Arc::new(CountingPrepareProvider {
+                prepares: Arc::clone(&prepares),
+                defer_queries: Arc::clone(&defer_queries),
+            }) as Arc<dyn ToolProvider>],
+        );
+
+        let prepare_context = crate::ToolPrepareContext::with_execution_binding(
+            "registry-test".to_string(),
+            Arc::new(crate::testing::MockSessionManager::default()),
+            crate::TurnContext::default(),
+            Some("unknown-call".to_string()),
+            json!({}),
+        );
+        let refusal = source
+            .prepare_tool_call(crate::ToolPrepareCall {
+                tool_id: tool_id("unadvertised"),
+                pending: crate::sansio::PendingToolCall {
+                    call_id: "unknown-call".to_string(),
+                    tool_name: "unadvertised".to_string(),
+                    args: json!({}),
+                    replay: None,
+                },
+                context: &prepare_context,
+            })
+            .await
+            .expect_err("an unadvertised id is refused before the provider prepare hook runs");
+        assert!(format!("{refusal:?}").contains("Unknown tool id"));
+
+        assert!(
+            !source.attempt_may_defer(&tool_id("unadvertised")),
+            "an unadvertised id never reserves a deferred completion key"
+        );
+
+        assert_eq!(
+            prepares.load(Ordering::SeqCst),
+            0,
+            "the provider prepare hook is not invoked for an unadvertised id"
+        );
+        assert_eq!(
+            defer_queries.load(Ordering::SeqCst),
+            0,
+            "the provider defer capability is not queried for an unadvertised id"
+        );
+
+        assert!(
+            source.attempt_may_defer(&tool_id("advertised")),
+            "an advertised id still reaches the provider"
+        );
+        assert_eq!(defer_queries.load(Ordering::SeqCst), 1);
+
+        source
+            .prepare_tool_call(crate::ToolPrepareCall {
+                tool_id: tool_id("advertised"),
+                pending: crate::sansio::PendingToolCall {
+                    call_id: "advertised-call".to_string(),
+                    tool_name: "advertised".to_string(),
+                    args: json!({}),
+                    replay: None,
+                },
+                context: &prepare_context,
+            })
+            .await
+            .expect("an advertised id still reaches the provider prepare hook");
+        assert_eq!(
+            prepares.load(Ordering::SeqCst),
+            1,
+            "the zero-count assertion above is a real refusal, not a prepare route that refuses everything"
+        );
+    }
+
     #[test]
     fn snapshot_resolution_rejects_lazy_live_sources_from_both_lanes() {
         let registry = ToolRegistry::empty();
         registry
             .upsert_source(Arc::new(ToolProviderSource::new(
                 "lazy-leaf",
-                Arc::new(LazyLeafBatchTool),
+                vec![Arc::new(LazyLeafBatchTool)],
             )))
             .expect("lazy leaf source registered");
         registry
@@ -1102,7 +1210,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_sources_re_reads_group_provider_manifests() {
+    fn refresh_sources_re_reads_multi_provider_manifests() {
         let names = Arc::new(std::sync::Mutex::new(vec!["dynamic_one".to_string()]));
         let provider: Arc<dyn ToolProvider> = Arc::new(DynamicToolProvider {
             names: Arc::clone(&names),
@@ -1384,7 +1492,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execution_grant_routes_grouped_source_by_id_not_name() {
+    async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         struct HiddenSameNameProvider {
             id: &'static str,
             result: &'static str,
@@ -1658,7 +1766,7 @@ mod tests {
         target
             .upsert_source(Arc::new(ToolProviderSource::new(
                 "legitimate-leaf",
-                Arc::new(MockTool),
+                vec![Arc::new(MockTool)],
             )))
             .expect("the live leaf lane supersedes the stored claim");
         assert!(

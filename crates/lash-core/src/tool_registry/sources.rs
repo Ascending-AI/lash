@@ -1,9 +1,3 @@
-struct ToolProviderSource {
-    id: String,
-    provider: Arc<dyn ToolProvider>,
-    tools: RwLock<BTreeMap<ToolId, ToolManifest>>,
-}
-
 struct OrchestratingToolSource {
     definition: crate::tool_provider::orchestration::OrchestratingToolDef,
 }
@@ -67,41 +61,6 @@ impl ToolSourceExecutor for OrchestratingToolSource {
     }
 }
 
-impl ToolProviderSource {
-    fn new(id: impl Into<String>, provider: Arc<dyn ToolProvider>) -> Self {
-        Self {
-            id: id.into(),
-            provider,
-            tools: RwLock::new(BTreeMap::new()),
-        }
-    }
-
-    fn read_advertised_tools(&self) -> Vec<ToolManifest> {
-        let manifests = self.provider.tool_manifests();
-        *self.tools.write_recover() = manifests
-            .iter()
-            .cloned()
-            .map(|manifest| (manifest.id.clone(), manifest))
-            .collect();
-        manifests
-    }
-
-    fn indexed_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        if let Some(manifest) = self
-            .tools
-            .read_recover()
-            .get(id)
-        {
-            return Some(manifest.clone());
-        }
-        let manifest = self.provider.resolve_manifest_by_id(id)?;
-        self.tools
-            .write_recover()
-            .insert(id.clone(), manifest.clone());
-        Some(manifest)
-    }
-}
-
 fn resolve_contract_for_indexed_manifest(
     provider: &dyn ToolProvider,
     manifest: &ToolManifest,
@@ -119,13 +78,15 @@ fn resolve_contract_for_indexed_manifest(
     provider.resolve_contract_by_id(&manifest.id)
 }
 
-struct ToolProviderGroupSource {
+/// One or more providers behind a single registry source, indexed by tool id:
+/// an unknown id is refused here rather than delegated to a provider.
+struct ToolProviderSource {
     id: String,
     tools: RwLock<BTreeMap<ToolId, (ToolManifest, usize)>>,
     providers: Vec<Arc<dyn ToolProvider>>,
 }
 
-impl ToolProviderGroupSource {
+impl ToolProviderSource {
     fn new(id: impl Into<String>, providers: Vec<Arc<dyn ToolProvider>>) -> Self {
         let mut tools = BTreeMap::new();
         for (provider_idx, provider) in providers.iter().enumerate() {
@@ -196,7 +157,7 @@ impl ToolProviderGroupSource {
 }
 
 #[async_trait::async_trait]
-impl ToolSourceExecutor for ToolProviderGroupSource {
+impl ToolSourceExecutor for ToolProviderSource {
     fn id(&self) -> &str {
         &self.id
     }
@@ -244,14 +205,12 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
         &self,
         call: ToolPrepareCall<'_>,
     ) -> Result<PreparedToolCall, ToolOutcome> {
-        let name = call.pending.tool_name.clone();
         let Some(provider_idx) = self.provider_index_for_id(&call.tool_id) else {
             return Err(ToolOutcome::err_fmt(format_args!(
                 "Unknown tool id: {}",
                 call.tool_id
             )));
         };
-        let _ = name;
         self.providers[provider_idx].prepare_tool_call(call).await
     }
 
@@ -319,106 +278,6 @@ impl ToolSourceExecutor for ToolProviderGroupSource {
             return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
         self.providers[provider_idx]
-            .execute_internal_by_id(tool_id, args, context)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolSourceExecutor for ToolProviderSource {
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    fn advertised_tools(&self) -> Vec<ToolManifest> {
-        self.read_advertised_tools()
-    }
-
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        if let Some(manifest) = self
-            .tools
-            .read_recover()
-            .values()
-            .find(|manifest| manifest.name == name)
-        {
-            return Some(manifest.clone());
-        }
-        let manifest = self.provider.resolve_manifest(name)?;
-        self.tools
-            .write_recover()
-            .insert(manifest.id.clone(), manifest.clone());
-        Some(manifest)
-    }
-
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        self.indexed_manifest_by_id(id)
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        self.provider.resolve_contract(name)
-    }
-
-    fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
-        let manifest = self.indexed_manifest_by_id(id)?;
-        resolve_contract_for_indexed_manifest(self.provider.as_ref(), &manifest)
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        self.provider.prepare_tool_call(call).await
-    }
-
-    async fn execute(
-        &self,
-        tool: &str,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        self.provider
-            .execute(ToolCall {
-                name: tool,
-                args,
-                context,
-            })
-            .await
-    }
-
-
-    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
-        self.provider.attempt_may_defer(tool_id)
-    }
-
-    async fn execute_attempt_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptOutcome {
-        self.provider
-            .execute_attempt_by_id(tool_id, args, context)
-            .await
-    }
-
-    async fn execute_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        self.provider
-            .execute_by_id(tool_id, args, context)
-            .await
-    }
-
-    async fn execute_internal_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::InternalProcessContext<'_>,
-    ) -> ToolOutcome {
-        self.provider
             .execute_internal_by_id(tool_id, args, context)
             .await
     }

@@ -49,7 +49,7 @@ pub(crate) mod facade_ops {
             };
             self.upsert_source(Arc::new(ToolProviderSource::new(
                 source_id.clone(),
-                provider,
+                vec![provider],
             )))?;
             Ok(ToolSourceHandle::new(source_id))
         }
