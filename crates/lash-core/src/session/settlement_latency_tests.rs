@@ -17,13 +17,61 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
+
 use crate::session::tool_execution::ToolInvocation;
+
+/// A one-shot signal raised when a named leaf's reply has been projected, which
+/// happens only once that leaf's child future has run to completion.
+#[derive(Clone)]
+struct LeafSettledSignal {
+    call_id: &'static str,
+    raised: Arc<tokio::sync::watch::Sender<bool>>,
+}
+
+impl LeafSettledSignal {
+    fn new(call_id: &'static str) -> Self {
+        Self {
+            call_id,
+            raised: Arc::new(tokio::sync::watch::channel(false).0),
+        }
+    }
+
+    /// Waits for the signal, giving up after a budget so a batch that cannot
+    /// raise it fails as an assertion rather than hanging the suite.
+    async fn wait(&self) -> bool {
+        let mut receiver = self.raised.subscribe();
+        tokio::time::timeout(Duration::from_secs(5), async move {
+            receiver.wait_for(|raised| *raised).await.is_ok()
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    fn projector(&self) -> crate::plugin::ToolResultProjector {
+        let signal = self.clone();
+        Arc::new(move |context: crate::plugin::ToolResultProjectionContext| {
+            if context.call_id == signal.call_id {
+                signal.raised.send_replace(true);
+            }
+            let projected = crate::ModelToolReturn::text(
+                context.call_id,
+                context.tool_name,
+                context.output.value_for_projection().to_string(),
+            );
+            Box::pin(async move { Ok(projected) })
+        })
+    }
+}
 
 /// Two deferred tools. Each parks on a completion key and arranges for that key
 /// to be resolved after its own delay, so the completions genuinely race.
 #[derive(Clone)]
 struct LatencyProbeTools {
     controller: Arc<crate::InlineRuntimeEffectController>,
+    /// When set, the synchronous probe blocks until this signal is raised
+    /// instead of sleeping out a fixed delay.
+    awaited_leaf: Option<LeafSettledSignal>,
 }
 
 fn probe_tool(name: &str) -> crate::ToolDefinition {
@@ -36,8 +84,17 @@ fn probe_tool(name: &str) -> crate::ToolDefinition {
     )
 }
 
+/// A leaf that never parks: it blocks inside its own attempt and then returns a
+/// terminal failure. It exists to hold a batch's earliest drain slot open until
+/// a later leaf has settled.
+const SLOW_SYNCHRONOUS_PROBE: &str = "slow_sync_fail";
+
 fn probe_tools() -> Vec<crate::ToolDefinition> {
-    vec![probe_tool("slow_fail"), probe_tool("fast_fail")]
+    vec![
+        probe_tool("slow_fail"),
+        probe_tool("fast_fail"),
+        probe_tool(SLOW_SYNCHRONOUS_PROBE).with_retry_policy(crate::ToolRetryPolicy::Never),
+    ]
 }
 
 /// How long each tool waits before its completion is delivered. The gap is wide
@@ -66,13 +123,35 @@ impl crate::ToolProvider for LatencyProbeTools {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    /// Every probe parks on an out-of-band completion, so the runtime
-    /// pre-derives the key each attempt body reads.
+    /// Every probe but the synchronous one parks on an out-of-band completion,
+    /// so the runtime pre-derives the key those attempt bodies read.
     fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
-        probe_tools().iter().any(|tool| tool.id() == tool_id)
+        probe_tools()
+            .iter()
+            .any(|tool| tool.id() == tool_id && tool.name() != SLOW_SYNCHRONOUS_PROBE)
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        if call.name == SLOW_SYNCHRONOUS_PROBE {
+            let settled = match &self.awaited_leaf {
+                Some(signal) => signal.wait().await,
+                // The synchronous probe exists only for the handshake case; a
+                // context without a signal has nothing for it to wait on.
+                None => false,
+            };
+            if !settled {
+                return crate::ToolOutcome::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "awaited_leaf_never_settled",
+                    "the later leaf never settled while this leaf held its drain slot",
+                ));
+            }
+            return crate::ToolOutcome::failure(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Internal,
+                "probe_failed",
+                format!("{SLOW_SYNCHRONOUS_PROBE} rejected"),
+            ));
+        }
         let key = call
             .context
             .completion_key()
@@ -101,7 +180,19 @@ fn probe_context(
     provider: Arc<dyn crate::ToolProvider>,
     controller: Arc<crate::InlineRuntimeEffectController>,
 ) -> crate::RuntimeExecutionContext<'static> {
+    probe_context_with_projector(provider, controller, None)
+}
+
+fn probe_context_with_projector(
+    provider: Arc<dyn crate::ToolProvider>,
+    controller: Arc<crate::InlineRuntimeEffectController>,
+    projector: Option<crate::plugin::ToolResultProjector>,
+) -> crate::RuntimeExecutionContext<'static> {
     let spec = crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider));
+    let spec = match projector {
+        Some(projector) => spec.with_tool_result_projector(projector),
+        None => spec,
+    };
     let plugins = crate::plugin::PluginHost::new(vec![Arc::new(
         crate::plugin::StaticPluginFactory::new("probe_tools", spec),
     )])
@@ -161,8 +252,25 @@ fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
     );
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
         controller: Arc::clone(&controller),
+        awaited_leaf: None,
     });
     probe_context(provider, controller)
+}
+
+/// A probe context whose synchronous leaf waits for `awaited_leaf` to settle,
+/// and whose result projector raises that signal.
+fn handshake_probe_context(
+    awaited_leaf: LeafSettledSignal,
+) -> crate::RuntimeExecutionContext<'static> {
+    let controller = Arc::new(
+        crate::InlineRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
+    );
+    let projector = awaited_leaf.projector();
+    let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
+        controller: Arc::clone(&controller),
+        awaited_leaf: Some(awaited_leaf),
+    });
+    probe_context_with_projector(provider, controller, Some(projector))
 }
 
 struct GrantedRetryProbeTools {
@@ -286,6 +394,66 @@ async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
         "the leading position carries the fast tool's rejection: {}",
         first_settled.output.value_for_projection()
     );
+}
+
+/// A later leaf must be able to settle while an earlier leaf still holds its
+/// intent-drain slot.
+///
+/// Both probes above park immediately, so neither ever waited on the batch's
+/// intent-drain gate for its turn, which left this case uncovered. Here leaf 0
+/// runs a synchronous attempt and so holds the earliest drain slot until that
+/// attempt returns, while leaf 1 parks at once and its completion lands in
+/// 20 ms.
+///
+/// The two leaves are wired into a handshake rather than a race, because a race
+/// between them proves nothing: leaf 0 refuses to finish until leaf 1's reply
+/// has been projected, which happens only after leaf 1's child future has run
+/// to completion. So the batch can only make progress at all if leaf 1 settles
+/// first.
+///
+/// Every non-draining exit — leaf 1's parked launch among them — used to
+/// discharge by calling `finish`, which waited for the slot's turn *before*
+/// releasing it. Leaf 1 could therefore not return its parked launch, let alone
+/// await its completion, until leaf 0 had drained; against that code this test
+/// deadlocks both leaves and leaf 0 reports `awaited_leaf_never_settled`.
+/// Discharge is now the guard's drop, which takes no turn, so leaf 1 settles
+/// when it actually settles and leads the order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_later_leaf_settles_while_an_earlier_leaf_holds_its_drain_slot() {
+    let context = handshake_probe_context(LeafSettledSignal::new("fast"));
+    let replies = context
+        .call_tool_batch(vec![
+            ToolInvocation::new(
+                "slow-sync",
+                crate::ToolId::from(format!("tool:{SLOW_SYNCHRONOUS_PROBE}")),
+                serde_json::json!({}),
+            ),
+            ToolInvocation::new(
+                "fast",
+                crate::ToolId::from("tool:fast_fail"),
+                serde_json::json!({}),
+            ),
+        ])
+        .await;
+
+    assert_eq!(replies.replies.len(), 2, "one reply per call");
+    let synchronous_leaf = replies.replies[0].output.value_for_projection().to_string();
+    assert!(
+        !synchronous_leaf.contains("awaited_leaf_never_settled"),
+        "the deferred leaf must settle while the synchronous leaf holds slot 0: {synchronous_leaf}"
+    );
+    assert_eq!(
+        replies.settlement_order,
+        vec![1, 0],
+        "the deferred leaf settled first, so it leads the order"
+    );
+    for reply in &replies.replies {
+        assert_eq!(
+            reply.output.status(),
+            lash_sansio::ToolCallStatus::Failure,
+            "both probes reject"
+        );
+    }
 }
 
 /// The same batch with the delays swapped must produce the mirrored order.
