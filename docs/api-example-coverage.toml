@@ -48979,7 +48979,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ExecCode"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:855#let outcome = lash_core::RuntimeEffectOutcome::ExecCode {"
+usage = "crates/lash-sim/src/store.rs:801#let outcome = lash_core::RuntimeEffectOutcome::ExecCode {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::ExecCode::result"
@@ -48988,7 +48988,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ExecCode::result"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:856#result: Box::new(Ok(response)),"
+usage = "crates/lash-sim/src/store.rs:802#result: Box::new(Ok(response)),"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::LlmCall"
@@ -51299,7 +51299,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeInvocation::caused_by"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:945#caused_by: None,"
+usage = "crates/lash-sim/src/store.rs:891#caused_by: None,"
 
 [[api]]
 symbol = "lash::runtime::RuntimeInvocation::effect"
@@ -51308,7 +51308,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeInvocation::effect"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:1189#lash_core::RuntimeInvocation::effect("
+usage = "crates/lash-sim/src/store.rs:1135#lash_core::RuntimeInvocation::effect("
 
 [[api]]
 symbol = "lash::runtime::RuntimeInvocation::effect_id"
@@ -51335,7 +51335,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeInvocation::replay"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:946#replay: Some(lash_core::runtime::RuntimeReplay {"
+usage = "crates/lash-sim/src/store.rs:892#replay: Some(lash_core::runtime::RuntimeReplay {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeInvocation::replay_key"
@@ -51362,7 +51362,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeInvocation::subject"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:940#subject: lash_core::runtime::RuntimeSubject::ProcessEvent {"
+usage = "crates/lash-sim/src/store.rs:886#subject: lash_core::runtime::RuntimeSubject::ProcessEvent {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeInvocation::with_caused_by"
@@ -51615,7 +51615,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeScope::new"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:939#scope: lash_core::runtime::RuntimeScope::new(session.clone()),"
+usage = "crates/lash-sim/src/store.rs:885#scope: lash_core::runtime::RuntimeScope::new(session.clone()),"
 
 [[api]]
 symbol = "lash::runtime::RuntimeScope::protocol_iteration"
@@ -71637,7 +71637,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:933#lash_core::facade_support::ProcessWakeDeliveryRequest {"
+usage = "crates/lash-sim/src/store.rs:879#lash_core::facade_support::ProcessWakeDeliveryRequest {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::authority"
@@ -71645,7 +71645,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:952#authority: lash_core::QueuedWorkAuthority::default(),"
+usage = "crates/lash-sim/src/store.rs:898#authority: lash_core::QueuedWorkAuthority::default(),"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::event_invocation"
@@ -71653,7 +71653,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:938#event_invocation: lash_core::RuntimeInvocation {"
+usage = "crates/lash-sim/src/store.rs:884#event_invocation: lash_core::RuntimeInvocation {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::event_type"
@@ -71661,7 +71661,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:937#event_type: \"process.wake\".to_string(),"
+usage = "crates/lash-sim/src/store.rs:883#event_type: \"process.wake\".to_string(),"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::occurred_at"
@@ -71669,7 +71669,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:956#occurred_at: std::time::UNIX_EPOCH"
+usage = "crates/lash-sim/src/store.rs:902#occurred_at: std::time::UNIX_EPOCH"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::process_caused_by"
@@ -71677,7 +71677,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:951#process_caused_by: None,"
+usage = "crates/lash-sim/src/store.rs:897#process_caused_by: None,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::process_id"
@@ -71685,7 +71685,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:964#&wake.process_id,"
+usage = "crates/lash-sim/src/store.rs:910#&wake.process_id,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::sequence"
@@ -71693,7 +71693,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:965#wake.sequence,"
+usage = "crates/lash-sim/src/store.rs:911#wake.sequence,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::target_session_id"
@@ -71701,7 +71701,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:934#target_session_id: session.clone(),"
+usage = "crates/lash-sim/src/store.rs:880#target_session_id: session.clone(),"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessWakeDeliveryRequest::wake"
@@ -71709,7 +71709,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:953#wake: lash_core::facade_support::ProcessWake {"
+usage = "crates/lash-sim/src/store.rs:899#wake: lash_core::facade_support::ProcessWake {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProtocolTurnOptionsFacadeOps"
@@ -75070,7 +75070,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:663#lash_core::facade_support::frame_node_id(&event.actor_alias, \"initial-frame\");"
+usage = "crates/lash-sim/src/store.rs:609#lash_core::facade_support::frame_node_id(&event.actor_alias, \"initial-frame\");"
 
 [[api]]
 symbol = "lash_core::facade_support::head_tail_truncate"
@@ -75135,7 +75135,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/store.rs:932#let wake = lash_core::facade_support::process_wake_delivery("
+usage = "crates/lash-sim/src/store.rs:878#let wake = lash_core::facade_support::process_wake_delivery("
 
 [[api]]
 symbol = "lash_core::facade_support::promise_semantics::PromiseState"
