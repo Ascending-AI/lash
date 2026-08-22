@@ -1014,6 +1014,7 @@ pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 pub(crate) use runtime::{apply_process_event_projection, fold_process_record};
 pub(crate) use session_model::plugin_runtime_protocol_event;
 
+pub(crate) use session::RuntimeExecutionProcessEventContext;
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};

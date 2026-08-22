@@ -152,6 +152,21 @@ impl RuntimeSessionServices {
                 .causal_invocation(execution_context_for_runtime.causal_invocation.clone())
                 .build()?;
             let dispatch = run_context.dispatch();
+            let event_context = crate::RuntimeExecutionProcessEventContext {
+                execution_write_authority: execution_write_authority.clone(),
+                registry: Arc::clone(&registry_for_runtime),
+                awaiter: process_awaiter_for_runtime.clone(),
+                store: services.current.store.clone(),
+                session_store_factory: services.current.host.session_store_factory.clone(),
+                queued_work_driver: services.current.host.queued_work_driver.clone(),
+                process_wake_delivery_policy: services
+                    .current
+                    .host
+                    .core
+                    .control
+                    .process_wake_delivery_policy,
+                clock: Arc::clone(&services.current.host.core.clock),
+            };
             let mut context = crate::RuntimeExecutionContext::new(
                 services.current.session_id.clone(),
                 Arc::clone(&dispatch),
@@ -163,23 +178,7 @@ impl RuntimeSessionServices {
             )
             .with_execution_env_spec(current_execution_env_spec(&services.current))
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
-            .with_process_registration_context(&registration_for_runtime)
-            .with_process_event_context(
-                registration_for_runtime.id.clone(),
-                execution_write_authority.clone(),
-                Arc::clone(&registry_for_runtime),
-                process_awaiter_for_runtime.clone(),
-                services.current.store.clone(),
-                services.current.host.session_store_factory.clone(),
-                services.current.host.queued_work_driver.clone(),
-                services
-                    .current
-                    .host
-                    .core
-                    .control
-                    .process_wake_delivery_policy,
-                Arc::clone(&services.current.host.core.clock),
-            )
+            .with_process_execution(&registration_for_runtime, event_context)
             .with_cancellation_token(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
             .with_process_work_driver(services.current.host.process_work_driver.clone());
