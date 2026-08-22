@@ -15927,7 +15927,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::current_frame_node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/plugin/runtime_state.rs:178#if *active_agent_frame_id != state.current_frame_node_id {"
+usage = "crates/lash-protocol-rlm/src/plugin/runtime_state.rs:180#if *active_agent_frame_id != state.current_frame_node_id {"
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::discard_runtime_snapshots"
@@ -48588,7 +48588,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::ExecCode"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:771#if invocation.effect_kind() != Some(RuntimeEffectKind::ExecCode) {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:760#if invocation.effect_kind() != Some(RuntimeEffectKind::ExecCode) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::LlmCall"
@@ -48770,7 +48770,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::into_trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2639#.into_trigger()?"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2612#.into_trigger()?"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49181,7 +49181,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2642#Ok(lash_core::RuntimeEffectOutcome::Trigger {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2615#Ok(lash_core::RuntimeEffectOutcome::Trigger {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49191,7 +49191,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger::result"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2643#result: Box::new(result),"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2616#result: Box::new(result),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -66816,7 +66816,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:255#accept_finish: false,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:248#accept_finish: false,"
 
 [[api]]
 symbol = "lash_core::ExecRequest::code"
@@ -66824,7 +66824,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:171#let clean_code = clean_model_code(&request.code);"
+usage = "crates/lash-protocol-rlm/src/executor.rs:175#let clean_code = clean_model_code(&request.code);"
 
 [[api]]
 symbol = "lash_core::ExecRequest::language"
@@ -66848,7 +66848,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:608#duration_ms: start.elapsed().as_millis() as u64,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:597#duration_ms: start.elapsed().as_millis() as u64,"
 
 [[api]]
 symbol = "lash_core::ExecResponse::error"
@@ -66856,7 +66856,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:607#error: Some(error.into()),"
+usage = "crates/lash-protocol-rlm/src/executor.rs:596#error: Some(error.into()),"
 
 [[api]]
 symbol = "lash_core::ExecResponse::observation_truncation"
@@ -66864,7 +66864,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:621#observation_truncation: collected.observation_truncation,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:610#observation_truncation: collected.observation_truncation,"
 
 [[api]]
 symbol = "lash_core::ExecResponse::observations"
@@ -66872,7 +66872,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:620#observations: collected.observations,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:609#observations: collected.observations,"
 
 [[api]]
 symbol = "lash_core::ExecResponse::printed_images"
@@ -66880,7 +66880,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:624#printed_images: collected.printed_images,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:613#printed_images: collected.printed_images,"
 
 [[api]]
 symbol = "lash_core::ExecResponse::terminal_finish"
@@ -66888,7 +66888,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:609#terminal_finish: None,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:598#terminal_finish: None,"
 
 [[api]]
 symbol = "lash_core::ExecResponse::tool_calls"
@@ -69166,7 +69166,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:337#let _phase = ctx.named_phase(\"rlm_lashlang.deferred_resolve\");"
+usage = "crates/lash-protocol-rlm/src/executor.rs:326#let _phase = ctx.named_phase(\"rlm_lashlang.deferred_resolve\");"
 
 [[api]]
 symbol = "lash_core::RuntimeExecutionContext::parent_invocation"
@@ -69174,7 +69174,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:694#let Some(invocation) = ctx.parent_invocation() else {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:683#let Some(invocation) = ctx.parent_invocation() else {"
 
 [[api]]
 symbol = "lash_core::RuntimeExecutionContext::process_handle_json"
@@ -69254,7 +69254,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:462#let owner_namespace = match ctx.trigger_owner_scope() {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:451#let owner_namespace = match ctx.trigger_owner_scope() {"
 
 [[api]]
 symbol = "lash_core::RuntimeExecutionContext::trigger_registration_wake_target"
@@ -69278,7 +69278,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:362#.turn_context()"
+usage = "crates/lash-protocol-rlm/src/executor.rs:351#.turn_context()"
 
 [[api]]
 symbol = "lash_core::SansIoTurnInput"
