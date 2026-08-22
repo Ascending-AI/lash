@@ -1353,7 +1353,7 @@ kind = "function"
 availability = "all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2119#lash_core::testing::conformance::process_registry_pagination(registry).await;"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2122#lash_core::testing::conformance::process_registry_pagination(registry).await;"
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -1362,8 +1362,52 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/conformance.rs:1533#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1555#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
+
+[[api]]
+symbol = "lash::testing::conformance::StoreRecoveryLeaseTiming"
+kind = "enum"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-postgres-store/tests/conformance.rs:510#lash_core::testing::conformance::StoreRecoveryLeaseTiming::Realtime,"
+reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
+
+[[api]]
+symbol = "lash::testing::conformance::StoreRecoveryLeaseTiming::Controlled"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-core/src/testing/conformance/store_recovery.rs:23#Self::Controlled(std::sync::Arc::new(advance))"
+reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
+
+[[api]]
+symbol = "lash::testing::conformance::StoreRecoveryLeaseTiming::Controlled::0"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "The tuple payload is an implementation detail of the feature-gated selector; conformance callers use controlled(...) and do not depend on the stored closure representation (FIG-1754)."
+
+[[api]]
+symbol = "lash::testing::conformance::StoreRecoveryLeaseTiming::Realtime"
+kind = "variant"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-postgres-store/tests/conformance.rs:510#lash_core::testing::conformance::StoreRecoveryLeaseTiming::Realtime,"
+reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
+
+[[api]]
+symbol = "lash::testing::conformance::StoreRecoveryLeaseTiming::controlled"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1304#lash_core::testing::conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {"
+reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
 
 [[api]]
 symbol = "lash::testing::conformance::queued_work_exact_claim_preserves_physical_order_and_key_breaks"
@@ -75277,7 +75321,7 @@ kind = "constant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2467#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2470#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2). Renamed from NON_TERMINAL_PROCESS_STATUS_LABELS in FIG-1383: live is no longer the complement of terminal."
 
 [[api]]

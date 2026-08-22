@@ -515,18 +515,25 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_runtime_persistence_recovery_laws() {
+        let clock = Arc::new(crate::testing::TestClock::new(10_000));
+        let store_clock = Arc::clone(&clock);
         let substrates = Arc::new(Mutex::new(
             BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
         ));
-        runtime_persistence_recovery_laws(move |scenario| {
-            let mut substrates = substrates.lock_recover();
-            let substrate = Arc::clone(
-                substrates
-                    .entry(scenario.to_string())
-                    .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
-            );
-            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
-        })
+        runtime_persistence_recovery_laws(
+            move |scenario| {
+                let mut substrates = substrates.lock_recover();
+                let store_clock = Arc::clone(&store_clock);
+                let substrate =
+                    Arc::clone(substrates.entry(scenario.to_string()).or_insert_with(|| {
+                        Arc::new(crate::InMemorySessionStore::with_clock(
+                            store_clock as Arc<dyn crate::Clock>,
+                        ))
+                    }));
+                crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
+            },
+            StoreRecoveryLeaseTiming::controlled(move |duration_ms| clock.advance(duration_ms)),
+        )
         .await;
     }
 

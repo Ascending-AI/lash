@@ -496,16 +496,19 @@ async fn postgres_runtime_persistence_recovery_laws_when_configured() {
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_core::testing::conformance::runtime_persistence_recovery_laws(|session_id| {
-        let database_url = database_url.clone();
-        let session_id = session_id.to_string();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("construct fresh Postgres store-recovery pool")
-        });
-        Arc::new(storage.session_store(session_id)) as Arc<dyn RuntimePersistence>
-    })
+    lash_core::testing::conformance::runtime_persistence_recovery_laws(
+        |session_id| {
+            let database_url = database_url.clone();
+            let session_id = session_id.to_string();
+            let storage = sync_await(async move {
+                PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("construct fresh Postgres store-recovery pool")
+            });
+            Arc::new(storage.session_store(session_id)) as Arc<dyn RuntimePersistence>
+        },
+        lash_core::testing::conformance::StoreRecoveryLeaseTiming::Realtime,
+    )
     .await;
 }
 
