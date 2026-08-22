@@ -100,7 +100,9 @@ pub use tool_catalog::{
     CheckpointApplication, PluginAbort, PluginDirective, PrepareTurnRequest, ToolCatalogContext,
     TurnFinalization, TurnPreparation,
 };
-pub(crate) use tool_catalog::{emit_plugin_runtime_events, plugin_runtime_session_events};
+pub(crate) use tool_catalog::{
+    PluginTerminalStrength, emit_plugin_runtime_events, plugin_runtime_session_events,
+};
 pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
     // Protocol plugins must be registered by the embedder before calling
     // `PluginHost::build_session`. Unit tests use an in-tree fake to avoid

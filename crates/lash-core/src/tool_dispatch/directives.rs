@@ -1,4 +1,7 @@
-use crate::plugin::{PluginDirective, PluginOwned, emit_plugin_runtime_events};
+use crate::plugin::{
+    PluginDirective, PluginOwned, PluginTerminalStrength as ToolTerminalKind,
+    emit_plugin_runtime_events,
+};
 use crate::{ToolFailure, ToolFailureClass, ToolOutcome};
 
 use super::context::ToolDispatchContext;
@@ -6,23 +9,6 @@ use super::context::ToolDispatchContext;
 pub(super) struct BeforeToolDirectiveOutcome {
     pub args: serde_json::Value,
     pub short_circuit: Option<ToolOutcome>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ToolTerminalKind {
-    SuccessfulShortCircuit,
-    DeniedShortCircuit,
-    AbortTurn,
-}
-
-impl ToolTerminalKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::SuccessfulShortCircuit => "successful_short_circuit",
-            Self::DeniedShortCircuit => "denied_short_circuit",
-            Self::AbortTurn => "abort_turn",
-        }
-    }
 }
 
 struct ToolTerminal {
