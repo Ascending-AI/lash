@@ -118,7 +118,7 @@ pub fn backend_fault_observation(
     retryable: bool,
 ) -> Value {
     let store_error = backend_fault_store_error(&operation, attempt, retryable);
-    let store_error_variant = store_error_variant(&store_error);
+    let store_error_variant = store_error.variant_name().to_string();
     json!({
         "session": session,
         "backend_failure": true,
@@ -146,60 +146,6 @@ fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -
             "simulated terminal backend failure during {operation}"
         ))
     }
-}
-
-fn store_error_variant(error: &StoreError) -> String {
-    match error {
-        StoreError::ExecutionStateCaptureFailed { .. } => "ExecutionStateCaptureFailed",
-        StoreError::Contended => "Contended",
-        StoreError::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
-        StoreError::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
-        StoreError::HeadRevisionConflict { .. } => "HeadRevisionConflict",
-        StoreError::Backend(_) => "Backend",
-        StoreError::SessionBindingMismatch { .. } => "SessionBindingMismatch",
-        StoreError::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
-        StoreError::InvalidSessionId { .. } => "InvalidSessionId",
-        StoreError::SessionDeleted { .. } => "SessionDeleted",
-        StoreError::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
-        StoreError::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
-        StoreError::AppendOperationIdentityConflict { .. } => "AppendOperationIdentityConflict",
-        StoreError::AppendReceiptRequestedNodeCountCorrupt { .. } => {
-            "AppendReceiptRequestedNodeCountCorrupt"
-        }
-        StoreError::TokenUsageAccountingOverflow { .. } => "TokenUsageAccountingOverflow",
-        StoreError::CheckpointTurnIndexOutOfRange { .. } => "CheckpointTurnIndexOutOfRange",
-        StoreError::CheckpointTokenUsageOutOfRange { .. } => "CheckpointTokenUsageOutOfRange",
-        StoreError::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
-        StoreError::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
-        StoreError::NodeIdCollision { .. } => "NodeIdCollision",
-        StoreError::GraphGenerationCollision { .. } => "GraphGenerationCollision",
-        StoreError::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
-        StoreError::ForkPointNotRetained { .. } => "ForkPointNotRetained",
-        StoreError::ForkSessionAlreadyExists { .. } => "ForkSessionAlreadyExists",
-        StoreError::InvalidGraphParent { .. } => "InvalidGraphParent",
-        StoreError::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
-        StoreError::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
-        StoreError::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
-        StoreError::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
-        StoreError::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
-        StoreError::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
-        StoreError::ProcessWakeSequenceRewound { .. } => "ProcessWakeSequenceRewound",
-        StoreError::SessionExecutionLeaseExpired { .. } => "SessionExecutionLeaseExpired",
-        StoreError::SessionExecutionLeaseRenewalRefused { .. } => {
-            "SessionExecutionLeaseRenewalRefused"
-        }
-        StoreError::SessionExecutionLeaseReleaseRefused { .. } => {
-            "SessionExecutionLeaseReleaseRefused"
-        }
-        StoreError::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
-        StoreError::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
-        StoreError::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",
-        StoreError::CheckpointComponentMissing { .. } => "CheckpointComponentMissing",
-        StoreError::StoredDataCorrupt { .. } => "StoredDataCorrupt",
-        StoreError::StorageFailure { .. } => "StorageFailure",
-        other => return format!("Unmapped:{}", other.variant_name()),
-    }
-    .to_string()
 }
 
 #[derive(Clone, Debug, Default)]
