@@ -7,7 +7,7 @@
 //! through lives in [`context`].
 
 pub(crate) mod context;
-mod journal_budget;
+pub(crate) mod journal_budget;
 mod journaled_effect;
 
 use std::fmt;
@@ -627,22 +627,10 @@ where
                         command: command.clone(),
                     },
                 );
-                let reconstructed_envelope = envelope.canonical_form()?;
-                let recorded_envelope = Arc::new(reconstructed_envelope.clone());
-                // The process command runs outside the run closure so its own
-                // journal commands stay at the handler's journal level, which
-                // makes the budget give-up this seam's own pre-flight duty: a
-                // give-up decided afterwards would discard a completed process
-                // command with no journal entry, and the next redrive would run
-                // it again. The verdict is journaled ahead of the command so a
-                // budget change between attempts cannot make a replay run it.
-                let recorded = match self
-                    .journaled_budget_give_up(&invocation, &recorded_envelope)
-                    .await
-                {
-                    Some(gave_up) => gave_up,
-                    None => {
-                        let outcome = execute_restate_process_command(
+                self.record_eager_effect(
+                    &envelope,
+                    Box::pin(async move {
+                        execute_restate_process_command(
                             &self.context,
                             &invocation,
                             *command,
@@ -651,73 +639,21 @@ where
                             |_, _| {},
                         )
                         .await
-                        .map(|result| RuntimeEffectOutcome::Process { result });
-                        let journaled_envelope = Arc::clone(&recorded_envelope);
-                        self.record_effect(
-                            &invocation,
-                            &recorded_envelope,
-                            Box::pin(async move {
-                                RecordedRuntimeEffect {
-                                    envelope: journaled_envelope,
-                                    outcome,
-                                }
-                            }),
-                        )
-                        .await
-                    }
-                }
-                .map_err(|error| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateEffectController,
-                        error.to_string(),
-                    )
-                })?;
-                validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
+                        .map(|result| RuntimeEffectOutcome::Process { result })
+                    }),
+                )
+                .await
             }
             RestateEffectExecution::DirectLocal { envelope } => {
                 local_executor.execute(envelope).await
             }
             RestateEffectExecution::DurableToolBatch { envelope } => {
-                // Child attempts remain direct so they can emit their own journal
-                // commands. Record the settled aggregate afterward: parent-end
-                // teardown reconstructs exclusively from this durable outcome.
-                let reconstructed_envelope = envelope.canonical_form()?;
-                let invocation = envelope.invocation.clone();
-                let recorded_envelope = Arc::new(reconstructed_envelope.clone());
-                // The child attempts run outside the run closure, so the budget
-                // give-up has to be decided before they run: giving up afterwards
-                // would discard a settled batch that was never journaled and let
-                // the next redrive re-execute every child. The verdict is
-                // journaled ahead of the batch so a budget change between
-                // attempts cannot make a replay run the children again.
-                let recorded = match self
-                    .journaled_budget_give_up(&invocation, &recorded_envelope)
-                    .await
-                {
-                    Some(gave_up) => gave_up,
-                    None => {
-                        let outcome = local_executor.execute(envelope).await;
-                        let journaled_envelope = Arc::clone(&recorded_envelope);
-                        self.record_effect(
-                            &invocation,
-                            &recorded_envelope,
-                            Box::pin(async move {
-                                RecordedRuntimeEffect {
-                                    envelope: journaled_envelope,
-                                    outcome,
-                                }
-                            }),
-                        )
-                        .await
-                    }
-                }
-                .map_err(|error| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateEffectController,
-                        error.to_string(),
-                    )
-                })?;
-                validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
+                let run_envelope = envelope.clone();
+                self.record_eager_effect(
+                    &envelope,
+                    Box::pin(async move { local_executor.execute(run_envelope).await }),
+                )
+                .await
             }
             RestateEffectExecution::Timer {
                 invocation,

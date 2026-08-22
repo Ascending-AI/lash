@@ -46213,7 +46213,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::queue_drain"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:7083#ExecutionScope::queue_drain(\"session\", \"drain\"),"
+usage = "crates/lash-restate/src/tests.rs:7370#ExecutionScope::queue_drain(\"session\", \"drain\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -46233,7 +46233,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::session_delete"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:7084#ExecutionScope::session_delete(\"session\"),"
+usage = "crates/lash-restate/src/tests.rs:7371#ExecutionScope::session_delete(\"session\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48123,7 +48123,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Direct::usage_source"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:5437#usage_source: \"test\".to_string(),"
+usage = "crates/lash-restate/src/tests.rs:5724#usage_source: \"test\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48133,7 +48133,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ExecCode"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1484#command @ RuntimeEffectCommand::ExecCode { .. } => RestateEffectExecution::DirectLocal {"
+usage = "crates/lash-restate/src/controller/mod.rs:1420#command @ RuntimeEffectCommand::ExecCode { .. } => RestateEffectExecution::DirectLocal {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::ExecCode::code"
@@ -48214,7 +48214,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::PeekAwaitEvent"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1502#RuntimeEffectCommand::PeekAwaitEvent { key } => {"
+usage = "crates/lash-restate/src/controller/mod.rs:1438#RuntimeEffectCommand::PeekAwaitEvent { key } => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::PeekAwaitEvent::key"
@@ -48223,7 +48223,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::PeekAwaitEvent::key"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1502#RuntimeEffectCommand::PeekAwaitEvent { key } => {"
+usage = "crates/lash-restate/src/controller/mod.rs:1438#RuntimeEffectCommand::PeekAwaitEvent { key } => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::Process"
@@ -48251,7 +48251,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Sleep"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1491#RuntimeEffectCommand::Sleep { duration_ms } => {"
+usage = "crates/lash-restate/src/controller/mod.rs:1427#RuntimeEffectCommand::Sleep { duration_ms } => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::Sleep::duration_ms"
@@ -48260,7 +48260,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Sleep::duration_ms"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1491#RuntimeEffectCommand::Sleep { duration_ms } => {"
+usage = "crates/lash-restate/src/controller/mod.rs:1427#RuntimeEffectCommand::Sleep { duration_ms } => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::SyncExecutionEnvironment"
@@ -48269,7 +48269,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::SyncExecutionEnvironment"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1513#| RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {"
+usage = "crates/lash-restate/src/controller/mod.rs:1449#| RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::SyncExecutionEnvironment::update_machine_config"
@@ -48278,7 +48278,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::SyncExecutionEnvironment::update_machine_config"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:5474#update_machine_config: true,"
+usage = "crates/lash-restate/src/tests.rs:5761#update_machine_config: true,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48351,7 +48351,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Trigger"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:986#RuntimeEffectCommand::Trigger { command } => {"
+usage = "crates/lash-restate/src/controller/mod.rs:922#RuntimeEffectCommand::Trigger { command } => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::Trigger::command"
@@ -48360,7 +48360,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Trigger::command"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:986#RuntimeEffectCommand::Trigger { command } => {"
+usage = "crates/lash-restate/src/controller/mod.rs:922#RuntimeEffectCommand::Trigger { command } => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::kind"
@@ -48506,7 +48506,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectEnvelope::canonical_form"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:630#let reconstructed_envelope = envelope.canonical_form()?;"
+usage = "crates/lash-restate/src/controller/mod.rs:821#let reconstructed_envelope = envelope.canonical_form()?;"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectEnvelope::command"
@@ -48652,7 +48652,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::Sleep"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1555#effect_kind = %RuntimeEffectKind::Sleep.as_str(),"
+usage = "crates/lash-restate/src/controller/mod.rs:1491#effect_kind = %RuntimeEffectKind::Sleep.as_str(),"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::SyncExecutionEnvironment"
@@ -48698,7 +48698,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::as_str"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:974#.map_or(\"runtime_invocation\", RuntimeEffectKind::as_str)"
+usage = "crates/lash-restate/src/controller/mod.rs:910#.map_or(\"runtime_invocation\", RuntimeEffectKind::as_str)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor"
@@ -48734,7 +48734,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::execute"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:678#local_executor.execute(envelope).await"
+usage = "crates/lash-restate/src/controller/mod.rs:648#local_executor.execute(envelope).await"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::execute_trigger"
@@ -48743,7 +48743,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::execute_trigger"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:988#local_executor.execute_trigger(invocation, *command).await"
+usage = "crates/lash-restate/src/controller/mod.rs:924#local_executor.execute_trigger(invocation, *command).await"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::into_await_event_options"
@@ -48770,7 +48770,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::into_sleep_options"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:734#} = local_executor.into_sleep_options();"
+usage = "crates/lash-restate/src/controller/mod.rs:670#} = local_executor.into_sleep_options();"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::into_trigger"
@@ -49062,7 +49062,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::PeekAwaitEvent"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:882#.map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })"
+usage = "crates/lash-restate/src/controller/mod.rs:818#.map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::PeekAwaitEvent::resolution"
@@ -49071,7 +49071,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::PeekAwaitEvent::resolution"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:882#.map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })"
+usage = "crates/lash-restate/src/controller/mod.rs:818#.map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::Process"
@@ -49098,7 +49098,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Sleep"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:791#Ok(RuntimeEffectOutcome::Sleep)"
+usage = "crates/lash-restate/src/controller/mod.rs:727#Ok(RuntimeEffectOutcome::Sleep)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::SyncExecutionEnvironment"
@@ -51310,7 +51310,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeInvocation::effect_kind"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:973#.effect_kind()"
+usage = "crates/lash-restate/src/controller/mod.rs:909#.effect_kind()"
 
 [[api]]
 symbol = "lash::runtime::RuntimeInvocation::replay"
@@ -51626,7 +51626,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeScope::turn_id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:4688#turn_id: Some(\"journaled-peek-turn\".to_string()),"
+usage = "crates/lash-restate/src/tests.rs:4975#turn_id: Some(\"journaled-peek-turn\".to_string()),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -51636,7 +51636,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeScope::turn_index"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:4689#turn_index: None,"
+usage = "crates/lash-restate/src/tests.rs:4976#turn_index: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -76966,7 +76966,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:11885#probe_slot.set_for_session("
+usage = "crates/lash-restate/src/tests.rs:12172#probe_slot.set_for_session("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]

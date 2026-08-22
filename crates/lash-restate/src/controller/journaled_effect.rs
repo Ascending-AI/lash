@@ -8,7 +8,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use lash_core::{RuntimeInvocation, facade_support::CanonicalRuntimeEffectEnvelope};
+use lash_core::{
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectOutcome, RuntimeErrorCode,
+    RuntimeInvocation, facade_support::CanonicalRuntimeEffectEnvelope,
+};
 use restate_sdk::serde::Json;
 
 use super::context::RestateControllerContext;
@@ -18,6 +21,7 @@ use super::journal_budget::{
 };
 use super::{
     RecordedRuntimeEffect, RestateEffectError, RestateRuntimeEffectController, restate_effect_name,
+    validate_recorded_effect_envelope,
 };
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
@@ -156,6 +160,57 @@ where
             }),
         )
         .await
+    }
+
+    /// Execute an eager effect (process command or tool batch) through the
+    /// five-step journaling protocol: canonicalise envelope -> journaled
+    /// budget give-up gate -> run work -> record effect -> validate recorded
+    /// envelope against reconstructed.
+    pub(super) async fn record_eager_effect<'run>(
+        &'run self,
+        envelope: &RuntimeEffectEnvelope,
+        future: Pin<
+            Box<
+                dyn Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
+                    + Send
+                    + 'run,
+            >,
+        >,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError>
+    where
+        'ctx: 'run,
+    {
+        let reconstructed_envelope = envelope.canonical_form()?;
+        let invocation = envelope.invocation.clone();
+        let recorded_envelope = Arc::new(reconstructed_envelope.clone());
+        let recorded = match self
+            .journaled_budget_give_up(&invocation, &recorded_envelope)
+            .await
+        {
+            Some(gave_up) => gave_up,
+            None => {
+                let outcome = future.await;
+                let journaled_envelope = Arc::clone(&recorded_envelope);
+                self.record_effect(
+                    &invocation,
+                    &recorded_envelope,
+                    Box::pin(async move {
+                        RecordedRuntimeEffect {
+                            envelope: journaled_envelope,
+                            outcome,
+                        }
+                    }),
+                )
+                .await
+            }
+        }
+        .map_err(|error| {
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RestateEffectController,
+                error.to_string(),
+            )
+        })?;
+        validate_recorded_effect_envelope(recorded, &reconstructed_envelope, None)?
     }
 
     /// Occupy this effect's journal slot with the entry the future yields, and

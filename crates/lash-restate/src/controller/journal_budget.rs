@@ -33,7 +33,7 @@ use super::RecordedRuntimeEffect;
 /// effect has, while a recorded effect requires `envelope` and `outcome`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
-pub(super) enum JournaledEffectRecord {
+pub(crate) enum JournaledEffectRecord {
     Recorded(RecordedRuntimeEffect),
     GaveUp(GaveUpEntry),
 }
@@ -41,7 +41,7 @@ pub(super) enum JournaledEffectRecord {
 /// The fixed-size poison entry: one budget, no envelope, no error text.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct GaveUpEntry {
+pub(crate) struct GaveUpEntry {
     journaled_effect_gave_up_over_budget: u64,
 }
 
@@ -56,7 +56,7 @@ pub(super) struct GaveUpEntry {
 /// so a replayed give-up never executes the effect first and a replayed
 /// `Proceed` never turns into a give-up that discards finished work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) enum JournaledBudgetVerdict {
+pub(crate) enum JournaledBudgetVerdict {
     Proceed,
     GaveUpOverBudget { budget: u64 },
 }
