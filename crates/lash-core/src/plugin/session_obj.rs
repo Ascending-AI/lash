@@ -53,6 +53,78 @@ fn lifecycle_event_hook_kind(event: &PluginLifecycleEvent<'_>) -> &'static str {
     }
 }
 
+enum PluginOperationInvocation {
+    Query {
+        sessions: Arc<dyn SessionReadService>,
+        processes: Arc<dyn ProcessReadService>,
+    },
+    Command {
+        sessions: Arc<dyn SessionStateService>,
+        session_lifecycle: Arc<dyn SessionLifecycleService>,
+        session_graph: Arc<dyn SessionGraphService>,
+        processes: Arc<dyn crate::ProcessService>,
+    },
+    Task {
+        sessions: Arc<dyn SessionStateService>,
+        session_lifecycle: Arc<dyn SessionLifecycleService>,
+        session_graph: Arc<dyn SessionGraphService>,
+        processes: Arc<dyn crate::ProcessService>,
+        scoped_effect_controller: crate::ScopedEffectController<'static>,
+        cancellation_token: tokio_util::sync::CancellationToken,
+    },
+}
+
+impl PluginOperationInvocation {
+    fn kind(&self) -> PluginOperationKind {
+        match self {
+            Self::Query { .. } => PluginOperationKind::Query,
+            Self::Command { .. } => PluginOperationKind::Command,
+            Self::Task { .. } => PluginOperationKind::Task,
+        }
+    }
+
+    fn into_context(self, session_id: Option<String>) -> PluginOperationContext {
+        match self {
+            Self::Query {
+                sessions,
+                processes,
+            } => PluginOperationContext::Query(PluginQueryContext {
+                session_id,
+                sessions,
+                processes,
+            }),
+            Self::Command {
+                sessions,
+                session_lifecycle,
+                session_graph,
+                processes,
+            } => PluginOperationContext::Command(PluginCommandContext {
+                session_id,
+                sessions,
+                session_lifecycle,
+                session_graph,
+                processes,
+            }),
+            Self::Task {
+                sessions,
+                session_lifecycle,
+                session_graph,
+                processes,
+                scoped_effect_controller,
+                cancellation_token,
+            } => PluginOperationContext::Task(PluginTaskContext {
+                session_id,
+                sessions,
+                session_lifecycle,
+                session_graph,
+                processes,
+                scoped_effect_controller,
+                cancellation_token,
+            }),
+        }
+    }
+}
+
 pub(crate) fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime::TurnIssue {
     let error = match error {
         PluginError::SessionExecutionLeaseLost { session_id } => {
@@ -193,21 +265,9 @@ impl PluginSession {
 
     pub fn plugin_operations(&self) -> Vec<PluginOperationDef> {
         self.contributions
-            .plugin_queries
+            .plugin_operations
             .values()
-            .map(|op| op.def.clone())
-            .chain(
-                self.contributions
-                    .plugin_commands
-                    .values()
-                    .map(|op| op.def.clone()),
-            )
-            .chain(
-                self.contributions
-                    .plugin_tasks
-                    .values()
-                    .map(|op| op.def.clone()),
-            )
+            .map(|op| op.def().clone())
             .collect()
     }
 
@@ -744,6 +804,33 @@ impl PluginSession {
         Ok(effective_session)
     }
 
+    async fn invoke_plugin_operation(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        session_id: Option<String>,
+        default_to_current_session: bool,
+        invocation: PluginOperationInvocation,
+    ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
+        let Some(operation) = self.contributions.plugin_operations.get(name).cloned() else {
+            return Err(PluginOperationInvokeError::Unknown(name.to_string()));
+        };
+        if operation.def().kind() != invocation.kind() {
+            return Err(PluginOperationInvokeError::Unknown(name.to_string()));
+        }
+        let effective_session = self.effective_operation_session(
+            name,
+            operation.def().session_param,
+            session_id,
+            default_to_current_session,
+        )?;
+        let outcome = operation
+            .invoke(invocation.into_context(effective_session), args)
+            .await
+            .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
+        Ok((operation.plugin_id().to_string(), outcome))
+    }
+
     pub(crate) async fn query_plugin(
         &self,
         name: &str,
@@ -753,26 +840,19 @@ impl PluginSession {
         sessions: Arc<dyn SessionReadService>,
         processes: Arc<dyn ProcessReadService>,
     ) -> Result<(String, serde_json::Value), PluginOperationInvokeError> {
-        let Some(op) = self.contributions.plugin_queries.get(name).cloned() else {
-            return Err(PluginOperationInvokeError::Unknown(name.to_string()));
-        };
-        let effective_session = self.effective_operation_session(
-            name,
-            op.def.session_param,
-            session_id,
-            default_to_current_session,
-        )?;
-        let output = (op.handler)(
-            PluginQueryContext {
-                session_id: effective_session,
-                sessions,
-                processes,
-            },
-            args,
-        )
-        .await
-        .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
-        Ok((op.plugin_id, output))
+        let (plugin_id, outcome) = self
+            .invoke_plugin_operation(
+                name,
+                args,
+                session_id,
+                default_to_current_session,
+                PluginOperationInvocation::Query {
+                    sessions,
+                    processes,
+                },
+            )
+            .await?;
+        Ok((plugin_id, outcome.output))
     }
 
     #[expect(
@@ -789,7 +869,8 @@ impl PluginSession {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-    ) -> Result<(String, PluginCommandOutcome<serde_json::Value>), PluginOperationInvokeError> {
+    ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
+    {
         let (plugin_id, outcome) = self
             .run_plugin_command(
                 name,
@@ -804,7 +885,7 @@ impl PluginSession {
             .await?;
         Ok((
             plugin_id,
-            PluginCommandOutcome {
+            PluginOperationOutcome {
                 output: outcome.output,
                 events: outcome.events,
                 directives: outcome.directives,
@@ -826,29 +907,20 @@ impl PluginSession {
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         processes: Arc<dyn crate::ProcessService>,
-    ) -> Result<(String, ErasedPluginCommandOutcome), PluginOperationInvokeError> {
-        let Some(op) = self.contributions.plugin_commands.get(name).cloned() else {
-            return Err(PluginOperationInvokeError::Unknown(name.to_string()));
-        };
-        let effective_session = self.effective_operation_session(
+    ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
+        self.invoke_plugin_operation(
             name,
-            op.def.session_param,
+            args,
             session_id,
             default_to_current_session,
-        )?;
-        let outcome = (op.handler)(
-            PluginCommandContext {
-                session_id: effective_session,
+            PluginOperationInvocation::Command {
                 sessions,
                 session_lifecycle,
                 session_graph,
                 processes,
             },
-            args,
         )
         .await
-        .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
-        Ok((op.plugin_id, outcome))
     }
 
     #[expect(
@@ -867,7 +939,8 @@ impl PluginSession {
         processes: Arc<dyn crate::ProcessService>,
         scoped_effect_controller: crate::ScopedEffectController<'static>,
         cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> Result<(String, PluginTaskOutcome<serde_json::Value>), PluginOperationInvokeError> {
+    ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
+    {
         let (plugin_id, outcome) = self
             .run_plugin_task(
                 name,
@@ -884,7 +957,7 @@ impl PluginSession {
             .await?;
         Ok((
             plugin_id,
-            PluginTaskOutcome {
+            PluginOperationOutcome {
                 output: outcome.output,
                 events: outcome.events,
                 directives: outcome.directives,
@@ -908,19 +981,13 @@ impl PluginSession {
         processes: Arc<dyn crate::ProcessService>,
         scoped_effect_controller: crate::ScopedEffectController<'static>,
         cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> Result<(String, ErasedPluginTaskOutcome), PluginOperationInvokeError> {
-        let Some(op) = self.contributions.plugin_tasks.get(name).cloned() else {
-            return Err(PluginOperationInvokeError::Unknown(name.to_string()));
-        };
-        let effective_session = self.effective_operation_session(
+    ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
+        self.invoke_plugin_operation(
             name,
-            op.def.session_param,
+            args,
             session_id,
             default_to_current_session,
-        )?;
-        let outcome = (op.handler)(
-            PluginTaskContext {
-                session_id: effective_session,
+            PluginOperationInvocation::Task {
                 sessions,
                 session_lifecycle,
                 session_graph,
@@ -928,10 +995,7 @@ impl PluginSession {
                 scoped_effect_controller,
                 cancellation_token,
             },
-            args,
         )
         .await
-        .map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;
-        Ok((op.plugin_id, outcome))
     }
 }

@@ -529,7 +529,7 @@ impl LashRuntime {
         args: serde_json::Value,
         session_id: Option<String>,
         operation_scope: crate::ExecutionScope,
-    ) -> Result<crate::PluginCommandReceipt<serde_json::Value>, PluginOperationInvokeError> {
+    ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
         self.reload_invalidated_resident_session_state()
             .await
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
@@ -560,7 +560,7 @@ impl LashRuntime {
                 operation_scope,
             )
             .await?;
-        Ok(crate::PluginCommandReceipt {
+        Ok(crate::PluginOperationReceipt {
             output: outcome.output,
             events,
             pending_turn_inputs,
@@ -575,7 +575,7 @@ impl LashRuntime {
         session_id: Option<String>,
         scoped_effect_controller: crate::ScopedEffectController<'static>,
         cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::PluginTaskReceipt<serde_json::Value>, PluginOperationInvokeError> {
+    ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
         self.reload_invalidated_resident_session_state()
             .await
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
@@ -609,7 +609,7 @@ impl LashRuntime {
                 operation_scope,
             )
             .await?;
-        Ok(crate::PluginTaskReceipt {
+        Ok(crate::PluginOperationReceipt {
             output: outcome.output,
             events,
             pending_turn_inputs,

@@ -474,7 +474,7 @@ impl SessionAdmin {
         &self,
         name: &str,
         args: serde_json::Value,
-    ) -> Result<lash_core::facade_support::PluginCommandReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
@@ -495,7 +495,7 @@ impl SessionAdmin {
         name: &str,
         args: serde_json::Value,
         cancellation_token: CancellationToken,
-    ) -> Result<lash_core::facade_support::PluginTaskReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
         let session_id = self.runtime.observe().session_id().to_string();
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
@@ -1303,12 +1303,12 @@ impl PluginOperations {
     pub async fn run_command<Op: lash_core::facade_support::PluginCommand>(
         &self,
         args: Op::Args,
-    ) -> Result<lash_core::facade_support::PluginCommandReceipt<Op::Output>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<Op::Output>> {
         let receipt = self
             .control
             .run_plugin_command_raw(Op::NAME, encode_plugin_args::<Op>(args)?)
             .await?;
-        Ok(lash_core::facade_support::PluginCommandReceipt {
+        Ok(lash_core::facade_support::PluginOperationReceipt {
             output: decode_plugin_output::<Op>(receipt.output)?,
             events: receipt.events,
             pending_turn_inputs: receipt.pending_turn_inputs,
@@ -1319,14 +1319,14 @@ impl PluginOperations {
         &self,
         name: &str,
         args: serde_json::Value,
-    ) -> Result<lash_core::facade_support::PluginCommandReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
         self.control.run_plugin_command_raw(name, args).await
     }
 
     pub async fn run_task<Op: lash_core::facade_support::PluginTask>(
         &self,
         args: Op::Args,
-    ) -> Result<lash_core::facade_support::PluginTaskReceipt<Op::Output>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<Op::Output>> {
         self.run_task_with_cancel::<Op>(args, CancellationToken::new())
             .await
     }
@@ -1335,7 +1335,7 @@ impl PluginOperations {
         &self,
         args: Op::Args,
         cancellation_token: CancellationToken,
-    ) -> Result<lash_core::facade_support::PluginTaskReceipt<Op::Output>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<Op::Output>> {
         let receipt = self
             .control
             .run_plugin_task_raw_with_cancel(
@@ -1344,7 +1344,7 @@ impl PluginOperations {
                 cancellation_token,
             )
             .await?;
-        Ok(lash_core::facade_support::PluginTaskReceipt {
+        Ok(lash_core::facade_support::PluginOperationReceipt {
             output: decode_plugin_output::<Op>(receipt.output)?,
             events: receipt.events,
             pending_turn_inputs: receipt.pending_turn_inputs,
@@ -1355,7 +1355,7 @@ impl PluginOperations {
         &self,
         name: &str,
         args: serde_json::Value,
-    ) -> Result<lash_core::facade_support::PluginTaskReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
         self.run_task_raw_with_cancel(name, args, CancellationToken::new())
             .await
     }
@@ -1365,7 +1365,7 @@ impl PluginOperations {
         name: &str,
         args: serde_json::Value,
         cancellation_token: CancellationToken,
-    ) -> Result<lash_core::facade_support::PluginTaskReceipt<serde_json::Value>> {
+    ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
         self.control
             .run_plugin_task_raw_with_cancel(name, args, cancellation_token)
             .await

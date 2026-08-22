@@ -29,16 +29,15 @@ mod tool_catalog;
 mod trigger_registry;
 
 pub(crate) use actions::{
-    ErasedPluginCommandOutcome, ErasedPluginTaskOutcome, PluginCommandHandler,
-    PluginCommandInvokeFuture, PluginQueryHandler, PluginQueryInvokeFuture, PluginTaskHandler,
-    PluginTaskInvokeFuture, RegisteredPluginCommand, RegisteredPluginQuery, RegisteredPluginTask,
+    ErasedPluginOperationInvokeFuture, ErasedPluginOperationOutcome, PluginCommandHandler,
+    PluginOperationContext, PluginOperationRegistration, PluginOperationSpec, PluginQueryHandler,
+    PluginQueryInvokeFuture, PluginTaskHandler, RegisteredPluginOperation, plugin_operation_spec,
 };
 pub use actions::{
-    PluginCommand, PluginCommandContext, PluginCommandOutcome, PluginCommandReceipt,
-    PluginOperation, PluginOperationDef, PluginOperationFailure, PluginOperationFuture,
-    PluginOperationKind, PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask,
-    PluginTaskContext, PluginTaskOutcome, PluginTaskReceipt, ProcessReadService, SessionParam,
-    SessionReadService, plugin_operation_def,
+    PluginCommand, PluginCommandContext, PluginOperation, PluginOperationDef,
+    PluginOperationFailure, PluginOperationFuture, PluginOperationKind, PluginOperationOutcome,
+    PluginOperationReceipt, PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask,
+    PluginTaskContext, ProcessReadService, SessionParam, SessionReadService,
 };
 pub use error::PluginError;
 pub use history::{
@@ -312,10 +311,9 @@ mod tests {
             }));
             let session_id = self.session_id.clone();
             reg.operations().query(
-                PluginOperationDef {
+                PluginOperationSpec {
                     name: "mock.echo".to_string(),
                     description: "echo".to_string(),
-                    kind: PluginOperationKind::Query,
                     session_param: SessionParam::Optional,
                     input_schema: json!({}),
                     output_schema: json!({}),
@@ -483,7 +481,7 @@ mod tests {
             .into_iter()
             .find(|def| def.name == TypedEchoOp::NAME)
             .expect("typed op definition");
-        assert_eq!(def.kind, PluginOperationKind::Query);
+        assert_eq!(def.kind(), PluginOperationKind::Query);
         assert_eq!(def.session_param, SessionParam::Optional);
         let value_type = def
             .input_schema
@@ -558,6 +556,146 @@ mod tests {
                 Err(err) => err,
             };
         assert!(err.to_string().contains("duplicate plugin operation name"));
+    }
+
+    fn kindless_operation_spec(name: &str) -> PluginOperationSpec {
+        PluginOperationSpec {
+            name: name.to_string(),
+            description: "operation registered without naming a kind".to_string(),
+            session_param: SessionParam::Forbidden,
+            input_schema: json!({}),
+            output_schema: json!({}),
+        }
+    }
+
+    fn query_context() -> PluginOperationContext {
+        PluginOperationContext::Query(PluginQueryContext {
+            session_id: None,
+            sessions: Arc::new(NoopSessionManager),
+            processes: Arc::new(NoopSessionManager),
+        })
+    }
+
+    /// A kind mismatch is unrepresentable because `PluginOperationSpec` has no
+    /// kind to contradict: the stored discriminant comes from whichever
+    /// registration constructor wrapped the handler, and nowhere else. This
+    /// asserts that stamping for all three constructors -- changing or
+    /// dropping any one of the three `PluginOperationDef::from_spec` kinds
+    /// turns this test red.
+    #[tokio::test]
+    async fn plugin_operation_registration_stamps_kind_from_its_constructor() {
+        let query = PluginOperationRegistration::query(
+            kindless_operation_spec("test.kindless_query"),
+            Arc::new(|_ctx, args| Box::pin(async move { Ok(args) })),
+        );
+        let command = PluginOperationRegistration::command(
+            kindless_operation_spec("test.kindless_command"),
+            Arc::new(|_ctx, args| {
+                Box::pin(async move { Ok(ErasedPluginOperationOutcome::new(args)) })
+            }),
+        );
+        let task = PluginOperationRegistration::task(
+            kindless_operation_spec("test.kindless_task"),
+            Arc::new(|_ctx, args| {
+                Box::pin(async move { Ok(ErasedPluginOperationOutcome::new(args)) })
+            }),
+        );
+
+        assert_eq!(query.def().kind(), PluginOperationKind::Query);
+        assert_eq!(command.def().kind(), PluginOperationKind::Command);
+        assert_eq!(task.def().kind(), PluginOperationKind::Task);
+
+        // The query registration accepts the context its stamped kind names.
+        let outcome = query
+            .invoke(query_context(), json!({"ok": true}))
+            .await
+            .expect("query invocation");
+        assert_eq!(outcome.output, json!({"ok": true}));
+
+        // The other two degrade to a typed failure rather than panicking.
+        let err = command
+            .invoke(query_context(), json!({}))
+            .await
+            .expect_err("command registration must refuse a query context");
+        assert_eq!(
+            err.to_string(),
+            "command registration invoked with a query context"
+        );
+        let err = task
+            .invoke(query_context(), json!({}))
+            .await
+            .expect_err("task registration must refuse a query context");
+        assert_eq!(
+            err.to_string(),
+            "task registration invoked with a query context"
+        );
+    }
+
+    /// The one-map collapse keeps operation names globally unique across
+    /// kinds: a task may not take a name a query already holds, and the
+    /// refusal is the same one a same-kind collision gets.
+    #[test]
+    fn plugin_operation_rejects_cross_kind_duplicate_names() {
+        struct EchoTaskOp;
+        impl PluginOperation for EchoTaskOp {
+            const NAME: &'static str = TypedEchoOp::NAME;
+            const DESCRIPTION: &'static str = "task colliding with a query name";
+            const SESSION_PARAM: SessionParam = SessionParam::Optional;
+            type Args = TypedEchoArgs;
+            type Output = TypedEchoOutput;
+        }
+        impl PluginTask for EchoTaskOp {}
+
+        struct CrossKindPlugin;
+        impl SessionPlugin for CrossKindPlugin {
+            fn id(&self) -> &'static str {
+                "cross_kind"
+            }
+
+            fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+                reg.operations()
+                    .typed_query::<TypedEchoOp, _, _>(move |ctx, args| async move {
+                        Ok(TypedEchoOutput {
+                            value: args.value,
+                            session_id: ctx.session_id,
+                        })
+                    })?;
+                reg.operations()
+                    .typed_task_value::<EchoTaskOp, _, _>(move |ctx, args| async move {
+                        Ok(TypedEchoOutput {
+                            value: args.value,
+                            session_id: ctx.session_id,
+                        })
+                    })
+            }
+        }
+
+        struct CrossKindFactory;
+        impl PluginFactory for CrossKindFactory {
+            fn id(&self) -> &'static str {
+                "cross_kind"
+            }
+
+            fn build(
+                &self,
+                _ctx: &PluginSessionContext,
+            ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+                Ok(Arc::new(CrossKindPlugin))
+            }
+        }
+
+        let err =
+            match PluginHost::new(vec![Arc::new(CrossKindFactory)]).build_session("root", None) {
+                Ok(_) => panic!("a task may not reuse a registered query name"),
+                Err(err) => err,
+            };
+        assert!(
+            err.to_string().contains(&format!(
+                "duplicate plugin operation name `{}`",
+                TypedEchoOp::NAME
+            )),
+            "unexpected refusal: {err}"
+        );
     }
 
     #[tokio::test]

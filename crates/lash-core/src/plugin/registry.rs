@@ -12,10 +12,10 @@ use std::sync::Arc;
 use super::{
     AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantStreamFinishedHook,
     AssistantStreamHook, BeforeToolCallHook, BeforeTurnHook, CheckpointHook, ContextCompactor,
-    PluginCommand, PluginCommandHandler, PluginCommandInvokeFuture, PluginCommandOutcome,
-    PluginError, PluginHost, PluginLifecycleEventHook, PluginOperationDef, PluginOperationFailure,
-    PluginOperationKind, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar,
-    PluginSnapshotMeta, PluginTask, PluginTaskHandler, PluginTaskInvokeFuture, PluginTaskOutcome,
+    ErasedPluginOperationInvokeFuture, PluginCommand, PluginCommandHandler, PluginError,
+    PluginHost, PluginLifecycleEventHook, PluginOperationFailure, PluginOperationOutcome,
+    PluginOperationRegistration, PluginOperationSpec, PluginQuery, PluginQueryHandler,
+    PluginQueryInvokeFuture, PluginRegistrar, PluginSnapshotMeta, PluginTask, PluginTaskHandler,
     PromptContributor, SessionConfigMutator, SessionToolAccess, SnapshotReader, SnapshotWriter,
     SubagentSessionContext, ToolCatalogContributor, ToolResultProjector, TurnContextTransform,
 };
@@ -102,9 +102,7 @@ pub struct PluginSpec {
     pub tool_result_projector: Option<ToolResultProjector>,
     pub runtime_event_hooks: Vec<PluginLifecycleEventHook>,
     pub session_config_mutators: Vec<SessionConfigMutator>,
-    pub(crate) plugin_queries: Vec<(PluginOperationDef, PluginQueryHandler)>,
-    pub(crate) plugin_commands: Vec<(PluginOperationDef, PluginCommandHandler)>,
-    pub(crate) plugin_tasks: Vec<(PluginOperationDef, PluginTaskHandler)>,
+    pub(crate) plugin_operations: Vec<PluginOperationRegistration>,
     pub turn_context_transforms: Vec<(i32, Arc<dyn TurnContextTransform>)>,
     pub context_compactors: Vec<(i32, Arc<dyn ContextCompactor>)>,
 }
@@ -206,10 +204,11 @@ impl PluginSpec {
 
     pub(crate) fn with_plugin_query(
         mut self,
-        def: PluginOperationDef,
+        spec: PluginOperationSpec,
         handler: PluginQueryHandler,
     ) -> Self {
-        self.plugin_queries.push((def, handler));
+        self.plugin_operations
+            .push(PluginOperationRegistration::query(spec, handler));
         self
     }
 
@@ -222,7 +221,7 @@ impl PluginSpec {
             + 'static,
     {
         self.with_plugin_query(
-            super::plugin_operation_def::<Op>(PluginOperationKind::Query),
+            super::plugin_operation_spec::<Op>(),
             Arc::new(move |ctx, args| {
                 let parsed = serde_json::from_value::<Op::Args>(args);
                 match parsed {
@@ -251,10 +250,11 @@ impl PluginSpec {
 
     pub(crate) fn with_plugin_command(
         mut self,
-        def: PluginOperationDef,
+        spec: PluginOperationSpec,
         handler: PluginCommandHandler,
     ) -> Self {
-        self.plugin_commands.push((def, handler));
+        self.plugin_operations
+            .push(PluginOperationRegistration::command(spec, handler));
         self
     }
 
@@ -263,12 +263,12 @@ impl PluginSpec {
         Op: PluginCommand,
         F: Fn(super::PluginCommandContext, Op::Args) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<
-                Output = Result<PluginCommandOutcome<Op::Output>, PluginOperationFailure>,
+                Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>,
             > + Send
             + 'static,
     {
         self.with_plugin_command(
-            super::plugin_operation_def::<Op>(PluginOperationKind::Command),
+            super::plugin_operation_spec::<Op>(),
             Arc::new(move |ctx, args| {
                 let parsed = serde_json::from_value::<Op::Args>(args);
                 match parsed {
@@ -282,19 +282,19 @@ impl PluginSpec {
                                     Op::NAME
                                 ))
                             })?;
-                            Ok(super::actions::ErasedPluginCommandOutcome {
+                            Ok(super::actions::ErasedPluginOperationOutcome {
                                 output,
                                 events: outcome.events,
                                 directives: outcome.directives,
                             })
-                        }) as PluginCommandInvokeFuture
+                        }) as ErasedPluginOperationInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
                         Err(PluginOperationFailure::new(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
-                    }) as PluginCommandInvokeFuture,
+                    }) as ErasedPluginOperationInvokeFuture,
                 }
             }),
         )
@@ -310,16 +310,17 @@ impl PluginSpec {
     {
         self.with_plugin_command_typed::<Op, _, _>(move |ctx, args| {
             let fut = handler(ctx, args);
-            async move { fut.await.map(PluginCommandOutcome::new) }
+            async move { fut.await.map(PluginOperationOutcome::new) }
         })
     }
 
     pub(crate) fn with_plugin_task(
         mut self,
-        def: PluginOperationDef,
+        spec: PluginOperationSpec,
         handler: PluginTaskHandler,
     ) -> Self {
-        self.plugin_tasks.push((def, handler));
+        self.plugin_operations
+            .push(PluginOperationRegistration::task(spec, handler));
         self
     }
 
@@ -328,12 +329,12 @@ impl PluginSpec {
         Op: PluginTask,
         F: Fn(super::PluginTaskContext, Op::Args) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<
-                Output = Result<PluginTaskOutcome<Op::Output>, PluginOperationFailure>,
+                Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>,
             > + Send
             + 'static,
     {
         self.with_plugin_task(
-            super::plugin_operation_def::<Op>(PluginOperationKind::Task),
+            super::plugin_operation_spec::<Op>(),
             Arc::new(move |ctx, args| {
                 let parsed = serde_json::from_value::<Op::Args>(args);
                 match parsed {
@@ -347,19 +348,19 @@ impl PluginSpec {
                                     Op::NAME
                                 ))
                             })?;
-                            Ok(super::actions::ErasedPluginTaskOutcome {
+                            Ok(super::actions::ErasedPluginOperationOutcome {
                                 output,
                                 events: outcome.events,
                                 directives: outcome.directives,
                             })
-                        }) as PluginTaskInvokeFuture
+                        }) as ErasedPluginOperationInvokeFuture
                     }
                     Err(err) => Box::pin(async move {
                         Err(PluginOperationFailure::new(format!(
                             "invalid {} args: {err}",
                             Op::NAME
                         )))
-                    }) as PluginTaskInvokeFuture,
+                    }) as ErasedPluginOperationInvokeFuture,
                 }
             }),
         )
@@ -375,7 +376,7 @@ impl PluginSpec {
     {
         self.with_plugin_task_typed::<Op, _, _>(move |ctx, args| {
             let fut = handler(ctx, args);
-            async move { fut.await.map(PluginTaskOutcome::new) }
+            async move { fut.await.map(PluginOperationOutcome::new) }
         })
     }
 
@@ -726,14 +727,8 @@ impl SessionPlugin for SpecPlugin {
         for hook in &self.spec.session_config_mutators {
             reg.session().config_mutator(Arc::clone(hook));
         }
-        for (def, handler) in &self.spec.plugin_queries {
-            reg.operations().query(def.clone(), Arc::clone(handler))?;
-        }
-        for (def, handler) in &self.spec.plugin_commands {
-            reg.operations().command(def.clone(), Arc::clone(handler))?;
-        }
-        for (def, handler) in &self.spec.plugin_tasks {
-            reg.operations().task(def.clone(), Arc::clone(handler))?;
+        for operation in &self.spec.plugin_operations {
+            reg.operations().register(operation.clone())?;
         }
         for (priority, transform) in &self.spec.turn_context_transforms {
             reg.context().prepare_turn(*priority, Arc::clone(transform));

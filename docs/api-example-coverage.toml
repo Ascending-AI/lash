@@ -35,7 +35,7 @@ removal_verdicts_recorded = 769
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2807
+prose_citations_recorded = 2798
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -71345,15 +71345,15 @@ disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/session.rs::ParkedSession::session_id as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginCommandReceipt"
+symbol = "lash_core::facade_support::PluginOperationReceipt"
 kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:477#) -> Result<lash_core::facade_support::PluginCommandReceipt<serde_json::Value>> {"
+usage = "crates/lash/src/admin.rs:477#) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginCommandReceipt::events"
+symbol = "lash_core::facade_support::PluginOperationReceipt::events"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -71361,7 +71361,7 @@ disposition = "internal-consumed"
 usage = "crates/lash/src/admin.rs:1313#events: receipt.events,"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginCommandReceipt::output"
+symbol = "lash_core::facade_support::PluginOperationReceipt::output"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -71369,7 +71369,7 @@ disposition = "internal-consumed"
 usage = "crates/lash/src/admin.rs:1312#output: decode_plugin_output::<Op>(receipt.output)?,"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginCommandReceipt::pending_turn_inputs"
+symbol = "lash_core::facade_support::PluginOperationReceipt::pending_turn_inputs"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
@@ -71430,7 +71430,7 @@ kind = "assoc_const"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-core/src/plugin/actions.rs::plugin_operation_def#`session_param: Op::SESSION_PARAM,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+reason = "An earlier FIG-1223 round named crates/lash-core/src/plugin/actions.rs::plugin_operation_spec#`session_param: Op::SESSION_PARAM,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
 symbol = "lash_core::test_support::PluginOperationFailure"
@@ -71448,38 +71448,6 @@ availability = "all-features"
 area = "plugins"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/tests/control_admin.rs::HideAllProcessTools::narrow#`Vec::new()` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
-
-[[api]]
-symbol = "lash_core::facade_support::PluginTaskReceipt"
-kind = "struct"
-availability = "default+all-features"
-area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:498#) -> Result<lash_core::facade_support::PluginTaskReceipt<serde_json::Value>> {"
-
-[[api]]
-symbol = "lash_core::facade_support::PluginTaskReceipt::events"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1349#events: receipt.events,"
-
-[[api]]
-symbol = "lash_core::facade_support::PluginTaskReceipt::output"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1348#output: decode_plugin_output::<Op>(receipt.output)?,"
-
-[[api]]
-symbol = "lash_core::facade_support::PluginTaskReceipt::pending_turn_inputs"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1350#pending_turn_inputs: receipt.pending_turn_inputs,"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan"
@@ -75935,60 +75903,60 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginCommandOutcome"
+symbol = "lash_core::plugin::actions::PluginOperationOutcome"
 kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginCommandOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals and first-party plugin crates -- this type is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command#`Fut: Future<Output = Result<PluginCommandOutcome<Op::Output>, PluginOperationFailure>>`, crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command_value#`async move { fut.await.map(PluginCommandOutcome::new) }`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` and `run_plugin_task_value` hand `PluginOperationOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals and first-party plugin crates -- this type is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command#`Fut: Future<Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>>` and crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task#`Fut: Future<Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>>`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginCommandOutcome::directives"
+symbol = "lash_core::plugin::actions::PluginOperationOutcome::directives"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::PluginCommandOutcome::directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash_core::plugin::actions::PluginOperationOutcome::directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginCommandOutcome::events"
+symbol = "lash_core::plugin::actions::PluginOperationOutcome::events"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginCommandOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_command_value#`events: outcome.events,`, crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_task_value#`events: outcome.events,`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` and `run_plugin_task_value` hand `PluginOperationOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_command_value#`events: outcome.events,` and crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_task_value#`events: outcome.events,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginCommandOutcome::new"
+symbol = "lash_core::plugin::actions::PluginOperationOutcome::new"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginCommandOutcome` to hosts (plugin and tool implementers). Consumer class: core plugin registration internals -- this function is exercised at crates/lash-core/src/plugin/registry.rs::PluginSpec::with_plugin_command_typed#`Err(PluginOperationFailure::new(format!(`, not by any example, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because command and task value handlers wrap plain outputs in one `PluginOperationOutcome`. Consumer class: core plugin registration internals -- this function is exercised at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command_value#`async move { fut.await.map(PluginOperationOutcome::new) }` and crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task_value#`async move { fut.await.map(PluginOperationOutcome::new) }`, not by any example, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginCommandOutcome::output"
+symbol = "lash_core::plugin::actions::PluginOperationOutcome::output"
 kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginCommandOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`let (_plugin_id, output) = session`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`let output: TypedEchoOutput = serde_json::from_value(output).unwrap();`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `PluginOperationOutcome` hands operation output to hosts (plugin and tool implementers). Consumer class: core plugin registration internals -- this field is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command#`serde_json::to_value(outcome.output)` and crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task#`serde_json::to_value(outcome.output)`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginCommandOutcome::with_directives"
+symbol = "lash_core::plugin::actions::PluginOperationOutcome::with_directives"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::PluginCommandOutcome::with_directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash_core::plugin::actions::PluginOperationOutcome::with_directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginCommandOutcome::with_events"
+symbol = "lash_core::plugin::actions::PluginOperationOutcome::with_events"
 kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::PluginCommandOutcome::with_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash_core::plugin::actions::PluginOperationOutcome::with_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef"
@@ -75996,7 +75964,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`PluginOperationDef {`, crates/lash-core/src/plugin/actions.rs::plugin_operation_def#`PluginOperationDef {`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::query#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Query),`, crates/lash-core/src/plugin/session_obj.rs::PluginSession::plugin_operations#`.map(|op| op.def().clone())`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef::description"
@@ -76004,7 +75972,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`description: \"echo\".to_string(),`, crates/lash-core/src/plugin/actions.rs::plugin_operation_def#`description: Op::DESCRIPTION.to_string(),`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`description: \"echo\".to_string(),`, crates/lash-core/src/plugin/actions.rs::PluginOperationDef::from_spec#`description: spec.description,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef::input_schema"
@@ -76016,11 +75984,11 @@ reason = "Core-only reachable surface: no root export names this item, and it is
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef::kind"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`kind: PluginOperationKind::Query,`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.kind, PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this method is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::invoke_plugin_operation#`if operation.def().kind() != invocation.kind() {`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.kind(), PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef::name"
@@ -76036,7 +76004,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`output_schema: json!({}),`, crates/lash-core/src/plugin/actions.rs::plugin_operation_def#`output_schema: serde_json::to_value(schemars::schema_for!(Op::Output))`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`output_schema: json!({}),`, crates/lash-core/src/plugin/actions.rs::PluginOperationDef::from_spec#`output_schema: spec.output_schema,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef::session_param"
@@ -76052,7 +76020,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this type is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`kind: PluginOperationKind::Query,`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.kind, PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this type is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationContext::kind#`Self::Command(_) => PluginOperationKind::Command,`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.kind(), PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationKind::Command"
@@ -76060,7 +76028,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this variant is exercised in-repo at crates/lash-core/src/plugin/registry.rs::PluginSpec::with_plugin_command_typed#`super::plugin_operation_def::<Op>(PluginOperationKind::Command),`, crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command#`plugin_operation_def::<Op>(PluginOperationKind::Command),`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this variant is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::command#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Command),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_operation_registration_stamps_kind_from_its_constructor#`assert_eq!(command.def().kind(), PluginOperationKind::Command);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationKind::Query"
@@ -76068,7 +76036,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_query#`plugin_operation_def::<Op>(PluginOperationKind::Query),`, crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`kind: PluginOperationKind::Query,`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::query#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Query),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_operation_registration_stamps_kind_from_its_constructor#`assert_eq!(query.def().kind(), PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationKind::Task"
@@ -76076,7 +76044,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task#`plugin_operation_def::<Op>(PluginOperationKind::Task),`, crates/lash-core/src/plugin/registry.rs::PluginSpec::with_plugin_task_typed#`super::plugin_operation_def::<Op>(PluginOperationKind::Task),`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::task#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Task),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_operation_registration_stamps_kind_from_its_constructor#`assert_eq!(task.def().kind(), PluginOperationKind::Task);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginRuntimeDirective"
@@ -76084,7 +76052,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginCommandOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`directives: Vec<crate::PluginRuntimeDirective>,`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`crate::PluginRuntimeDirective::QueueTurn { input, source_key } => {`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`directives: Vec<crate::PluginRuntimeDirective>,`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`crate::PluginRuntimeDirective::QueueTurn { input, source_key } => {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn"
@@ -76092,7 +76060,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginCommandOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn::input"
@@ -76100,7 +76068,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginCommandOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`value: event,`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`value: event,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn::source_key"
@@ -76108,63 +76076,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginCommandOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`value: event,`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash_core::plugin::actions::PluginTaskOutcome"
-kind = "struct"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_task_value` hands `PluginTaskOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task#`Fut: Future<Output = Result<PluginTaskOutcome<Op::Output>, PluginOperationFailure>>`, crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task_value#`async move { fut.await.map(PluginTaskOutcome::new) }`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash_core::plugin::actions::PluginTaskOutcome::directives"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_task_value` hands `PluginTaskOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_command_value#`directives: outcome.directives,`, crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_task_value#`directives: outcome.directives,`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash_core::plugin::actions::PluginTaskOutcome::events"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_task_value` hands `PluginTaskOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_command_value#`events: outcome.events,`, crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_task_value#`events: outcome.events,`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash_core::plugin::actions::PluginTaskOutcome::new"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_task_value` hands `PluginTaskOutcome` to hosts (plugin and tool implementers). Consumer class: core plugin registration internals -- this function is exercised at crates/lash-core/src/plugin/registry.rs::PluginSpec::with_plugin_task_typed#`Err(PluginOperationFailure::new(format!(`, not by any example, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash_core::plugin::actions::PluginTaskOutcome::output"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_task_value` hands `PluginTaskOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`let (_plugin_id, output) = session`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`let output: TypedEchoOutput = serde_json::from_value(output).unwrap();`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash_core::plugin::actions::PluginTaskOutcome::with_directives"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::PluginTaskOutcome::with_directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash_core::plugin::actions::PluginTaskOutcome::with_events"
-kind = "function"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::PluginTaskOutcome::with_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`value: event,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::SessionParam"
@@ -76433,7 +76345,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::services::PluginOperationInvokeError::Failed"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised at crates/lash-core/src/plugin/session_obj.rs::PluginSession::query_plugin#`.map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;`, not by any example, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised at crates/lash-core/src/plugin/session_obj.rs::PluginSession::invoke_plugin_operation#`.map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;`, not by any example, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::PluginOperationInvokeError::Failed::0"
@@ -76487,7 +76399,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::services::PluginOperationInvokeError::Unknown"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::query_plugin#`return Err(PluginOperationInvokeError::Unknown(name.to_string()));`, crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_command#`return Err(PluginOperationInvokeError::Unknown(name.to_string()));`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::invoke_plugin_operation#`return Err(PluginOperationInvokeError::Unknown(name.to_string()));`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::PluginOperationInvokeError::Unknown::0"
