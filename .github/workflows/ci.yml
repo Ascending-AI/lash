@@ -286,6 +286,7 @@ jobs:
           python3 scripts/test_judged_runbook_matrix.py
           python3 scripts/test_check_judged_build_geometry.py
           python3 scripts/test_release_notes.py
+          python3 scripts/test_rustdoc_json_cache.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
 
