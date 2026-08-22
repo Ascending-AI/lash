@@ -137,7 +137,7 @@ where
             Some(end),
         );
         span.set_attributes(self.attributes_for(record));
-        if is_error_event(&record.event) {
+        if record.event.is_failed() {
             span.set_status(error_status(record));
         }
         span.end_with_timestamp(end);
@@ -1267,10 +1267,6 @@ fn record_time(record: &TraceRecord) -> SystemTime {
 
 fn event_type(event: &TraceEvent) -> &'static str {
     event.kind()
-}
-
-fn is_error_event(event: &TraceEvent) -> bool {
-    event.is_failed()
 }
 
 fn error_status(record: &TraceRecord) -> Status {

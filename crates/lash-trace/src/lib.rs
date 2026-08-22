@@ -454,7 +454,27 @@ pub struct TraceExecutionEvidence {
 }
 
 impl TraceEvent {
-    /// Returns `true` if this event represents a failure outcome.
+    /// Returns `true` when this event represents one of these failure outcomes:
+    ///
+    /// - [`Self::LlmCallFailed`], [`Self::EffectEnvelopeDiff`], and
+    ///   [`Self::StoreErrorObserved`] always;
+    /// - [`Self::JournaledEffectSettled`] only with
+    ///   [`TraceJournaledEffectStatus::Failed`];
+    /// - [`Self::DurableTimerResolved`] only with [`TraceDurableTimerStatus::Failed`];
+    /// - [`Self::DurableWaitResolved`] only with [`TraceDurableWaitResolution::Failed`];
+    /// - [`Self::ToolCallCompleted`] only with [`TraceToolCallOutcome::Failure`];
+    /// - [`Self::TurnCompleted`] only with [`TraceTurnOutcome::Failed`], for any
+    ///   [`TraceTurnFailureReason`] (`Incomplete`, `InvalidInput`, `MaxTurns`,
+    ///   `ToolFailure`, `ProviderError`, `PluginAbort`, `RuntimeError`,
+    ///   `SubmittedError`, or `ToolError`); and
+    /// - [`Self::LanguageExecution`] for
+    ///   [`TraceLanguageExecutionPayload::NodeFailed`] or
+    ///   [`TraceLanguageExecutionPayload::ExecutionFinished`] with
+    ///   [`TraceLanguageExecutionStatus::Failed`].
+    ///
+    /// All other event outcomes are not failures. In particular,
+    /// [`TraceTurnOutcome::AgentFrameSwitch`], completed or cancelled turns,
+    /// and successful or cancelled tool calls return `false`.
     pub fn is_failed(&self) -> bool {
         match self {
             Self::LlmCallFailed { .. }
@@ -463,16 +483,47 @@ impl TraceEvent {
             Self::JournaledEffectSettled { status, .. } => status.is_failed(),
             Self::DurableTimerResolved { status, .. } => status.is_failed(),
             Self::DurableWaitResolved { resolution, .. } => resolution.is_failed(),
-            Self::ToolCallCompleted { output, .. } => !output.is_success(),
+            Self::ToolCallCompleted { output, .. } => match &output.outcome {
+                TraceToolCallOutcome::Failure(_) => true,
+                TraceToolCallOutcome::Success(_) | TraceToolCallOutcome::Cancelled(_) => false,
+            },
             Self::TurnCompleted { outcome, .. } => outcome.is_failed(),
             Self::LanguageExecution { event, .. } => match &event.payload {
                 TraceLanguageExecutionPayload::NodeFailed { .. } => true,
-                TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => {
-                    *status == TraceLanguageExecutionStatus::Failed
-                }
-                _ => false,
+                TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => match status {
+                    TraceLanguageExecutionStatus::Failed => true,
+                    TraceLanguageExecutionStatus::Running
+                    | TraceLanguageExecutionStatus::Completed
+                    | TraceLanguageExecutionStatus::Cancelled => false,
+                },
+                TraceLanguageExecutionPayload::ExecutionStarted { .. }
+                | TraceLanguageExecutionPayload::NodeStarted { .. }
+                | TraceLanguageExecutionPayload::NodeCompleted { .. }
+                | TraceLanguageExecutionPayload::BranchSelected { .. }
+                | TraceLanguageExecutionPayload::ChildStarted { .. } => false,
             },
-            _ => false,
+            Self::SessionStarted { .. }
+            | Self::TurnStarted { .. }
+            | Self::PromptBuilt { .. }
+            | Self::CompositionChanged { .. }
+            | Self::RollingHistoryCompactionNeeded { .. }
+            | Self::RollingHistoryCompactionStarted { .. }
+            | Self::RollingHistoryCompactionCompleted { .. }
+            | Self::RollingHistoryPromptPruned { .. }
+            | Self::LlmCallStarted { .. }
+            | Self::LlmCallCompleted { .. }
+            | Self::ProviderRequest { .. }
+            | Self::ProviderReplayDropped { .. }
+            | Self::ProviderStreamEvent { .. }
+            | Self::RuntimeStreamEvent { .. }
+            | Self::ToolCallStarted { .. }
+            | Self::JournaledEffectStarted { .. }
+            | Self::DurableWaitParked { .. }
+            | Self::DurableTimerStarted { .. }
+            | Self::DurableSegmentBoundary { .. }
+            | Self::ProtocolStep { .. }
+            | Self::TokenUsage { .. }
+            | Self::Custom { .. } => false,
         }
     }
 
@@ -886,7 +937,12 @@ impl TraceTurnOutcome {
     /// Returns `true` only for [`Self::Failed`]. A cancelled turn is a
     /// deliberate stop, not a failure.
     pub fn is_failed(&self) -> bool {
-        matches!(self, Self::Failed { .. })
+        match self {
+            Self::Failed { .. } => true,
+            Self::Completed { .. } | Self::AgentFrameSwitch { .. } | Self::Cancelled { .. } => {
+                false
+            }
+        }
     }
 
     /// The `status` tag serde writes for this variant, read back from serde
@@ -969,7 +1025,10 @@ impl TraceJournaledEffectStatus {
     /// Whether this outcome is a failure. The shared failure predicate matches
     /// on the variant; no status string is compared anywhere.
     pub fn is_failed(&self) -> bool {
-        matches!(self, Self::Failed)
+        match self {
+            Self::Failed => true,
+            Self::Completed => false,
+        }
     }
 
     /// The snake_case tag serde writes for this variant.
@@ -1004,7 +1063,16 @@ impl TraceDurableWaitResolution {
     /// Whether this outcome is a failure. The shared failure predicate matches
     /// on the variant; no status string is compared anywhere.
     pub fn is_failed(&self) -> bool {
-        matches!(self, Self::Failed)
+        match self {
+            Self::Failed => true,
+            Self::Ok
+            | Self::Error
+            | Self::Timeout
+            | Self::Cancelled
+            | Self::Resolved
+            | Self::TurnCancelled
+            | Self::SessionRevoked => false,
+        }
     }
 
     /// The snake_case tag serde writes for this variant.
@@ -1031,7 +1099,10 @@ impl TraceDurableTimerStatus {
     /// Whether this outcome is a failure. The shared failure predicate matches
     /// on the variant; no status string is compared anywhere.
     pub fn is_failed(&self) -> bool {
-        matches!(self, Self::Failed)
+        match self {
+            Self::Failed => true,
+            Self::Resolved | Self::Cancelled | Self::SessionRevoked => false,
+        }
     }
 
     /// The snake_case tag serde writes for this variant.
