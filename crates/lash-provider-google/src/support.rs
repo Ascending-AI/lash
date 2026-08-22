@@ -18,8 +18,8 @@ pub(crate) use lash_core::llm::types::{
     ProviderReasoningReplay, ProviderReplayMeta, ProviderRouteIdentity, ResponseTextMeta,
 };
 pub(crate) use lash_core::provider::{
-    Provider, ProviderComponents, ProviderFactory, ProviderOptions, ReasoningDisableEncoding,
-    ReasoningEncoding, ReasoningSelection, StreamTermination, resolve_generation_policy,
+    Provider, ProviderComponents, ProviderOptions, ReasoningDisableEncoding, ReasoningEncoding,
+    ReasoningSelection, StreamTermination, resolve_generation_policy,
 };
 pub(crate) use lash_llm_transport::normalize::{
     http_error_envelope, serialize_options_tail, terminal_reason_from_parts,

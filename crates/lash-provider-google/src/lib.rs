@@ -18,7 +18,7 @@ mod support;
 pub mod testing;
 mod upload;
 
-pub use config::{GoogleOAuthClient, GoogleOAuthProvider, GoogleOAuthProviderFactory};
+pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
 pub use lash_core::llm::transport::{GOOGLE_FILE_MIMES, GOOGLE_IMAGE_MIMES, GOOGLE_MEDIA_FAMILIES};
 
 #[cfg(test)]

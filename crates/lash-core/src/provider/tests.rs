@@ -8,10 +8,14 @@ use crate::llm::types::{
 };
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
+/// Marker `max_output_tokens` value `MutatingProvider` writes into its own
+/// options while completing, so a test can prove the handle kept the mutated
+/// provider instead of a pre-call clone.
+const MUTATED_MAX_OUTPUT_TOKENS: u64 = 4_321;
+
 #[derive(Clone, Debug, Default)]
 struct MutatingProvider {
     options: ProviderOptions,
-    marker: String,
 }
 
 #[derive(Clone, Debug)]
@@ -377,11 +381,11 @@ impl Provider for MutatingProvider {
     }
 
     fn serialize_config(&self) -> serde_json::Value {
-        serde_json::json!({ "marker": self.marker })
+        serde_json::json!({})
     }
 
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
-        self.marker = "complete".to_string();
+        self.options.max_output_tokens = Some(MUTATED_MAX_OUTPUT_TOKENS);
         Ok(LlmResponse {
             full_text: "ok".to_string(),
             parts: Vec::new(),
@@ -899,23 +903,6 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
 }
 
 #[test]
-fn provider_spec_roundtrips_as_flat_object() {
-    let spec = ProviderSpec {
-        kind: "anthropic".to_string(),
-        config: serde_json::json!({
-            "api_key": "sk-ant-test",
-            "base_url": null
-        }),
-    };
-    let serialized = serde_json::to_value(&spec).expect("serialize");
-    assert_eq!(serialized["type"], serde_json::json!("anthropic"));
-    assert_eq!(serialized["api_key"], serde_json::json!("sk-ant-test"));
-    let roundtripped: ProviderSpec = serde_json::from_value(serialized).expect("deserialize");
-    assert_eq!(roundtripped.kind, spec.kind);
-    assert_eq!(roundtripped.config["api_key"], spec.config["api_key"]);
-}
-
-#[test]
 fn provider_options_serialize_only_reliability_shape() {
     let options = ProviderOptions {
         reliability: ProviderReliability::default()
@@ -1143,8 +1130,8 @@ async fn transport_mutations_are_visible_after_completion_returns() {
     let completion = handle.complete(empty_request()).await.expect("complete");
 
     assert_eq!(
-        handle.to_spec().config["marker"],
-        serde_json::json!("complete")
+        handle.options().max_output_tokens,
+        Some(MUTATED_MAX_OUTPUT_TOKENS)
     );
     assert_eq!(completion.call_record.attempts.len(), 1);
     assert_eq!(

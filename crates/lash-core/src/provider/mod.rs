@@ -6,22 +6,18 @@
 //! running session. Model capability metadata is host-supplied data that
 //! travels with each request; the provider does not produce it.
 //!
-//! [`ProviderSpec`] is only a host/config-file data shape. Runtime
-//! persistence records provider identity separately and never rebuilds a
-//! [`ProviderHandle`] from disk.
+//! Runtime persistence records provider identity separately; a host that
+//! keeps provider configuration on disk owns rebuilding the handle from it.
 
-mod factory;
 mod handle;
 mod options;
 mod rate_limit;
 mod resolver;
-mod spec;
 mod support;
 #[cfg(test)]
 mod tests;
 mod traits;
 
-pub use factory::ProviderFactory;
 pub(crate) use handle::synthetic_terminal_call_record;
 pub use handle::{
     ProviderCompletion, ProviderCompletionError, ProviderComponents, ProviderHandle,
@@ -43,7 +39,6 @@ pub use resolver::{
     EmptyProviderResolver, MapProviderResolver, ProviderBinding, ProviderResolutionError,
     RuntimeProviderResolver, SingleProviderResolver,
 };
-pub use spec::ProviderSpec;
 pub use traits::{
     DefaultProviderFailureClassifier, GenerationRetryGuarantee, Provider,
     ProviderFailureClassifier, is_context_overflow_text,

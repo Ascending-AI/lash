@@ -509,16 +509,11 @@ mod tests {
     fn direct_client_provider_accessors_expose_owned_provider_handle() {
         let provider = TestProvider::builder()
             .kind("direct-accessor-provider")
-            .serialize_config(|| json!({"provider": "owned"}))
             .build()
             .into_handle();
         let mut client = DirectLlmClient::new(provider);
 
         assert_eq!(client.provider().kind(), "direct-accessor-provider");
-        assert_eq!(
-            client.provider().to_spec().config,
-            json!({"provider": "owned"})
-        );
 
         let options = ProviderOptions {
             reliability: ProviderReliability::default().max_attempts(7),

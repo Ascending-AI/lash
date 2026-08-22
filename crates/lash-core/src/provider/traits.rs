@@ -38,9 +38,9 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     fn options(&self) -> ProviderOptions;
     fn set_options(&mut self, options: ProviderOptions);
 
-    /// Emit the provider-specific JSON body used by [`ProviderSpec`]. The
-    /// object must NOT contain a `type` field — the [`ProviderSpec`]
-    /// `Serialize` impl layers that on top.
+    /// Emit the provider-specific JSON body a host persists for this
+    /// provider. The object must NOT contain a `type` field — a host that
+    /// tags the record with its provider kind layers that on top.
     fn serialize_config(&self) -> serde_json::Value;
 
     /// Execute one request.

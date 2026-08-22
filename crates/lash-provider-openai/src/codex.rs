@@ -1,8 +1,8 @@
 //! OpenAI Codex OAuth provider (ChatGPT Plus/Pro/Team via device-code flow).
 //!
-//! [`CodexProvider`] and [`CodexProviderFactory`] are the facade: this file owns
-//! the provider's shape (construction, configuration, the Codex-specific
-//! request body) and delegates the rest to modules that each own one concern —
+//! [`CodexProvider`] is the facade: this file owns the provider's shape
+//! (construction, configuration, the Codex-specific request body) and
+//! delegates the rest to modules that each own one concern —
 //! `credential` for OAuth material and refresh, `session` for the WebSocket
 //! session cache and its leases, `continuation` for cached-context planning,
 //! `streaming` for driving a response over either transport, and `failure` for
@@ -19,7 +19,6 @@ pub mod ws_testing;
 
 use std::sync::Arc;
 
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::common::{DEFAULT_HTTP_TRANSPORT, DEFAULT_MAX_OUTPUT_TOKENS, reasoning_intent};
@@ -30,8 +29,8 @@ use lash_core::llm::types::{
     GenerationOptionOutcome, GenerationReceipt, LlmOutputSpec, LlmRequest,
 };
 use lash_core::provider::{
-    CacheRetention, Provider, ProviderComponents, ProviderFactory, ProviderOptions,
-    ProviderReliability, resolve_generation_policy,
+    CacheRetention, Provider, ProviderComponents, ProviderOptions, ProviderReliability,
+    resolve_generation_policy,
 };
 use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
 use lash_llm_transport::LlmHttpTransport;
@@ -161,8 +160,7 @@ impl CodexProvider {
     /// a constructor-level injection seam in the same spirit as
     /// [`CodexProvider::with_http_transport`]: production always uses the
     /// built-in `chatgpt.com` endpoints, and the override is never serialized
-    /// into provider config ([`CodexProviderFactory`] always rebuilds with the
-    /// production URLs), so tests can point a provider instance at local
+    /// into provider config, so tests can point a provider instance at local
     /// scripted servers without adding a user-facing behavior surface.
     pub fn with_endpoint_urls(
         mut self,
@@ -298,47 +296,6 @@ impl CodexProvider {
     pub fn into_components(self) -> ProviderComponents {
         ProviderComponents::new(Box::new(self))
             .with_failure_classifier(std::sync::Arc::new(CodexFailureClassifier))
-    }
-}
-
-#[derive(Deserialize)]
-struct CodexProviderConfig {
-    access_token: String,
-    refresh_token: String,
-    expires_at: u64,
-    #[serde(default)]
-    account_id: Option<String>,
-    #[serde(default = "default_codex_options")]
-    options: ProviderOptions,
-    #[serde(default)]
-    transport: CodexTransport,
-}
-
-fn default_codex_options() -> ProviderOptions {
-    ProviderOptions {
-        reliability: ProviderReliability::codex(),
-        ..ProviderOptions::default()
-    }
-}
-
-/// Factory that materializes [`CodexProvider`] from a host-owned
-/// [`ProviderSpec`](lash_core::facade_support::ProviderSpec).
-pub struct CodexProviderFactory;
-
-impl ProviderFactory for CodexProviderFactory {
-    fn kind(&self) -> &'static str {
-        "codex"
-    }
-    fn deserialize(&self, config: serde_json::Value) -> Result<ProviderComponents, String> {
-        let cfg: CodexProviderConfig =
-            serde_json::from_value(config).map_err(|err| err.to_string())?;
-        Ok(CodexProvider {
-            options: cfg.options,
-            transport: cfg.transport,
-            ..CodexProvider::new(cfg.access_token, cfg.refresh_token, cfg.expires_at)
-                .with_account_id(cfg.account_id)
-        }
-        .into_components())
     }
 }
 
