@@ -181,7 +181,7 @@ impl RuntimeBoundaryHarness {
             BoundaryKind::Worker => self.run_worker_stale_completion(event).await,
             kind => Err(RuntimeBoundaryError::new(format!(
                 "runtime boundary harness does not own {}",
-                boundary_kind_name(kind)
+                kind.name()
             ))),
         }
     }
@@ -1513,27 +1513,6 @@ fn owner_json(owner: &LeaseOwnerIdentity) -> Value {
         "owner_id": owner.owner_id,
         "incarnation_id": owner.incarnation_id,
     })
-}
-
-fn boundary_kind_name(kind: BoundaryKind) -> &'static str {
-    match kind {
-        BoundaryKind::Ingress => "ingress",
-        BoundaryKind::QueuedIngress => "queued_ingress",
-        BoundaryKind::Provider => "provider",
-        BoundaryKind::ProviderEvent => "provider_event",
-        BoundaryKind::Tool => "tool",
-        BoundaryKind::ExecCode => "exec_code",
-        BoundaryKind::DurableEffect => "durable_effect",
-        BoundaryKind::ProcessWake => "process_wake",
-        BoundaryKind::ProcessLifecycle => "process_lifecycle",
-        BoundaryKind::Worker => "worker",
-        BoundaryKind::Observer => "observer",
-        BoundaryKind::Cancellation => "cancellation",
-        BoundaryKind::Trigger => "trigger",
-        BoundaryKind::BackendFailure => "backend_failure",
-        BoundaryKind::ProviderMutation => "provider_mutation",
-        BoundaryKind::LeaseTime => "lease_time",
-    }
 }
 
 #[cfg(test)]

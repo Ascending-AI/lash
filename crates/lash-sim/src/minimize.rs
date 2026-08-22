@@ -258,7 +258,7 @@ pub fn minimize_trace(
             best = candidate;
         }
         operation_family_reductions.push(OperationFamilyReduction {
-            boundary_kind: boundary_kind_name(kind).to_string(),
+            boundary_kind: kind.name().to_string(),
             original_family_event_count,
             accepted,
             event_count_after_attempt: best.events.len(),
@@ -352,27 +352,6 @@ fn operation_families(trace: &SimulationTrace) -> Vec<BoundaryKind> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
-}
-
-fn boundary_kind_name(kind: BoundaryKind) -> &'static str {
-    match kind {
-        BoundaryKind::Ingress => "ingress",
-        BoundaryKind::QueuedIngress => "queued_ingress",
-        BoundaryKind::Provider => "provider",
-        BoundaryKind::ProviderEvent => "provider_event",
-        BoundaryKind::Tool => "tool",
-        BoundaryKind::ExecCode => "exec_code",
-        BoundaryKind::DurableEffect => "durable_effect",
-        BoundaryKind::ProcessWake => "process_wake",
-        BoundaryKind::ProcessLifecycle => "process_lifecycle",
-        BoundaryKind::Worker => "worker",
-        BoundaryKind::Observer => "observer",
-        BoundaryKind::Cancellation => "cancellation",
-        BoundaryKind::Trigger => "trigger",
-        BoundaryKind::BackendFailure => "backend_failure",
-        BoundaryKind::ProviderMutation => "provider_mutation",
-        BoundaryKind::LeaseTime => "lease_time",
-    }
 }
 
 fn renumber_events(trace: &mut SimulationTrace) {

@@ -8455,6 +8455,38 @@ mod tests {
     }
 
     #[test]
+    fn boundary_kind_name_matches_serde_serialization() {
+        let all_kinds = [
+            BoundaryKind::Ingress,
+            BoundaryKind::QueuedIngress,
+            BoundaryKind::Provider,
+            BoundaryKind::ProviderEvent,
+            BoundaryKind::Tool,
+            BoundaryKind::ExecCode,
+            BoundaryKind::DurableEffect,
+            BoundaryKind::ProcessWake,
+            BoundaryKind::ProcessLifecycle,
+            BoundaryKind::Worker,
+            BoundaryKind::Observer,
+            BoundaryKind::Cancellation,
+            BoundaryKind::Trigger,
+            BoundaryKind::BackendFailure,
+            BoundaryKind::ProviderMutation,
+            BoundaryKind::LeaseTime,
+        ];
+        assert_eq!(all_kinds.len(), 16, "must test all sixteen boundary kinds");
+        for kind in all_kinds {
+            let serialized = serde_json::to_string(&kind).expect("serialization failed");
+            let expected_name = serialized.trim_matches('"');
+            assert_eq!(
+                kind.name(),
+                expected_name,
+                "BoundaryKind::name() for {kind:?} must match its serde-serialized snake_case string"
+            );
+        }
+    }
+
+    #[test]
     fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_process_wake_and_observer()
      {
         for kind in [BoundaryKind::ProcessWake, BoundaryKind::Observer] {

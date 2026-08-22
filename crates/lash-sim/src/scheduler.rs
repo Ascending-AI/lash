@@ -27,6 +27,29 @@ pub enum BoundaryKind {
     LeaseTime,
 }
 
+impl BoundaryKind {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            BoundaryKind::Ingress => "ingress",
+            BoundaryKind::QueuedIngress => "queued_ingress",
+            BoundaryKind::Provider => "provider",
+            BoundaryKind::ProviderEvent => "provider_event",
+            BoundaryKind::Tool => "tool",
+            BoundaryKind::ExecCode => "exec_code",
+            BoundaryKind::DurableEffect => "durable_effect",
+            BoundaryKind::ProcessWake => "process_wake",
+            BoundaryKind::ProcessLifecycle => "process_lifecycle",
+            BoundaryKind::Worker => "worker",
+            BoundaryKind::Observer => "observer",
+            BoundaryKind::Cancellation => "cancellation",
+            BoundaryKind::Trigger => "trigger",
+            BoundaryKind::BackendFailure => "backend_failure",
+            BoundaryKind::ProviderMutation => "provider_mutation",
+            BoundaryKind::LeaseTime => "lease_time",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BoundaryEvent {
     pub boundary_id: String,
@@ -391,7 +414,7 @@ impl BoundaryScheduler {
         candidates.sort_by(|(_, left), (_, right)| {
             left.actor_alias
                 .cmp(&right.actor_alias)
-                .then_with(|| left.kind_name().cmp(right.kind_name()))
+                .then_with(|| left.kind.name().cmp(right.kind.name()))
                 .then_with(|| left.boundary_id.cmp(&right.boundary_id))
         });
         let candidate_count_at_tick = candidates.len();
@@ -422,29 +445,6 @@ struct SchedulerDecision {
     selected_candidate_index: usize,
     seed_before: u64,
     seed_after: u64,
-}
-
-impl BoundaryEvent {
-    fn kind_name(&self) -> &'static str {
-        match self.kind {
-            BoundaryKind::Ingress => "ingress",
-            BoundaryKind::QueuedIngress => "queued_ingress",
-            BoundaryKind::Provider => "provider",
-            BoundaryKind::ProviderEvent => "provider_event",
-            BoundaryKind::Tool => "tool",
-            BoundaryKind::ExecCode => "exec_code",
-            BoundaryKind::DurableEffect => "durable_effect",
-            BoundaryKind::ProcessWake => "process_wake",
-            BoundaryKind::ProcessLifecycle => "process_lifecycle",
-            BoundaryKind::Worker => "worker",
-            BoundaryKind::Observer => "observer",
-            BoundaryKind::Cancellation => "cancellation",
-            BoundaryKind::Trigger => "trigger",
-            BoundaryKind::BackendFailure => "backend_failure",
-            BoundaryKind::ProviderMutation => "provider_mutation",
-            BoundaryKind::LeaseTime => "lease_time",
-        }
-    }
 }
 
 pub(crate) fn next_seed(seed: &mut u64) -> u64 {
