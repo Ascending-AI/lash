@@ -1,0 +1,100 @@
+# cargo-nextest configuration.
+#
+# Three jobs, and deliberately nothing else:
+#
+#   1. Keep the slow marks visible to the end of the run, without ever killing
+#      a test. A slow test is annotated, not terminated; there is no
+#      `terminate-after` in this file, so no gate can be weakened by a bound
+#      that was guessed rather than measured.
+#   2. Stop the two known co-scheduling hazards — the fault-matrix gate test,
+#      which forks real `cargo` invocations of its own, and the suites that
+#      share a single Postgres database or MinIO bucket.
+#   3. Give CI a profile that finishes the whole run rather than stopping at
+#      the first failure, and that refuses to launder a flaky pass into a
+#      green run.
+#
+# Everything else stays at nextest's defaults on purpose.
+
+# Suites that talk to the one Postgres database / MinIO bucket that a run
+# stands up. They are not isolated from each other: the `lash-postgres-store`
+# binaries below truncate every `lash_*` table on the configured database, the
+# `lash-sim` cross-backend differential compares against those same tables, and
+# the `lash-s3-store` MinIO tests share one bucket. Today they interlock by
+# hand, holding a session-level Postgres advisory lock
+# (`SHARED_DATABASE_LOCK_KEY`) across process boundaries, which under
+# process-per-test means every waiter burns a test slot doing nothing but
+# blocking. `max-threads = 1` makes that serialization the runner's job, so
+# the slots stay free for the rest of the workspace.
+#
+# Scope note, so the group is not mistaken for a CI win it does not currently
+# deliver: every nextest call site today runs service-less (the shards in
+# `.github/workflows/ci.yml` and `scripts/push-gate.sh`, which unsets
+# `LASH_POSTGRES_DATABASE_URL` outright), so these tests all self-skip and the
+# group does nothing there. The jobs that do have services — `Test Postgres
+# store`, `Test S3 store` — run `cargo test`, not nextest. The group pays off
+# for a developer running the workspace with a database URL set, and is the
+# shape those service jobs need the day they move to nextest.
+#
+# Deliberately NOT in this group: `lash-sim`'s Postgres-backed unit tests
+# (`crates/lash-sim/src/postgres_test_isolation.rs`) and anything else built on
+# `IsolatedDatabase`, plus the four `lash-postgres-store` binaries excluded by
+# name below — those provision a database or a UUID-named scratch schema per
+# test (`crates/lash-postgres-store/tests/schema_drift/harness.rs`) and have
+# nothing to serialize against. Serializing them was measured at 7.7s -> 31.0s
+# for zero isolation gain.
+[test-groups.docker-services]
+max-threads = 1
+
+[profile.default]
+# Report-only, and at nextest's own 60s slow mark: raising the period would buy
+# quieter output by making the 60-120s band invisible, which is the band worth
+# seeing. Nothing is killed either way — there is no `terminate-after` here —
+# so the only thing this profile changes is that the slow marks survive to the
+# end-of-run summary rather than scrolling past mid-run.
+final-status-level = "slow"
+
+# `durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence` walks the
+# durable fault matrix and, for every non-blocked row, spawns a real
+# `cargo test -p ... -- --list` to prove the row's filter still selects tests.
+# Each probe is its own cargo invocation with its own build graph, so this one
+# "test" is really N cargo processes. Co-scheduling it with the rest of the
+# suite is what turns a loaded box into a timeout report; `num-test-threads`
+# reserves the whole runner for its duration instead.
+[[profile.default.overrides]]
+filter = '''
+  package(lash-core)
+  & test(=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence)
+'''
+threads-required = "num-test-threads"
+
+# Membership of the shared-service group, narrowed to the binaries that
+# actually contend: unit tests which never open a connection stay parallel, and
+# so do the integration binaries that provision their own scratch schema.
+[[profile.default.overrides]]
+filter = '''
+    (
+      package(lash-postgres-store) & kind(test)
+      & !(
+          binary(schema_drift)
+        + binary(preflight_durable_walk)
+        + binary(preflight_schema_status)
+        + binary(checkpoint_projection_migration)
+      )
+    )
+  + (package(lash-sim) & binary(cross_backend_store_differential))
+  + (package(lash-runtime) & test(agent_scenarios::process_parent_atomicity::))
+  + (package(lash-s3-store) & test(minio))
+'''
+test-group = "docker-services"
+
+[profile.ci]
+# One failing test must never hide the rest of the shard (the alpha.82 lesson,
+# recorded at the shard invocation in ci.yml). The shards pass `--no-fail-fast`
+# explicitly and keep doing so; this makes the same answer the profile's
+# default, so a CI nextest call that forgets the flag still reports in full.
+fail-fast = false
+# A test that only passes on retry is still a defect. Nothing in this file sets
+# `retries`, so this is a standing guard rather than a counterweight: should a
+# retry ever be added here, it must first earn a `.github/test-quarantines.json`
+# entry (ADR 0008), and even then a flaky outcome fails the run.
+flaky-result = "fail"
