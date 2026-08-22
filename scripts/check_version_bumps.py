@@ -113,6 +113,18 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
         "sha256:587b0088e2344437aeeff0446339baca01ef0a2f3fa5b054f41581717eda7e0a"
     ),
+    # FIG-1792, one time only: the protocol turn options schema version became
+    # wire-only. The in-memory field was deleted and a hand-written serializer
+    # now stamps the constant, but the emitted struct name, field names, field
+    # order, and the stamped value's Rust type (u32) are unchanged, so the
+    # bytes are identical in both directions and
+    # PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION stays 1. The same change widens the
+    # guard to the hand-written codecs, so this fingerprint covers the widened
+    # signature; the identical residual applies as above -- the baseline pins a
+    # STATE, so restoring exactly these bytes later would re-match.
+    "crates/lash-core/src/lib.rs:PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION": (
+        "sha256:2f04d80d453bf0e962e4c3a0eafa71897732e60e6922a975388f24160016a0a1"
+    ),
 }
 
 

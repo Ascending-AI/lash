@@ -577,7 +577,20 @@ description = "persisted protocol-specific turn options envelope"
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-core/src/lib.rs"]
-symbols = ["ProtocolTurnOptions"]
+# The envelope's wire shape lives in hand-written codecs, not in the in-memory
+# struct: `serialize_protocol_turn_options` is the sole definition of the
+# emitted field names, their order, and the stamped version's type, and
+# `ProtocolTurnOptionsWire` is the accept side. `rust_items` cannot see `impl`
+# blocks, so both must be named here for the guard to cover the wire contract.
+# The constant itself is guarded too: its Rust type decides how the stamped
+# value is emitted (`serialize_u32` vs anything else) and, with the in-memory
+# `schema_version: u32` field gone, nothing else in the guard records it.
+symbols = [
+  "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
+  "ProtocolTurnOptions",
+  "ProtocolTurnOptionsWire",
+  "serialize_protocol_turn_options",
+]
 
 [[surface]]
 constant = "RLM_SNAPSHOT_VERSION"

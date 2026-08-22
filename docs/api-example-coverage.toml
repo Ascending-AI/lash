@@ -47527,15 +47527,6 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash::runtime::ProtocolTurnOptions::schema_version"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::ProtocolTurnOptions::schema_version"]
-area = "protocol"
-disposition = "unused-justify"
-reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
 symbol = "lash::runtime::ProtocolTurnOptions::typed"
 kind = "function"
 availability = "default+all-features"
