@@ -137,6 +137,27 @@ worktrees, then proves a second same-worktree run refuses cleanly. Evidence is
 written below `target/gate-concurrency-proof/<worktree-slug>/` unless
 `LASH_GATE_PROOF_OUT_DIR` overrides it.
 
+### Machine load, as distinct from gate isolation
+
+Worktree isolation makes concurrent gates *correct*; it does nothing about the
+machine they share. Every concurrent `just push-gate` compiles the whole
+workspace, and an unbudgeted build sizes itself from `nproc`, so several gates
+at once oversubscribe the box and each one finishes later than it would have by
+waiting. Two limits, both feature-detected and both absent on CI runners, which
+get a runner per job and have nothing to share:
+
+- **How wide one gate goes.** The build width comes from the environment —
+  `CARGO_BUILD_JOBS` and `NEXTEST_TEST_THREADS`, exported by whatever prepares
+  the checkout — not from `nproc`.
+- **How many gates run at once.** `push-gate.sh` runs its build-heavy legs
+  (workspace check, clippy, the workspace test build, the doc passes) through
+  `heavy-slot` when that tool is on `PATH`: a box-wide semaphore that caps how
+  many compile-shaped gates are resident at once and *waits* for a slot rather
+  than failing. Absent, the legs run exactly as before.
+
+Raise a budget or bypass the semaphore only for a specific measured need. An
+unbudgeted gate does not finish sooner; it makes every other one finish later.
+
 There is no `staging` branch. Preview work belongs in pull requests, while the
 merged product state lives on `main`.
 

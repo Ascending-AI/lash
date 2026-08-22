@@ -96,6 +96,8 @@ State the expected proof on the ticket. Defaults when unstated:
 
 Gate merges on the local battery (`just push-gate`, plus the confidence-gate lane the change warrants) and review; CI is the backstop, not the first signal. Deterministic failure classes (docs lint, conformance, contract drift) must be fixed, never bypassed.
 
+Heavy gates are serial within a lane and capped across the box: build width comes from the environment the checkout was prepared with (`CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`), and the build-heavy legs of `push-gate.sh` run through the `heavy-slot` semaphore when the machine provides it, so concurrent lanes queue instead of thrashing. Both are feature-detected and inert on CI. Do not override either without a measured need; the mechanics are in `CONTRIBUTING.md` under "Concurrent local gates".
+
 ### Expect tests versus conformance assertions
 
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.

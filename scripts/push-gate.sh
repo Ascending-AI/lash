@@ -27,6 +27,29 @@ step() {
   printf '\n==> %s\n' "$*"
 }
 
+# Build-heavy legs run through `heavy-slot` when the developer box provides it.
+#
+# The gate lock this script already holds serialises push gates *within* one
+# worktree. It says nothing about the rest of the machine, and a box running
+# several agent lanes at once has several of these gates compiling the whole
+# workspace simultaneously — each sized from `nproc`, each evicting the others'
+# pages. `heavy-slot` is a box-wide semaphore (a small number of `flock`ed
+# slots) that caps how many compile-shaped gates are resident at once; it waits
+# for a slot rather than failing, and it is re-entrant, so wrapping a leg that
+# already runs inside a slot is a no-op rather than a deadlock.
+#
+# It is feature-detected on purpose. CI runners have one job per runner and no
+# such tool, and a gate that only works on one developer's machine is a broken
+# gate: with `heavy-slot` absent, `heavy` expands to nothing and every leg below
+# runs exactly as it did before.
+heavy_slot_cmd=()
+if command -v heavy-slot >/dev/null 2>&1; then
+  heavy_slot_cmd=(heavy-slot)
+fi
+
+heavy() {
+  "${heavy_slot_cmd[@]}" "$@"
+}
 
 configure_bindgen_headers() {
   if [ -n "${BINDGEN_EXTRA_CLANG_ARGS:-}" ]; then
@@ -123,12 +146,12 @@ run_workspace_tests() {
   step "Workspace tests"
   if cargo nextest --version >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+    heavy env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
       cargo nextest run --workspace --locked ${ci_features}
   else
     echo "cargo-nextest is not installed; falling back to cargo test for local push gate." >&2
     # shellcheck disable=SC2086
-    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+    heavy env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
       cargo test --workspace --locked ${ci_features}
   fi
 }
@@ -276,7 +299,7 @@ rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/sto
 
 step "Clippy"
 # shellcheck disable=SC2086
-cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
+heavy cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
 
 step "Restate handler panic boundary"
 python3 scripts/check-restate-handler-panics.py
@@ -301,7 +324,7 @@ step "Documented format versions"
 python3 scripts/check_format_versions.py
 
 step "Rustdoc lint"
-bash scripts/check-rustdoc.sh
+heavy bash scripts/check-rustdoc.sh
 
 step "Test quarantine metadata"
 python3 scripts/check_test_quarantines.py
@@ -328,7 +351,7 @@ check_current_branch_release_notes
 
 step "Workspace check"
 # shellcheck disable=SC2086
-cargo check --workspace --all-targets --locked ${ci_features}
+heavy cargo check --workspace --all-targets --locked ${ci_features}
 
 run_runtime_feature_boundary_check
 run_postgres_conformance
@@ -337,7 +360,7 @@ run_workspace_tests
 
 step "Workspace doctests"
 # shellcheck disable=SC2086
-cargo test --doc --workspace --locked ${ci_features}
+heavy cargo test --doc --workspace --locked ${ci_features}
 
 step "Workflow graph example integration"
 just workflow-graph-integration-verify
