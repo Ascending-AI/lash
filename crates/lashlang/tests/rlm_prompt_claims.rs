@@ -6,6 +6,9 @@
 //! lashlang semantics, the failing test tells you which line in the prompt
 //! is now a lie.
 
+#[path = "support/execute.rs"]
+mod execute_support;
+
 use lash_sansio::sync::MutexExt;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ParseError,
@@ -13,6 +16,8 @@ use lashlang::{
 };
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+use execute_support::ExecuteError;
 
 // ─────────────────────────────────────────────────────────────────────
 // Test host: mirrors the real RLM runtime's tool-result wrapping
@@ -123,35 +128,12 @@ fn test_host_operation(
     }
 }
 
-#[derive(Debug, thiserror::Error, PartialEq)]
-enum ExecuteError {
-    #[error(transparent)]
-    Parse(#[from] lashlang::ParseError),
-    #[error(transparent)]
-    Link(#[from] lashlang::LinkError),
-    #[error(transparent)]
-    Runtime(#[from] lashlang::RuntimeError),
-}
-
 async fn execute<H: ExecutionHost>(
     source: &str,
     state: &mut State,
     host: &H,
 ) -> Result<ExecutionOutcome, ExecuteError> {
-    let program = parse(source)?;
-    let compiled = if let Ok(linked) =
-        lashlang::LinkedModule::link(program.clone(), test_host_environment())
-    {
-        lashlang::compile_linked(&linked)
-    } else if program_contains_start_process(&program.main) {
-        let linked = lashlang::LinkedModule::link(program, test_host_environment())?;
-        lashlang::compile_linked(&linked)
-    } else {
-        lashlang::compile(source)?
-    };
-    lashlang::execute(&compiled, state, host)
-        .await
-        .map_err(ExecuteError::Runtime)
+    execute_support::execute(source, state, host, test_host_environment()).await
 }
 
 fn test_host_environment() -> lashlang::LashlangHostEnvironment {
@@ -217,24 +199,6 @@ fn test_host_environment() -> lashlang::LashlangHostEnvironment {
         )
         .expect("host catalog operation must not conflict");
     lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
-}
-
-fn program_contains_start_process(expr: &lashlang::Expr) -> bool {
-    struct Finder(bool);
-
-    impl lashlang::ExprVisitor for Finder {
-        fn visit_expr(&mut self, expr: &lashlang::Expr) {
-            if matches!(expr, lashlang::Expr::StartProcess(_)) {
-                self.0 = true;
-                return;
-            }
-            lashlang::walk_expr(self, expr);
-        }
-    }
-
-    let mut finder = Finder(false);
-    lashlang::ExprVisitor::visit_expr(&mut finder, expr);
-    finder.0
 }
 
 impl MockHost {
