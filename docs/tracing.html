@@ -18,11 +18,11 @@
 <script src="./docs.js?v=7" defer></script>
 <script src="./syntax.js" defer></script>
 </head>
-<body class="docs-page" data-cover-source="<code>crates/lash-trace</code>, <code>crates/lash</code>, <code>crates/lash-trace-viewer</code>, <code>examples/agent-service</code>.">
+<body class="docs-page" data-cover-source="<code>crates/lash-trace</code>, <code>crates/lash</code>, <code>examples/agent-service</code>.">
   <a class="skip-link" href="#content">skip to content</a>
 <section class="opener">
     <h1 class="opener__title">tracing<span class="slash">/</span>observability</h1>
-    <p class="opener__lede">Structured runtime records emit through <code>TraceSink</code>. The bundled <code>JsonlTraceSink</code> writes one record per line; fan-out, OTel, and custom sinks are wrappers. Lashlang execution graphs are a separate opt-in sink for foreground blocks, durable process runs, and trace-derived graph snapshots. <code>lash-trace-viewer</code> renders JSONL to a self-contained HTML page.</p>
+    <p class="opener__lede">Structured runtime records emit through <code>TraceSink</code>. The bundled <code>JsonlTraceSink</code> writes one record per line; fan-out, OTel, and custom sinks are wrappers. Lashlang execution graphs are a separate opt-in sink for foreground blocks, durable process runs, and trace-derived graph snapshots.</p>
   </section>
 
   <main class="body" id="content">
@@ -261,7 +261,7 @@ impl TraceSink for FanoutTraceSink {
         <div class="section" id="what-is-emitted">
           <div class="section-header">
             <h2>What Is Emitted</h2>
-            <p>Tagged enums on <code>TraceEvent</code>. <code>TraceEvent::kind()</code> is the single source of truth for each variant's <code>type</code> tag — consumers such as the trace viewer match on the enum and read the kind from there rather than re-deriving tag strings. A new variant is breaking for closed-enum readers and bumps the schema; an optional field is additive only for readers that ignore unknown fields. The full rule set lives in <a href="./reporting.html#schema-evolution">Reporting channels → Schema evolution</a>.</p>
+            <p>Tagged enums on <code>TraceEvent</code>. <code>TraceEvent::kind()</code> is the single source of truth for each variant's <code>type</code> tag — consumers match on the enum and read the kind from there rather than re-deriving tag strings. A new variant is breaking for closed-enum readers and bumps the schema; an optional field is additive only for readers that ignore unknown fields. The full rule set lives in <a href="./reporting.html#schema-evolution">Reporting channels → Schema evolution</a>.</p>
           </div>
           <div class="def-list-grid">
             <article class="panel">
@@ -307,8 +307,8 @@ impl TraceSink for FanoutTraceSink {
           <div class="section-header">
             <h2>The JSONL Schema</h2>
             <p>One line of UTF-8 JSON per record. <code>TRACE_SCHEMA_VERSION = <span data-format-version="TRACE_SCHEMA_VERSION">7</span></code>. Version 5 adds <code>CompositionChanged</code>; version 6 adds <code>ProviderReplayDropped</code> with typed minting and serving LLM Provider routes, including normalized endpoints; version 7 renames the Lashlang execution records to language-tagged ones. Endpoints are routing metadata, not redacted secrets: URL userinfo is rejected, and hosts must not place credentials in paths or query strings because those bytes remain identity-significant and operator-visible in traces and remote envelopes. Typed decoding requires that exact version and returns <code>TraceSchemaVersionError</code> for any other version before interpreting the event payload. The <a href="./reporting.html#schema-evolution">schema-evolution policy</a> distinguishes closed-enum variants from optional fields and opaque payloads.</p>
-            <p>Restate-hosted turns can attach the same sink to <code>RestateRuntimeEffectController::with_trace_sink</code>. The viewer then shows journaled-effect start/settle, durable-wait park/resolve, durable timers, and segment boundaries alongside the ordinary session-manager turn, LLM, and tool records. The controller retains only a weak sink reference: an absent or dropped sink is a no-op. These records are live observations, may be emitted again during handler redrive, and never issue a Restate command or replace the durable journal.</p>
-            <p>Completed or failed LLM and tool events may also carry an additive <code>attempts</code> ladder projected from the retry owner's existing records. The viewer shows the attempt count plus each attempt's outcome, duration, retry reason, and scheduled delay, so a throttling or transient-failure storm remains visible instead of collapsing into the final clean outcome.</p>
+            <p>Restate-hosted turns can attach the same sink to <code>RestateRuntimeEffectController::with_trace_sink</code>. The resulting records include journaled-effect start/settle, durable-wait park/resolve, durable timers, and segment boundaries alongside the ordinary session-manager turn, LLM, and tool records. The controller retains only a weak sink reference: an absent or dropped sink is a no-op. These records are live observations, may be emitted again during handler redrive, and never issue a Restate command or replace the durable journal.</p>
+            <p>Completed or failed LLM and tool events may also carry an additive <code>attempts</code> ladder projected from the retry owner's existing records. The records include the attempt count plus each attempt's outcome, duration, retry reason, and scheduled delay, so a throttling or transient-failure storm remains visible instead of collapsing into the final clean outcome.</p>
           </div>
           <pre data-lang="json"><code>{
   "schema_version": 7,
@@ -326,21 +326,6 @@ impl TraceSink for FanoutTraceSink {
   "duration_ms": 8
 }</code></pre>
           <p>Record type: <code>lash_trace::TraceRecord</code>. Event variants: <code>lash_trace::TraceEvent</code>. Both <code>Deserialize</code>; parse directly with <code>serde_json::from_str::&lt;TraceRecord&gt;()</code>. That documented decode path enforces the exact schema version structurally.</p>
-        </div>
-
-        <div class="section" id="viewing">
-          <div class="section-header">
-            <h2>Viewing A Trace</h2>
-            <p>Renders JSONL to a self-contained HTML timeline with nested LLM calls, tool calls, and streaming chunks inline. The viewer uses the same version-validating <code>TraceRecord</code> decode. Valid-JSON records refused by that typed decode, including old or unrecognized schemas, are deliberately preserved through the raw fallback; a line that is not valid JSON aborts the load.</p>
-          </div>
-          <pre data-lang="console"><code>$ cargo run -p lash-trace-viewer -- ./.lash-data/trace.jsonl
-# Writes ./.lash-data/trace.html next to the input
-
-$ cargo run -p lash-trace-viewer -- trace.jsonl \
-      --out report.html \
-      --title "Session 2026-05-11"
-# Custom output path and title.</code></pre>
-          <p>Workspace-only; no separate release. Run with <code>cargo run -p lash-trace-viewer</code> from the workspace root.</p>
         </div>
 
         <div class="section" id="opentelemetry">

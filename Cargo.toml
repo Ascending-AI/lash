@@ -2,7 +2,6 @@
 members = [
     "crates/lash-sansio",
     "crates/lash-trace",
-    "crates/lash-trace-viewer",
     "crates/lash-rlm-types",
     "crates/lash-core",
     "crates/lash-lashlang-runtime",

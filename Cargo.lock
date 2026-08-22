@@ -2699,17 +2699,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-trace-viewer"
-version = "0.0.0-dev"
-dependencies = [
- "anyhow",
- "clap",
- "lash-trace",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "lash-typescript"
 version = "0.0.0-dev"
 dependencies = [

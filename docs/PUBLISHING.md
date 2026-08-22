@@ -16,7 +16,7 @@ release publishes them all together, in dependency order.
   a-la-carte capability crates (`lash-tools`, `lash-plugin-mcp`,
   `lash-subagents`, `lash-plugin-tool-output-budget`, `lash-llm-tools`).
 - **Not published:** anything marked `publish = false` — examples, E2E
-  harnesses, and dev/internal tooling (`lash-perf`, `lash-trace-viewer`).
+  harnesses, and dev/internal tooling (`lash-perf`).
   Harness evolution lives in the separate
   [`lash-evolve`](https://github.com/SamGalanakis/lash-evolve) repository.
 
