@@ -632,7 +632,6 @@ mod tests {
                     lash_core::TurnBudget::Unbounded,
                 )),
                 outcome,
-                cancellation: None,
                 assistant_output: lash_core::facade_support::AssistantOutput {
                     safe_text: "looks final".to_string(),
                     raw_text: "looks final".to_string(),

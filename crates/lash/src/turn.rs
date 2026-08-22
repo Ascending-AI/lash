@@ -1349,10 +1349,9 @@ pub(crate) async fn stream_prepared_agent_frame_run(
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TurnReport {
     pub state: SessionSnapshot,
+    /// Cancellation evidence, when the turn was cancelled, rides this outcome
+    /// — read it with [`TurnReport::cancellation`].
     pub outcome: TurnOutcome,
-    /// Durable request evidence, present exactly when `outcome` is cancelled.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancellation: Option<lash_core::facade_support::TurnCancellationEvidence>,
     pub assistant_output: AssistantOutput,
     /// Parent's own LLM tokens for this turn. Does **not** include child
     /// sessions; see [`children_usage`](Self::children_usage) and
@@ -1381,7 +1380,6 @@ impl TurnReport {
         Self {
             state: turn.state,
             outcome: turn.outcome,
-            cancellation: turn.cancellation,
             assistant_output: turn.assistant_output,
             usage: turn.token_usage,
             children_usage: turn.children_usage,
@@ -1390,6 +1388,12 @@ impl TurnReport {
             execution: turn.execution,
             errors: turn.errors,
         }
+    }
+
+    /// Durable cancellation evidence, present exactly when this turn was
+    /// cancelled. Cancellation evidence has no home other than the outcome.
+    pub fn cancellation(&self) -> Option<&lash_core::facade_support::TurnCancellationEvidence> {
+        self.outcome.cancellation()
     }
 
     /// Sum of parent's own LLM tokens and every child session's LLM tokens

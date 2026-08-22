@@ -3648,7 +3648,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
 
     assert!(matches!(
         drained.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
         crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
@@ -4161,7 +4161,7 @@ async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_hando
         .expect("cancelled terminal turn");
     assert!(matches!(
         terminal.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
         crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
@@ -5734,7 +5734,7 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
 
     assert!(matches!(
         assembled.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
         assembled.errors.is_empty(),
@@ -7431,16 +7431,14 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
         .expect("cancelled turn should finish")
         .expect("cancelled turn task")
         .expect("sealed cancellation should commit despite later renewal rejection");
-    assert!(matches!(
-        assembled.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
-    ));
     assert_eq!(
-        assembled.cancellation,
-        Some(crate::TurnCancellationEvidence {
-            request_id: "cancel-before-loss-request".to_string(),
-            origin: Some("test-user".to_string()),
-            reason: Some("user stopped the turn".to_string()),
+        assembled.outcome,
+        TurnOutcome::Stopped(TurnStop::Cancelled {
+            evidence: crate::TurnCancellationEvidence {
+                request_id: "cancel-before-loss-request".to_string(),
+                origin: Some("test-user".to_string()),
+                reason: Some("user stopped the turn".to_string()),
+            }
         })
     );
 }

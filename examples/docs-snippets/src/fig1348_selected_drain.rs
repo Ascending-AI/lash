@@ -161,14 +161,10 @@ async fn advanced_selected_drain_observes_cooperative_cancellation() -> anyhow::
     let claimed_exact = vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id }];
     assert_eq!(cancelled.satisfied, claimed_exact);
     let cancelled = cancelled.turn.expect("selected row starts a turn");
-    assert_eq!(cancelled.outcome, TurnOutcome::Stopped(TurnStop::Cancelled));
-    assert_eq!(
-        cancelled
-            .cancellation
-            .expect("cooperative cancellation evidence")
-            .origin,
-        None
-    );
+    let TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) = &cancelled.outcome else {
+        panic!("selected drain under a cancelled token commits a cancelled turn");
+    };
+    assert_eq!(evidence.origin, None);
     Ok(())
 }
 
@@ -191,11 +187,8 @@ async fn selected_drain_preserves_host_cancellation_origin() -> anyhow::Result<(
         cancelled.satisfied,
         vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow { batch_id }]
     );
-    let evidence = cancelled
-        .turn
-        .expect("selected row starts a turn")
-        .cancellation
-        .expect("host cancellation evidence");
+    let turn = cancelled.turn.expect("selected row starts a turn");
+    let evidence = turn.cancellation().expect("host cancellation evidence");
     assert_eq!(evidence.origin.as_deref(), Some("host-shutdown"));
     Ok(())
 }

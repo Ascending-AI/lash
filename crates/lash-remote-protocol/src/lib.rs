@@ -94,7 +94,14 @@ pub use usage_activity::*;
 // Bumped to 43: remote turn reports reject status/outcome contradictions;
 // peers must derive status from the terminal outcome rather than trusting both
 // fields independently (FIG-1756).
-pub const REMOTE_PROTOCOL_VERSION: u32 = 43;
+// Bumped to 44: `RemoteTurnStatus` is a projection derived from the turn
+// outcome and no longer has an `in_progress` variant -- a turn report exists
+// only once the turn has a terminal outcome, so a version 43 peer emitting
+// that status must be refused rather than mapped onto a terminal one.
+// `RemoteTurnReport` has no probe-first decoder: exact-version negotiation in
+// `validate` refuses a version 43 report that decodes, and the removed status
+// value is refused by serde before that (FIG-1757).
+pub const REMOTE_PROTOCOL_VERSION: u32 = 44;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

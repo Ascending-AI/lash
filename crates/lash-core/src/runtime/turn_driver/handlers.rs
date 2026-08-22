@@ -160,10 +160,12 @@ impl RuntimeTurnDriver<'_> {
                     },
                 )
                 .await?;
-            if pending_cancel.is_some() {
+            if let Some(evidence) = pending_cancel {
                 cancel.cancel();
                 send_session_event(event_tx, SessionStreamEvent::Done).await;
-                machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled));
+                machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
+                    evidence,
+                }));
                 return Ok(());
             }
         }
@@ -174,6 +176,11 @@ impl RuntimeTurnDriver<'_> {
                 let prose_projector = self.session.plugins().assistant_prose_projector();
                 emit_semantic_response_parts(event_tx, response, prose_projector.as_deref()).await;
             }
+        }
+        // Name the request that stopped the call before the machine decides a
+        // cancelled terminal reason, so its outcome carries real evidence.
+        if let Some(evidence) = self.turn_control.evidence() {
+            machine.record_cancellation_evidence(evidence);
         }
         self.handle_machine_response(
             machine,

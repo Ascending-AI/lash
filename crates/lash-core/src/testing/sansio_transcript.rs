@@ -210,7 +210,7 @@ fn outcome_entry(actor: Actor, outcome: &TurnOutcome) -> Entry {
 
 fn stop_reason(stop: &TurnStop) -> &'static str {
     match stop {
-        TurnStop::Cancelled => "cancelled",
+        TurnStop::Cancelled { .. } => "cancelled",
         TurnStop::Incomplete => "incomplete",
         TurnStop::InvalidInput => "invalid_input",
         TurnStop::MaxTurns => "max_turns",

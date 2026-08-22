@@ -2258,16 +2258,14 @@ fn assert_engine_restart_cancelled_terminal(
     request_id: &str,
 ) -> Result<()> {
     let TurnTerminal::Committed {
-        outcome,
-        cancellation: Some(evidence),
+        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence }),
         ..
     } = terminal
     else {
         anyhow::bail!("expected committed post-restart cancellation, got {terminal:?}")
     };
     anyhow::ensure!(
-        matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled))
-            && evidence.request_id == request_id
+        evidence.request_id == request_id
             && evidence.origin.as_deref() == Some("scripted-engine-restart-runner")
             && evidence.reason.as_deref()
                 == Some("cancel a replayed turn after the Restate engine restarted"),
@@ -2308,7 +2306,7 @@ async fn drive_break_glass_scenario(
             !matches!(
                 terminal,
                 TurnTerminal::Committed {
-                    outcome: TurnOutcome::Stopped(TurnStop::Cancelled),
+                    outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
                     ..
                 }
             ),
@@ -2363,19 +2361,14 @@ fn assert_requested(outcome: &TurnCancelOutcome, request_id: &str) -> Result<()>
 fn assert_cancelled_terminal(terminal: &TurnTerminal, request_id: &str) -> Result<()> {
     let TurnTerminal::Committed {
         outcome,
-        cancellation,
         session_revision: _,
     } = terminal
     else {
         anyhow::bail!("expected committed cancellation terminal, got {terminal:?}")
     };
-    anyhow::ensure!(
-        matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled)),
-        "terminal was not Cancelled: {terminal:?}"
-    );
-    let evidence = cancellation
-        .as_ref()
-        .context("Cancelled terminal omitted cancellation evidence")?;
+    let evidence = outcome
+        .cancellation()
+        .context("terminal was not Cancelled")?;
     anyhow::ensure!(
         evidence.request_id == request_id,
         "terminal evidence mismatch: {evidence:?}"
@@ -2388,21 +2381,12 @@ fn assert_cancelled_terminal(terminal: &TurnTerminal, request_id: &str) -> Resul
 }
 
 fn assert_non_cancel_terminal(terminal: &TurnTerminal) -> Result<()> {
-    let TurnTerminal::Committed {
-        outcome,
-        cancellation,
-        ..
-    } = terminal
-    else {
+    let TurnTerminal::Committed { outcome, .. } = terminal else {
         anyhow::bail!("expected committed completion terminal, got {terminal:?}")
     };
     anyhow::ensure!(
-        !matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled)),
+        outcome.cancellation().is_none(),
         "completion-sealed terminal reported Cancelled"
-    );
-    anyhow::ensure!(
-        cancellation.is_none(),
-        "non-cancel terminal carried cancellation evidence"
     );
     Ok(())
 }

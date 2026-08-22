@@ -551,11 +551,11 @@ async fn drive_first_party_cancel_before_start(
         .await
         .expect("future turn");
 
-    let cancellation = cancelled.result.cancellation;
+    let cancellation = cancelled.result.cancellation().cloned();
     FirstPartyCancelObs {
         cancelled: matches!(
             cancelled.result.outcome,
-            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled)
+            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
         ),
         request_id: cancellation
             .as_ref()
@@ -629,21 +629,19 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
         .expect("commit cancelled SQLite turn");
     assert!(matches!(
         cancelled.result.outcome,
-        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled)
+        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
     ));
     assert_eq!(
         cancelled
             .result
-            .cancellation
-            .as_ref()
+            .cancellation()
             .map(|evidence| evidence.request_id.as_str()),
         Some("sqlite-replay-cancel")
     );
     assert_eq!(
         cancelled
             .result
-            .cancellation
-            .as_ref()
+            .cancellation()
             .and_then(|evidence| evidence.origin.as_deref()),
         Some("sqlite-replay")
     );

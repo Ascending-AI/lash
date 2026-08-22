@@ -585,7 +585,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .expect("cancel input runs");
     assert!(matches!(
         cancelled.result.outcome,
-        lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled)
+        lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     let cancel_verdict = logical_turn_claims_settle_exactly_once(&cancel_trace.snapshot());
     assert!(cancel_verdict.is_passed(), "{cancel_verdict:?}");

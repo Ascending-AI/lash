@@ -35,7 +35,7 @@ removal_verdicts_recorded = 769
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2790
+prose_citations_recorded = 2788
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -420,7 +420,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:349#let parent: lash::CancellationToken = lash::CancellationToken::new();"
+usage = "examples/docs-snippets/src/embedding_turns.rs:359#let parent: lash::CancellationToken = lash::CancellationToken::new();"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -429,8 +429,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:352#lash::CancellationToken::cancel(&parent);"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:355#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:362#lash::CancellationToken::cancel(&parent);"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:365#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
 
 [[api]]
 symbol = "lash::CancellationToken::cancelled"
@@ -438,8 +438,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:362#lash::CancellationToken::cancelled(&child),"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:359#assert!(lash::CancellationToken::is_cancelled(&child));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:372#lash::CancellationToken::cancelled(&child),"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:369#assert!(lash::CancellationToken::is_cancelled(&child));"
 
 [[api]]
 symbol = "lash::CancellationToken::cancelled_owned"
@@ -447,7 +447,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:368#let owned_waiter = tokio::spawn(lash::CancellationToken::cancelled_owned(owned.clone()));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:378#let owned_waiter = tokio::spawn(lash::CancellationToken::cancelled_owned(owned.clone()));"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -456,7 +456,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:350#let child = lash::CancellationToken::child_token(&parent);"
+usage = "examples/docs-snippets/src/embedding_turns.rs:360#let child = lash::CancellationToken::child_token(&parent);"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -465,8 +465,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:389#drop(lash::CancellationToken::drop_guard(guarded));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:391#lash::CancellationToken::is_cancelled(&observed_guarded),"
+usage = "examples/docs-snippets/src/embedding_turns.rs:399#drop(lash::CancellationToken::drop_guard(guarded));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:401#lash::CancellationToken::is_cancelled(&observed_guarded),"
 
 [[api]]
 symbol = "lash::CancellationToken::drop_guard_ref"
@@ -474,8 +474,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:396#drop(lash::CancellationToken::drop_guard_ref(&borrowed_guarded));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:398#lash::CancellationToken::is_cancelled(&borrowed_guarded),"
+usage = "examples/docs-snippets/src/embedding_turns.rs:406#drop(lash::CancellationToken::drop_guard_ref(&borrowed_guarded));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:408#lash::CancellationToken::is_cancelled(&borrowed_guarded),"
 
 [[api]]
 symbol = "lash::CancellationToken::is_cancelled"
@@ -483,8 +483,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:359#assert!(lash::CancellationToken::is_cancelled(&child));"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:359#assert!(lash::CancellationToken::is_cancelled(&child));"
+usage = "examples/docs-snippets/src/embedding_turns.rs:369#assert!(lash::CancellationToken::is_cancelled(&child));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:369#assert!(lash::CancellationToken::is_cancelled(&child));"
 
 [[api]]
 symbol = "lash::CancellationToken::new"
@@ -492,7 +492,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:349#let parent: lash::CancellationToken = lash::CancellationToken::new();"
+usage = "examples/docs-snippets/src/embedding_turns.rs:359#let parent: lash::CancellationToken = lash::CancellationToken::new();"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -501,8 +501,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:355#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:355#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+usage = "examples/docs-snippets/src/embedding_turns.rs:365#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:365#tokio::time::timeout(Duration::from_secs(1), borrowed_work).await,"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -511,8 +511,8 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:379#tokio::time::timeout(Duration::from_secs(1), owned_work)"
-assertion = "examples/docs-snippets/src/embedding_turns.rs:379#tokio::time::timeout(Duration::from_secs(1), owned_work)"
+usage = "examples/docs-snippets/src/embedding_turns.rs:389#tokio::time::timeout(Duration::from_secs(1), owned_work)"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:389#tokio::time::timeout(Duration::from_secs(1), owned_work)"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -2781,7 +2781,7 @@ aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests.rs:1913#.lease_timings(lease_timings)"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1652#takeover_latency < default_ttl,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1655#takeover_latency < default_ttl,"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::live_replay_store"
@@ -3752,8 +3752,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ObservableSession::resume_from_cursor"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:689#.resume_from_cursor(&cursor)"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:698#\"{label} observer missed ModelAttemptReset: {events:#?}\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:692#.resume_from_cursor(&cursor)"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:701#\"{label} observer missed ModelAttemptReset: {events:#?}\""
 
 [[api]]
 symbol = "lash::ObservableSession::session_id"
@@ -3789,8 +3789,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::ObservableSession::subscribe_from_cursor"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:637#.subscribe_from_cursor(&cursor)"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:682#\"successful retry did not commit: {terminal:#?}\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:640#.subscribe_from_cursor(&cursor)"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:685#\"successful retry did not commit: {terminal:#?}\""
 
 [[api]]
 symbol = "lash::ObservableSession::subscribe_from_remote_cursor"
@@ -6344,16 +6344,26 @@ reason = "The current example use of lash::TurnCancelRequest::with_reason is com
 symbol = "lash::TurnCancellationEvidence"
 kind = "struct"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::TurnCancellationEvidence", "lash_core::runtime::turn_control::TurnCancellationEvidence"]
+aliases = ["lash_core::facade_support::TurnCancellationEvidence"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: `lash::TurnCancellationEvidence` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::cancellation` because its canonical identity is the lash-core one. Consumer class: the remote-protocol crate and facade agent-scenario tests -- this type is exercised in-repo at crates/lash-remote-protocol/src/core_conversions_tests.rs::turn_cancel_core_conversions_round_trip_every_envelope#`let evidence = lash_core::facade_support::TurnCancellationEvidence {`, crates/lash-remote-protocol/src/core_conversions_tests.rs::turn_cancel_core_conversions_round_trip_every_envelope#`lash_core::facade_support::TurnCancellationEvidence::from(remote_evidence),`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
+symbol = "lash::TurnCancellationEvidence::internal"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnCancellationEvidence::internal"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_turns.rs:255#TurnCancellationEvidence::internal(turn_id).request_id,"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:256#format!(\"internal:{turn_id}\")"
+
+[[api]]
 symbol = "lash::TurnCancellationEvidence::origin"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::TurnCancellationEvidence::origin", "lash_core::runtime::turn_control::TurnCancellationEvidence::origin"]
+aliases = ["lash_core::facade_support::TurnCancellationEvidence::origin"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::TurnCancellationEvidence::origin` directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::cancellation`. Consumer class: the remote-protocol crate and facade agent-scenario tests -- this field is exercised in-repo at crates/lash-remote-protocol/src/core_conversions_tests.rs::turn_cancel_core_conversions_round_trip_every_envelope#`origin: Some(\"workbench-user\".to_string()),`, crates/lash-remote-protocol/src/core_conversions_tests.rs::turn_cancel_core_conversions_round_trip_every_envelope#`origin: None,`, and no example reaches it, which is what keeps the row unused."
@@ -6362,7 +6372,7 @@ reason = "Facade contract surface, not a closure-only discovery: the owning type
 symbol = "lash::TurnCancellationEvidence::reason"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::TurnCancellationEvidence::reason", "lash_core::runtime::turn_control::TurnCancellationEvidence::reason"]
+aliases = ["lash_core::facade_support::TurnCancellationEvidence::reason"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::TurnCancellationEvidence::reason` directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::cancellation`. Consumer class: facade agent-scenario tests and the remote-protocol crate -- this field is exercised in-repo at crates/lash/src/tests/turn_streaming.rs::rlm_provider_failure_after_prose_is_not_retried_or_committed#`assert_eq!(`, crates/lash/src/tests/turn_streaming.rs::session_observation_remote_recovery_stream_yields_dto_gap#`panic!(\"trimmed remote cursor should yield a gap item\");`, and no example reaches it, which is what keeps the row unused."
@@ -6371,7 +6381,7 @@ reason = "Facade contract surface, not a closure-only discovery: the owning type
 symbol = "lash::TurnCancellationEvidence::request_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::TurnCancellationEvidence::request_id", "lash_core::runtime::turn_control::TurnCancellationEvidence::request_id"]
+aliases = ["lash_core::facade_support::TurnCancellationEvidence::request_id"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::TurnCancellationEvidence::request_id` directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::cancellation`. Consumer class: the remote-protocol crate and the core test harness -- this field is exercised in-repo at crates/lash-remote-protocol/src/core_conversions_tests.rs::turn_cancel_core_conversions_round_trip_every_envelope#`request_id: \"cancel-request\".to_string(),`, crates/lash-remote-protocol/src/core_conversions_tests.rs::turn_cancel_core_conversions_round_trip_every_envelope#`request_id: \"cancel-without-origin\".to_string(),`, and no example reaches it, which is what keeps the row unused."
@@ -7459,7 +7469,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnOutcome::Stopped", "lash_core::facade_support::TurnOutcome::Stopped"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:214#outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:215#lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -7470,6 +7480,16 @@ aliases = ["lash::prelude::TurnOutcome::Stopped::0", "lash_core::facade_support:
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::TurnOutcome::Stopped::0 to the docs-snippets embedding/turns example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::TurnOutcome::cancellation"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::TurnOutcome::cancellation", "lash_core::facade_support::TurnOutcome::cancellation"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/embedding_turns.rs:250#assert_eq!(TurnOutcome::cancellation(&result.outcome), Some(evidence));"
+assertion = "examples/docs-snippets/src/embedding_turns.rs:250#assert_eq!(TurnOutcome::cancellation(&result.outcome), Some(evidence));"
 
 [[api]]
 symbol = "lash::TurnOutput"
@@ -7563,7 +7583,7 @@ reason = "Add lash::TurnReport::assistant_output to the docs-snippets embedding/
 
 [[api]]
 symbol = "lash::TurnReport::cancellation"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnReport::cancellation", "lash::turn::TurnReport::cancellation"]
 area = "sessions-turns"
@@ -7712,8 +7732,18 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnStop::Cancelled", "lash_core::facade_support::TurnStop::Cancelled"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:214#outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:215#lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::TurnStop::Cancelled::evidence"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::TurnStop::Cancelled::evidence", "lash_core::facade_support::TurnStop::Cancelled::evidence"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:216#evidence: ref terminal_evidence,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:216#evidence: ref terminal_evidence,"
 
 [[api]]
 symbol = "lash::TurnStop::Incomplete"
@@ -7758,7 +7788,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnStop::ProviderError", "lash_core::facade_support::TurnStop::ProviderError"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:475#lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError)"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:474#lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError)"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -7872,24 +7902,14 @@ usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:21
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
-symbol = "lash::TurnTerminal::Committed::cancellation"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::TurnTerminal::Committed::cancellation"]
-area = "stores"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:215#cancellation: Some(ref terminal_evidence),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:215#cancellation: Some(ref terminal_evidence),"
-
-[[api]]
 symbol = "lash::TurnTerminal::Committed::outcome"
 kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::facade_support::TurnTerminal::Committed::outcome"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:214#outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:214#outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:214#outcome:"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:214#outcome:"
 
 [[api]]
 symbol = "lash::TurnTerminal::Committed::session_revision"
@@ -10691,8 +10711,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimings", "lash_core::store::lease_timings::LeaseTimings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1652#takeover_latency < default_ttl,"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1652#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1655#takeover_latency < default_ttl,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1655#takeover_latency < default_ttl,"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -10711,7 +10731,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimings::new", "lash_core::store::lease_timings::LeaseTimings::new"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1572#lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1575#lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -10739,8 +10759,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimings::ttl", "lash_core::store::lease_timings::LeaseTimings::ttl"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1652#takeover_latency < default_ttl,"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1652#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1655#takeover_latency < default_ttl,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1655#takeover_latency < default_ttl,"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -12538,7 +12558,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::Committed"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:681#matches!(terminal, lash::TurnTerminal::Committed { .. }),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:684#matches!(terminal, lash::TurnTerminal::Committed { .. }),"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12632,7 +12652,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::TurnActivity"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:656#lash::observe::SessionObservationEventPayload::TurnActivity(_)"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:659#lash::observe::SessionObservationEventPayload::TurnActivity(_)"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12715,7 +12735,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::SessionObservationSubscription"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:634#let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) ="
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:637#let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) ="
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12752,7 +12772,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::SessionObservationSubscription::Subscribed"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:634#let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) ="
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:637#let lash::observe::SessionObservationSubscription::Subscribed(mut subscription) ="
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12827,7 +12847,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::SessionResume"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:685#let lash::observe::SessionResume::Replayed {"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:688#let lash::observe::SessionResume::Replayed {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12864,7 +12884,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::SessionResume::Replayed"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:685#let lash::observe::SessionResume::Replayed {"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:688#let lash::observe::SessionResume::Replayed {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12874,8 +12894,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::SessionResume::Replayed::events"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:686#events: replay_events,"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:697#resets, 1,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:689#events: replay_events,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:700#resets, 1,"
 
 [[api]]
 symbol = "lash::observe::SessionRevision"
@@ -17901,8 +17921,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::turn_index"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1480#read_view.turn_index(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1480#read_view.turn_index(),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1483#read_view.turn_index(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1483#read_view.turn_index(),"
 
 [[api]]
 symbol = "lash::persistence::SessionRelation"
@@ -19935,8 +19955,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputIngress::active_turn_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1440#== injected.ingress.active_turn_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1400#lash::persistence::TurnInputIngress::NextTurn"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1443#== injected.ingress.active_turn_id()"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1403#lash::persistence::TurnInputIngress::NextTurn"
 
 [[api]]
 symbol = "lash::persistence::TurnInputIngress::admits_checkpoint"
@@ -25262,7 +25282,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessAwaitOutput"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:396#lash::process::ProcessAwaitOutput::Cancelled { .. }"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:400#lash::process::ProcessAwaitOutput::Cancelled { .. }"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -25299,7 +25319,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessAwaitOutput::Cancelled"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:396#lash::process::ProcessAwaitOutput::Cancelled { .. }"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:400#lash::process::ProcessAwaitOutput::Cancelled { .. }"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -27408,8 +27428,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRecord"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:943#!immediately_after_delete.is_terminal(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:944#\"session revocation must leave the independently sleeping process live\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:946#!immediately_after_delete.is_terminal(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:947#\"session revocation must leave the independently sleeping process live\""
 
 [[api]]
 symbol = "lash::process::ProcessRecord::abandon_request"
@@ -27555,8 +27575,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRecord::is_terminal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:943#!immediately_after_delete.is_terminal(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:943#!immediately_after_delete.is_terminal(),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:946#!immediately_after_delete.is_terminal(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:946#!immediately_after_delete.is_terminal(),"
 
 [[api]]
 symbol = "lash::process::ProcessRecord::max_attempts"
@@ -28917,7 +28937,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatus"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1193#&& item.process.lifecycle == lash::process::ProcessStatus::Cancelled"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1196#&& item.process.lifecycle == lash::process::ProcessStatus::Cancelled"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -28936,8 +28956,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatus::Cancelled"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1185#assert!(terminal_work.iter().any(|item| {"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1185#assert!(terminal_work.iter().any(|item| {"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1188#assert!(terminal_work.iter().any(|item| {"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1188#assert!(terminal_work.iter().any(|item| {"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -28947,8 +28967,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatus::Completed"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1185#assert!(terminal_work.iter().any(|item| {"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1185#assert!(terminal_work.iter().any(|item| {"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1188#assert!(terminal_work.iter().any(|item| {"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1188#assert!(terminal_work.iter().any(|item| {"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -29079,7 +29099,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter::Running"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1225#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1228#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -29529,7 +29549,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkObserver"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:949#.events_after(&process_id, 0)"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:952#.events_after(&process_id, 0)"
 reason = "Syntax-only evidence: the recorded example anchor inherits a closure operand that can observe an unrelated callback; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -29539,7 +29559,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkObserver::events_after"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:949#.events_after(&process_id, 0)"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:952#.events_after(&process_id, 0)"
 reason = "Syntax-only evidence: the recorded example anchor inherits a closure operand that can observe an unrelated callback; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -29549,8 +29569,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkObserver::list"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1211#.list(&lash::process::ProcessListFilter {"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1225#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1214#.list(&lash::process::ProcessListFilter {"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1228#\"timed out waiting for running process {label:?}; observed={processes:#?}\""
 
 [[api]]
 symbol = "lash::process::ProcessWorkObserver::list_observed_by"
@@ -43122,14 +43142,6 @@ disposition = "unused-add"
 reason = "Add lash::remote::turn_result::RemoteTurnStatus::Failed to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::remote::turn_result::RemoteTurnStatus::InProgress"
-kind = "variant"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::turn_result::RemoteTurnStatus::InProgress to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::remote::turn_result::RemoteTurnStop"
 kind = "enum"
 availability = "default+all-features"
@@ -45587,15 +45599,6 @@ aliases = ["lash_core::facade_support::AssembledTurn::assistant_output", "lash_c
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::assistant_output` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the subagent plugin crate and the core test harness -- this field is exercised in-repo at crates/lash-subagents/src/rlm_support.rs::task_result_value#`return json!({ \"frame_key\": frame_key, \"task\": task });`, crates/lash-subagents/src/rlm_support.rs::task_result_value#`if !turn.assistant_output.safe_text.trim().is_empty() {`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::runtime::AssembledTurn::cancellation"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::AssembledTurn::cancellation", "lash_core::runtime::AssembledTurn::cancellation"]
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::cancellation` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and facade agent-scenario tests -- this field is exercised in-repo at crates/lash/src/turn.rs::TurnReport::from_assembled#`cancellation: turn.cancellation,`, crates/lash/src/tests/core_session_builder/session_lifecycle.rs::turn_result_total_usage_sums_parent_and_children#`..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::AssembledTurn::children_usage"
@@ -50847,15 +50850,6 @@ symbol = "lash::runtime::RuntimeErrorCode::TurnCancelGateInvalidTerminal"
 kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::TurnCancelGateInvalidTerminal"]
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "Concrete host class: runtime hosts match the typed diagnostic to choose retry, terminal settlement, or caller-bug handling."
-
-[[api]]
-symbol = "lash::runtime::RuntimeErrorCode::TurnCancellationEvidenceMissing"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::RuntimeErrorCode::TurnCancellationEvidenceMissing"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime hosts match the typed diagnostic to choose retry, terminal settlement, or caller-bug handling."
@@ -66969,7 +66963,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:648#futures_util::StreamExt::next(&mut subscription),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:651#futures_util::StreamExt::next(&mut subscription),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -67066,7 +67060,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1004#error: Some(lash_core::NormalizedError {"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1003#error: Some(lash_core::NormalizedError {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67075,7 +67069,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1005#class: failure_kind.code().to_string(),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1004#class: failure_kind.code().to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67084,7 +67078,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1010#diagnostic: Some(code.to_string()),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1009#diagnostic: Some(code.to_string()),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67093,7 +67087,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1007#http_status: None,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1006#http_status: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67118,7 +67112,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1009#retry_after: None,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1008#retry_after: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -73128,7 +73122,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2481#assert_eq!(result.usage.input_tokens, 10);"
+usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2480#assert_eq!(result.usage.input_tokens, 10);"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -80212,7 +80206,7 @@ aliases = ["lash::turn::SelectedQueuedTurnBuilder::cancel"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:157#.cancel(cancel)"
-assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:164#assert_eq!(cancelled.outcome, TurnOutcome::Stopped(TurnStop::Cancelled));"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:167#assert_eq!(evidence.origin, None);"
 
 [[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::cancel_with_origin"
@@ -80221,8 +80215,8 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::cancel_with_origin"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:187#.cancel_with_origin(cancel, Some(\"host-shutdown\".to_string()))"
-assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:199#assert_eq!(evidence.origin.as_deref(), Some(\"host-shutdown\"));"
+usage = "examples/docs-snippets/src/fig1348_selected_drain.rs:183#.cancel_with_origin(cancel, Some(\"host-shutdown\".to_string()))"
+assertion = "examples/docs-snippets/src/fig1348_selected_drain.rs:192#assert_eq!(evidence.origin.as_deref(), Some(\"host-shutdown\"));"
 
 [[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::drain_id"
@@ -91651,7 +91645,7 @@ kind = "field"
 availability = "all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/embedding_turns.rs:318#final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),"
+usage = "examples/docs-snippets/src/embedding_turns.rs:328#final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),"
 reason = "Syntax-only evidence: the recorded example anchor states the durable format when the session opens, and no executed assertion in the docs snippets observes the resulting answer shape. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]

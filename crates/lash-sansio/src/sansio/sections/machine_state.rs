@@ -170,4 +170,9 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     cumulative_usage: TokenUsage,
     termination: TurnTerminationPolicyState,
     synced_protocol_iteration: Option<usize>,
+    /// Cancellation evidence the host has observed for this turn, recorded
+    /// before the machine is told the provider call was cancelled. Lets the
+    /// machine name the request that stopped it instead of minting internal
+    /// evidence.
+    pub(crate) observed_cancellation: Option<crate::TurnCancellationEvidence>,
 }

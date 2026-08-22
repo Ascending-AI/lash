@@ -64,15 +64,14 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
         .await
         .expect("recreate active control");
     let observed = recovered
-        .settle_before_commit(host.as_ref(), false)
+        .settle_before_commit(host.as_ref(), false, None)
         .await
         .expect("settle recovered turn")
         .expect("pending cancellation survives replay");
     assert_eq!(observed, evidence);
 
     let terminal = TurnTerminal::Committed {
-        outcome: crate::TurnOutcome::Stopped(TurnStop::Cancelled),
-        cancellation: Some(observed),
+        outcome: crate::TurnOutcome::Stopped(TurnStop::Cancelled { evidence: observed }),
         session_revision: Some(7),
     };
     recovered
@@ -86,11 +85,12 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
     assert!(matches!(
         attached,
         TurnTerminal::Committed {
-            outcome: crate::TurnOutcome::Stopped(TurnStop::Cancelled),
-            cancellation: Some(TurnCancellationEvidence {
-                ref request_id,
-                origin: Some(ref origin),
-                ..
+            outcome: crate::TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: TurnCancellationEvidence {
+                    ref request_id,
+                    origin: Some(ref origin),
+                    ..
+                }
             }),
             session_revision: Some(7),
         } if request_id == "request-1" && origin == "conformance-user"
@@ -105,7 +105,6 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
                 outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
                     text: "stale completion".to_string(),
                 }),
-                cancellation: None,
                 session_revision: Some(6),
             },
         )
@@ -118,11 +117,12 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
     assert!(matches!(
         attached_again,
         TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled),
-            cancellation: Some(TurnCancellationEvidence {
-                ref request_id,
-                origin: Some(ref origin),
-                ..
+            outcome: TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: TurnCancellationEvidence {
+                    ref request_id,
+                    origin: Some(ref origin),
+                    ..
+                }
             }),
             session_revision: Some(7),
         } if request_id == "request-1" && origin == "conformance-user"
@@ -136,7 +136,7 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
         .await
         .expect("active control");
     let (seal, cancel) = tokio::join!(
-        active.settle_before_commit(host.as_ref(), false),
+        active.settle_before_commit(host.as_ref(), false, None),
         driver.request_cancel(request(address.clone(), "race-request")),
     );
     let terminal = match (seal.expect("seal"), cancel.expect("cancel").outcome) {
@@ -144,14 +144,12 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
             outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
                 text: "completion won".to_string(),
             }),
-            cancellation: None,
             session_revision: Some(8),
         },
         (Some(evidence), TurnCancelOutcome::Requested(requested)) => {
             assert_eq!(evidence, requested);
             TurnTerminal::Committed {
-                outcome: TurnOutcome::Stopped(TurnStop::Cancelled),
-                cancellation: Some(evidence),
+                outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence }),
                 session_revision: Some(8),
             }
         }
@@ -165,18 +163,19 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
         .await_terminal(&address)
         .await
         .expect("attach race terminal");
+    // Whichever side won, the attached terminal must be the one that was
+    // published: a cancelled terminal names the racing request, a completed
+    // one carries the completion text.
     match attached {
         TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled),
-            cancellation: Some(_),
+            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence }),
             ..
-        }
-        | TurnTerminal::Committed {
-            outcome: TurnOutcome::Finished(_),
-            cancellation: None,
+        } => assert_eq!(evidence.request_id, "race-request"),
+        TurnTerminal::Committed {
+            outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage { text }),
             ..
-        } => {}
-        other => panic!("cancellation evidence invariant failed: {other:?}"),
+        } => assert_eq!(text, "completion won"),
+        other => panic!("attached terminal does not match the settled gate: {other:?}"),
     }
 }
 
@@ -290,7 +289,7 @@ async fn session_deletion_revokes_control_promises(host: Arc<dyn EffectHost>) {
     );
     assert!(
         active
-            .settle_before_commit(host.as_ref(), false)
+            .settle_before_commit(host.as_ref(), false, None)
             .await
             .is_err(),
         "session deletion left the reserved cancellation gate live"

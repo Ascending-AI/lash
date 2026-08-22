@@ -193,7 +193,7 @@ where
         .expect("owner creates cancellation gate");
     let cancel_driver = crate::TurnWorkDriver::new(make());
     let (settled, cancelled) = tokio::join!(
-        active.settle_before_commit(owner_host.as_ref(), false),
+        active.settle_before_commit(owner_host.as_ref(), false, None),
         cancel_driver.request_cancel(
             crate::TurnCancelRequest::new(address, format!("{prefix}-race-request"), None)
                 .with_reason("cold-instance conformance race"),
@@ -414,7 +414,6 @@ where
         outcome: crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
             text: "attach-after".to_string(),
         }),
-        cancellation: None,
         session_revision: Some(1),
     };
     let after_key = make()
@@ -448,7 +447,6 @@ where
         outcome: crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
             text: "attach-before".to_string(),
         }),
-        cancellation: None,
         session_revision: Some(2),
     };
     let attach_address = before.clone();

@@ -556,7 +556,7 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
 
     assert!(matches!(
         turn.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert_eq!(
         recorder

@@ -232,14 +232,14 @@ impl AppState {
             json!({
                 "final": if matches!(
                     turn.outcome,
-                    TurnOutcome::Stopped(TurnStop::Cancelled)
+                    TurnOutcome::Stopped(TurnStop::Cancelled { .. })
                 ) {
                     "turn-control-cancelled"
                 } else {
                     "turn-control-completed"
                 },
                 "outcome": turn.outcome,
-                "cancellation": turn.cancellation,
+                "cancellation": turn.cancellation(),
                 "turn_index": turn.state.turn_index,
             })
         } else {
@@ -432,7 +432,7 @@ impl AppState {
             .map_err(terminal_error)?;
         let terminal_cancelled = matches!(
             cancelled.result.outcome,
-            TurnOutcome::Stopped(TurnStop::Cancelled)
+            TurnOutcome::Stopped(TurnStop::Cancelled { .. })
         );
         let claims_settled = session
             .queued_work()

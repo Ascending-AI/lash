@@ -436,7 +436,7 @@ pub(crate) async fn run_once(
             )
         })?;
         if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-            if !matches!(turn.outcome, TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)) {
+            if !matches!(turn.outcome, TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })) {
                 anyhow::bail!("cancel round-trip turn did not finish cancelled: {:?}", turn.outcome);
             }
         } else {
