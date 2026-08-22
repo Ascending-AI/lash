@@ -221,12 +221,14 @@ bug.  `rustdoc()` passes `--document-hidden-items` so the compiler still names
 what it hides.
 
 Running this check builds rustdoc JSON for the facade and for every workspace
-crate whose re-exports it has to resolve, so it reads `CARGO_TARGET_DIR` and
-inherits whatever that names.  With a warm target directory it is about a
-minute; pointed at an empty one it is a cold build of the workspace's documents,
-which is why CI gives it its own job.  In a worktree, export the target
-directory the rest of that worktree's builds use, or the check pays for a second
-copy of everything.
+crate whose re-exports it has to resolve.  Those builds go into a subdirectory
+of their own under `CARGO_TARGET_DIR` -- see `GATE_TARGET` -- because every
+`cargo doc` and `cargo rustdoc` in a checkout writes the same
+`<target>/doc/<crate>.json`, and a document this gate did not ask for read as
+one it did is an availability verdict about another feature set.  Pointed at a
+cold subdirectory it is a build of the documents and their dependencies, which
+is why CI gives it its own job; on an unchanged tree the rustdoc-JSON cache
+answers without building at all.
 """
 
 from __future__ import annotations
@@ -251,7 +253,41 @@ import rustdoc_json_cache  # noqa: E402  (sibling script, located above)
 
 REPO = Path(__file__).resolve().parents[1]
 INVENTORY = REPO / "docs" / "api-example-coverage.toml"
-TARGET = Path(os.environ.get("CARGO_TARGET_DIR", REPO / "target"))
+
+
+def target_directory(environment: dict[str, str] | None = None) -> Path:
+    """Cargo's target directory for this checkout, as an absolute path.
+
+    A relative `CARGO_TARGET_DIR` is resolved by cargo against its *working
+    directory*, and `rustdoc()` runs cargo at the repository root, so the
+    repository is where a relative value lands.  This script may be invoked
+    from anywhere, so it cannot resolve one against its own cwd and still name
+    the directory cargo wrote to.  The invariant belongs to that call site, not
+    to cargo: generation moving to another cwd would have to move this with it.
+    """
+    if environment is None:
+        environment = dict(os.environ)
+    return REPO / Path(environment.get("CARGO_TARGET_DIR") or "target")
+
+
+TARGET = target_directory()
+#: Where this gate's rustdoc builds live.
+#:
+#: Every `cargo doc` and `cargo rustdoc` in a checkout writes
+#: `<target>/doc/<crate>.json`, so a document at that path belongs to whichever
+#: documentation build ran last rather than to the invocation that is about to
+#: read it.  The rustdoc gate documents these same two crates with
+#: `--all-features`; a run of it that lands between this gate's default-features
+#: rustdoc and this gate's read hands the default pass an all-features document,
+#: which is an availability flip on every `testing`-gated item -- and, because
+#: the rustdoc-JSON cache stores what it finds at the destination, one that
+#: outlives the run that produced it.  A subdirectory of its own makes the
+#: document this gate reads a function of the command this gate issued.
+#:
+#: Derived from `CARGO_TARGET_DIR` rather than named absolutely so a worktree
+#: keeps its artifacts inside its own target directory, and so the isolation
+#: survives `orb`-style forks that relocate it.
+GATE_TARGET = TARGET / "coverage-gate"
 
 AREAS = {
     "sessions-turns",
@@ -875,6 +911,13 @@ def rustdoc(
         command.append("--document-hidden-items")
     env = os.environ.copy()
     env["RUSTC_BOOTSTRAP"] = "1"
+    # The isolation travels in the environment rather than as `--target-dir` on
+    # the command line, and deliberately: the cache keys the command verbatim,
+    # so an absolute target path inside it would give every checkout a key of
+    # its own and cost the cache the cross-worktree reuse it exists for. What
+    # the command names -- package, features, rustdoc flags -- is exactly what
+    # decides the document, and that is what stays keyed.
+    env["CARGO_TARGET_DIR"] = str(GATE_TARGET)
     # Generation is the whole cost of this gate on an unchanged tree; the walk
     # below still runs, against whichever copy of the compiler's answer the
     # cache hands back.
@@ -883,7 +926,7 @@ def rustdoc(
         package=package,
         crate_name=crate_name,
         command=command,
-        destination=TARGET / "doc" / f"{crate_name}.json",
+        destination=GATE_TARGET / "doc" / f"{crate_name}.json",
         generate=lambda: rustdoc_json_cache.run_command(command, cwd=REPO, env=env),
     )
     with document.open("rb") as handle:
