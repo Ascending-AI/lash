@@ -158,6 +158,12 @@ impl LashRuntime {
             );
             // Lane-less public runtime operation: callers append between turn
             // drivers, so this handle owns no retained execution guard.
+            //
+            // Structurally excluded from `state::commit_in_lane_context`: this site
+            // is strictly lane-less (never carries a `BorrowedLaneAuthority`) and
+            // interleaves in-memory protocol session rollback
+            // (`restore_protocol_session_from_state`) on commit failure or
+            // `AppendAncestorNotActive` stale-branch response.
             let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
                 Arc::clone(&store),
                 commit,
