@@ -115,6 +115,210 @@ pub enum RlmHistoryItem {
     },
 }
 
+impl RlmHistoryItem {
+    /// Build the model-visible step from its persisted protocol entry.
+    ///
+    /// The image representations intentionally remain distinct: persisted
+    /// entries retain attachment references, while history items expose the
+    /// compact image metadata used by the model.
+    pub fn from_trajectory_entry(entry: &RlmTrajectoryEntry, images: Vec<RlmImageRef>) -> Self {
+        Self::LashlangStep {
+            id: entry.id.clone(),
+            protocol_iteration: entry.protocol_iteration,
+            code: entry.code.clone(),
+            output: entry.output.clone(),
+            images,
+            calls: entry.calls.clone(),
+            calls_omitted: entry.calls_omitted,
+            error: entry.error.clone(),
+            final_output: entry.final_output.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod rlm_step_serde_tests {
+    use std::fmt;
+
+    use serde::de::{IgnoredAny, MapAccess, Visitor};
+    use serde::{Deserializer as _, Serialize};
+
+    use super::{RlmHistoryItem, RlmImageRef, RlmTrajectoryEntry};
+
+    fn serialized_field_order<T: Serialize>(value: &T) -> Vec<String> {
+        struct FieldOrderVisitor;
+
+        impl<'de> Visitor<'de> for FieldOrderVisitor {
+            type Value = Vec<String>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a serialized JSON object")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut fields = Vec::new();
+                while let Some(field) = map.next_key::<String>()? {
+                    fields.push(field);
+                    map.next_value::<IgnoredAny>()?;
+                }
+                Ok(fields)
+            }
+        }
+
+        let encoded = serde_json::to_string(value).expect("step serializes");
+        let mut deserializer = serde_json::Deserializer::from_str(&encoded);
+        let fields = deserializer
+            .deserialize_map(FieldOrderVisitor)
+            .expect("step is a JSON object");
+        deserializer
+            .end()
+            .expect("serialized step has one JSON value");
+        fields
+    }
+
+    fn shared_field_order<T: Serialize>(value: &T) -> Vec<String> {
+        serialized_field_order(value)
+            .into_iter()
+            .filter(|field| field != "images" && field != "kind")
+            .collect()
+    }
+
+    fn populated_entry() -> RlmTrajectoryEntry {
+        RlmTrajectoryEntry {
+            id: "step-1".to_string(),
+            protocol_iteration: 3,
+            code: "print('hello')".to_string(),
+            output: vec!["hello".to_string()],
+            images: vec![lash_sansio::AttachmentRef {
+                id: "image-1".parse().expect("valid attachment id"),
+                media_type: "image/png".parse().expect("valid media type"),
+                byte_len: 42,
+                type_metadata: None,
+                label: Some("plot".to_string()),
+            }],
+            calls: vec![lash_sansio::ExecutedCallRecord {
+                operation: "math.add".to_string(),
+                outcome: lash_sansio::ExecutedCallOutcome::Ok,
+            }],
+            calls_omitted: 2,
+            error: Some("not really an error".to_string()),
+            final_output: Some(serde_json::json!({"answer": 42})),
+        }
+    }
+
+    fn populated_images() -> Vec<RlmImageRef> {
+        vec![RlmImageRef {
+            id: "image-1".to_string(),
+            media_type: "image/png".parse().expect("valid media type"),
+            width: Some(640),
+            height: Some(480),
+            bytes: 42,
+            label: Some("plot".to_string()),
+        }]
+    }
+
+    #[test]
+    fn trajectory_and_history_step_serde_shapes_stay_in_parity() {
+        let entry = populated_entry();
+        let history = RlmHistoryItem::from_trajectory_entry(&entry, populated_images());
+
+        let expected_shared_fields = [
+            "id",
+            "protocol_iteration",
+            "code",
+            "output",
+            "calls",
+            "calls_omitted",
+            "error",
+            "final_output",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        assert_eq!(shared_field_order(&entry), expected_shared_fields);
+        assert_eq!(shared_field_order(&history), expected_shared_fields);
+
+        let entry_fields = serialized_field_order(&entry);
+        let history_fields = serialized_field_order(&history);
+        assert!(entry_fields.contains(&"images".to_string()));
+        assert!(history_fields.contains(&"images".to_string()));
+        assert!(history_fields.contains(&"kind".to_string()));
+
+        let sparse_entry = RlmTrajectoryEntry {
+            id: "step-empty".to_string(),
+            protocol_iteration: 0,
+            code: "".to_string(),
+            output: Vec::new(),
+            images: Vec::new(),
+            calls: Vec::new(),
+            calls_omitted: 0,
+            error: None,
+            final_output: None,
+        };
+        let sparse_history = RlmHistoryItem::from_trajectory_entry(&sparse_entry, Vec::new());
+        let expected_sparse_fields = ["id", "protocol_iteration", "code", "output"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(shared_field_order(&sparse_entry), expected_sparse_fields);
+        assert_eq!(shared_field_order(&sparse_history), expected_sparse_fields);
+        assert!(!serialized_field_order(&sparse_entry).contains(&"images".to_string()));
+        assert!(!serialized_field_order(&sparse_history).contains(&"images".to_string()));
+    }
+
+    #[test]
+    fn legacy_observations_decode_with_matching_defaults() {
+        let legacy_entry: RlmTrajectoryEntry = serde_json::from_value(serde_json::json!({
+            "id": "legacy-step",
+            "protocol_iteration": 4,
+            "code": "print('legacy')",
+            "observations": ["legacy output"],
+        }))
+        .expect("legacy trajectory entry decodes");
+        assert_eq!(legacy_entry.output, vec!["legacy output"]);
+        assert!(legacy_entry.images.is_empty());
+        assert!(legacy_entry.calls.is_empty());
+        assert_eq!(legacy_entry.calls_omitted, 0);
+        assert!(legacy_entry.error.is_none());
+        assert!(legacy_entry.final_output.is_none());
+
+        let legacy_history: RlmHistoryItem = serde_json::from_value(serde_json::json!({
+            "kind": "lashlang_step",
+            "id": "legacy-step",
+            "protocol_iteration": 4,
+            "code": "print('legacy')",
+            "observations": ["legacy output"],
+        }))
+        .expect("legacy history item decodes");
+        let RlmHistoryItem::LashlangStep {
+            id,
+            protocol_iteration,
+            code,
+            output,
+            images,
+            calls,
+            calls_omitted,
+            error,
+            final_output,
+        } = legacy_history
+        else {
+            panic!("legacy payload decoded to the wrong history item");
+        };
+        assert_eq!(id, legacy_entry.id);
+        assert_eq!(protocol_iteration, legacy_entry.protocol_iteration);
+        assert_eq!(code, legacy_entry.code);
+        assert_eq!(output, legacy_entry.output);
+        assert!(images.is_empty());
+        assert!(calls.is_empty());
+        assert_eq!(calls_omitted, 0);
+        assert!(error.is_none());
+        assert!(final_output.is_none());
+    }
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct RlmGlobalsPatchPluginBody {
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
