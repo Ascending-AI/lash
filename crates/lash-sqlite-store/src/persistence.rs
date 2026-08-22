@@ -48,6 +48,26 @@ pub(crate) fn ensure_session_not_deleted_conn(
     }
 }
 
+/// The assignment half of turn-input settlement, shared by both settlement
+/// regimes so only the predicate differs (ADR 0069 §5). `?3` is the settled
+/// lifecycle state.
+const TURN_INPUT_SETTLEMENT_ASSIGNMENTS: &str = "state = ?3,
+                                     claim_id = NULL,
+                                     claim_owner_id = NULL,
+                                     claim_owner_incarnation_id = NULL,
+                                     claim_owner_liveness_json = NULL,
+                                     claim_token = NULL,
+                                     claim_session_lease_generation = 0";
+
+/// Whether an unclaimed row is still open for settlement.
+///
+/// A cancelled or already-settled row is terminal: an unclaimed settlement that
+/// finds one lost the head CAS.
+fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
+    state != lash_core::TurnInputState::Completed.as_str()
+        && state != lash_core::TurnInputState::Cancelled.as_str()
+}
+
 const SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = ?1
        AND available_at_ms <= ?2
        AND (
@@ -651,9 +671,9 @@ impl SessionCommitStore for Store {
                     }
                     for completed in &commit.completed_turn_input_claims {
                         for input_id in &completed.input_ids {
-                            let authority = tx
+                            let observed = tx
                                 .query_row(
-                                    "SELECT claim_id, claim_token, claim_session_lease_generation
+                                    "SELECT claim_id, claim_token, claim_session_lease_generation, state
                                      FROM pending_turn_inputs
                                      WHERE session_id = ?1 AND input_id = ?2",
                                     params![completed.session_id, input_id],
@@ -662,13 +682,14 @@ impl SessionCommitStore for Store {
                                             row.get::<_, Option<String>>(0)?,
                                             row.get::<_, Option<String>>(1)?,
                                             row.get::<_, i64>(2)?,
+                                            row.get::<_, String>(3)?,
                                         ))
                                     },
                                 )
                                 .optional()
                                 .map_err(sqlite_error)?;
-                            let authority = authority
-                                .map(|(claim_id, claim_token, generation)| {
+                            let observed = observed
+                                .map(|(claim_id, claim_token, generation, state)| {
                                     Ok((
                                         claim_id,
                                         claim_token,
@@ -680,32 +701,57 @@ impl SessionCommitStore for Store {
                                                 ),
                                             )
                                         })?,
+                                        state,
                                     ))
                                 })
                                 .transpose()?;
-                            let owns_row = authority.as_ref().is_some_and(
-                                |(claim_id, claim_token, _)| {
-                                    claim_id.as_deref() == Some(completed.claim_id.as_str())
-                                        && claim_token.as_deref()
-                                            == Some(completed.lease_token.as_str())
-                                },
-                            );
+                            // One predicate, two regimes: the claim fields only
+                            // strengthen it (ADR 0069 section 5). Claimed
+                            // settlement requires the row to still carry this
+                            // claim; unclaimed settlement requires it to still
+                            // be unclaimed and unsettled.
+                            let owns_row = match completed.claim.as_ref() {
+                                Some(claim) => observed.as_ref().is_some_and(
+                                    |(claim_id, claim_token, _, _)| {
+                                        claim_id.as_deref() == Some(claim.claim_id.as_str())
+                                            && claim_token.as_deref()
+                                                == Some(claim.lease_token.as_str())
+                                    },
+                                ),
+                                None => observed.as_ref().is_some_and(|(claim_id, _, _, state)| {
+                                    claim_id.is_none()
+                                        && unclaimed_turn_input_is_settleable(state)
+                                }),
+                            };
                             if !owns_row {
-                                return Err(StoreError::TurnInputClaimSuperseded {
-                                    session_id: completed.session_id.clone(),
-                                    claim_id: completed.claim_id.clone(),
-                                    row_id: Some(input_id.clone().into_boxed_str()),
-                                    superseding_claim_id: authority
-                                        .as_ref()
-                                        .and_then(|(claim_id, _, _)| claim_id.clone())
-                                        .map(String::into_boxed_str),
-                                    superseding_session_lease_generation: authority
-                                        .as_ref()
-                                        .and_then(|(claim_id, _, generation)| {
-                                            claim_id
-                                                .as_ref()
-                                                .map(|_| Box::new(*generation))
-                                        }),
+                                return Err(match completed.claim.as_ref() {
+                                    Some(claim) => StoreError::TurnInputClaimSuperseded {
+                                        session_id: completed.session_id.clone(),
+                                        claim_id: claim.claim_id.clone(),
+                                        row_id: Some(input_id.clone().into_boxed_str()),
+                                        superseding_claim_id: observed
+                                            .as_ref()
+                                            .and_then(|(claim_id, _, _, _)| claim_id.clone())
+                                            .map(String::into_boxed_str),
+                                        superseding_session_lease_generation: observed
+                                            .as_ref()
+                                            .and_then(|(claim_id, _, generation, _)| {
+                                                claim_id.as_ref().map(|_| Box::new(*generation))
+                                            }),
+                                    },
+                                    None => StoreError::UnclaimedTurnInputSettlementSuperseded {
+                                        session_id: completed.session_id.clone(),
+                                        input_id: input_id.clone(),
+                                        observed_state: observed
+                                            .as_ref()
+                                            .map(|(_, _, _, state)| {
+                                                state.clone().into_boxed_str()
+                                            }),
+                                        superseding_claim_id: observed
+                                            .as_ref()
+                                            .and_then(|(claim_id, _, _, _)| claim_id.clone())
+                                            .map(String::into_boxed_str),
+                                    },
                                 });
                             }
                         }
@@ -850,28 +896,62 @@ impl SessionCommitStore for Store {
                     }
                     for completed in &commit.completed_turn_input_claims {
                         for input_id in &completed.input_ids {
-                            tx.execute(
-                                "UPDATE pending_turn_inputs
-                                 SET state = ?5,
-                                     claim_id = NULL,
-                                     claim_owner_id = NULL,
-                                     claim_owner_incarnation_id = NULL,
-                                     claim_owner_liveness_json = NULL,
-                                     claim_token = NULL,
-                                     claim_session_lease_generation = 0
-                                 WHERE session_id = ?1
-                                   AND input_id = ?2
-                                   AND claim_id = ?3
-                                   AND claim_token = ?4",
-                                params![
-                                    completed.session_id,
-                                    input_id,
-                                    completed.claim_id,
-                                    completed.lease_token,
-                                    lash_core::TurnInputState::Completed.as_str(),
-                                ],
-                            )
+                            // One conditional write for both settlement
+                            // regimes: the claim fields are an optional
+                            // predicate strengthener, and either way exactly
+                            // one row must change (ADR 0069 section 5).
+                            let settled = match completed.claim.as_ref() {
+                                Some(claim) => tx.execute(
+                                    &format!(
+                                        "UPDATE pending_turn_inputs
+                                         SET {TURN_INPUT_SETTLEMENT_ASSIGNMENTS}
+                                         WHERE session_id = ?1
+                                           AND input_id = ?2
+                                           AND claim_id = ?4
+                                           AND claim_token = ?5"
+                                    ),
+                                    params![
+                                        completed.session_id,
+                                        input_id,
+                                        lash_core::TurnInputState::Completed.as_str(),
+                                        claim.claim_id,
+                                        claim.lease_token,
+                                    ],
+                                ),
+                                None => tx.execute(
+                                    &format!(
+                                        "UPDATE pending_turn_inputs
+                                         SET {TURN_INPUT_SETTLEMENT_ASSIGNMENTS}
+                                         WHERE session_id = ?1
+                                           AND input_id = ?2
+                                           AND claim_id IS NULL
+                                           AND state NOT IN ('completed', 'cancelled')"
+                                    ),
+                                    params![
+                                        completed.session_id,
+                                        input_id,
+                                        lash_core::TurnInputState::Completed.as_str(),
+                                    ],
+                                ),
+                            }
                             .map_err(sqlite_error)?;
+                            if settled != 1 {
+                                return Err(match completed.claim.as_ref() {
+                                    Some(claim) => StoreError::TurnInputClaimSuperseded {
+                                        session_id: completed.session_id.clone(),
+                                        claim_id: claim.claim_id.clone(),
+                                        row_id: Some(input_id.clone().into_boxed_str()),
+                                        superseding_claim_id: None,
+                                        superseding_session_lease_generation: None,
+                                    },
+                                    None => StoreError::UnclaimedTurnInputSettlementSuperseded {
+                                        session_id: completed.session_id.clone(),
+                                        input_id: input_id.clone(),
+                                        observed_state: None,
+                                        superseding_claim_id: None,
+                                    },
+                                });
+                            }
                         }
                     }
                     if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {

@@ -1509,6 +1509,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
+        | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {
             RestateEffectExecution::JournaledRun {

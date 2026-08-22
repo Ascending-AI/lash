@@ -4,7 +4,9 @@ set -euo pipefail
 # Deterministic companion for runbooks/session-lease-triage. It induces the three
 # situations the published stuck-turn triage procedure claims to distinguish
 # (provider hang, lease takeover, commit-CAS livelock), captures both surfaces the
-# procedure names, and asserts that each situation reads the way the docs say.
+# procedure names, and asserts that each situation reads the way the docs say. A
+# fourth phase runs the killed-worker recovery against a *direct* turn, which is
+# recoverable at all only because direct ingress accepts before it drives.
 #
 # PostgreSQL is optional. Set LASH_POSTGRES_DATABASE_URL to run every phase on a
 # shared substrate as well as SQLite; the companion owns no container and no host
@@ -53,6 +55,7 @@ cargo test --locked --quiet -p agent-service lease_triage \
 harness hang 2>&1 | tee "$artifact_dir/02-provider-hang.jsonl" | tee -a "$test_output"
 harness takeover 2>&1 | tee "$artifact_dir/03-lease-takeover.jsonl" | tee -a "$test_output"
 harness livelock 2>&1 | tee "$artifact_dir/04-commit-cas-livelock.jsonl" | tee -a "$test_output"
+harness direct-turn 2>&1 | tee "$artifact_dir/08-direct-turn-recovery.jsonl" | tee -a "$test_output"
 
 # The documented procedure and its compiled snippet must still agree with the
 # sources, so a docs-vs-observed judgment has something stable to score against.
@@ -230,6 +233,45 @@ for backend, record in livelock_records.items():
     if record["lease_lost_count"] or record["taken_over_count"]:
         fail(f"{backend}: livelock must be distinguishable from a handoff: {record}")
 
+
+# Phase 4: the killed-worker recovery, run against a turn that entered through
+# `TurnBuilder::run`. Acceptance-before-drive is what makes it recoverable: the
+# request is a pending row while the provider is still parked, and the peer that
+# takes the lane finds it through the ordinary queued drain.
+direct_turn_records = checkpoints("direct_turn_recovery", "08-direct-turn-recovery.jsonl")
+for backend, record in direct_turn_records.items():
+    if not record["seed_acceptance_input_id"]:
+        fail(f"{backend}: a direct turn must report the acceptance it was admitted under: {record}")
+    if record["seed_acceptance_source_key"] is not None:
+        fail(
+            f"{backend}: direct ingress must not mint an idempotency key of its own: {record}"
+        )
+    if not record["seed_acceptance_settled"]:
+        fail(f"{backend}: the reported acceptance is not the input that settled: {record}")
+    if record["claimable_while_parked"] != 0:
+        fail(
+            f"{backend}: the input a parked direct turn is driving is held by its own claim, so "
+            f"nothing may be claimable while it runs: {record}"
+        )
+    if not record["drain_ran"]:
+        fail(
+            f"{backend}: an orphaned direct-turn input must be claimable by an unrelated worker; "
+            f"the drain ran nothing ({record['drain_empty_reason']}): {record}"
+        )
+    if not record["recovered_turn_committed"]:
+        fail(f"{backend}: the recovering worker did not commit the turn: {record}")
+    if record["recovered_application_turn_id"] is None:
+        fail(f"{backend}: the recovered input never settled as canonical input: {record}")
+    if not (record["recovered_input_id"] or "").startswith("ti:"):
+        fail(f"{backend}: the recovered row is not a pending turn input: {record}")
+    if record["recovered_application_turn_id"] == record["abandoned_turn_id"]:
+        fail(
+            f"{backend}: the successor must commit its own turn, not the abandoned driver's: "
+            f"{record}"
+        )
+    if record["pending_after_recovery"]:
+        fail(f"{backend}: recovery must settle the row rather than leave it claimable: {record}")
+
 # One normalized law artifact makes backend agreement reviewable as a single
 # row rather than requiring a reader to mentally join three phase files.
 dispositions = {}
@@ -237,6 +279,7 @@ for backend in backends:
     hang = hang_records[backend]
     takeover = takeover_records[backend]
     busy = livelock_records[backend]
+    direct = direct_turn_records[backend]
     dispositions[backend] = {
         "provider_hang": {
             "renewal": hang["reading_while_parked"]["renewal"],
@@ -264,6 +307,13 @@ for backend in backends:
             "rejected_lane_held": [event["lane_held"] for event in busy["commit_cas_rejected"]],
             "rejected_lease_lost": [event["lease_lost"] for event in busy["commit_cas_rejected"]],
         },
+        "direct_turn_recovery": {
+            "claimable_while_parked": direct["claimable_while_parked"],
+            "drain_ran": direct["drain_ran"],
+            "recovered_turn_committed": direct["recovered_turn_committed"],
+            "pending_after_recovery": direct["pending_after_recovery"],
+            "acceptance_source_key": direct["seed_acceptance_source_key"],
+        },
     }
 
 normalized = {json.dumps(value, sort_keys=True) for value in dispositions.values()}
@@ -286,8 +336,8 @@ if len(normalized) != 1:
 
 print(
     "session-lease-triage gates: provider hang, winner-emitted takeover of a dead holder, "
-    f"and recurring CAS livelock asserted on {', '.join(backends)}; recovery dispositions "
-    "observed"
+    "recurring CAS livelock, and direct-turn recovery after a killed worker asserted on "
+    f"{', '.join(backends)}; recovery dispositions observed"
 )
 PY
 
@@ -296,4 +346,4 @@ if grep -Fn 'panicked at' "$test_output" >&2; then
   exit 1
 fi
 echo "panic gate: clean (no 'panicked at' lines in session-lease-triage E2E output)" | tee -a "$test_output"
-echo "session-lease-triage e2e passed: scenarios=3 backends=$backends artifacts=$artifact_dir" | tee -a "$test_output"
+echo "session-lease-triage e2e passed: scenarios=4 backends=$backends artifacts=$artifact_dir" | tee -a "$test_output"

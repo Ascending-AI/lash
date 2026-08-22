@@ -64,11 +64,27 @@ fn merge_pending_queue_claim_authority(
     Ok(())
 }
 
+/// Reconcile a checkpoint's fresh claim against the claims this turn already
+/// holds.
+///
+/// Only claimed drives take part: a checkpoint claim exists only under a
+/// session-execution fence, and a turn that holds that fence took its own rows
+/// under a claim too. An unclaimed drive therefore never overlaps an incoming
+/// checkpoint claim in this process — and if two processes ever did reach that
+/// state, the head CAS refuses one of them, because a claimed row no longer
+/// satisfies the unclaimed settlement predicate (ADR 0069 §5).
 fn merge_pending_turn_input_claim_authority(
-    pending_claims: &mut Vec<crate::TurnInputClaim>,
+    pending_drives: &mut Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
     incoming: &mut crate::TurnInputClaim,
 ) -> Result<std::collections::HashSet<String>, RuntimeError> {
     let mut already_delivered = std::collections::HashSet::new();
+    let mut pending_claims = pending_drives
+        .iter_mut()
+        .filter_map(|drive| match drive {
+            crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim) => Some(claim),
+            crate::runtime::turn_input_ingress::TurnInputDrive::Unclaimed(_) => None,
+        })
+        .collect::<Vec<_>>();
     for pending in pending_claims.iter_mut() {
         let overlapping = pending
             .inputs
@@ -143,7 +159,8 @@ fn merge_pending_turn_input_claim_authority(
             }
         }
     }
-    pending_claims.retain(|claim| !claim.inputs.is_empty());
+    drop(pending_claims);
+    pending_drives.retain(|drive| !drive.inputs().is_empty());
     Ok(already_delivered)
 }
 
@@ -787,14 +804,22 @@ mod claim_authority_tests {
 
     #[test]
     fn equal_turn_input_authority_with_different_claims_is_rejected() {
-        let mut pending = vec![turn_input_claim("first", 2, 3, &["input-a"])];
+        let mut pending = vec![super::super::turn_input_ingress::TurnInputDrive::Claimed(
+            turn_input_claim("first", 2, 3, &["input-a"]),
+        )];
         let mut incoming = turn_input_claim("conflicting", 2, 3, &["input-a"]);
         let error = merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
             .expect_err("equal authority must not silently choose a turn-input claim");
 
         assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
         assert!(error.message.contains("conflicting claim authorities"));
-        assert_eq!(pending[0].claim_id, "first");
+        assert_eq!(
+            pending[0]
+                .as_claim()
+                .expect("pending drive stays claimed")
+                .claim_id,
+            "first"
+        );
     }
 
     #[test]

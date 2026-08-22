@@ -90,8 +90,10 @@ fn claim_settlement_refuses_foreign_completions_in_both_directions() {
     commit.completed_queue_claims.clear();
     commit.completed_turn_input_claims = vec![crate::TurnInputCompletion {
         session_id: commit.session_id.clone(),
-        claim_id: "foreign-input".to_string(),
-        lease_token: "token".to_string(),
+        claim: Some(crate::TurnInputSettlementClaim {
+            claim_id: "foreign-input".to_string(),
+            lease_token: "token".to_string(),
+        }),
         data: crate::TurnInputCompletionData {
             input_ids: vec!["input".to_string()],
             applications: Vec::new(),
@@ -204,8 +206,10 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
     let mut first = intent_fixture();
     first.completed_turn_input_claims = vec![crate::TurnInputCompletion {
         session_id: "golden-session".to_string(),
-        claim_id: "claim-a".to_string(),
-        lease_token: "lease-a".to_string(),
+        claim: Some(crate::TurnInputSettlementClaim {
+            claim_id: "claim-a".to_string(),
+            lease_token: "lease-a".to_string(),
+        }),
         data: crate::TurnInputCompletionData {
             input_ids: vec!["input-1".to_string()],
             applications: vec![crate::TurnInputApplication {

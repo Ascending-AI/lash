@@ -856,6 +856,7 @@ fn remote_turn_result_maps_core_semantics() {
         }],
     };
     let turn = lash_core::facade_support::AssembledTurn {
+        turn_input_acceptance: None,
         state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -1034,6 +1035,7 @@ fn assert_terminal_call_record_converts_and_validates(
     RemoteTurnActivity::decode_json(&activity_json).expect("activity decoder validates");
 
     let turn = lash_core::facade_support::AssembledTurn {
+        turn_input_acceptance: None,
         state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),

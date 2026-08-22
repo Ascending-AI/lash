@@ -241,7 +241,7 @@ pub mod persistence {
         QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
         SessionStoreCreateRequest, SessionStoreFactory, TurnInputCheckpointBoundary,
         TurnInputClaim, TurnInputClaimData, TurnInputCompletion, TurnInputCompletionData,
-        TurnInputIngress, TurnInputState,
+        TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub use lash_core::{QueuedWorkClaimOutcome, SelectedQueuedWorkClaimOutcome};
