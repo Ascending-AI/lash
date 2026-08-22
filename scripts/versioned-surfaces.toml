@@ -78,7 +78,17 @@ description = "NDJSON trace records, event variants, contexts, and graph payload
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = ["crates/lash-trace/src/*.rs"]
-must_cover = ["TraceRecord", "TraceEvent"]
+must_cover = [
+  "TraceRecord",
+  "TraceEvent",
+  "TraceTurnOutcome",
+  "TraceTurnCancellationEvidence",
+  "TraceTurnCompletionReason",
+  "TraceTurnFailureReason",
+  "TraceJournaledEffectStatus",
+  "TraceDurableWaitResolution",
+  "TraceDurableTimerStatus",
+]
 
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
 # the whole schema text, so adding a non-unique index is not a compatibility
