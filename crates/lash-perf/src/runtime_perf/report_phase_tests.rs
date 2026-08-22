@@ -1,7 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::budgets::{
-    assert_complete_runtime_budget, configured_phase_names, phase_wall_clock_budget_ms,
+    assert_complete_runtime_budget, configured_phase_names, configured_scenario_names,
+    phase_wall_clock_budget_ms,
 };
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
@@ -72,7 +73,17 @@ fn typed_runtime_phase_inventory_is_required_and_budgeted() {
 }
 
 #[test]
-fn budget_and_required_phase_inventories_are_closed() {
+fn runtime_phase_inventory_is_closed_in_both_directions() {
+    let known_scenarios = RuntimePerfScenario::KNOWN
+        .iter()
+        .map(|scenario| scenario.name())
+        .collect::<BTreeSet<_>>();
+    let budgeted_scenarios = configured_scenario_names().collect::<BTreeSet<_>>();
+    assert_eq!(
+        budgeted_scenarios, known_scenarios,
+        "every budgeted phase must be owned by a known runtime perf scenario"
+    );
+
     for scenario in RuntimePerfScenario::KNOWN {
         assert_complete_runtime_budget(scenario);
         let required = required_phases(scenario)

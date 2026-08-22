@@ -59,7 +59,14 @@ struct EnforcedAllocationBudget {
 #[serde(deny_unknown_fields)]
 struct AdvisoryDurationBudget {
     ms_max: f64,
-    phases: BTreeMap<String, f64>,
+    phases: BTreeMap<String, AdvisoryPhaseBudget>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdvisoryPhaseBudget {
+    budget_ms: f64,
+    required: bool,
 }
 
 fn budgets() -> &'static RuntimeBudgets {
@@ -75,6 +82,29 @@ fn scenario_budget(scenario: RuntimePerfScenario) -> &'static RuntimeScenarioBud
     budgets()
         .scenarios
         .get(scenario.name())
+        .unwrap_or_else(|| panic!("missing runtime budget for {}", scenario.name()))
+}
+
+pub(super) fn required_phase_names(scenario: RuntimePerfScenario) -> &'static [&'static str] {
+    static REQUIRED_PHASES: OnceLock<BTreeMap<String, Vec<&'static str>>> = OnceLock::new();
+    REQUIRED_PHASES
+        .get_or_init(|| {
+            budgets()
+                .scenarios
+                .iter()
+                .map(|(scenario, budget)| {
+                    let required = budget
+                        .advisory_duration
+                        .phases
+                        .iter()
+                        .filter_map(|(phase, budget)| budget.required.then_some(phase.as_str()))
+                        .collect();
+                    (scenario.clone(), required)
+                })
+                .collect()
+        })
+        .get(scenario.name())
+        .map(Vec::as_slice)
         .unwrap_or_else(|| panic!("missing runtime budget for {}", scenario.name()))
 }
 
@@ -106,7 +136,7 @@ pub(super) fn phase_wall_clock_budget_ms(
         .advisory_duration
         .phases
         .get(phase)
-        .copied()
+        .map(|budget| budget.budget_ms)
 }
 
 #[cfg(test)]
@@ -118,6 +148,11 @@ pub(super) fn configured_phase_names(
         .phases
         .keys()
         .map(String::as_str)
+}
+
+#[cfg(test)]
+pub(super) fn configured_scenario_names() -> impl Iterator<Item = &'static str> {
+    budgets().scenarios.keys().map(String::as_str)
 }
 
 #[cfg(test)]
@@ -242,6 +277,72 @@ mod tests {
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(err.to_string().contains("missing field `ms_max`"), "{err}");
+    }
+
+    #[test]
+    fn missing_phase_budget_fails_to_load_under_deny_unknown_fields() {
+        let json = r#"{
+            "guarded_span": "whole_run",
+            "enforced_allocation": {
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {
+                    "phase": {"required": true}
+                }
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(
+            err.to_string().contains("missing field `budget_ms`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn missing_phase_required_flag_fails_to_load_under_deny_unknown_fields() {
+        let json = r#"{
+            "guarded_span": "whole_run",
+            "enforced_allocation": {
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {
+                    "phase": {"budget_ms": 1.0}
+                }
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(
+            err.to_string().contains("missing field `required`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn unknown_phase_budget_field_fails_to_load_under_deny_unknown_fields() {
+        let json = r#"{
+            "guarded_span": "whole_run",
+            "enforced_allocation": {
+                "alloc_bytes_max": 1000.0,
+                "steady_state_turn_alloc_bytes_max": 500.0
+            },
+            "advisory_duration": {
+                "ms_max": 10.0,
+                "phases": {
+                    "phase": {"budget_ms": 1.0, "required": true, "unexpected": false}
+                }
+            }
+        }"#;
+        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field `unexpected`"),
+            "{err}"
+        );
     }
 
     #[test]
