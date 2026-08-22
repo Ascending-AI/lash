@@ -618,6 +618,11 @@ mod tests {
     use crate::store::SessionExecutionLeaseStore;
     use crate::{Message, SessionGraph, TokenUsage, shared_parts};
     const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
+    fn cancelled_outcome() -> TurnOutcome {
+        TurnOutcome::Stopped(crate::TurnStop::Cancelled {
+            evidence: crate::TurnCancellationEvidence::internal("turn-boundary-test"),
+        })
+    }
     fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
         crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
     }
@@ -1101,7 +1106,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
-                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                outcome: &cancelled_outcome(),
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
@@ -1160,7 +1165,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
-                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                outcome: &cancelled_outcome(),
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: Vec::new(),
@@ -1298,7 +1303,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &usage,
-                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
@@ -1414,7 +1419,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
-                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                outcome: &cancelled_outcome(),
                 originating_queue_claims: vec![predecessor_claim.completion()],
                 originating_turn_input_claims: Vec::new(),
                 completed_queue_claims: vec![predecessor_claim.completion()],
@@ -1480,7 +1485,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
-                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: vec![queue_origin],
                 originating_turn_input_claims: Vec::new(),
@@ -1516,7 +1521,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
-                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: vec![turn_input_origin],
@@ -1565,7 +1570,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: None,
                 usage_deltas: &[],
-                outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled),
+                outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),

@@ -239,7 +239,7 @@ alphabetical order of the old name.
 | `RemoteTurnCancelReceipt` | *unchanged* | Acknowledges an addressed cancellation gate. |
 | `RemoteTurnOutcome` | *unchanged* | Closed enum: finished, frame switch, stopped. |
 | `RemoteTurnResult` | `RemoteTurnReport` | Wire mirror of `TurnReport`. **CONTESTED** — see `TurnResult`. |
-| `RemoteTurnStatus` | *unchanged* | Point-in-time turn state, including `InProgress`. |
+| `RemoteTurnStatus` | *unchanged* | Derived projection of `RemoteTurnOutcome`: computed on encode, checked against the outcome on decode. It states no fact the outcome does not already carry, so it has no `InProgress` — a turn report exists only once the turn has a terminal outcome (FIG-1757). |
 | `RemoteTurnUsageSummary` | `RemoteTurnUsageReport` | Aggregate: parent usage, per-child ledger entries, total. |
 | `ResolveOutcome` | *unchanged* | Closed enum of terminal resolve states. |
 | `RuntimeCommitResult` | `RuntimeCommitReceipt` | Durable acknowledgement of one commit, replayed verbatim on receipt replay. |

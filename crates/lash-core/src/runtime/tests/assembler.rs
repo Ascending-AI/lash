@@ -10,7 +10,7 @@ fn assembler_ignores_streamed_text_without_durable_output() {
 
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -35,12 +35,15 @@ fn cancelled_assembler_with_only_streamed_text_has_empty_assistant_output() {
 
     let out = assembler.finish(
         default_state().to_snapshot(),
-        true,
+        Some(crate::TurnCancellationEvidence::internal("assembler-test")),
         None,
         &TerminationPolicy::default(),
     );
 
-    assert_eq!(out.outcome, TurnOutcome::Stopped(TurnStop::Cancelled));
+    assert!(matches!(
+        out.outcome,
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+    ));
     assert!(out.assistant_output.safe_text.is_empty());
     assert!(out.assistant_output.raw_text.is_empty());
     assert_eq!(out.assistant_output.state, OutputState::EmptyOutput);
@@ -58,7 +61,7 @@ fn assembler_preserves_explicit_assistant_message_outcome() {
 
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -84,7 +87,7 @@ fn assembler_uses_assistant_message_outcome_without_recovery_issue_when_no_strea
 
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -115,7 +118,7 @@ fn assembler_uses_final_value_for_assistant_output() {
 
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -142,7 +145,7 @@ fn assembler_uses_tool_value_for_assistant_output() {
 
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -173,7 +176,7 @@ fn assembler_falls_back_to_last_assistant_message_when_stream_output_is_empty() 
     assembler.push(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -224,14 +227,14 @@ fn interrupted_assembler_does_not_reuse_assistant_before_latest_user_message() {
 
     let out = TurnAssembler::default().finish(
         state.to_snapshot(),
-        true,
+        Some(crate::TurnCancellationEvidence::internal("assembler-test")),
         None,
         &TerminationPolicy::default(),
     );
 
     assert!(matches!(
         &out.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(out.assistant_output.safe_text.is_empty());
     assert!(out.assistant_output.raw_text.is_empty());
@@ -261,7 +264,7 @@ fn assembler_prefers_state_output_when_streamed_text_is_a_truncated_prefix() {
     assembler.push(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -313,13 +316,13 @@ fn assembler_state_output_excludes_tool_call_payload() {
     let assembler = TurnAssembler::default();
     let out = assembler.finish(
         state.to_snapshot(),
-        true,
+        Some(crate::TurnCancellationEvidence::internal("assembler-test")),
         None,
         &TerminationPolicy::default(),
     );
     assert!(matches!(
         &out.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert_eq!(
         out.assistant_output.safe_text,
@@ -349,7 +352,7 @@ fn assembler_derives_tool_failure_from_assembled_records() {
     assembler.push(&SessionStreamEvent::Done);
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -381,7 +384,7 @@ fn assembler_treats_any_non_success_record_as_tool_failure() {
 
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -397,7 +400,7 @@ fn assembler_marks_missing_done_as_failure() {
     });
     let out = assembler.finish(
         default_state().to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );
@@ -429,7 +432,7 @@ fn assembler_detects_max_turn_message() {
     assembler.push(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
-        false,
+        None,
         None,
         &TerminationPolicy::default(),
     );

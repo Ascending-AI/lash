@@ -250,7 +250,7 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
     );
     assert!(matches!(
         turn.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled)
+        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(events.iter().any(|event| matches!(
         event,

@@ -70,7 +70,7 @@ pub enum TurnFinish {
     TurnOutcome::Finished(finish) =&gt; persist_terminal(finish)?,
     TurnOutcome::AgentFrameSwitch { frame_key, .. } =&gt; record_frame_boundary(frame_key)?,
     TurnOutcome::Stopped(stop) =&gt; match stop {
-        TurnStop::Cancelled | TurnStop::InvalidInput =&gt; report_user_visible(stop),
+        TurnStop::Cancelled { .. } | TurnStop::InvalidInput =&gt; report_user_visible(stop),
         TurnStop::ProviderError | TurnStop::Incomplete =&gt; offer_retry(stop),
         // Either bound: the turn budget, or the no-progress budget when
         // consecutive attempts committed no successful execution.
@@ -229,10 +229,10 @@ impl TurnActivitySink for ChannelSink {
         <div class="section" id="cancellation">
           <div class="section-header">
             <h2>Cancellation</h2>
-            <p>Cancellation is cooperative and first-class: a cancelled turn finishes with <code>TurnOutcome::Stopped(TurnStop::Cancelled)</code>, commits like any other turn, and leaves the session ready for the next turn. In-flight provider streaming is aborted, not awaited.</p>
+            <p>Cancellation is cooperative and first-class: a cancelled turn finishes with <code>TurnOutcome::Stopped(TurnStop::Cancelled { evidence })</code>, commits like any other turn, and leaves the session ready for the next turn. The evidence that settled the cancellation rides the variant, so a cancelled outcome always names the request that stopped it. In-flight provider streaming is aborted, not awaited.</p>
           </div>
           <p>Host-facing controls retain the stable turn id and call <code>LashSession::request_turn_cancel</code> or a deployment-level <code>TurnWorkDriver::request_cancel</code>. The keyed-promise gate is exact-scope and replay-safe, and <code>await_terminal</code> attaches idempotently to the authoritative result. Restate deployments use <code>RestateTurnDeployment</code> and <code>LashDurableWaitWorkflow</code>, not the Admin API. Cancellation is cooperative: detached effects are not guaranteed to stop. Session and turn ids are routing identity, not authorization.</p>
-          <pre data-lang="rust" data-snippet="embedding_turns#cancel-turn"><code>use lash::{TurnAddress, TurnOutcome, TurnStop};
+          <pre data-lang="rust" data-snippet="embedding_turns#cancel-turn"><code>use lash::{TurnAddress, TurnCancellationEvidence, TurnOutcome, TurnStop};
 
 let turn_id = "incident-summary-42";
 let stream = session
@@ -256,9 +256,19 @@ let receipt = session
 let _receipt = receipt;
 
 let result = stream.finish().await?;
-if matches!(result.outcome, TurnOutcome::Stopped(TurnStop::Cancelled)) {
-    assert!(result.cancellation.is_some());
+// The evidence that settled the cancellation rides the outcome, so a
+// cancelled turn always names the request that stopped it. Match on the
+// variant, or read it with `TurnOutcome::cancellation`.
+if let TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) = &amp;result.outcome {
+    assert_eq!(evidence.request_id, "stop-button-7");
+    assert_eq!(TurnOutcome::cancellation(&amp;result.outcome), Some(evidence));
 }
+// Lash mints its own evidence when no host request explains the stop, so
+// the request id is namespaced rather than absent.
+assert_eq!(
+    TurnCancellationEvidence::internal(turn_id).request_id,
+    format!("internal:{turn_id}")
+);
 
 // Attachment is idempotent and returns immediately after publication.
 let terminal = core

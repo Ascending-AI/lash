@@ -88,15 +88,7 @@ impl TurnCancelOriginHint {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TurnCancellationEvidence {
-    pub request_id: String,
-    /// Opaque host-domain data. Lash records and returns it unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
+pub use lash_sansio::TurnCancellationEvidence;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnCancelRequest {
@@ -163,13 +155,25 @@ pub struct TurnCancelReceipt {
     pub outcome: TurnCancelOutcome,
 }
 
+/// The published terminal of one foreground turn.
+///
+/// This value is the payload of the turn's terminal keyed promise, so its JSON
+/// encoding is a durable carrier: a terminal published by one binary can be
+/// read by another after a rolling upgrade. That carrier is forward-only and
+/// unversioned by design — Lash never reads a superseded shape. A reshape of
+/// `TurnTerminal` therefore fails an in-flight
+/// [`TurnAttach::await_terminal`] typed, with
+/// [`crate::RuntimeErrorCode::TurnTerminalDecode`], and the host re-awaits or
+/// re-reads the committed turn rather than getting a silently misread
+/// terminal. Moving cancellation evidence into `TurnStop::Cancelled` was one
+/// such reshape.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum TurnTerminal {
     Committed {
+        /// Cancellation evidence, when any, rides `outcome` — see
+        /// [`TurnOutcome::cancellation`].
         outcome: TurnOutcome,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cancellation: Option<TurnCancellationEvidence>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_revision: Option<u64>,
     },
@@ -486,16 +490,35 @@ impl ActiveTurnControl {
         }
     }
 
+    /// Settle the durable cancellation gate before the turn commits.
+    ///
+    /// `assembled` is the evidence the executed turn already carries, when it
+    /// stopped cancelled. Sealing that value rather than minting a fresh one
+    /// is what keeps a single cancellation to a single request id: the
+    /// evidence a host saw on the streamed `TurnOutcome` is the evidence the
+    /// committed report carries.
     pub(crate) async fn settle_before_commit(
         &self,
         resolver: &dyn AwaitEventResolver,
         locally_cancelled: bool,
+        assembled: Option<TurnCancellationEvidence>,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         if let Some(evidence) = self.evidence() {
             return Ok(Some(evidence));
         }
         let proposed = if locally_cancelled {
-            TurnGateTerminal::CancelRequested(self.internal_evidence())
+            TurnGateTerminal::CancelRequested(match assembled {
+                // A lash-originated stop already names itself. The
+                // process-local origin hint, when a host entry point supplied
+                // one, is the only fact the executing machine cannot know.
+                Some(mut evidence) => {
+                    if evidence.origin.is_none() {
+                        evidence.origin = self.local_cancel_origin.get();
+                    }
+                    evidence
+                }
+                None => self.internal_evidence(),
+            })
         } else {
             TurnGateTerminal::CompletionSealed
         };
@@ -548,15 +571,22 @@ impl ActiveTurnControl {
         self.evidence.lock_recover().clone()
     }
 
+    /// Evidence for an outcome that is already known to be cancelled, before
+    /// the durable gate has settled: the observed request when one arrived,
+    /// otherwise lash's own internal evidence. The settled evidence from
+    /// [`Self::settle_before_commit`] is what the committed turn carries.
+    pub(crate) fn evidence_or_internal(&self) -> TurnCancellationEvidence {
+        self.evidence().unwrap_or_else(|| self.internal_evidence())
+    }
+
     fn remember(&self, evidence: TurnCancellationEvidence) {
         *self.evidence.lock_recover() = Some(evidence);
     }
 
     fn internal_evidence(&self) -> TurnCancellationEvidence {
         TurnCancellationEvidence {
-            request_id: format!("internal:{}", self.address.turn_id),
             origin: self.local_cancel_origin.get(),
-            reason: None,
+            ..TurnCancellationEvidence::internal(&self.address.turn_id)
         }
     }
 }
@@ -608,14 +638,13 @@ mod tests {
             .await
             .expect("active control");
         let observed = active
-            .settle_before_commit(host.as_ref(), false)
+            .settle_before_commit(host.as_ref(), false, None)
             .await
             .expect("settle")
             .expect("cancellation won");
         assert_eq!(observed, evidence);
         let terminal = TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled),
-            cancellation: Some(observed),
+            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence: observed }),
             session_revision: Some(7),
         };
         active
@@ -629,10 +658,44 @@ mod tests {
         assert!(matches!(
             attached,
             TurnTerminal::Committed {
-                outcome: TurnOutcome::Stopped(TurnStop::Cancelled),
-                cancellation: Some(_),
+                outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
                 session_revision: Some(7),
             }
+        ));
+    }
+
+    #[tokio::test]
+    async fn settle_seals_the_assembled_evidence_instead_of_minting_a_second_id() {
+        // A provider abort classified as cancelled arrives with evidence the
+        // sans-IO machine already put on the streamed outcome. Sealing that
+        // value is what keeps one cancellation to one request id: minting
+        // `internal:{turn_id}` here would hand the host a second identity for
+        // the same fact.
+        let host = Arc::new(InlineEffectHost::default());
+        let driver = TurnWorkDriver::new(host.clone());
+        let address = address("assembled");
+        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+            .await
+            .expect("active control");
+        let assembled = TurnCancellationEvidence::internal("provider-cancelled:3");
+
+        let settled = active
+            .settle_before_commit(host.as_ref(), true, Some(assembled.clone()))
+            .await
+            .expect("settle")
+            .expect("a locally cancelled turn settles cancelled");
+        assert_eq!(settled, assembled);
+        assert_ne!(settled, active.internal_evidence());
+
+        // The durable gate carries the same identity, so a later requester and
+        // a replayed owner both read the value the turn streamed.
+        let late = driver
+            .request_cancel(request(address, "late-request"))
+            .await
+            .expect("late cancellation");
+        assert!(matches!(
+            late.outcome,
+            TurnCancelOutcome::AlreadyRequested(ref evidence) if *evidence == assembled
         ));
     }
 
@@ -646,7 +709,7 @@ mod tests {
             .expect("active control");
 
         let (seal, cancel) = tokio::join!(
-            active.settle_before_commit(host.as_ref(), false),
+            active.settle_before_commit(host.as_ref(), false, None),
             driver.request_cancel(request(address, "race-request")),
         );
         match (seal.expect("seal"), cancel.expect("cancel").outcome) {
@@ -685,7 +748,7 @@ mod tests {
             .expect("pending cancellation is visible before recovered effects");
         assert_eq!(observed, expected);
         let settled = recovered
-            .settle_before_commit(host.as_ref(), false)
+            .settle_before_commit(host.as_ref(), false, None)
             .await
             .expect("settle recovered turn")
             .expect("pending cancellation survives owner loss");
@@ -789,7 +852,7 @@ mod tests {
             .await
             .expect("active control after timed-out attach");
         active
-            .settle_before_commit(host.as_ref(), false)
+            .settle_before_commit(host.as_ref(), false, None)
             .await
             .expect("seal after timed-out attach");
         active
@@ -799,7 +862,6 @@ mod tests {
                     outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
                         text: "done".to_string(),
                     }),
-                    cancellation: None,
                     session_revision: None,
                 },
             )
@@ -809,7 +871,6 @@ mod tests {
             driver.await_terminal(&address).await.expect("late attach"),
             TurnTerminal::Committed {
                 outcome: TurnOutcome::Finished(_),
-                cancellation: None,
                 ..
             }
         ));
@@ -839,7 +900,6 @@ mod tests {
             outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
                 text: "done".to_string(),
             }),
-            cancellation: None,
             session_revision: None,
         };
         let encoded = terminal_resolution(&terminal).expect("encode terminal");

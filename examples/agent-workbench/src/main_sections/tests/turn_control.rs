@@ -574,8 +574,7 @@ finish (await handle)?
             receipt.cancellations.as_slice(),
             [TurnCancelReceipt {
                 terminal: Some(lash::TurnTerminal::Committed {
-                    outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),
-                    cancellation: Some(_),
+                    outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. }),
                     ..
                 }),
                 ..
@@ -583,7 +582,7 @@ finish (await handle)?
         ));
         assert!(matches!(
             turn.result.outcome,
-            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled)
+            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
         ));
         assert!(matches!(
             process_registry

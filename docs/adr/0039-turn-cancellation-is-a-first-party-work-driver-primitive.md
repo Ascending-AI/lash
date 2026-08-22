@@ -9,7 +9,7 @@ credentials; every host boundary remains responsible for authentication and auth
 The primitive is cooperative. A request races the turn's normal completion through a reserved,
 first-writer-wins keyed promise. A cancellation winner carries a request id, optional opaque
 host-supplied origin, and optional reason as evidence; the running or replayed owner feeds that
-evidence into its internal cancellation token, assembles `TurnStop::Cancelled`, and commits under
+evidence into its internal cancellation token, assembles `TurnStop::Cancelled { evidence }`, and commits under
 the live session-execution lease. A normal completion seals the same gate before commit, causing
 later requests to report `CompletionWonRace`. A second reserved promise publishes terminal
 evidence after the commit so an external caller can attach without polling storage. The promise

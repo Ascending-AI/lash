@@ -229,7 +229,6 @@ pub enum RuntimeErrorCode {
     TurnCancelGateDecode,
     TurnCancelGateEncode,
     TurnCancelGateInvalidTerminal,
-    TurnCancellationEvidenceMissing,
     TurnControlPeekOutcome,
     TurnControlUnknownOrRevoked,
     /// The local observer was cancelled while the durable promise stayed live;
@@ -421,7 +420,6 @@ impl RuntimeErrorCode {
             Self::TurnCancelGateDecode => "turn_cancel_gate_decode",
             Self::TurnCancelGateEncode => "turn_cancel_gate_encode",
             Self::TurnCancelGateInvalidTerminal => "turn_cancel_gate_invalid_terminal",
-            Self::TurnCancellationEvidenceMissing => "turn_cancellation_evidence_missing",
             Self::TurnControlPeekOutcome => "turn_control_peek_outcome",
             Self::TurnControlUnknownOrRevoked => "turn_control_unknown_or_revoked",
             Self::TurnControlWaitCancelled => "turn_control_wait_cancelled",
@@ -593,7 +591,6 @@ impl RuntimeErrorCode {
                 | Self::TurnCancelGateDecode
                 | Self::TurnCancelGateEncode
                 | Self::TurnCancelGateInvalidTerminal
-                | Self::TurnCancellationEvidenceMissing
                 | Self::TurnControlPeekOutcome
                 | Self::TurnControlUnknownOrRevoked
                 | Self::TurnTerminalDecode
@@ -775,7 +772,6 @@ impl RuntimeErrorCode {
             "turn_cancel_gate_decode" => Self::TurnCancelGateDecode,
             "turn_cancel_gate_encode" => Self::TurnCancelGateEncode,
             "turn_cancel_gate_invalid_terminal" => Self::TurnCancelGateInvalidTerminal,
-            "turn_cancellation_evidence_missing" => Self::TurnCancellationEvidenceMissing,
             "turn_control_peek_outcome" => Self::TurnControlPeekOutcome,
             "turn_control_unknown_or_revoked" => Self::TurnControlUnknownOrRevoked,
             "turn_control_wait_cancelled" => Self::TurnControlWaitCancelled,
@@ -1106,7 +1102,6 @@ mod tests {
             | RuntimeErrorCode::TurnCancelGateDecode
             | RuntimeErrorCode::TurnCancelGateEncode
             | RuntimeErrorCode::TurnCancelGateInvalidTerminal
-            | RuntimeErrorCode::TurnCancellationEvidenceMissing
             | RuntimeErrorCode::TurnControlPeekOutcome
             | RuntimeErrorCode::TurnControlUnknownOrRevoked
             | RuntimeErrorCode::TurnTerminalDecode
@@ -1290,7 +1285,6 @@ mod tests {
             RuntimeErrorCode::TurnCancelGateDecode,
             RuntimeErrorCode::TurnCancelGateEncode,
             RuntimeErrorCode::TurnCancelGateInvalidTerminal,
-            RuntimeErrorCode::TurnCancellationEvidenceMissing,
             RuntimeErrorCode::TurnControlPeekOutcome,
             RuntimeErrorCode::TurnControlUnknownOrRevoked,
             RuntimeErrorCode::TurnControlWaitCancelled,

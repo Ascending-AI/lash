@@ -150,7 +150,9 @@ fn process_terminal_state_for_turn(turn: &crate::AssembledTurn) -> crate::Proces
         crate::TurnOutcome::Finished(_) | crate::TurnOutcome::AgentFrameSwitch { .. } => {
             crate::ProcessStatus::Completed
         }
-        crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled) => crate::ProcessStatus::Cancelled,
+        crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. }) => {
+            crate::ProcessStatus::Cancelled
+        }
         crate::TurnOutcome::Stopped(_) => crate::ProcessStatus::Failed,
     }
 }

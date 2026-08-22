@@ -864,7 +864,6 @@ fn remote_turn_result_maps_core_semantics() {
                 text: "done".to_string(),
             },
         ),
-        cancellation: None,
         assistant_output: lash_core::facade_support::AssistantOutput {
             safe_text: "done".to_string(),
             raw_text: "done".to_string(),
@@ -1039,18 +1038,19 @@ fn assert_terminal_call_record_converts_and_validates(
         )),
         outcome: if cancelled {
             lash_core::facade_support::TurnOutcome::Stopped(
-                lash_core::facade_support::TurnStop::Cancelled,
+                lash_core::facade_support::TurnStop::Cancelled {
+                    evidence: lash_core::facade_support::TurnCancellationEvidence {
+                        request_id: "cancel-request".to_string(),
+                        origin: None,
+                        reason: None,
+                    },
+                },
             )
         } else {
             lash_core::facade_support::TurnOutcome::Stopped(
                 lash_core::facade_support::TurnStop::ProviderError,
             )
         },
-        cancellation: cancelled.then(|| lash_core::facade_support::TurnCancellationEvidence {
-            request_id: "cancel-request".to_string(),
-            origin: None,
-            reason: None,
-        }),
         assistant_output: lash_core::facade_support::AssistantOutput {
             safe_text: String::new(),
             raw_text: String::new(),

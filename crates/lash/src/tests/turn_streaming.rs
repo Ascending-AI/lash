@@ -4377,11 +4377,11 @@ async fn pre_cancelled_token_yields_cancelled_outcome() -> Result<()> {
 
     assert!(matches!(
         output.result.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     let evidence = output
         .result
-        .cancellation
+        .cancellation()
         .expect("local token cancellation evidence");
     assert_eq!(evidence.origin, None);
     assert_eq!(evidence.reason, None);
@@ -4402,9 +4402,9 @@ async fn local_cancel_token_preserves_explicit_origin_hint() -> Result<()> {
         .await?;
 
     assert!(matches!(
-        output.result.cancellation,
+        output.result.cancellation(),
         Some(lash_core::facade_support::TurnCancellationEvidence {
-            origin: Some(ref origin),
+            origin: Some(origin),
             ..
         }) if origin == "shutdown"
     ));
@@ -4448,12 +4448,12 @@ async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
     let result = stream.finish().await?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     assert!(matches!(
-        result.cancellation,
+        result.cancellation(),
         Some(lash_core::facade_support::TurnCancellationEvidence {
-            origin: Some(ref origin),
+            origin: Some(origin),
             ..
         }) if origin == "user"
     ));
@@ -4852,11 +4852,11 @@ async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()> {
     let second = second.finish().await?;
     assert!(matches!(
         first.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     assert!(matches!(
         second.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     assert_eq!(session.cancel_running_turns(), 0);
     Ok(())
@@ -4889,12 +4889,50 @@ async fn cancel_running_turns_does_not_cross_separately_opened_handles() -> Resu
     let result = hanging.finish().await?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
 
     // The untouched handle keeps working.
     let output = handle_b.turn(TurnInput::text("plain")).run().await?;
     assert_eq!(output.assistant_message(), Some("echo: plain"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn provider_abort_cancellation_commits_the_evidence_the_turn_streamed() -> Result<()> {
+    // No host cancel request explains this stop, so the evidence is minted
+    // inside the sans-IO machine and rides the streamed `TurnOutcome`. The
+    // committed report must carry that same request id: one cancellation is
+    // one identity, never a machine-side id plus a commit-side `internal:
+    // {turn_id}` mint.
+    let (started_tx, started_rx) = oneshot::channel::<()>();
+    let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
+    let session = core.session("provider-abort-evidence").open().await?;
+
+    let hanging = session
+        .turn(TurnInput::text("hang here"))
+        .turn_id("abort-evidence-turn")
+        .stream()?;
+    started_rx.await.expect("turn reached the provider");
+    assert_eq!(session.cancel_running_turns(), 1);
+
+    let result = hanging.finish().await?;
+    let evidence = result
+        .cancellation()
+        .expect("a cancelled turn names the request that stopped it");
+    assert!(
+        evidence
+            .request_id
+            .starts_with("internal:provider-cancelled:"),
+        "committed report must carry the machine-minted evidence, got `{}`",
+        evidence.request_id
+    );
+    assert_ne!(evidence.request_id, "internal:abort-evidence-turn");
     Ok(())
 }
 
@@ -4933,12 +4971,12 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
         .expect("queued drain should produce a turn");
     assert!(matches!(
         output.result.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     assert!(matches!(
-        output.result.cancellation,
+        output.result.cancellation(),
         Some(lash_core::facade_support::TurnCancellationEvidence {
-            origin: Some(ref origin),
+            origin: Some(origin),
             ..
         }) if origin == "user"
     ));
@@ -5023,7 +5061,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
     let interrupted = turn.await.expect("turn task")?;
     assert!(matches!(
         interrupted.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
 
     let pending = session.pending_turn_inputs().await?;
@@ -5168,7 +5206,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     let interrupted = turn.await.expect("turn task")?;
     assert!(matches!(
         interrupted.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     assert!(
         session.pending_turn_inputs().await?.is_empty(),

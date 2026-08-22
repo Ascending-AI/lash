@@ -1246,12 +1246,8 @@ async fn record_turn_output_for_model(
         );
     }
     match &output.outcome {
-        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled) => {
-            let message = output
-                .cancellation
-                .as_ref()
-                .map(|evidence| format!("turn stopped · request {}", evidence.request_id))
-                .unwrap_or_else(|| "turn stopped".to_string());
+        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }) => {
+            let message = format!("turn stopped · request {}", evidence.request_id);
             state.push_message_with_id_for_session(
                 &session.session_id(),
                 format!("turn:{turn_id}:cancelled"),

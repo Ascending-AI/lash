@@ -854,14 +854,14 @@ finish "gap source"
         assert!(accepted.accepted);
         assert!(matches!(
             turn.result.outcome,
-            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled)
+            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
         ));
         assert!(matches!(
             accepted.cancellations.as_slice(),
             [TurnCancelReceipt {
                 outcome: lash::TurnCancelOutcome::AlreadyRequested(_),
                 terminal: Some(lash::TurnTerminal::Committed {
-                    cancellation: Some(evidence),
+                    outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }),
                     ..
                 }),
                 ..

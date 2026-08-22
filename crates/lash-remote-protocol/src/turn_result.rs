@@ -19,9 +19,11 @@ pub struct RemoteTurnReport {
     pub protocol_version: u32,
     pub session_id: String,
     pub turn_id: String,
+    /// Derived from `outcome` on encode and checked against it on decode.
     pub status: RemoteTurnStatus,
     pub outcome: RemoteTurnOutcome,
-    /// Present exactly when `status == cancelled`.
+    /// Wire projection of the cancellation evidence carried by
+    /// `outcome`. Present exactly when `status == cancelled`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancellation: Option<RemoteTurnCancellationEvidence>,
     pub assistant_output: RemoteAssistantOutput,
@@ -159,6 +161,11 @@ pub enum RemoteCausalRef {
     },
 }
 
+/// Derived projection of [`RemoteTurnOutcome`]. Producers compute it with
+/// `RemoteTurnStatus::from(&outcome)`; consumers get it checked against the
+/// outcome by [`RemoteTurnReport::validate`]. It never states a fact the
+/// outcome does not already carry, so there is no in-progress status: a turn
+/// report exists only once the turn has a terminal outcome.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteTurnStatus {
@@ -166,7 +173,6 @@ pub enum RemoteTurnStatus {
     Completed,
     Failed,
     Cancelled,
-    InProgress,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -403,3 +409,7 @@ pub struct RemoteTurnIssue {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_failure_kind: Option<RemoteProviderFailureKind>,
 }
+
+#[cfg(test)]
+#[path = "turn_result_tests.rs"]
+mod turn_result_tests;

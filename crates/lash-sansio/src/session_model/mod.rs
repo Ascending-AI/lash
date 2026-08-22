@@ -497,6 +497,17 @@ pub enum TurnOutcome {
     Stopped(TurnStop),
 }
 
+impl TurnOutcome {
+    /// Durable cancellation evidence, present exactly when this outcome is a
+    /// cancelled stop. Cancellation evidence has no other home.
+    pub fn cancellation(&self) -> Option<&TurnCancellationEvidence> {
+        match self {
+            Self::Stopped(TurnStop::Cancelled { evidence }) => Some(evidence),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnFinish {
@@ -515,7 +526,12 @@ pub enum TurnFinish {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStop {
-    Cancelled,
+    /// The turn was cancelled. The evidence that settled the cancellation
+    /// rides the variant, so a cancelled outcome can never be stated without
+    /// saying which request produced it.
+    Cancelled {
+        evidence: TurnCancellationEvidence,
+    },
     Incomplete,
     InvalidInput,
     MaxTurns,
@@ -530,6 +546,34 @@ pub enum TurnStop {
         tool_name: String,
         value: serde_json::Value,
     },
+}
+
+/// Durable evidence that a turn was cancelled.
+///
+/// Minted either from a host turn-cancel request, which supplies the
+/// `request_id` and `origin` verbatim, or, when lash itself originates the
+/// cancellation, from [`TurnCancellationEvidence::internal`]. It is carried
+/// only by [`TurnStop::Cancelled`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TurnCancellationEvidence {
+    pub request_id: String,
+    /// Opaque host-domain data. Lash records and returns it unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl TurnCancellationEvidence {
+    /// Evidence for a cancellation lash originated itself: no host cancel
+    /// request exists, so the request id is namespaced `internal:`.
+    pub fn internal(subject: impl std::fmt::Display) -> Self {
+        Self {
+            request_id: format!("internal:{subject}"),
+            origin: None,
+            reason: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

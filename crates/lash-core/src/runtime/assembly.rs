@@ -689,7 +689,7 @@ impl TurnAssembler {
     pub(super) fn finish(
         mut self,
         state: crate::SessionSnapshot,
-        interrupted: bool,
+        cancellation: Option<crate::TurnCancellationEvidence>,
         force_runtime_error: Option<TurnIssue>,
         termination: &TerminationPolicy,
     ) -> AssembledTurn {
@@ -727,8 +727,8 @@ impl TurnAssembler {
         };
         let safe_output = sanitize_assistant_output(raw_output.clone());
 
-        let outcome = if interrupted {
-            TurnOutcome::Stopped(TurnStop::Cancelled)
+        let outcome = if let Some(evidence) = cancellation {
+            TurnOutcome::Stopped(TurnStop::Cancelled { evidence })
         } else if let Some(outcome) = self.outcome.take() {
             match outcome {
                 TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => {
@@ -781,7 +781,6 @@ impl TurnAssembler {
             },
             state,
             outcome,
-            cancellation: None,
             assistant_output: AssistantOutput {
                 safe_text: safe_output,
                 raw_text: raw_output,
@@ -837,7 +836,7 @@ fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
         }
         TurnOutcome::AgentFrameSwitch { .. }
         | TurnOutcome::Stopped(
-            TurnStop::Cancelled
+            TurnStop::Cancelled { .. }
             | TurnStop::Incomplete
             | TurnStop::InvalidInput
             | TurnStop::MaxTurns

@@ -47,7 +47,28 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: TokenUsage::default(),
             termination: TurnTerminationPolicyState::new(),
             synced_protocol_iteration: None,
+            observed_cancellation: None,
         }
+    }
+
+    /// Record the cancellation request the host has observed for this turn.
+    /// The first observation wins; later ones are ignored.
+    pub fn record_cancellation_evidence(&mut self, evidence: crate::TurnCancellationEvidence) {
+        if self.observed_cancellation.is_none() {
+            self.observed_cancellation = Some(evidence);
+        }
+    }
+
+    /// Evidence for a cancellation the machine is about to record, falling
+    /// back to lash-internal evidence when the host observed no request (a
+    /// provider-side abort classified as cancelled).
+    fn cancellation_evidence(&self) -> crate::TurnCancellationEvidence {
+        self.observed_cancellation.clone().unwrap_or_else(|| {
+            crate::TurnCancellationEvidence::internal(format!(
+                "provider-cancelled:{}",
+                self.protocol_iteration
+            ))
+        })
     }
 
     /// Whether the machine has finished.
@@ -125,6 +146,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: checkpoint.cumulative_usage,
             termination: checkpoint.termination,
             synced_protocol_iteration: checkpoint.synced_protocol_iteration,
+            observed_cancellation: None,
         }
     }
 
@@ -643,7 +665,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
         };
         match result {
             Err(error) if error.terminal_reason == LlmTerminalReason::Cancelled => {
-                self.finish(TurnOutcome::Stopped(TurnStop::Cancelled));
+                self.finish(TurnOutcome::Stopped(TurnStop::Cancelled {
+                    evidence: self.cancellation_evidence(),
+                }));
             }
             Err(error) => {
                 self.emit_llm_error(error);
@@ -695,7 +719,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
             LlmTerminalReason::ContextOverflow => TurnOutcome::Stopped(TurnStop::ProviderError),
             LlmTerminalReason::ContentFilter => TurnOutcome::Stopped(TurnStop::ProviderError),
             LlmTerminalReason::ProviderError => TurnOutcome::Stopped(TurnStop::ProviderError),
-            LlmTerminalReason::Cancelled => TurnOutcome::Stopped(TurnStop::Cancelled),
+            LlmTerminalReason::Cancelled => TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: self.cancellation_evidence(),
+            }),
             LlmTerminalReason::Stop | LlmTerminalReason::ToolUse | LlmTerminalReason::Unknown => {
                 return false;
             }

@@ -1001,10 +1001,9 @@ pub struct TurnIssue {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AssembledTurn {
     pub state: SessionSnapshot,
+    /// Cancellation evidence, when the turn was cancelled, rides this outcome
+    /// — see [`crate::TurnOutcome::cancellation`].
     pub outcome: crate::TurnOutcome,
-    /// Durable request evidence, present exactly when `outcome` is cancelled.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancellation: Option<TurnCancellationEvidence>,
     pub assistant_output: AssistantOutput,
     pub execution: TurnExecutionMetrics,
     #[serde(default)]

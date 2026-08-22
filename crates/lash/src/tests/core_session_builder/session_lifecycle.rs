@@ -2429,7 +2429,6 @@ fn turn_result_total_usage_sums_parent_and_children() {
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: "ok".to_string(),
         }),
-        cancellation: None,
         assistant_output: AssistantOutput {
             safe_text: "ok".to_string(),
             raw_text: "ok".to_string(),

@@ -29,7 +29,7 @@ fn outcome_match(result: TurnReport) -> anyhow::Result<()> {
         TurnOutcome::Finished(finish) => persist_terminal(finish)?,
         TurnOutcome::AgentFrameSwitch { frame_key, .. } => record_frame_boundary(frame_key)?,
         TurnOutcome::Stopped(stop) => match stop {
-            TurnStop::Cancelled | TurnStop::InvalidInput => report_user_visible(stop),
+            TurnStop::Cancelled { .. } | TurnStop::InvalidInput => report_user_visible(stop),
             TurnStop::ProviderError | TurnStop::Incomplete => offer_retry(stop),
             // Either bound: the turn budget, or the no-progress budget when
             // consecutive attempts committed no successful execution.
@@ -218,7 +218,7 @@ async fn rlm_terminal_contracts(
 
 async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<()> {
     // docs:start:cancel-turn
-    use lash::{TurnAddress, TurnOutcome, TurnStop};
+    use lash::{TurnAddress, TurnCancellationEvidence, TurnOutcome, TurnStop};
 
     let turn_id = "incident-summary-42";
     let stream = session
@@ -242,9 +242,19 @@ async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<(
     let _receipt = receipt;
 
     let result = stream.finish().await?;
-    if matches!(result.outcome, TurnOutcome::Stopped(TurnStop::Cancelled)) {
-        assert!(result.cancellation.is_some());
+    // The evidence that settled the cancellation rides the outcome, so a
+    // cancelled turn always names the request that stopped it. Match on the
+    // variant, or read it with `TurnOutcome::cancellation`.
+    if let TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) = &result.outcome {
+        assert_eq!(evidence.request_id, "stop-button-7");
+        assert_eq!(TurnOutcome::cancellation(&result.outcome), Some(evidence));
     }
+    // Lash mints its own evidence when no host request explains the stop, so
+    // the request id is namespaced rather than absent.
+    assert_eq!(
+        TurnCancellationEvidence::internal(turn_id).request_id,
+        format!("internal:{turn_id}")
+    );
 
     // Attachment is idempotent and returns immediately after publication.
     let terminal = core
@@ -398,5 +408,23 @@ mod asserted_examples {
             lash::CancellationToken::is_cancelled(&borrowed_guarded),
             "dropping a borrowed guard must publish cancellation"
         );
+    }
+
+    #[test]
+    fn cancellation_evidence_is_read_off_the_turn_outcome() {
+        let evidence = lash::TurnCancellationEvidence::internal("incident-summary-42");
+        assert_eq!(evidence.request_id, "internal:incident-summary-42");
+
+        let cancelled = lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled {
+            evidence: evidence.clone(),
+        });
+        // A cancelled outcome names the request that stopped it.
+        assert_eq!(lash::TurnOutcome::cancellation(&cancelled), Some(&evidence));
+
+        let finished = lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage {
+            text: "summary".to_string(),
+        });
+        // Evidence exists only on a cancelled outcome.
+        assert_eq!(lash::TurnOutcome::cancellation(&finished), None);
     }
 }

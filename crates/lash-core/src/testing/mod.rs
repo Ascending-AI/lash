@@ -1186,7 +1186,6 @@ pub fn mock_assembled_turn(session_id: &str, summary: &str) -> AssembledTurn {
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: summary.to_string(),
         }),
-        cancellation: None,
         assistant_output: AssistantOutput {
             safe_text: summary.to_string(),
             raw_text: summary.to_string(),

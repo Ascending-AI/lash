@@ -211,8 +211,10 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     assert!(matches!(
         terminal,
         lash::TurnTerminal::Committed {
-            outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),
-            cancellation: Some(ref terminal_evidence),
+            outcome:
+                lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled {
+                    evidence: ref terminal_evidence,
+                }),
             ..
         } if terminal_evidence == &evidence
     ));
@@ -357,8 +359,10 @@ finish (await handle)?
     assert!(matches!(
         terminal,
         lash::TurnTerminal::Committed {
-            outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled),
-            cancellation: Some(ref terminal_evidence),
+            outcome:
+                lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled {
+                    evidence: ref terminal_evidence,
+                }),
             ..
         } if terminal_evidence == &evidence
     ));
@@ -462,19 +466,18 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         .await_terminal_with_timeout(&failed_address, Duration::from_secs(20))
         .await
         .expect("auth failure must publish a turn terminal");
-    let lash::TurnTerminal::Committed {
-        outcome,
-        cancellation,
-        ..
-    } = terminal
-    else {
+    let lash::TurnTerminal::Committed { outcome, .. } = terminal else {
         panic!("provider auth failure did not settle through the turn contract: {terminal:#?}");
     };
     assert_eq!(
         outcome,
         lash::TurnOutcome::Stopped(lash::TurnStop::ProviderError)
     );
-    assert_eq!(cancellation, None, "provider failure is not cancellation");
+    assert_eq!(
+        outcome.cancellation(),
+        None,
+        "provider failure is not cancellation"
+    );
     let invocation = wait_for_restate_invocation_completion(
         &harness.state,
         &failed_invocation,
@@ -1692,22 +1695,12 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .await_terminal_with_timeout(&address, Duration::from_secs(20))
         .await
         .expect("recovered turn must commit a cancellation terminal");
-    let lash::TurnTerminal::Committed {
-        outcome,
-        cancellation,
-        ..
-    } = terminal
-    else {
+    let lash::TurnTerminal::Committed { outcome, .. } = terminal else {
         panic!("recovered turn returned non-committed terminal: {terminal:#?}");
     };
-    assert!(
-        matches!(
-            outcome,
-            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled)
-        ),
-        "recovered turn did not commit Cancelled: {outcome:#?}"
-    );
-    let evidence = cancellation.expect("Cancelled terminal must carry evidence");
+    let lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }) = outcome else {
+        panic!("recovered turn did not commit Cancelled: {outcome:#?}");
+    };
     assert_eq!(
         evidence.request_id,
         format!("workbench-recovery-{backend}-e2e-cancel")

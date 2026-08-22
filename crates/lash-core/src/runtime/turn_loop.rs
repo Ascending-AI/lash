@@ -215,7 +215,7 @@ fn trace_fields_from_outcome(
 
 fn trace_stop_reason(stop: &TurnStop) -> &'static str {
     match stop {
-        TurnStop::Cancelled => "cancelled",
+        TurnStop::Cancelled { .. } => "cancelled",
         TurnStop::Incomplete => "incomplete",
         TurnStop::InvalidInput => "invalid_input",
         TurnStop::MaxTurns => "max_turns",
@@ -1329,15 +1329,21 @@ impl LashRuntime {
             );
         }
 
-        let assembled_cancelled = matches!(
-            assembler.outcome,
-            Some(TurnOutcome::Stopped(TurnStop::Cancelled))
-        );
+        // The evidence the executed turn already named travels into the gate,
+        // so the request id a host saw on the streamed outcome is the one the
+        // committed report carries. Only a cancellation with no assembled
+        // evidence at all falls back to lash's internal mint.
+        let assembled_cancellation = match &assembler.outcome {
+            Some(TurnOutcome::Stopped(TurnStop::Cancelled { evidence })) => Some(evidence.clone()),
+            _ => None,
+        };
+        let assembled_cancelled = assembled_cancellation.is_some();
         let lease_was_lost = session_execution_lease.is_some_and(|lease| lease.is_lost());
         let cancellation = turn_control
             .settle_before_commit(
                 turn_control_resolver,
                 assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
+                assembled_cancellation,
             )
             .await?;
         if cancellation.is_some() {
@@ -1377,13 +1383,12 @@ impl LashRuntime {
         let last_prompt_usage = assembler.last_llm_usage().and_then(normalize_prompt_usage);
         turn_pipeline.state_mut().last_prompt_usage = last_prompt_usage;
         let assembled_state = turn_pipeline.export_state_for_assembly();
-        let mut assembled = assembler.finish(
+        let assembled = assembler.finish(
             assembled_state,
-            interrupted,
+            cancellation,
             None,
             &self.host.core.control.termination,
         );
-        assembled.cancellation = cancellation;
 
         let Some(session) = self.session.as_ref() else {
             self.state.apply_snapshot(&assembled.state);
@@ -1400,7 +1405,6 @@ impl LashRuntime {
                 turn_control_resolver,
                 &TurnTerminal::Committed {
                     outcome: assembled.outcome.clone(),
-                    cancellation: assembled.cancellation.clone(),
                     session_revision: None,
                 },
                 &self.state.session_id,
@@ -1446,26 +1450,7 @@ impl LashRuntime {
                 ));
             }
         };
-        let mut returned_turn = finalized.turn;
-        if returned_turn.cancellation.is_some()
-            && !matches!(
-                returned_turn.outcome,
-                TurnOutcome::Stopped(TurnStop::Cancelled)
-            )
-        {
-            returned_turn.outcome = TurnOutcome::Stopped(TurnStop::Cancelled);
-        }
-        if matches!(
-            returned_turn.outcome,
-            TurnOutcome::Stopped(TurnStop::Cancelled)
-        ) && returned_turn.cancellation.is_none()
-        {
-            self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::TurnCancellationEvidenceMissing,
-                "cancelled turns must carry cancellation evidence",
-            ));
-        }
+        let returned_turn = finalized.turn;
         let prepared = PreparedTurn {
             turn_pipeline,
             turn: returned_turn,
@@ -1550,7 +1535,6 @@ impl LashRuntime {
             turn_control_resolver,
             &TurnTerminal::Committed {
                 outcome: delivery.turn.outcome.clone(),
-                cancellation: delivery.turn.cancellation.clone(),
                 session_revision: None,
             },
             &self.state.session_id,
@@ -1685,7 +1669,15 @@ impl LashRuntime {
             ..
         } = driver;
         self.session = Some(session);
-        emit_terminal_sequence(&mut assembler, events, None, TurnStop::Cancelled).await;
+        emit_terminal_sequence(
+            &mut assembler,
+            events,
+            None,
+            TurnStop::Cancelled {
+                evidence: turn_control.evidence_or_internal(),
+            },
+        )
+        .await;
         let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
         Box::pin(self.finish_turn(
             TurnFinishInput {
@@ -3950,7 +3942,6 @@ mod tests {
                 outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
                     text: "committed".to_string(),
                 }),
-                cancellation: None,
                 session_revision: Some(1),
             },
             "committed-session",
