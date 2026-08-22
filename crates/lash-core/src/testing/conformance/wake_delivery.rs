@@ -122,6 +122,7 @@ pub async fn wake_delivery_crash_matrix(
     .await
     .expect("recover pending wake");
     assert_eq!(first.enqueued, 1, "unexpected delivery report: {first:?}");
+    assert_eq!(first.retryable_failures, 0);
     let queued = target
         .list_queued_work(target_session_id)
         .await
@@ -315,6 +316,12 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&clock),
         Arc::clone(&target),
         target_session_id,
+    )
+    .await;
+    missing_target_is_deferred_and_rearmed(
+        Arc::clone(&factory),
+        Arc::clone(&registry),
+        Arc::clone(&clock),
     )
     .await;
 
@@ -779,6 +786,101 @@ pub async fn wake_delivery_crash_matrix(
     )
     .await;
     expired_is_a_typed_discard(factory, registry, clock).await;
+}
+
+async fn missing_target_is_deferred_and_rearmed(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+    registry: Arc<dyn crate::ProcessRegistry>,
+    clock: Arc<TestClock>,
+) {
+    let target_session_id = "wake-retry-target";
+    let process_id = "wake-missing-target-sender";
+    registry
+        .register_process(
+            process_registry::registration(process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id.to_string())),
+        )
+        .await
+        .expect("register missing-target wake sender");
+    let wake = registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "retry missing target"}),
+            ),
+        )
+        .await
+        .expect("append missing-target wake")
+        .wake_delivery
+        .expect("missing-target wake delivery");
+
+    let first = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        Arc::clone(&factory),
+        None,
+        Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        1,
+    )
+    .await
+    .expect("defer missing-target wake");
+    assert_eq!(
+        first.retryable_failures, 1,
+        "unexpected retry report: {first:?}"
+    );
+    assert_eq!(first.enqueued, 0);
+
+    let deferred = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list deferred missing-target wake")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
+        })
+        .expect("deferred missing-target wake remains inspectable");
+    assert_eq!(deferred.state, crate::WakeDeliveryState::Pending);
+    assert_eq!(deferred.claim_token, None);
+    assert_eq!(deferred.attempts, 1);
+    assert!(deferred.next_attempt_at_ms > crate::Clock::timestamp_ms(clock.as_ref()));
+
+    factory
+        .create_store(&crate::SessionStoreCreateRequest {
+            session_id: target_session_id.to_string(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create missing-target retry receiver");
+    clock.set(deferred.next_attempt_at_ms);
+
+    let second = crate::WakeDeliveryDriver::drive_pending_once(
+        Arc::clone(&registry),
+        factory,
+        None,
+        clock as Arc<dyn crate::Clock>,
+        1,
+    )
+    .await
+    .expect("re-arm missing-target wake");
+    assert_eq!(
+        second.retryable_failures, 0,
+        "unexpected re-arm report: {second:?}"
+    );
+    assert_eq!(second.enqueued, 1);
+
+    let rearmed = registry
+        .list_wake_deliveries(None)
+        .await
+        .expect("list re-armed missing-target wake")
+        .into_iter()
+        .find(|delivery| {
+            delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
+        })
+        .expect("re-armed missing-target wake remains inspectable");
+    assert_eq!(rearmed.state, crate::WakeDeliveryState::Enqueued);
+    assert_eq!(rearmed.discard_reason, None);
 }
 
 async fn sender_floor_lifetime(
@@ -1485,6 +1587,7 @@ async fn target_gone_is_a_typed_discard(
     .await
     .expect("drive target-gone wake");
     assert_eq!(report.discarded_target_gone, 1);
+    assert_eq!(report.retryable_failures, 0);
     let delivery = registry
         .list_wake_deliveries(None)
         .await
@@ -1548,6 +1651,7 @@ async fn expired_is_a_typed_discard(
     )
     .await
     .expect("drive expired wake with injected clock");
+    assert_eq!(report.retryable_failures, 0);
     assert!(
         report.discarded_expired >= 1,
         "the injected expiry clock must discard at least the named wake: {report:?}"
