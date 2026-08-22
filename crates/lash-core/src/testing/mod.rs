@@ -14,8 +14,11 @@ pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
 pub mod conformance;
+mod execution_context_builder;
 mod live_replay;
 pub mod sansio_transcript;
+
+use execution_context_builder::*;
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::future::Future;
@@ -504,70 +507,21 @@ impl crate::ToolProvider for EmptyToolProvider {
 pub fn code_execution_context_with_tool_catalog(
     tool_catalog: crate::ToolCatalog,
 ) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_provider_catalog_and_trigger_router(
-        Arc::new(EmptyToolProvider),
-        tool_catalog,
-        None,
-    )
+    TestExecutionContextBuilder::new()
+        .tool_catalog(tool_catalog)
+        .build()
+        .into_runtime()
 }
 
 pub fn code_execution_context_with_tool_provider_and_catalog(
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
 ) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_provider_catalog_and_trigger_router(
-        provider,
-        tool_catalog,
-        None,
-    )
-}
-
-fn code_execution_context_with_tool_catalog_and_trigger_router(
-    tool_catalog: crate::ToolCatalog,
-    trigger_router: Option<crate::TriggerRouter>,
-) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_provider_catalog_and_trigger_router(
-        Arc::new(EmptyToolProvider),
-        tool_catalog,
-        trigger_router,
-    )
-}
-
-fn code_execution_context_with_tool_provider_catalog_and_trigger_router(
-    provider: Arc<dyn crate::ToolProvider>,
-    tool_catalog: crate::ToolCatalog,
-    trigger_router: Option<crate::TriggerRouter>,
-) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_controller(
-        provider,
-        tool_catalog,
-        trigger_router,
-        Arc::new(
-            crate::InlineRuntimeEffectController::default()
-                .allow_process_lifetime_completion_keys(),
-        ),
-    )
-}
-
-fn code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_controller(
-    provider: Arc<dyn crate::ToolProvider>,
-    tool_catalog: crate::ToolCatalog,
-    trigger_router: Option<crate::TriggerRouter>,
-    effect_controller: Arc<dyn crate::RuntimeEffectController>,
-) -> crate::RuntimeExecutionContext<'static> {
-    let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-    );
-    code_execution_context_with_process_dependencies(
-        provider,
-        tool_catalog,
-        trigger_router,
-        Arc::new(crate::UnavailableProcessService),
-        effect_controller,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-        execution_env_spec,
-    )
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .build()
+        .into_runtime()
 }
 
 /// Build a code-execution context whose process service, effect controller,
@@ -581,53 +535,20 @@ pub fn code_execution_context_with_process_dependencies(
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
 ) -> crate::RuntimeExecutionContext<'static> {
-    let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
-        .build_session("test-session", None)
-        .expect("test plugin session");
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
-    let attachment_store: Arc<crate::SessionAttachmentStore> =
-        Arc::new(crate::SessionAttachmentStore::in_memory());
-    let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
-        plugins,
-        tools: provider,
-        tool_registry: None,
-        tool_catalog: Arc::new(tool_catalog),
-        sessions: Arc::new(MockSessionManager::default()),
-        session_lifecycle: Arc::new(MockSessionManager::default()),
-        session_graph: Arc::new(MockSessionManager::default()),
-        processes,
-        trigger_router,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(effect_controller),
-        direct_completions: crate::DirectCompletionClient::unavailable(
-            "direct completions are unavailable in this test context",
-        ),
-        parent_invocation: None,
-        execution_env_spec: execution_env_spec.clone(),
-        session_id: "test-session".to_string(),
-        agent_frame_id: String::new(),
-        event_tx,
-        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&attachment_store),
-        attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-        turn_context: crate::TurnContext::default(),
-        clock: std::sync::Arc::new(crate::SystemClock),
-    });
-    crate::RuntimeExecutionContext::new(
-        "test-session".to_string(),
-        dispatch,
-        process_env_store,
-        attachment_store,
-        Arc::new(crate::ChronologicalProjection::default()),
-        None,
-        crate::TurnContext::default(),
-    )
-    .with_execution_env_spec(execution_env_spec)
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .trigger_router(trigger_router)
+        .processes(processes)
+        .shared_effect_controller(effect_controller)
+        .process_env_store(process_env_store)
+        .execution_env_spec(execution_env_spec)
+        .build()
+        .into_runtime()
 }
 
 pub fn code_execution_context() -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_catalog(crate::ToolCatalog::from_tool_definitions(Vec::new()))
+    TestExecutionContextBuilder::new().build().into_runtime()
 }
 
 /// Build an empty code-execution context carrying the stable parent invocation
@@ -635,7 +556,10 @@ pub fn code_execution_context() -> crate::RuntimeExecutionContext<'static> {
 pub fn code_execution_context_with_invocation(
     invocation: crate::RuntimeInvocation,
 ) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context().with_parent_invocation(invocation)
+    TestExecutionContextBuilder::new()
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
 }
 
 /// Build a code-execution context with a concrete tool surface and the stable
@@ -645,8 +569,12 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
     tool_catalog: crate::ToolCatalog,
     invocation: crate::RuntimeInvocation,
 ) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_provider_and_catalog(provider, tool_catalog)
-        .with_parent_invocation(invocation)
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
 }
 
 /// Build the stable invocation installed around an `ExecCode` effect.
@@ -669,10 +597,10 @@ pub fn exec_code_invocation(
 pub fn code_execution_context_with_trigger_store(
     trigger_store: Arc<dyn crate::TriggerStore>,
 ) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_catalog_and_trigger_router(
-        crate::ToolCatalog::from_tool_definitions(Vec::new()),
-        Some(crate::TriggerRouter::new(trigger_store, None, None)),
-    )
+    TestExecutionContextBuilder::new()
+        .trigger_router(Some(crate::TriggerRouter::new(trigger_store, None, None)))
+        .build()
+        .into_runtime()
 }
 
 /// Build a code-execution context whose trigger operations pass through the
@@ -681,12 +609,11 @@ pub fn code_execution_context_with_trigger_store_and_effect_controller(
     trigger_store: Arc<dyn crate::TriggerStore>,
     effect_controller: Arc<dyn crate::RuntimeEffectController>,
 ) -> crate::RuntimeExecutionContext<'static> {
-    code_execution_context_with_tool_provider_catalog_trigger_router_and_effect_controller(
-        Arc::new(EmptyToolProvider),
-        crate::ToolCatalog::from_tool_definitions(Vec::new()),
-        Some(crate::TriggerRouter::new(trigger_store, None, None)),
-        effect_controller,
-    )
+    TestExecutionContextBuilder::new()
+        .trigger_router(Some(crate::TriggerRouter::new(trigger_store, None, None)))
+        .shared_effect_controller(effect_controller)
+        .build()
+        .into_runtime()
 }
 
 /// Builds the production-shaped `ToolContext` installed while a controller-owned
@@ -699,89 +626,25 @@ pub fn atomic_tool_context_with_services<'run>(
     trigger_router: Option<crate::TriggerRouter>,
     parent_invocation: crate::RuntimeInvocation,
 ) -> crate::ToolContext<'run> {
-    crate::ToolContext::from_dispatch(atomic_tool_dispatch_with_services(
-        scoped_effect_controller,
-        session_lifecycle,
-        processes,
-        trigger_router,
-        parent_invocation,
-        "atomic-tool-test-session",
+    crate::ToolContext::from_dispatch(build_atomic_tool_dispatch(
+        TestExecutionContextBuilder::new()
+            .session_id("atomic-tool-test-session")
+            .session_lifecycle(session_lifecycle)
+            .processes(processes)
+            .trigger_router(trigger_router)
+            .borrowed_effect_controller(scoped_effect_controller)
+            .dispatch_parent_invocation(parent_invocation),
     ))
     .build()
 }
 
-fn atomic_tool_dispatch_with_services<'run>(
-    scoped_effect_controller: crate::ScopedEffectController<'run>,
-    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
-    processes: Arc<dyn crate::ProcessService>,
-    trigger_router: Option<crate::TriggerRouter>,
-    parent_invocation: crate::RuntimeInvocation,
-    session_id: &str,
+fn build_atomic_tool_dispatch<'run>(
+    builder: TestExecutionContextBuilder<'run>,
 ) -> Arc<crate::tool_dispatch::ToolDispatchContext<'run>> {
-    atomic_tool_dispatch_with_provider_and_services(
-        scoped_effect_controller,
-        session_lifecycle,
-        processes,
-        trigger_router,
-        parent_invocation,
-        session_id,
-        Arc::new(EmptyToolProvider),
-        crate::ToolCatalog::from_tool_definitions(Vec::new()),
-        Arc::new(crate::SystemClock),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn atomic_tool_dispatch_with_provider_and_services<'run>(
-    scoped_effect_controller: crate::ScopedEffectController<'run>,
-    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
-    processes: Arc<dyn crate::ProcessService>,
-    trigger_router: Option<crate::TriggerRouter>,
-    parent_invocation: crate::RuntimeInvocation,
-    session_id: &str,
-    tools: Arc<dyn crate::ToolProvider>,
-    tool_catalog: crate::ToolCatalog,
-    clock: Arc<dyn crate::Clock>,
-) -> Arc<crate::tool_dispatch::ToolDispatchContext<'run>> {
-    let host = Arc::new(MockSessionManager::default());
-    let plugins = crate::plugin::PluginHost::new(test_code_protocol_factories())
-        .build_session(session_id, None)
-        .expect("build atomic-tool test plugin session");
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
-    let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
-    let execution_env_spec = crate::ProcessExecutionEnvSpec::new(
-        crate::PluginOptions::default(),
-        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-    );
-    Arc::new(crate::tool_dispatch::ToolDispatchContext {
-        plugins,
-        tools,
-        tool_registry: None,
-        tool_catalog: Arc::new(tool_catalog),
-        sessions: host.clone(),
-        session_lifecycle,
-        session_graph: host,
-        processes,
-        trigger_router,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(
-            scoped_effect_controller,
-        ),
-        direct_completions: crate::DirectCompletionClient::unavailable(
-            "direct completions are unavailable in this test context",
-        ),
-        parent_invocation: Some(parent_invocation),
-        execution_env_spec,
-        session_id: session_id.to_string(),
-        agent_frame_id: String::new(),
-        event_tx,
-        checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
-        attachment_store,
-        attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
-        turn_context: crate::TurnContext::default(),
-        clock,
-    })
+    builder
+        .shared_session_host(Arc::new(MockSessionManager::default()))
+        .build()
+        .dispatch
 }
 
 #[derive(Debug)]
@@ -830,16 +693,18 @@ pub async fn coordinate_tool_provider_with_services(
         crate::RuntimeEffectKind::ToolBatch,
         format!("tool-batch:{}", call.call_id),
     );
-    let dispatch = atomic_tool_dispatch_with_provider_and_services(
-        scoped_effect_controller,
-        Arc::new(MockSessionManager::default()),
-        processes,
-        None,
-        parent_invocation.clone(),
-        session_id,
-        provider,
-        crate::ToolCatalog::from_tool_definitions(vec![definition]),
-        Arc::new(FrozenToolCoordinatorClock(std::time::Instant::now())),
+    let dispatch = build_atomic_tool_dispatch(
+        TestExecutionContextBuilder::new()
+            .session_id(session_id)
+            .session_lifecycle(Arc::new(MockSessionManager::default()))
+            .processes(processes)
+            .provider(provider)
+            .tool_catalog(crate::ToolCatalog::from_tool_definitions(vec![definition]))
+            .borrowed_effect_controller(scoped_effect_controller)
+            .dispatch_parent_invocation(parent_invocation.clone())
+            .clock(Arc::new(FrozenToolCoordinatorClock(
+                std::time::Instant::now(),
+            ))),
     );
     let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
         .prepared_call(&call)
@@ -915,13 +780,13 @@ pub async fn execute_tool_intents_with_services(
         crate::RuntimeEffectKind::ToolBatch,
         format!("tool-intent-drain:{tool_call_id}"),
     );
-    let dispatch = atomic_tool_dispatch_with_services(
-        scoped_effect_controller,
-        Arc::new(MockSessionManager::default()),
-        processes,
-        None,
-        parent_invocation,
-        session_id,
+    let dispatch = build_atomic_tool_dispatch(
+        TestExecutionContextBuilder::new()
+            .session_id(session_id)
+            .session_lifecycle(Arc::new(MockSessionManager::default()))
+            .processes(processes)
+            .borrowed_effect_controller(scoped_effect_controller)
+            .dispatch_parent_invocation(parent_invocation),
     );
     crate::tool_dispatch::execute_final_tool_intents(
         dispatch.as_ref(),
