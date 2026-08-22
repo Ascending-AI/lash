@@ -426,6 +426,7 @@ pub enum TraceEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRetryAttempt {
     pub ordinal: u32,
+    // Explicit FIG-1827 carve-out: free-form until the next TRACE_SCHEMA_VERSION bump (v9), when it joins the typed-enum family.
     pub outcome: String,
     pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
