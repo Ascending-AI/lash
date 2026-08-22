@@ -147,7 +147,7 @@ fn head_revision_cas_holds_across_two_connections() {
 async fn gc_keeps_live_committed_checkpoint_blobs() {
     let store = Store::memory().await.expect("store");
     let orphan = store
-        .put_artifact_blob(
+        .put_unrooted_artifact_blob_for_testing(
             lash_sqlite_store::BlobArtifactDescriptor::checkpoint_component(),
             b"orphan-blob",
         )

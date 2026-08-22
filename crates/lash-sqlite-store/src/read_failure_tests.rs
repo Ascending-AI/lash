@@ -24,6 +24,20 @@ fn assert_storage_failure<T>(label: &str, result: Result<T, StoreError>) {
     );
 }
 
+fn assert_artifact_storage_failure<T>(
+    label: &str,
+    result: Result<T, lashlang::ArtifactStoreError>,
+) {
+    match result {
+        Err(lashlang::ArtifactStoreError::Backend(message)) => assert!(
+            message.starts_with("sqlite storage failure:"),
+            "expected SQLite storage failure from {label}, got {message}"
+        ),
+        Err(error) => panic!("expected SQLite storage failure from {label}, got {error}"),
+        Ok(_) => panic!("expected SQLite storage failure from {label}"),
+    }
+}
+
 #[tokio::test]
 async fn absent_rows_remain_honest_successful_outcomes() {
     let store = Store::memory().await.expect("open store");
@@ -83,7 +97,20 @@ async fn absent_rows_remain_honest_successful_outcomes() {
     );
 
     let raw_bytes = b"legacy non-enveloped blob";
-    let raw_blob_ref = store.put_blob(raw_bytes).await;
+    let raw_blob_ref = BlobRef(format!("{:x}", Sha256::digest(raw_bytes)));
+    let raw_hash = raw_blob_ref.as_str().to_string();
+    let raw_content = raw_bytes.to_vec();
+    store
+        .conn
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",
+                params![raw_hash, raw_content],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("seed legacy raw blob");
     assert_eq!(
         store.get_blob(&raw_blob_ref).await.expect("read raw blob"),
         Some(raw_bytes.to_vec())
@@ -320,5 +347,97 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     assert_storage_failure(
         "AttachmentManifest::list_all_refs",
         lash_core::AttachmentManifest::list_all_refs(&store),
+    );
+}
+
+async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("readonly.db");
+    Store::open(&path).await.expect("provision store");
+    let store = Store::open_readonly(&path)
+        .await
+        .expect("open read-only store");
+    (dir, store)
+}
+
+#[tokio::test]
+async fn readonly_connection_rejects_every_surviving_blob_write_path() {
+    let (_dir, store) = readonly_store_for_blob_write_failure().await;
+    assert_storage_failure(
+        "put_unrooted_artifact_blob_for_testing",
+        store
+            .put_unrooted_artifact_blob_for_testing(
+                BlobArtifactDescriptor::checkpoint_component(),
+                b"artifact",
+            )
+            .await,
+    );
+
+    assert_artifact_storage_failure(
+        "put_artifact_ref_blob",
+        store
+            .put_artifact_bytes("readonly-artifact", "generic", b"artifact-ref")
+            .await,
+    );
+
+    let trigger_artifact = lashlang::ModuleArtifact::from_program(
+        lashlang::parse("process readonly(root: str) { finish root }")
+            .expect("parse trigger artifact"),
+    )
+    .expect("build trigger artifact");
+    assert_artifact_storage_failure(
+        "replace_current_trigger_manifest",
+        store
+            .replace_current_trigger_manifest("readonly-owner", &trigger_artifact)
+            .await,
+    );
+
+    let state = lash_core::RuntimeSessionState {
+        session_id: "readonly-session".to_string(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    assert_storage_failure(
+        "commit_runtime_state",
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .await,
+    );
+
+    let raw = store
+        .conn
+        .call(|conn| {
+            Store::insert_artifact_blob_conn(
+                conn,
+                BlobArtifactDescriptor::checkpoint_component(),
+                b"raw",
+                BuiltinBlobProfile::LowLatency,
+            )
+        })
+        .await
+        .map_err(sqlite_error);
+    assert_storage_failure("insert_artifact_blob_conn", raw);
+
+    let typed = store
+        .conn
+        .call(|conn| {
+            Store::put_typed_artifact_blob_conn(
+                conn,
+                BlobArtifactDescriptor::checkpoint_component(),
+                &42_u64,
+                BuiltinBlobProfile::LowLatency,
+            )
+            .map_err(sqlite_conversion_error)
+        })
+        .await
+        .map_err(sqlite_error);
+    assert_storage_failure("put_typed_artifact_blob_conn", typed);
+
+    assert_storage_failure(
+        "put_checkpoint",
+        store
+            .put_checkpoint(&HydratedSessionCheckpoint::default())
+            .await,
     );
 }

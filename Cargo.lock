@@ -2529,6 +2529,7 @@ dependencies = [
  "lash-core",
  "lash-lashlang-runtime",
  "lash-sansio",
+ "lash-sqlite-store",
  "lashlang",
  "rmp-serde",
  "rusqlite",

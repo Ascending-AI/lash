@@ -5,8 +5,9 @@
 //! `*_conn` helpers here are **synchronous** and take a `&rusqlite::Connection`
 //! so they can be reused from inside any `conn.call`/`conn.write` closure (the
 //! checkpoint/persistence/graph modules call them while already on the
-//! connection thread). The public async methods wrap a single helper call in
-//! `self.conn.call(...)`.
+//! connection thread). Public reads bridge onto that connection thread, while
+//! production blob writes stay inside the transaction that publishes their
+//! durable root.
 
 use super::*;
 
@@ -67,6 +68,22 @@ impl Store {
     ) -> Result<BlobRef, StoreError> {
         let bytes = encode_msgpack(value, "SQLite typed artifact blob")?;
         Self::insert_artifact_blob_conn_typed(conn, descriptor, &bytes, profile)
+    }
+
+    /// Seed an intentionally unrooted artifact for GC and failure-path tests.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn put_unrooted_artifact_blob_for_testing(
+        &self,
+        descriptor: BlobArtifactDescriptor,
+        content: &[u8],
+    ) -> Result<BlobRef, StoreError> {
+        let content = content.to_vec();
+        let profile = self.options.blob_profile;
+        self.conn
+            .call(move |conn| Self::insert_artifact_blob_conn(conn, descriptor, &content, profile))
+            .await
+            .map_err(sqlite_error)
     }
 
     /// Persist the complete checkpoint root and every changed leaf inside the
@@ -293,66 +310,12 @@ impl Store {
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
     }
 
-    /// Persist `stored` bytes under `hash` in the `blobs` table, warning with
-    /// `warn_label` (and dropping the row) if the write fails.
-    async fn insert_blob_row(&self, hash: String, stored: Vec<u8>, warn_label: &str) -> BlobRef {
-        let hash_for_row = hash.clone();
-        let result = self
-            .conn
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)",
-                    params![hash_for_row, stored],
-                )
-            })
-            .await;
-        if let Err(err) = result {
-            tracing::warn!(error = %err, hash, "{warn_label}");
-        }
-        BlobRef(hash)
-    }
-
-    pub async fn put_blob(&self, content: &[u8]) -> BlobRef {
-        let hash = blob_content_hash(content);
-        self.insert_blob_row(hash, content.to_vec(), "failed to persist checkpoint blob")
-            .await
-    }
-
-    pub async fn put_artifact_blob(
-        &self,
-        descriptor: BlobArtifactDescriptor,
-        content: &[u8],
-    ) -> Result<BlobRef, StoreError> {
-        let hash = blob_content_hash(content);
-        let stored = encode_artifact_blob(&descriptor, self.options.blob_profile, content)?;
-        Ok(self
-            .insert_blob_row(hash, stored, "failed to persist artifact blob")
-            .await)
-    }
-
     pub async fn get_blob(&self, blob_ref: &BlobRef) -> Result<Option<Vec<u8>>, StoreError> {
         let blob_ref = blob_ref.clone();
         self.conn
             .call(move |conn| Self::get_blob_conn(conn, &blob_ref).map_err(sqlite_conversion_error))
             .await
             .map_err(sqlite_error)
-    }
-
-    pub async fn put_typed_blob<T: serde::Serialize>(
-        &self,
-        value: &T,
-    ) -> Result<BlobRef, StoreError> {
-        let bytes = encode_msgpack(value, "SQLite typed blob")?;
-        Ok(self.put_blob(&bytes).await)
-    }
-
-    pub async fn put_typed_artifact_blob<T: serde::Serialize>(
-        &self,
-        descriptor: BlobArtifactDescriptor,
-        value: &T,
-    ) -> Result<BlobRef, StoreError> {
-        let bytes = encode_msgpack(value, "SQLite typed artifact blob")?;
-        self.put_artifact_blob(descriptor, &bytes).await
     }
 
     pub async fn get_typed_blob<T: serde::de::DeserializeOwned>(
@@ -370,7 +333,8 @@ impl Store {
         })
     }
 
-    pub async fn put_checkpoint(
+    #[cfg(test)]
+    pub(crate) async fn put_checkpoint(
         &self,
         checkpoint: &HydratedSessionCheckpoint,
     ) -> Result<StoredSessionCheckpoint, StoreError> {

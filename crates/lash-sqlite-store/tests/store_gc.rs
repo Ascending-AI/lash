@@ -1,9 +1,9 @@
 use lash_core::store::GraphAppend;
 use lash_core::{
-    HydratedSessionCheckpoint, Message, MessageRole, ModelSpec, Part, PersistedTurnState,
-    PluginSessionSnapshot, RuntimeCommit, RuntimeSessionState, SessionCommitStore, SessionPolicy,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry,
-    TokenUsage, ToolState, facade_support::shared_parts,
+    Message, MessageRole, ModelSpec, Part, PluginSessionSnapshot, RuntimeCommit,
+    RuntimeSessionState, SessionCommitStore, SessionPolicy, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState,
+    facade_support::shared_parts,
 };
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, Store};
 
@@ -59,40 +59,10 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let plugin_snapshot = PluginSessionSnapshot {
         plugins: Default::default(),
     };
-    let checkpoint = HydratedSessionCheckpoint {
-        turn_state: PersistedTurnState {
-            turn_index: 1,
-            token_usage: TokenUsage::default(),
-            last_prompt_usage: None,
-            protocol_turn_options: Default::default(),
-        },
-        components: [
-            (
-                lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
-                lash_core::HydratedCheckpointComponent::changed(
-                    rmp_serde::to_vec_named(&tool_state).expect("encode tool state"),
-                ),
-            ),
-            (
-                lash_core::store::PLUGIN_SNAPSHOT_CHECKPOINT_COMPONENT.to_string(),
-                lash_core::HydratedCheckpointComponent::changed(
-                    rmp_serde::to_vec_named(&plugin_snapshot).expect("encode plugin snapshot"),
-                ),
-            ),
-        ]
-        .into_iter()
-        .collect(),
-        plugin_snapshot_revision: Some(11),
-    };
-    let stored = store
-        .put_checkpoint(&checkpoint)
-        .await
-        .expect("store checkpoint");
     let mut state = RuntimeSessionState {
         session_id: "root".to_string(),
-        turn_index: checkpoint.turn_state.turn_index,
-        plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
-        checkpoint_ref: Some(stored.checkpoint_ref.clone()),
+        turn_index: 1,
+        plugin_snapshot_revision: Some(11),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -104,12 +74,15 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .await
         .expect("bind session to store");
     state.ensure_agent_frame_initialized();
-    store
+    let stored = store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit session state");
     let orphan = store
-        .put_artifact_blob(BlobArtifactDescriptor::checkpoint_component(), b"orphan")
+        .put_unrooted_artifact_blob_for_testing(
+            BlobArtifactDescriptor::checkpoint_component(),
+            b"orphan",
+        )
         .await
         .expect("store orphan");
 
