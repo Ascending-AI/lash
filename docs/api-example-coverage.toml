@@ -870,7 +870,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::validate_process_wake_source"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1504#.validate_process_wake_source()"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1537#.validate_process_wake_source()"
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkStore::enqueue_queued_work_with_outcome"
@@ -879,7 +879,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkStore::enqueue_queued_work_with_outcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1513#async fn enqueue_queued_work_with_outcome("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1546#async fn enqueue_queued_work_with_outcome("
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES"
@@ -952,7 +952,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1951#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1984#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"
@@ -961,7 +961,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1951#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1984#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 
 [[api]]
 symbol = "lash::persistence::StoreError::checked_monotonic_increment"
@@ -979,7 +979,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::raw_session_owned_artifact_refs_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2775#async fn raw_session_owned_artifact_refs_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2808#async fn raw_session_owned_artifact_refs_for_testing("
 
 [[api]]
 symbol = "lash::persistence::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"
@@ -988,7 +988,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2756#async fn seed_session_trigger_manifest_ref_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2789#async fn seed_session_trigger_manifest_ref_for_testing("
 
 [[api]]
 symbol = "lash::plugins::PluginSpec::orchestrating_tools"
@@ -1357,12 +1357,48 @@ usage = "crates/lash-postgres-store/tests/conformance.rs:2122#lash_core::testing
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
+symbol = "lash::testing::conformance::unclaimed_turn_input_settlement_is_a_conditional_write"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-sqlite-store/tests/conformance/direct_turn_acceptance.rs:65#lash_core::testing::conformance::unclaimed_turn_input_settlement_is_a_conditional_write("
+reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
+
+[[api]]
+symbol = "lash::testing::conformance::direct_turn_accepts_before_driving"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-sqlite-store/tests/conformance/direct_turn_acceptance.rs:29#lash_core::testing::conformance::direct_turn_accepts_before_driving("
+reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
+
+[[api]]
+symbol = "lash::testing::conformance::direct_turn_acceptance_mints_no_idempotency_key"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-sqlite-store/tests/conformance/direct_turn_acceptance.rs:53#lash_core::testing::conformance::direct_turn_acceptance_mints_no_idempotency_key("
+reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
+
+[[api]]
+symbol = "lash::testing::conformance::orphaned_direct_turn_input_is_drivable_by_another_worker"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-test-only"
+usage = "crates/lash-sqlite-store/tests/conformance/direct_turn_acceptance.rs:41#lash_core::testing::conformance::orphaned_direct_turn_input_is_drivable_by_another_worker("
+reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
+
+[[api]]
 symbol = "lash::testing::conformance::public_signal_intent_wakes_parked_process"
 kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/conformance.rs:1555#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1557#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -1406,7 +1442,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/conformance.rs:1304#lash_core::testing::conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {"
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1306#lash_core::testing::conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {"
 reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
 
 [[api]]
@@ -3162,7 +3198,7 @@ aliases = ["lash::prelude::LashSession::enqueue"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:6#.enqueue(lash::TurnInput::text(\"queued workbench input\"))"
-assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:57#assert_eq!(durable.len(), 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:64#assert_eq!(settled.turn_id.as_str(), \"workbench-queued-turn\");"
 
 [[api]]
 symbol = "lash::LashSession::observe"
@@ -3238,7 +3274,7 @@ aliases = ["lash::prelude::LashSession::queued_turn"]
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:12#.queued_turn()"
-assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:57#assert_eq!(durable.len(), 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:64#assert_eq!(settled.turn_id.as_str(), \"workbench-queued-turn\");"
 
 [[api]]
 symbol = "lash::LashSession::queued_work"
@@ -3276,7 +3312,7 @@ aliases = ["lash::prelude::LashSession::remote_turn_input_applications"]
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:54#.remote_turn_input_applications()"
-assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:57#assert_eq!(durable.len(), 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:64#assert_eq!(settled.turn_id.as_str(), \"workbench-queued-turn\");"
 
 [[api]]
 symbol = "lash::LashSession::request_turn_cancel"
@@ -3982,7 +4018,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome::AlreadyClaimed::claim", "lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed::claim"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:67#claim: self.claim_diagnostics(),"
+usage = "crates/lash-perf/src/runtime_perf/store.rs:89#claim: self.claim_diagnostics(),"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::AlreadyClaimed::input"
@@ -4075,7 +4111,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::outcome"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2535#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2568#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelReceipt::target"
@@ -4084,7 +4120,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::target"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2535#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2568#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget"
@@ -4177,7 +4213,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2553#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2586#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes"
@@ -4196,7 +4232,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2578#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2611#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes::outcomes"
@@ -4587,7 +4623,7 @@ aliases = ["lash::prelude::QueuedTurnBuilder::run", "lash::turn::QueuedTurnBuild
 area = "sessions-turns"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:14#.run()"
-assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:57#assert_eq!(durable.len(), 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/turn_input_application.rs:64#assert_eq!(settled.turn_id.as_str(), \"workbench-queued-turn\");"
 
 [[api]]
 symbol = "lash::QueuedTurnBuilder::stream_to"
@@ -5804,7 +5840,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::id", "lash_core::TurnActivity::id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1368#id: lash_core::TurnActivityId::new(\"activity-1\"),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1370#id: lash_core::TurnActivityId::new(\"activity-1\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6784,7 +6820,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedInputAccepted", "lash_core::TurnEvent::QueuedInputAccepted"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1309#lash_core::TurnActivity::independent(lash_core::TurnEvent::QueuedInputAccepted {"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1311#lash_core::TurnActivity::independent(lash_core::TurnEvent::QueuedInputAccepted {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -7301,7 +7337,7 @@ reason = "Concrete host class: custom observability sink implementers consuming 
 symbol = "lash::TurnInputAcceptanceReceipt"
 kind = "struct"
 availability = "default+all-features"
-aliases = ["lash::prelude::TurnInputAcceptanceReceipt", "lash_core::facade_support::TurnInputAcceptanceReceipt"]
+aliases = ["lash::prelude::TurnInputAcceptanceReceipt", "lash_core::facade_support::TurnInputAcceptanceReceipt", "lash_core::runtime::turn_input_ingress::TurnInputAcceptanceReceipt"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::TurnInputAcceptanceReceipt to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -7310,7 +7346,7 @@ reason = "Add lash::TurnInputAcceptanceReceipt to the docs-snippets embedding/tu
 symbol = "lash::TurnInputAcceptanceReceipt::ingress"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::TurnInputAcceptanceReceipt::ingress", "lash_core::facade_support::TurnInputAcceptanceReceipt::ingress"]
+aliases = ["lash::prelude::TurnInputAcceptanceReceipt::ingress", "lash_core::facade_support::TurnInputAcceptanceReceipt::ingress", "lash_core::runtime::turn_input_ingress::TurnInputAcceptanceReceipt::ingress"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::TurnInputAcceptanceReceipt::ingress to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -7319,7 +7355,7 @@ reason = "Add lash::TurnInputAcceptanceReceipt::ingress to the docs-snippets emb
 symbol = "lash::TurnInputAcceptanceReceipt::input_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::TurnInputAcceptanceReceipt::input_id", "lash_core::facade_support::TurnInputAcceptanceReceipt::input_id"]
+aliases = ["lash::prelude::TurnInputAcceptanceReceipt::input_id", "lash_core::facade_support::TurnInputAcceptanceReceipt::input_id", "lash_core::runtime::turn_input_ingress::TurnInputAcceptanceReceipt::input_id"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::TurnInputAcceptanceReceipt::input_id to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -7328,7 +7364,7 @@ reason = "Add lash::TurnInputAcceptanceReceipt::input_id to the docs-snippets em
 symbol = "lash::TurnInputAcceptanceReceipt::session_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::TurnInputAcceptanceReceipt::session_id", "lash_core::facade_support::TurnInputAcceptanceReceipt::session_id"]
+aliases = ["lash::prelude::TurnInputAcceptanceReceipt::session_id", "lash_core::facade_support::TurnInputAcceptanceReceipt::session_id", "lash_core::runtime::turn_input_ingress::TurnInputAcceptanceReceipt::session_id"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::TurnInputAcceptanceReceipt::session_id to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -7337,7 +7373,7 @@ reason = "Add lash::TurnInputAcceptanceReceipt::session_id to the docs-snippets 
 symbol = "lash::TurnInputAcceptanceReceipt::source_key"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::TurnInputAcceptanceReceipt::source_key", "lash_core::facade_support::TurnInputAcceptanceReceipt::source_key"]
+aliases = ["lash::prelude::TurnInputAcceptanceReceipt::source_key", "lash_core::facade_support::TurnInputAcceptanceReceipt::source_key", "lash_core::runtime::turn_input_ingress::TurnInputAcceptanceReceipt::source_key"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::TurnInputAcceptanceReceipt::source_key to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -7376,7 +7412,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputApplication::input_id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1302#input_id: \"input-1\".to_string(),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1304#input_id: \"input-1\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -7386,7 +7422,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputApplication::source_key"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1303#source_key: Some(\"host:source-1\".to_string()),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1305#source_key: Some(\"host:source-1\".to_string()),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -7396,7 +7432,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputApplication::turn_id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1304#turn_id: lash_core::TurnId::from(\"turn-1\"),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1306#turn_id: lash_core::TurnId::from(\"turn-1\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -7562,6 +7598,15 @@ aliases = ["lash::prelude::TurnReport", "lash::turn::TurnReport"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "The current example use of lash::TurnReport is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::TurnReport::acceptance"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::TurnReport::acceptance", "lash::turn::TurnReport::acceptance"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add lash::TurnReport::acceptance to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::TurnReport::assistant_message"
@@ -12827,7 +12872,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionQueueEventKind::Cancelled"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1742#kind: lash_core::SessionQueueEventKind::Cancelled,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1744#kind: lash_core::SessionQueueEventKind::Cancelled,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -12837,7 +12882,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionQueueEventKind::Enqueued"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1587#kind: lash_core::SessionQueueEventKind::Enqueued,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1589#kind: lash_core::SessionQueueEventKind::Enqueued,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -13689,7 +13734,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GcReport::root_count"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2944#root_count,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2977#root_count,"
 
 [[api]]
 symbol = "lash::persistence::CheckpointComponentDescriptor"
@@ -14529,7 +14574,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::ingress"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2371#let state = match draft.ingress {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2404#let state = match draft.ingress {"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input"
@@ -14538,7 +14583,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::input"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2378#let input_json = encode_json(&draft.input)?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2411#let input_json = encode_json(&draft.input)?;"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input_id"
@@ -14547,7 +14592,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::input_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:1067#.input_id"
+usage = "crates/lash-perf/src/runtime_perf/store.rs:1088#.input_id"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::new"
@@ -14565,7 +14610,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2351#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2384#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::source_key"
@@ -14574,7 +14619,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::source_key"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2366#draft.source_key.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2399#draft.source_key.as_deref(),"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::submitted_content_matches"
@@ -14583,7 +14628,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::submitted_content_matches"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2405#if !draft.submitted_content_matches(&input).map_err(|err| {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2438#if !draft.submitted_content_matches(&input).map_err(|err| {"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::with_input_id"
@@ -19549,6 +19594,51 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnclaimedTurnInputSettlementSuperseded"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnclaimedTurnInputSettlementSuperseded::session_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded::input_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnclaimedTurnInputSettlementSuperseded::input_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded::observed_state"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnclaimedTurnInputSettlementSuperseded::observed_state"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::StoreError::UnclaimedTurnInputSettlementSuperseded::superseding_claim_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::StoreError::UnclaimedTurnInputSettlementSuperseded::superseding_claim_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
 symbol = "lash::persistence::StoreError::UnsettledTurnInputClaim"
 kind = "variant"
 availability = "default+all-features"
@@ -19832,7 +19922,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::applications"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3401#applications: Vec::new(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3434#applications: Vec::new(),"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::inputs"
@@ -19841,7 +19931,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3400#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3433#inputs,"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
@@ -19850,13 +19940,148 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::mode"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2626#let restored_state = match claim.mode {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2659#let restored_state = match claim.mode {"
 
 [[api]]
 symbol = "lash::persistence::TurnInputCompletion"
-kind = "type_alias"
+kind = "struct"
 availability = "default+all-features"
 aliases = ["lash_core::TurnInputCompletion"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputCompletion::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputCompletion::session_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputCompletion::claim"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputCompletion::claim"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputCompletion::data"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputCompletion::data"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputCompletion::claim_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputCompletion::claim_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputCompletion::lease_token"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputCompletion::lease_token"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputCompletion::settlement_identity"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputCompletion::settlement_identity"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputSettlementClaim"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputSettlementClaim"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputSettlementClaim::claim_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputSettlementClaim::claim_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::TurnInputSettlementClaim::lease_token"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::TurnInputSettlementClaim::lease_token"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::UnclaimedTurnInputs"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::UnclaimedTurnInputs"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::UnclaimedTurnInputs::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::UnclaimedTurnInputs::session_id"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::UnclaimedTurnInputs::inputs"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::UnclaimedTurnInputs::inputs"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::UnclaimedTurnInputs::applications"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::UnclaimedTurnInputs::applications"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::UnclaimedTurnInputs::completion"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::UnclaimedTurnInputs::completion"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
+
+[[api]]
+symbol = "lash::persistence::UnclaimedTurnInputs::record_initial_turn_application"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::UnclaimedTurnInputs::record_initial_turn_application"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: durable-store implementers. FIG-879 keeps claim and settlement authority byte-compatible while repository backends and conformance tests exercise these low-level contracts directly."
@@ -39472,6 +39697,14 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:959#RemoteRuntimeEffectKi
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::remote::processes::RemoteRuntimeEffectKind::AcceptTurnInput"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: remote-protocol implementers projecting runtime effect lineage; bundled examples do not enumerate every effect kind over the wire."
+
+[[api]]
 symbol = "lash::remote::processes::RemoteRuntimeEffectKind::Checkpoint"
 kind = "variant"
 availability = "default+all-features"
@@ -45664,6 +45897,15 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::token_usage` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the remote-protocol crate and the `lash` facade itself -- this field is exercised in-repo at crates/lash-remote-protocol/src/core_conversions_tests.rs::remote_turn_result_maps_core_semantics#`token_usage: lash_core::TokenUsage {`, crates/lash-remote-protocol/src/core_conversions_tests.rs::assert_terminal_call_record_converts_and_validates#`llm_calls: vec![record],`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
+symbol = "lash::runtime::AssembledTurn::turn_input_acceptance"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AssembledTurn::turn_input_acceptance", "lash_core::runtime::AssembledTurn::turn_input_acceptance"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add lash::runtime::AssembledTurn::turn_input_acceptance to the docs-snippets embedding/turns example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::runtime::AssembledTurn::tool_calls"
 kind = "field"
 availability = "default+all-features"
@@ -48012,6 +48254,24 @@ disposition = "internal-consumed"
 usage = "crates/lash-restate/src/effect_host.rs:360#if let RuntimeEffectCommand::AwaitEvent { key } = &envelope.command {"
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectCommand::AcceptTurnInput"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectCommand::AcceptTurnInput"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectCommand::AcceptTurnInput::draft"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectCommand::AcceptTurnInput::draft"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::Checkpoint"
 kind = "variant"
 availability = "default+all-features"
@@ -48200,7 +48460,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::SyncExecutionEnvironment"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1461#| RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {"
+usage = "crates/lash-restate/src/controller/mod.rs:1462#| RuntimeEffectCommand::SyncExecutionEnvironment { .. }) => {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::SyncExecutionEnvironment::update_machine_config"
@@ -48504,6 +48764,15 @@ usage = "crates/lash-restate/src/tests.rs:975#runtime_invocation(RuntimeEffectKi
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectKind::AcceptTurnInput"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectKind::AcceptTurnInput"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectKind::Checkpoint"
 kind = "variant"
 availability = "default+all-features"
@@ -48583,7 +48852,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::Sleep"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/controller/mod.rs:1503#effect_kind = %RuntimeEffectKind::Sleep.as_str(),"
+usage = "crates/lash-restate/src/controller/mod.rs:1504#effect_kind = %RuntimeEffectKind::Sleep.as_str(),"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::SyncExecutionEnvironment"
@@ -48592,7 +48861,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::SyncExecutionEnvironment"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:981#lash_core::RuntimeEffectKind::SyncExecutionEnvironment => Self::SyncExecutionEnvironment,"
+usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:982#lash_core::RuntimeEffectKind::SyncExecutionEnvironment => Self::SyncExecutionEnvironment,"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::ToolAttempt"
@@ -48769,6 +49038,15 @@ disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
+symbol = "lash::runtime::RuntimeEffectLocalExecutor::turn_acceptance"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectLocalExecutor::turn_acceptance"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: durable effect-host implementers that execute the ADR 0069 turn-acceptance effect locally. lash-core issues it itself on the inline path, so no bundled example builds this executor."
+
+[[api]]
 symbol = "lash::runtime::RuntimeEffectLocalExecutor::triggers"
 kind = "function"
 availability = "default+all-features"
@@ -48832,6 +49110,24 @@ aliases = ["lash_core::RuntimeEffectOutcome::AwaitEvent::resolution"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-restate/src/effect_host.rs:381#return Ok(RuntimeEffectOutcome::AwaitEvent { resolution });"
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::AcceptTurnInput"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::AcceptTurnInput"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::runtime::RuntimeEffectOutcome::AcceptTurnInput::accepted"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::RuntimeEffectOutcome::AcceptTurnInput::accepted"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::Checkpoint"
@@ -51679,7 +51975,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionPolicy::autonomous"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:1086#autonomous,"
+usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:1088#autonomous,"
 
 [[api]]
 symbol = "lash::runtime::SessionPolicy::context_window_tokens"
@@ -51970,7 +52266,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionSnapshot::turn_index"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1598#turn_index: 12,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1600#turn_index: 12,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -66356,7 +66652,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1077#lash_core::AttemptOutcome::Aborted,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1079#lash_core::AttemptOutcome::Aborted,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -66374,7 +66670,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1105#lash_core::AttemptOutcome::Failed,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1107#lash_core::AttemptOutcome::Failed,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -66383,7 +66679,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1091#lash_core::AttemptOutcome::Interrupted,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1093#lash_core::AttemptOutcome::Interrupted,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67043,7 +67339,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1003#error: Some(lash_core::NormalizedError {"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1004#error: Some(lash_core::NormalizedError {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67052,7 +67348,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1004#class: failure_kind.code().to_string(),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1005#class: failure_kind.code().to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67061,7 +67357,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1009#diagnostic: Some(code.to_string()),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1010#diagnostic: Some(code.to_string()),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67070,7 +67366,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1006#http_status: None,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1007#http_status: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -67095,7 +67391,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1008#retry_after: None,"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1009#retry_after: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -69476,7 +69772,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests.rs:157#if let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut node.payload {"
+usage = "crates/lash/src/tests.rs:166#if let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut node.payload {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -69968,7 +70264,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1797#lash_core::TurnInputClaimMode::ActiveTurn {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1830#lash_core::TurnInputClaimMode::ActiveTurn {"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::ActiveTurn"
@@ -69976,7 +70272,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1797#lash_core::TurnInputClaimMode::ActiveTurn {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1830#lash_core::TurnInputClaimMode::ActiveTurn {"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::ActiveTurn::checkpoint"
@@ -69992,7 +70288,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1798#turn_id: turn_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1831#turn_id: turn_id.clone(),"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::NextTurn"
@@ -70000,7 +70296,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2617#lash_core::TurnInputClaimMode::NextTurn,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2650#lash_core::TurnInputClaimMode::NextTurn,"
 
 [[api]]
 symbol = "lash_core::TurnMachine"
@@ -70489,7 +70785,15 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1322#) -> Result<lash_core::facade_support::AgentFrameRun> {"
+usage = "crates/lash/src/turn.rs:1345#) -> Result<lash_core::facade_support::AgentFrameRun> {"
+
+[[api]]
+symbol = "lash_core::facade_support::AgentFrameRun::acceptance"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-add"
+reason = "Add lash_core::facade_support::AgentFrameRun::acceptance to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::facade_support::AgentFrameRun::final_turn"
@@ -72046,7 +72350,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:722#.queue_drain_scope(drain_id);"
+usage = "crates/lash/src/turn.rs:745#.queue_drain_scope(drain_id);"
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope"
@@ -73105,7 +73409,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2480#assert_eq!(result.usage.input_tokens, 10);"
+usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2481#assert_eq!(result.usage.input_tokens, 10);"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -73521,7 +73825,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1266#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
+usage = "crates/lash/src/turn.rs:1289#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnContextFacadeOps::replace_prompt_slot"
@@ -73545,7 +73849,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1216#) -> lash_core::facade_support::TurnOptions<'a> {"
+usage = "crates/lash/src/turn.rs:1239#) -> lash_core::facade_support::TurnOptions<'a> {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::new"
@@ -73553,7 +73857,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1217#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
+usage = "crates/lash/src/turn.rs:1240#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_events"
@@ -73561,7 +73865,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1219#opts = opts.with_events(events);"
+usage = "crates/lash/src/turn.rs:1242#opts = opts.with_events(events);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_local_cancel_origin_hint"
@@ -73577,7 +73881,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1221#opts.with_turn_events(turn_events)"
+usage = "crates/lash/src/turn.rs:1244#opts.with_turn_events(turn_events)"
 
 [[api]]
 symbol = "lash_core::facade_support::append_assistant_text_part"
@@ -75017,7 +75321,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:1204#occurred_at_ms: lash_core::facade_support::epoch_ms_from_system_time(occurred_at),"
+usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:1206#occurred_at_ms: lash_core::facade_support::epoch_ms_from_system_time(occurred_at),"
 
 [[api]]
 symbol = "lash_core::facade_support::evaluate_trigger_mutation"
@@ -75708,7 +76012,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1985#occurred_at: lash_core::facade_support::system_time_from_epoch_ms(12),"
+usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1987#occurred_at: lash_core::facade_support::system_time_from_epoch_ms(12),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -78363,7 +78667,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1319#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1352#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::executor_id"
@@ -78371,7 +78675,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1304#.zip(lease.executor_id.clone())"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1337#.zip(lease.executor_id.clone())"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::lease_token"
@@ -78379,7 +78683,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1247#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1280#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::owner"
@@ -78387,7 +78691,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1167#owner: &owner,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1247#owner: &owner,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::session_id"
@@ -78395,7 +78699,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1166#session_id: &session_id,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1246#session_id: &session_id,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts"
@@ -78403,7 +78707,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3765#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3798#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::executor_id"
@@ -78411,7 +78715,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3767#executor_id: current.executor_id.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3800#executor_id: current.executor_id.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::expires_at_epoch_ms"
@@ -78419,7 +78723,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:220#expires_at_epoch_ms: current.expires_at_epoch_ms,"
+usage = "crates/lash-perf/src/runtime_perf/store.rs:242#expires_at_epoch_ms: current.expires_at_epoch_ms,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::fencing_token"
@@ -78427,7 +78731,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3769#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3802#fencing_token: current.fencing_token,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
@@ -78435,7 +78739,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3768#lease_token: current.lease_token.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3801#lease_token: current.lease_token.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::owner"
@@ -78443,7 +78747,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3766#owner: current.owner.as_ref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3799#owner: current.owner.as_ref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts"
@@ -78451,7 +78755,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1381#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1414#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::current_executor_id"
@@ -78499,7 +78803,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1381#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1414#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::minimum_expires_at_epoch_ms"
@@ -78539,7 +78843,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1377#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1410#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::ExecutionFence"
@@ -78555,7 +78859,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1457#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1490#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal"
@@ -78563,7 +78867,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1377#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1410#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::RenewalInstall"
@@ -78579,7 +78883,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2364#lash_core::store_backend_support::derive_pending_turn_input_id("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2397#lash_core::store_backend_support::derive_pending_turn_input_id("
 
 [[api]]
 symbol = "lash_core::store_backend_support::admitted_min_boundary_sql"
@@ -78587,7 +78891,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2971#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3004#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
 
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_abandon_restore_claim_id"
@@ -78595,7 +78899,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2121#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2154#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
 
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_claim_data"
@@ -78603,7 +78907,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1628#data: lash_core::store_backend_support::queued_work_claim_data("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1661#data: lash_core::store_backend_support::queued_work_claim_data("
 
 [[api]]
 symbol = "lash_core::store_backend_support::require_current_session_execution_lease"
@@ -78611,7 +78915,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3762#lash_core::store_backend_support::require_current_session_execution_lease("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3795#lash_core::store_backend_support::require_current_session_execution_lease("
 
 [[api]]
 symbol = "lash_core::store_backend_support::trace_session_execution_lease_refusal"
@@ -78619,7 +78923,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1376#lash_core::store_backend_support::trace_session_execution_lease_refusal("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1409#lash_core::store_backend_support::trace_session_execution_lease_refusal("
 
 [[api]]
 symbol = "lash_core::tool_dispatch::context::ToolTriggerEffectOutcome"
@@ -92242,7 +92546,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:3969#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
+usage = "crates/lash-sqlite-store/src/persistence.rs:4049#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
 
 [[api]]
 symbol = "lash::EmptyQueuedDrainReason"
@@ -92456,7 +92760,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1584#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1664#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
 reason = "Internal seam: this is the contract every durable backend returns from an automatic claim, so its consumers are the backends themselves rather than an example."
 
 [[api]]
@@ -92466,7 +92770,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1745#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1778#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend reports the rows it claimed through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -92476,7 +92780,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1745#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1778#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend carries the claim it took in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -92486,7 +92790,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1644#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1677#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend names why it claimed nothing through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -92496,7 +92800,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1644#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1677#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend carries the refusal it computed in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -92773,7 +93077,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:1334#Err(store::MaintenanceFailure::failed_before_any_work("
+usage = "crates/lash-perf/src/runtime_perf/store.rs:1355#Err(store::MaintenanceFailure::failed_before_any_work("
 reason = "FIG-1505: `lash-perf`'s store reports its unimplemented maintenance levers through this type rather than an empty report, so the consumer is another workspace crate rather than an example. Host-facing projection: `lash::persistence::MaintenanceFailure`."
 
 [[api]]
@@ -92803,7 +93107,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2817#lash_core::MaintenanceFailure::failed("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2850#lash_core::MaintenanceFailure::failed("
 reason = "FIG-1505: the Postgres vacuum reports the rows its first delete already committed when the second fails, which is the constructor's whole purpose; the consumer is a backend crate rather than an example."
 
 [[api]]
@@ -92822,7 +93126,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed_before_any_work"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:1334#Err(store::MaintenanceFailure::failed_before_any_work("
+usage = "crates/lash-perf/src/runtime_perf/store.rs:1355#Err(store::MaintenanceFailure::failed_before_any_work("
 reason = "FIG-1505: every backend that stops before reclaiming anything constructs its failure through this; the consumers are backend crates rather than examples."
 
 [[api]]
@@ -92841,7 +93145,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceResult"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:3026#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:3106#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
 reason = "FIG-1505: every store backend spells the maintenance levers' return type with this alias; the consumers are backend crates rather than examples. Host-facing projection: `lash::persistence::MaintenanceResult`."
 
 [[api]]

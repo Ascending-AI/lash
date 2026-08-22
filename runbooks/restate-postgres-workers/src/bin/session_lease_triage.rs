@@ -1,6 +1,6 @@
 //! Session-lease observability harness (`runbooks/session-lease-triage`).
 //!
-//! Three phases, one process each, driven by
+//! Four phases, one process each, driven by
 //! `scripts/session-lease-triage-e2e.sh`. Each phase induces one of the three
 //! situations the published triage procedure claims to distinguish, then records
 //! both surfaces an operator is told to consult: the `session_lease_diagnostics`
@@ -15,6 +15,11 @@
 //!   strictly higher generation, and the dead holder must emit nothing at all:
 //!   that is the case a takeover reported from the loser's renewal path missed
 //!   entirely.
+//! * `direct-turn`: the killed-worker case for a turn that entered through
+//!   `TurnBuilder::run` rather than the queue. Direct ingress accepts before it
+//!   drives (ADR 0069), so the request is durable while the provider is still
+//!   parked, and the peer that takes the lane recovers it through the ordinary
+//!   queued drain under the same generation fence.
 //! * `livelock`: the cause the procedure names for repeated CAS rejections: two
 //!   concurrent runtime opens on one session under one host owner. Their owner
 //!   and boot incarnation match, their runtime-minted executor ids differ, the
@@ -83,6 +88,14 @@ fn observable_timings() -> lash::durability::LeaseTimings {
     lash::durability::LeaseTimings::new(LEASE_TTL, RENEW_INTERVAL).expect("ttl >= 3 * renew")
 }
 
+/// Timings for the direct-turn recovery phase's doomed worker. Its lane is left
+/// held by a process that will never renew again, so the successor's wait for a
+/// dead holder is bounded by this term rather than by the observable default.
+fn short_lived_timings() -> lash::durability::LeaseTimings {
+    lash::durability::LeaseTimings::new(Duration::from_millis(1_500), Duration::from_millis(500))
+        .expect("ttl >= 3 * renew")
+}
+
 /// Default timings for the livelock phase. The race it stages settles in
 /// milliseconds, so a renewal must not fire inside it: the discriminator under
 /// test is a rejected commit with `lease_lost = false`, and a renewal landing
@@ -95,7 +108,7 @@ fn quiet_timings() -> lash::durability::LeaseTimings {
 async fn main() -> Result<()> {
     let phase = std::env::args()
         .nth(1)
-        .context("usage: lash-e2e-session-lease-triage hang|takeover|livelock")?;
+        .context("usage: lash-e2e-session-lease-triage hang|takeover|livelock|direct-turn")?;
     let capture = LeaseTraceCapture::install();
     let run_id = uuid::Uuid::new_v4().simple().to_string();
 
@@ -104,6 +117,7 @@ async fn main() -> Result<()> {
             "hang" => provider_hang(&backend, &capture, &run_id).await?,
             "takeover" => lease_takeover(&backend, &capture, &run_id).await?,
             "livelock" => commit_cas_livelock(&backend, &capture, &run_id).await?,
+            "direct-turn" => direct_turn_recovery(&backend, &capture, &run_id).await?,
             other => bail!("unknown session-lease-triage phase `{other}`"),
         };
         emit(checkpoint);
@@ -819,6 +833,169 @@ async fn commit_cas_livelock(
         "lease_lost_count": capture.named("session_execution_lease.lost").len(),
         "taken_over_count": capture.named("session_execution_lease.taken_over").len(),
         "reading_after_livelock": reading(after.as_ref()),
+        "lease_trace": capture.timeline(),
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Phase: direct-turn recovery
+// ---------------------------------------------------------------------------
+
+/// The killed-worker recovery case, run against a *direct* turn (ADR 0069).
+///
+/// Phase 2 sweeps a lane whose queued work was always durable. This phase asks
+/// the harder question the single-ingress rule answers: a host called
+/// `TurnBuilder::run` and the process died mid-turn, so nothing but the store
+/// remembers the request. Because direct ingress accepts before it drives, the
+/// input is a pending row while the provider is still parked, and the peer that
+/// takes the lane rediscovers it through the ordinary queued drain — the same
+/// path, the same generation fence (ADR 0029), no direct-turn-shaped repair.
+///
+/// Fixture honesty: the worker is killed by aborting the in-flight turn future
+/// and dropping everything behind it. No cleanup runs, exactly as with a
+/// SIGKILL: no lane release, no claim abandonment, no cancellation of the
+/// accepted row. The successor is a separate core with its own owner identity,
+/// and it is given no knowledge that the input was ever direct.
+async fn direct_turn_recovery(
+    backend: &Backend,
+    capture: &LeaseTraceCapture,
+    run_id: &str,
+) -> Result<Value> {
+    capture.reset();
+    let session_id = session_id("direct-turn", backend, run_id);
+    let abandoned_by = owner(
+        "triage-direct-dead-worker",
+        "triage-direct-dead-worker:boot-1",
+    );
+    let successor = owner("triage-direct-successor", "triage-direct-successor:boot-1");
+    let abandoned_turn_id = "lease-triage-direct-turn-abandoned";
+
+    // One committed direct turn materializes the session and supplies the
+    // handle-side half of the law: a direct turn reports the acceptance
+    // identity it was admitted under, and that identity is what settled.
+    let seed = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
+    let seed_session = seed.open(&session_id).await?;
+    let seeded = seed_session
+        .turn(lash::TurnInput::text(TURN_PROMPT))
+        .turn_id("lease-triage-direct-turn-seed".to_string())
+        .run()
+        .await
+        .map_err(anyhow::Error::msg)?;
+    let seed_acceptance = seeded.result.acceptance.clone();
+    drop(seed_session);
+    drop(seed);
+
+    let store = backend.store(&session_id).await?;
+    let seed_applications = store
+        .list_turn_input_applications(&session_id)
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("read the seeded turn's settled applications")?;
+    let seed_acceptance_settled = seed_acceptance.as_ref().is_some_and(|acceptance| {
+        seed_applications
+            .iter()
+            .any(|application| application.input_id == acceptance.input_id)
+    });
+
+    // The direct turn that never gets to commit. Its worker uses a short lease
+    // term so the successor's wait for a dead holder stays inside the phase
+    // gate; nothing here depends on the lane lapsing rather than being taken.
+    let provider = StallingProvider::new();
+    let dead = backend.core(
+        provider.handle.clone(),
+        abandoned_by.clone(),
+        short_lived_timings(),
+    )?;
+    let dead_session = dead.open(&session_id).await?;
+    let abandoned = tokio::spawn(async move {
+        dead_session
+            .turn(lash::TurnInput::text(TURN_PROMPT))
+            .turn_id(abandoned_turn_id.to_string())
+            .run()
+            .await
+    });
+    provider.wait_until_parked().await?;
+
+    // The provider has not returned, so nothing of this turn has been driven to
+    // a commit. The accepted row is already durable, but it is *not* claimable:
+    // the parked turn holds it under its own claim, and the pending listing
+    // deliberately hides rows a live claim owns. Zero claimable inputs here is
+    // therefore the observable, and the durability of the row is proved after
+    // the kill, when a peer that was told nothing recovers it.
+    let claimable_while_parked = store
+        .list_pending_turn_inputs(&session_id)
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("read the session's claimable inputs while the direct drive is parked")?;
+
+    // Kill the worker: abort the future mid-drive and drop the core behind it.
+    // No release, no abandonment, no cancellation runs.
+    abandoned.abort();
+    let _ = abandoned.await;
+    drop(dead);
+    drop(provider);
+
+    // A peer takes the lane through the ordinary queued drain. It was told
+    // nothing about the abandoned request.
+    let sweeper = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
+    let sweeper_session = sweeper.open(&session_id).await?;
+    let drained = tokio::time::timeout(
+        GATE_TIMEOUT,
+        sweeper_session
+            .queued_turn()
+            .drain_id("lease-triage-direct-turn-recovery")
+            .run(),
+    )
+    .await
+    .context("the recovery drain never settled")?
+    .map_err(anyhow::Error::msg)?;
+    let (drain_ran, drain_empty_reason, recovered_committed) = match &drained {
+        lash::QueuedTurnDrain::Ran(output) => {
+            (true, None, output.final_value() == Some(&json!("ok")))
+        }
+        lash::QueuedTurnDrain::Empty(reason) => (false, Some(format!("{reason:?}")), false),
+    };
+
+    let applications = store
+        .list_turn_input_applications(&session_id)
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("read settled applications after recovery")?;
+    let seed_input_id = seed_acceptance
+        .as_ref()
+        .map(|acceptance| acceptance.input_id.clone());
+    let recovered_application = applications
+        .iter()
+        .find(|application| Some(application.input_id.clone()) != seed_input_id);
+    let pending_after_recovery = store
+        .list_pending_turn_inputs(&session_id)
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("read pending inputs after recovery")?;
+
+    Ok(json!({
+        "checkpoint": "direct_turn_recovery",
+        "backend": backend.name,
+        "session_id": session_id,
+        "abandoned_owner_id": abandoned_by.owner_id,
+        "successor_owner_id": successor.owner_id,
+        "abandoned_turn_id": abandoned_turn_id,
+        "seed_acceptance_input_id": seed_acceptance
+            .as_ref()
+            .map(|acceptance| acceptance.input_id.clone()),
+        "seed_acceptance_source_key": seed_acceptance
+            .as_ref()
+            .and_then(|acceptance| acceptance.source_key.clone()),
+        "seed_acceptance_settled": seed_acceptance_settled,
+        "claimable_while_parked": claimable_while_parked.len(),
+        "recovered_input_id": recovered_application
+            .map(|application| application.input_id.clone()),
+        "drain_ran": drain_ran,
+        "drain_empty_reason": drain_empty_reason,
+        "recovered_turn_committed": recovered_committed,
+        "recovered_application_turn_id": recovered_application
+            .map(|application| application.turn_id.as_str().to_string()),
+        "pending_after_recovery": pending_after_recovery.len(),
         "lease_trace": capture.timeline(),
     }))
 }

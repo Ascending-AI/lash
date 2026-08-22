@@ -3,7 +3,8 @@
 ## Status
 
 Accepted. Ratified on FIG-1661; the four sections of the decision are the four
-rulings recorded there. Implemented separately by FIG-1671.
+rulings recorded there. Implemented separately by FIG-1671, which added
+section 5 — how an accepted input is settled by the turn that drove it.
 
 ## Context
 
@@ -155,6 +156,126 @@ as a side effect of unifying ingress would be exactly the kind of unowned dedup
 table ADR 0067 was written to stop. A host that needs at-most-once submission
 today gets it the way it always has: by using `enqueue(..).id(..)` with a
 `source_key` it chose.
+
+### 5. A turn may settle the acceptance it drove, with or without a claim
+
+Section 3 says the caller's future is the first driver with no special status.
+That is a statement about *recovery*, and it was read once as a statement about
+*authority*: that a direct turn must first take the session-execution lane, claim
+its own accepted row under ADR 0029's generation fencing, and only then drive it.
+That reading is wrong, and it breaks a property that predates this ADR — the
+session-execution lane is **advisory for a direct turn**
+([ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md): the
+commit CAS is the authority, the lease is an advisory serialiser). Making the
+lane load-bearing would refuse foreground turns that lash has always run.
+
+**So: a turn may settle the acceptance it drove without holding a claim on it,
+fenced by the head commit CAS.** There are exactly two settlement regimes —
+*claimed* and *unclaimed* — and one authority for both: the head CAS at commit.
+A driver that holds the lane claims its row and settles under the claim
+predicate; a driver that could not take the advisory lane drives the row it
+itself accepted and settles it under the bare row predicate. Nothing else
+changes: the ingress split (direct push versus claimed drain) is unchanged, and
+the two regimes are **one code path per backend**, not two parallel routines —
+the claim fields are an optional predicate strengthener on the same conditional
+write.
+
+Four conditions bind this, and each is enforced in code.
+
+**(a) Predicate plus affected-rows contract.** Unclaimed settlement is a
+conditional write, not a blind one. Every backend verifies that the settlement
+UPDATE (or, for the in-memory and perf stores, the equivalent state check) is
+matched by **exactly one row**. The claimed predicate additionally requires the
+claim id and claim token; the unclaimed predicate requires the row to carry no
+claim and to be in neither `Completed` nor `Cancelled`. Zero matched rows is a
+typed supersession error, never a silent success — a settlement that changed
+nothing must never be reported as a settlement that changed something.
+
+**(b) Ordering.** A lane-less direct turn is **exempt from queue-head ordering**,
+and this is the stated exemption rather than a head-only restriction. It drives
+exactly the row it accepted and no other, so it never reorders itself ahead of
+pending work it might otherwise have drained: what it does is precisely what an
+advisory-lane direct turn has always done, now with a durable row behind it. A
+turn that *wants* the queue's ordering takes the lane and claims, which is the
+claimed regime. The exemption is enforced by the settlement validator: an
+unclaimed completion carries no claim id to match on, so it validates only
+against an originating settlement naming exactly the rows this turn accepted. A
+turn can never settle a row it neither claimed nor accepted.
+
+**(c) Commit identity is unchanged.** Unclaimed settlement rides the existing
+`completed_turn_inputs` hash projection. Claim-authority fields stay excluded
+from `turn_commit_hash`, and **no new intent field is introduced** — the identity
+of a settlement is the session and the rows, which is what it always was.
+Introducing an "unclaimed" marker into the intent would change replay hashing for
+every commit, including the ones that never had a choice of regime.
+
+**(d) Supersession.** ADR 0029's recovered-settlement drop rule keys on lease
+generation: a settlement whose claim generation has been superseded is dropped
+and retried under the current one. An unclaimed settlement has **no generation**,
+so it has no generation to be superseded at, and the rule does not apply to it.
+Its semantics are therefore *lose, do not retry*: it is a distinct typed error,
+and the losing driver retires its turn at its **first** commit attempt rather
+than looping. This is what decides the recovery-claim-versus-live-driver race —
+if an ActiveTurn-mode recovery claims the row while a lane-less driver is mid
+turn, the CAS decides at the loser's first commit and the loser reports failure.
+Liveness is never guessed.
+
+### 6. Acceptance is journaled, so engine replay re-derives it
+
+The acceptance commit happens before the turn runs, which puts it inside the
+replay window of a durable-execution engine driving lash
+([ADR 0045](0045-services-are-stateless-substrates-own-continuation.md)). If it
+is performed as an ordinary store write, every replay of the handler performs it
+again and admits the same turn twice.
+
+So acceptance is issued as a **journaled runtime effect**, not as a direct store
+call. On first execution the engine journals the acceptance and its result; on
+replay the engine returns the journaled result and lash re-derives the admission
+instead of re-performing it. The algebra is the same one the effect host already
+uses for provisioned effects: the acceptance identity is provisioned and stable
+across replays, an already-settled identity is skipped, the committed successor
+result is the predicate that prevents a second redemption, and an intent is
+fulfilled if and only if its result exists.
+
+This is the second regime's replay story and it introduces no third one. There is
+no lease-generation fencing for direct turns — that would be a third authority
+beside the claim predicate and the head CAS, and the point of section 5 is that
+there are exactly two regimes with one authority.
+
+### The residual duplicate-execution window
+
+Sections 5 and 6 do not close every duplicate-execution window, and the one that
+remains is stated here rather than implied.
+
+**The window.** Duplicate execution requires a session-lease handover while the
+previous holder is alive but partitioned, mid-turn. In steady state it is zero.
+Its rate is approximately the lease-handover rate multiplied by the probability
+that a turn is in flight at handover.
+
+**Its granularity.** The loser is fenced at its **first commit attempt**, so the
+duplicated work is bounded to a single uncommitted segment — the provider call
+and any un-journaled work since its last commit point. The durable record is
+never duplicated: two drivers may execute, but only one commits, because the head
+CAS admits exactly one.
+
+**Why it is not closed.** Closing it means proving a remote process is not
+running, and lease-based systems do not offer that proof. etcd states plainly
+that lease-based mutual exclusion cannot guarantee a previous holder has stopped
+executing; Orleans documents duplicate-activation windows during silo failure
+detection; Temporal specifies activities as at-least-once and pushes idempotency
+to the activity. Lash makes the same trade for the same reason, and pays for it
+in bounded re-execution rather than in a liveness oracle it cannot build.
+
+**Remediations, documented and not implemented.** Three options exist if the
+window ever costs something measurable: a pre-flight fence read before expensive
+provider work (narrows, does not close, and adds a read to every turn);
+double-run-sensitive tools routed through the journaled effect path so their
+results are deduplicated by identity; and faster lease-liveness detection, which
+shortens the window at the cost of more spurious handovers. None is implemented
+today.
+
+**Trigger for revisiting.** Measured duplicate provider spend correlated with
+handover events. Not a hypothetical, and not a code review finding — a number.
 
 ## Alternatives considered
 

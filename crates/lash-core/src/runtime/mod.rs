@@ -426,7 +426,7 @@ pub use turn_input_ingress::{
     PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt,
     TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
     TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputState,
+    TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs,
 };
 pub use turn_loop::ensure_durable_effect_input;
 pub use turn_queue::{
@@ -1022,6 +1022,9 @@ pub struct AssembledTurn {
     pub tool_calls: Vec<ToolCallRecord>,
     #[serde(default)]
     pub errors: Vec<TurnIssue>,
+    /// Durable admission identity of the input this turn was driven from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_input_acceptance: Option<TurnInputAcceptanceReceipt>,
 }
 
 /// Result of driving one logical host turn through any AgentFrame switches.
@@ -1032,6 +1035,9 @@ pub struct AssembledTurn {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AgentFrameRun {
     pub turns: Vec<AssembledTurn>,
+    /// Durable admission identity committed before this run was driven.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<TurnInputAcceptanceReceipt>,
 }
 
 impl AgentFrameRun {
@@ -1538,14 +1544,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     }
 }
 
-/// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ResidentSessionState {
-    /// In-memory session and plugin state are valid and match durable expectations.
-    Valid,
-    /// Resident state was invalidated and requires durable reload before further execution.
-    Invalidated { decision_id: String },
-}
+pub(crate) use session_api::ResidentSessionState;
 
 /// Runtime session orchestration over host-supplied services and policy.
 pub struct LashRuntime {

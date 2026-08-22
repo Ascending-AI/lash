@@ -420,7 +420,7 @@ impl RuntimeCommitPlanner {
             if completion.session_id != self.commit.session_id {
                 return Err(StoreError::TurnInputClaimSuperseded {
                     session_id: completion.session_id.clone(),
-                    claim_id: completion.claim_id.clone(),
+                    claim_id: completion.settlement_identity(),
                     row_id: None,
                     superseding_claim_id: None,
                     superseding_session_lease_generation: None,

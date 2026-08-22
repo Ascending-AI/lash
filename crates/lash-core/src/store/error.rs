@@ -248,6 +248,25 @@ pub enum StoreError {
         superseding_claim_id: Option<Box<str>>,
         superseding_session_lease_generation: Option<Box<u64>>,
     },
+    /// An unclaimed turn-input settlement lost the head CAS.
+    ///
+    /// The settling turn accepted `input_id` itself and drove it without the
+    /// session-execution lane ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)
+    /// §5). Between acceptance and commit the row stopped being unclaimed and
+    /// unsettled — a recovery claim took it, a cancel withdrew it, or another
+    /// driver already settled it — so this commit affected zero rows and is
+    /// refused whole. Unlike [`Self::TurnInputClaimSuperseded`] this settlement
+    /// carries no lease generation, so it is never dropped and retried: the
+    /// losing driver retires at its first commit attempt.
+    #[error(
+        "unclaimed turn-input settlement for session `{session_id}` lost the head CAS at row `{input_id}`: the row is {observed_state:?} and held by claim {superseding_claim_id:?}"
+    )]
+    UnclaimedTurnInputSettlementSuperseded {
+        session_id: String,
+        input_id: String,
+        observed_state: Option<Box<str>>,
+        superseding_claim_id: Option<Box<str>>,
+    },
     #[error(
         "runtime commit for session `{session_id}` includes queued-work-derived content without settling claim `{claim_id}`"
     )]
@@ -492,6 +511,9 @@ impl StoreError {
                 "SelectedQueuedWorkRequiresInterruptedComposition"
             }
             Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
+            Self::UnclaimedTurnInputSettlementSuperseded { .. } => {
+                "UnclaimedTurnInputSettlementSuperseded"
+            }
             Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
             Self::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
             Self::ForeignQueuedWorkCompletion { .. } => "ForeignQueuedWorkCompletion",

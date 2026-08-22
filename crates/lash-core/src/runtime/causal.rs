@@ -26,6 +26,29 @@ pub(crate) fn turn_effect_invocation(
     )
 }
 
+/// Invocation for the durable acceptance of a turn input (ADR 0069 §6).
+///
+/// Acceptance runs before the turn does, so it has no protocol iteration to
+/// name and cannot use [`turn_effect_invocation`]. Its replay key is a function
+/// of the session and the execution scope alone — both of which a replaying
+/// engine reconstructs identically — so a redriven handler journals the same
+/// entry and re-derives the admission instead of admitting a second turn.
+pub(crate) fn turn_acceptance_effect_invocation(
+    session_id: &str,
+    turn_id: &str,
+    turn_index: usize,
+) -> RuntimeInvocation {
+    RuntimeInvocation::effect(
+        RuntimeScope::for_turn(session_id, turn_id, turn_index, 0),
+        format!("{turn_id}.accept"),
+        RuntimeEffectKind::AcceptTurnInput,
+        format!(
+            "{session_id}:{turn_id}:{}",
+            RuntimeEffectKind::AcceptTurnInput.as_str()
+        ),
+    )
+}
+
 /// Invocation for a later phase of a staged turn effect (FIG-1276).
 ///
 /// The phase carries its own effect id — `<id>.<kind>` — so its journal entry,

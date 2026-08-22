@@ -377,8 +377,10 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     let input_id = format!("input:{}", uuid::Uuid::new_v4());
     let stale = lash_core::TurnInputCompletion {
         session_id: session_id.clone(),
-        claim_id: "claim-a".to_string(),
-        lease_token: "token-a".to_string(),
+        claim: Some(lash_core::TurnInputSettlementClaim {
+            claim_id: "claim-a".to_string(),
+            lease_token: "token-a".to_string(),
+        }),
         data: lash_core::TurnInputCompletionData {
             input_ids: vec![input_id.clone()],
             applications: Vec::new(),
@@ -402,8 +404,8 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     .bind(&input_id)
     .bind(&session_id)
     .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
-    .bind(&stale.claim_id)
-    .bind(&stale.lease_token)
+    .bind(stale.claim_id())
+    .bind(stale.lease_token())
     .execute(storage.pool())
     .await
     .expect("insert claimed turn input");
@@ -455,8 +457,8 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     )
     .bind(&session_id)
     .bind(&input_id)
-    .bind(&stale.claim_id)
-    .bind(&stale.lease_token)
+    .bind(stale.claim_id())
+    .bind(stale.lease_token())
     .fetch_optional(&mut *stale_committer)
     .await
     .expect("old non-locking ownership validation");
@@ -497,7 +499,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
             ref session_id,
             ref claim_id,
             ..
-        } if session_id == &stale.session_id && claim_id == &stale.claim_id
+        } if session_id == &stale.session_id && claim_id.as_str() == stale.claim_id().unwrap_or_default()
     ));
     stale_committer
         .rollback()

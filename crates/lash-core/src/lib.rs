@@ -1010,9 +1010,10 @@ pub use runtime::{
     ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent,
     TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
     TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
-    TurnInputIngress, TurnInputState, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

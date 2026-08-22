@@ -1193,32 +1193,65 @@ pub(crate) async fn complete_turn_input_claims_tx(
 ) -> Result<(), StoreError> {
     for completed in completed_claims {
         for input_id in &completed.input_ids {
-            let completion = sqlx::query(
-                "UPDATE lash_pending_turn_inputs
-                 SET state = $5,
-                     claim_id = NULL,
-                     claim_owner_id = NULL,
-                     claim_owner_incarnation_id = NULL,
-                     claim_owner_liveness_json = NULL,
-                     claim_token = NULL,
-                     claim_session_lease_generation = 0
-                 WHERE session_id = $1 AND input_id = $2 AND claim_id = $3 AND claim_token = $4",
-            )
-            .bind(&completed.session_id)
-            .bind(input_id)
-            .bind(&completed.claim_id)
-            .bind(&completed.lease_token)
-            .bind(lash_core::TurnInputState::Completed.as_str())
+            // One conditional write for both settlement regimes: the claim
+            // fields are an optional predicate strengthener, and either way
+            // exactly one row must change (ADR 0069 §5).
+            let settlement = match completed.claim.as_ref() {
+                Some(claim) => sqlx::query(
+                    "UPDATE lash_pending_turn_inputs
+                     SET state = $3,
+                         claim_id = NULL,
+                         claim_owner_id = NULL,
+                         claim_owner_incarnation_id = NULL,
+                         claim_owner_liveness_json = NULL,
+                         claim_token = NULL,
+                         claim_session_lease_generation = 0
+                     WHERE session_id = $1
+                       AND input_id = $2
+                       AND claim_id = $4
+                       AND claim_token = $5",
+                )
+                .bind(&completed.session_id)
+                .bind(input_id)
+                .bind(lash_core::TurnInputState::Completed.as_str())
+                .bind(&claim.claim_id)
+                .bind(&claim.lease_token),
+                None => sqlx::query(
+                    "UPDATE lash_pending_turn_inputs
+                     SET state = $3,
+                         claim_id = NULL,
+                         claim_owner_id = NULL,
+                         claim_owner_incarnation_id = NULL,
+                         claim_owner_liveness_json = NULL,
+                         claim_token = NULL,
+                         claim_session_lease_generation = 0
+                     WHERE session_id = $1
+                       AND input_id = $2
+                       AND claim_id IS NULL
+                       AND state NOT IN ('completed', 'cancelled')",
+                )
+                .bind(&completed.session_id)
+                .bind(input_id)
+                .bind(lash_core::TurnInputState::Completed.as_str()),
+            }
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-            if completion.rows_affected() != 1 {
-                return Err(StoreError::TurnInputClaimSuperseded {
-                    session_id: completed.session_id.clone(),
-                    claim_id: completed.claim_id.clone(),
-                    row_id: Some(input_id.clone().into_boxed_str()),
-                    superseding_claim_id: None,
-                    superseding_session_lease_generation: None,
+            if settlement.rows_affected() != 1 {
+                return Err(match completed.claim.as_ref() {
+                    Some(claim) => StoreError::TurnInputClaimSuperseded {
+                        session_id: completed.session_id.clone(),
+                        claim_id: claim.claim_id.clone(),
+                        row_id: Some(input_id.clone().into_boxed_str()),
+                        superseding_claim_id: None,
+                        superseding_session_lease_generation: None,
+                    },
+                    None => StoreError::UnclaimedTurnInputSettlementSuperseded {
+                        session_id: completed.session_id.clone(),
+                        input_id: input_id.clone(),
+                        observed_state: None,
+                        superseding_claim_id: None,
+                    },
                 });
             }
         }

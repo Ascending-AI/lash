@@ -31,6 +31,28 @@ struct RuntimePerfPendingTurnInput {
     claim_session_lease_generation: u64,
 }
 
+/// One predicate, two regimes: the claim fields only strengthen it (ADR 0069 §5).
+fn turn_input_settlement_matches(
+    entry: &RuntimePerfPendingTurnInput,
+    completed: &lash_core::TurnInputCompletion,
+) -> bool {
+    entry.input.session_id == completed.session_id
+        && completed.input_ids.contains(&entry.input.input_id)
+        && match completed.claim.as_ref() {
+            Some(claim) => {
+                entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
+                    && entry.claim_token.as_deref() == Some(claim.lease_token.as_str())
+            }
+            None => {
+                entry.claim_id.is_none()
+                    && !matches!(
+                        entry.input.state,
+                        lash_core::TurnInputState::Completed | lash_core::TurnInputState::Cancelled
+                    )
+            }
+        }
+}
+
 impl RuntimePerfPendingTurnInput {
     fn claim_diagnostics(&self) -> Option<lash_core::PendingTurnInputClaimDiagnostics> {
         (self.claim_id.is_some() || matches!(self.input.state, lash_core::TurnInputState::Accepted))
@@ -750,20 +772,23 @@ impl SessionCommitStore for RuntimePerfStore {
             for completed in &commit.completed_turn_input_claims {
                 let matches = pending
                     .iter()
-                    .filter(|entry| {
-                        entry.input.session_id == completed.session_id
-                            && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                            && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
-                            && completed.input_ids.contains(&entry.input.input_id)
-                    })
+                    .filter(|entry| turn_input_settlement_matches(entry, completed))
                     .count();
                 if matches != completed.input_ids.len() {
-                    return Err(StoreError::TurnInputClaimSuperseded {
-                        session_id: completed.session_id.clone(),
-                        claim_id: completed.claim_id.clone(),
-                        row_id: None,
-                        superseding_claim_id: None,
-                        superseding_session_lease_generation: None,
+                    return Err(match completed.claim.as_ref() {
+                        Some(claim) => StoreError::TurnInputClaimSuperseded {
+                            session_id: completed.session_id.clone(),
+                            claim_id: claim.claim_id.clone(),
+                            row_id: None,
+                            superseding_claim_id: None,
+                            superseding_session_lease_generation: None,
+                        },
+                        None => StoreError::UnclaimedTurnInputSettlementSuperseded {
+                            session_id: completed.session_id.clone(),
+                            input_id: completed.input_ids.join(","),
+                            observed_state: None,
+                            superseding_claim_id: None,
+                        },
                     });
                 }
             }
@@ -816,11 +841,7 @@ impl SessionCommitStore for RuntimePerfStore {
             let mut pending = self.pending_turn_inputs.lock_recover();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
-                    if entry.input.session_id == completed.session_id
-                        && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                        && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
-                        && completed.input_ids.contains(&entry.input.input_id)
-                    {
+                    if turn_input_settlement_matches(entry, completed) {
                         entry.input.state = lash_core::TurnInputState::Completed;
                         entry.clear_claim();
                     }
