@@ -100,11 +100,10 @@ impl RuntimeExecutionContext<'_> {
                 let child_execution_trace_hook =
                     child_trace_hooks.get(&child.call.call_id).cloned();
                 let (intent_drain_slot, mut final_result_committed) =
-                    crate::tool_dispatch::IntentDrainSlot::new(
+                    crate::tool_dispatch::IntentDrainGuard::new(
                         std::sync::Arc::clone(&intent_drain_gate),
                         index,
                     );
-                let cancellation_slot = intent_drain_slot.clone();
                 async move {
                     let tool_call = context.execute_prepared_tool_batch_child(
                         child,
@@ -123,30 +122,18 @@ impl RuntimeExecutionContext<'_> {
                                 .clock
                                 .sleep(std::time::Duration::from_millis(50));
                             tokio::pin!(grace);
-                            if *final_result_committed.borrow() {
+                            if final_result_committed.is_committed() {
                                 return tool_call.await;
                             }
                             tokio::select! {
                                 biased;
                                 outcome = &mut tool_call => outcome,
-                                changed = final_result_committed.changed() => {
-                                    if changed.is_ok() && *final_result_committed.borrow() {
-                                        tool_call.await
-                                    } else {
-                                        cancellation_slot.finish().await;
-                                        CoordinatedToolLaunch {
-                                            launch: cancelled_runtime_tool_call_launch(
-                                                cancelled_tool.call_id,
-                                                cancelled_tool.tool_name,
-                                                cancelled_tool.args,
-                                                cancelled_tool.replay,
-                                            ),
-                                            triggers: Vec::new(),
-                                        }
-                                    }
-                                },
+                                () = final_result_committed.committed() => tool_call.await,
+                                // Abandoning the child here drops its drain
+                                // guard along with its future, which discharges
+                                // the drain slot; no hand-written release is
+                                // needed to keep later siblings moving.
                                 _ = &mut grace => {
-                                    cancellation_slot.finish().await;
                                     CoordinatedToolLaunch {
                                         launch: cancelled_runtime_tool_call_launch(
                                             cancelled_tool.call_id,
@@ -192,7 +179,7 @@ impl RuntimeExecutionContext<'_> {
         index: usize,
         parent_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-        intent_drain_slot: Option<crate::tool_dispatch::IntentDrainSlot>,
+        intent_drain_slot: Option<crate::tool_dispatch::IntentDrainGuard>,
     ) -> CoordinatedToolLaunch {
         let call_id = child.call.call_id.clone();
         let tool_name = child.call.tool_name.clone();
@@ -221,9 +208,11 @@ impl RuntimeExecutionContext<'_> {
                 tool_context,
             )
             .await;
-            if let Some(slot) = &intent_drain_slot {
-                slot.finish().await;
-            }
+            // An orchestrating body declares no intents to drain, so its slot is
+            // discharged as soon as the body returns. Dropping the guard here
+            // rather than at the end of this function keeps the release point
+            // where the former hand-written discharge stood.
+            drop(intent_drain_slot);
             let completed = self
                 .complete_tool_call(index, call_id, replay, outcome, activity_id)
                 .await;

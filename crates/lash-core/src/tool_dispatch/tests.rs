@@ -15,6 +15,7 @@ use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
 mod directives;
+mod intent_drain;
 mod internal_activation;
 mod settlement_order;
 
