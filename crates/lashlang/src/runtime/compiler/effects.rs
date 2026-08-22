@@ -568,14 +568,18 @@ impl Compiler {
                 self.compile_stats.borrow_mut().type_ref_sites += 1;
             }
             TypeExpr::List(inner) => {
-                let kind_idx = self.push_const(Value::String(schema_keys::ARRAY.into()));
+                let kind_idx = self.push_const(Value::String(
+                    SchemaScalarKind::Array.as_schema_name().into(),
+                ));
                 self.code.push(Instruction::PushConst(kind_idx));
                 self.compile_type_expr(inner);
                 let keys = self.push_key_list([schema_keys::TYPE, schema_keys::ITEMS].into_iter());
                 self.code.push(Instruction::BuildRecord(keys));
             }
             TypeExpr::Object(fields) => {
-                let kind_idx = self.push_const(Value::String(schema_keys::OBJECT.into()));
+                let kind_idx = self.push_const(Value::String(
+                    SchemaScalarKind::Object.as_schema_name().into(),
+                ));
                 self.code.push(Instruction::PushConst(kind_idx));
 
                 for field in fields {
@@ -620,7 +624,7 @@ impl Compiler {
                 self.code.push(Instruction::BuildRecord(keys));
             }
             TypeExpr::Process { .. } | TypeExpr::TriggerHandle(_) => {
-                let idx = self.push_const(interned_scalar_schema(ScalarSchemaKind::Any));
+                let idx = self.push_const(interned_scalar_schema(None));
                 self.code.push(Instruction::PushConst(idx));
             }
             TypeExpr::Any
@@ -661,7 +665,10 @@ impl Compiler {
             TypeExpr::List(inner) => {
                 let inner_value = self.fold_type_expr_inner(inner, resolving)?;
                 let mut rec = record_with_capacity(2);
-                rec.insert(TYPE.into(), Value::String(ARRAY.into()));
+                rec.insert(
+                    TYPE.into(),
+                    Value::String(SchemaScalarKind::Array.as_schema_name().into()),
+                );
                 rec.insert(ITEMS.into(), inner_value);
                 Some(Value::Record(Arc::new(rec)))
             }
@@ -679,7 +686,10 @@ impl Compiler {
                     .map(|f| Value::String(f.name.clone()))
                     .collect();
                 let mut rec = record_with_capacity(4);
-                rec.insert(TYPE.into(), Value::String(OBJECT.into()));
+                rec.insert(
+                    TYPE.into(),
+                    Value::String(SchemaScalarKind::Object.as_schema_name().into()),
+                );
                 rec.insert(PROPERTIES.into(), Value::Record(Arc::new(properties)));
                 rec.insert(REQUIRED.into(), Value::List(required.into()));
                 rec.insert(ADDITIONAL_PROPERTIES.into(), Value::Bool(false));

@@ -284,10 +284,10 @@ fn contains_type_literal(expr: &Expr) -> bool {
     matches!(expr, Expr::TypeLiteral(_)) || expr.children().any(contains_type_literal)
 }
 
-/// The JSON-Schema vocabulary the language emits. Both the compile-time
-/// builder ([`fold_type`]) and the runtime instruction builder
-/// ([`Compiler::compile_type_expr`]) reference these names so the schema shape
-/// is defined exactly once.
+/// The JSON-Schema keys used by the language's type-schema builders. Scalar
+/// type names live in [`SchemaScalarKind`]; these keys are shared by the
+/// compile-time builder ([`fold_type`]) and runtime instruction builder
+/// ([`Compiler::compile_type_expr`]).
 mod schema_keys {
     pub(super) const TYPE: &str = "type";
     pub(super) const ITEMS: &str = "items";
@@ -296,10 +296,6 @@ mod schema_keys {
     pub(super) const ADDITIONAL_PROPERTIES: &str = "additionalProperties";
     pub(super) const ANY_OF: &str = "anyOf";
     pub(super) const ENUM: &str = "enum";
-
-    pub(super) const ARRAY: &str = "array";
-    pub(super) const OBJECT: &str = "object";
-    pub(super) const STRING: &str = "string";
 }
 
 /// Best-effort compile-time construction of a JSON-Schema Value for a
@@ -313,16 +309,19 @@ mod schema_keys {
 fn fold_type(ty: &TypeExpr) -> Option<Value> {
     use schema_keys::*;
     match ty {
-        TypeExpr::Any => Some(interned_scalar_schema(ScalarSchemaKind::Any)),
-        TypeExpr::Str => Some(interned_scalar_schema(ScalarSchemaKind::Str)),
-        TypeExpr::Int => Some(interned_scalar_schema(ScalarSchemaKind::Int)),
-        TypeExpr::Float => Some(interned_scalar_schema(ScalarSchemaKind::Float)),
-        TypeExpr::Bool => Some(interned_scalar_schema(ScalarSchemaKind::Bool)),
-        TypeExpr::Dict => Some(interned_scalar_schema(ScalarSchemaKind::Dict)),
-        TypeExpr::Null => Some(interned_scalar_schema(ScalarSchemaKind::Null)),
+        TypeExpr::Any => Some(interned_scalar_schema(None)),
+        TypeExpr::Str => Some(interned_scalar_schema(Some(SchemaScalarKind::String))),
+        TypeExpr::Int => Some(interned_scalar_schema(Some(SchemaScalarKind::Integer))),
+        TypeExpr::Float => Some(interned_scalar_schema(Some(SchemaScalarKind::Number))),
+        TypeExpr::Bool => Some(interned_scalar_schema(Some(SchemaScalarKind::Boolean))),
+        TypeExpr::Dict => Some(interned_scalar_schema(Some(SchemaScalarKind::Object))),
+        TypeExpr::Null => Some(interned_scalar_schema(Some(SchemaScalarKind::Null))),
         TypeExpr::Enum(values) => {
             let mut rec = record_with_capacity(2);
-            rec.insert(TYPE.into(), Value::String(STRING.into()));
+            rec.insert(
+                TYPE.into(),
+                Value::String(SchemaScalarKind::String.as_schema_name().into()),
+            );
             let items: Vec<Value> = values.iter().map(|v| Value::String(v.clone())).collect();
             rec.insert(ENUM.into(), Value::List(items.into()));
             Some(Value::Record(Arc::new(rec)))
@@ -330,7 +329,10 @@ fn fold_type(ty: &TypeExpr) -> Option<Value> {
         TypeExpr::List(inner) => {
             let inner_value = fold_type(inner)?;
             let mut rec = record_with_capacity(2);
-            rec.insert(TYPE.into(), Value::String(ARRAY.into()));
+            rec.insert(
+                TYPE.into(),
+                Value::String(SchemaScalarKind::Array.as_schema_name().into()),
+            );
             rec.insert(ITEMS.into(), inner_value);
             Some(Value::Record(Arc::new(rec)))
         }
@@ -345,7 +347,10 @@ fn fold_type(ty: &TypeExpr) -> Option<Value> {
                 .map(|f| Value::String(f.name.clone()))
                 .collect();
             let mut rec = record_with_capacity(4);
-            rec.insert(TYPE.into(), Value::String(OBJECT.into()));
+            rec.insert(
+                TYPE.into(),
+                Value::String(SchemaScalarKind::Object.as_schema_name().into()),
+            );
             rec.insert(PROPERTIES.into(), Value::Record(Arc::new(properties)));
             rec.insert(REQUIRED.into(), Value::List(required.into()));
             rec.insert(ADDITIONAL_PROPERTIES.into(), Value::Bool(false));
@@ -358,9 +363,7 @@ fn fold_type(ty: &TypeExpr) -> Option<Value> {
             rec.insert(ANY_OF.into(), Value::List(folded.into()));
             Some(Value::Record(Arc::new(rec)))
         }
-        TypeExpr::Process { .. } | TypeExpr::TriggerHandle(_) => {
-            Some(interned_scalar_schema(ScalarSchemaKind::Any))
-        }
+        TypeExpr::Process { .. } | TypeExpr::TriggerHandle(_) => Some(interned_scalar_schema(None)),
         TypeExpr::Ref(_) => None,
     }
 }
@@ -385,37 +388,106 @@ fn is_terminal_expr(expr: &Expr) -> bool {
     }
 }
 
-#[derive(Clone, Copy)]
-enum ScalarSchemaKind {
-    Any,
-    Str,
-    Int,
-    Float,
-    Bool,
-    Dict,
-    Null,
-}
-
 /// Returns an `Arc`-shared schema for a scalar. All sites referencing `str`
 /// point at the same `Arc<Record>`, so emitting a Type literal with N string
 /// fields allocates one record, not N.
-fn interned_scalar_schema(kind: ScalarSchemaKind) -> Value {
-    static CACHE: OnceLock<[Value; 7]> = OnceLock::new();
+fn interned_scalar_schema(kind: Option<SchemaScalarKind>) -> Value {
+    static CACHE: OnceLock<[Value; 8]> = OnceLock::new();
     let cache = CACHE.get_or_init(|| {
-        let build = |ty: &str| {
+        let build = |kind: SchemaScalarKind| {
             let mut rec = record_with_capacity(1);
-            rec.insert(schema_keys::TYPE.into(), Value::String(ty.into()));
+            rec.insert(
+                schema_keys::TYPE.into(),
+                Value::String(kind.as_schema_name().into()),
+            );
             Value::Record(Arc::new(rec))
         };
         [
-            Value::Record(Arc::new(record_with_capacity(0))), // Any == {}
-            build(schema_keys::STRING),
-            build("integer"),
-            build("number"),
-            build("boolean"),
-            build(schema_keys::OBJECT),
-            build("null"),
+            Value::Record(Arc::new(record_with_capacity(0))),
+            build(SchemaScalarKind::String),
+            build(SchemaScalarKind::Number),
+            build(SchemaScalarKind::Integer),
+            build(SchemaScalarKind::Boolean),
+            build(SchemaScalarKind::Array),
+            build(SchemaScalarKind::Object),
+            build(SchemaScalarKind::Null),
         ]
     });
-    cache[kind as usize].clone()
+    let index = match kind {
+        None => 0,
+        Some(SchemaScalarKind::String) => 1,
+        Some(SchemaScalarKind::Number) => 2,
+        Some(SchemaScalarKind::Integer) => 3,
+        Some(SchemaScalarKind::Boolean) => 4,
+        Some(SchemaScalarKind::Array) => 5,
+        Some(SchemaScalarKind::Object) => 6,
+        Some(SchemaScalarKind::Null) => 7,
+    };
+    cache[index].clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{TypeExpr, TypeField};
+
+    #[test]
+    fn typed_output_accepts_every_producible_type_schema() {
+        let types = vec![
+            TypeExpr::Any,
+            TypeExpr::Str,
+            TypeExpr::Int,
+            TypeExpr::Float,
+            TypeExpr::Bool,
+            TypeExpr::Dict,
+            TypeExpr::Null,
+            TypeExpr::Enum(vec!["ready".into(), "done".into()]),
+            TypeExpr::List(Box::new(TypeExpr::Str)),
+            TypeExpr::Object(vec![TypeField {
+                name: "value".into(),
+                ty: TypeExpr::Int,
+                optional: false,
+            }]),
+            TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null]),
+            TypeExpr::Process {
+                input: Box::new(TypeExpr::Any),
+                output: Box::new(TypeExpr::Str),
+                input_count: 0,
+            },
+            TypeExpr::TriggerHandle(Box::new(TypeExpr::Str)),
+        ];
+
+        for ty in types {
+            let schema = fold_type(&ty).expect("all listed types are foldable");
+            let schema_json = crate::runtime::to_json_direct(&schema);
+            let wrapped = serde_json::json!({
+                (crate::LASH_TYPE_KEY): schema_json.clone()
+            });
+            let expected_type = match &ty {
+                TypeExpr::Any
+                | TypeExpr::Union(_)
+                | TypeExpr::Process { .. }
+                | TypeExpr::TriggerHandle(_) => None,
+                TypeExpr::Str | TypeExpr::Enum(_) => Some("string"),
+                TypeExpr::Int => Some("integer"),
+                TypeExpr::Float => Some("number"),
+                TypeExpr::Bool => Some("boolean"),
+                TypeExpr::Dict | TypeExpr::Object(_) => Some("object"),
+                TypeExpr::Null => Some("null"),
+                TypeExpr::List(_) => Some("array"),
+                TypeExpr::Ref(_) => unreachable!("refs are not foldable"),
+            };
+            assert_eq!(
+                wrapped[crate::LASH_TYPE_KEY]
+                    .get("type")
+                    .and_then(|value| value.as_str()),
+                expected_type,
+                "producer schema name for {ty:?}"
+            );
+            let accepted = crate::parse_output_schema(Some(&wrapped))
+                .expect("producer schema should parse")
+                .expect("producer schema should be present");
+            assert_eq!(accepted, schema_json, "schema for {ty:?} was not preserved");
+        }
+    }
 }

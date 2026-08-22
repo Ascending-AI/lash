@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::LASH_TYPE_KEY;
+use crate::{LASH_TYPE_KEY, runtime::SchemaScalarKind};
 
 /// Parse a tool's output-schema witness into the JSON Schema it describes.
 ///
@@ -27,6 +27,15 @@ pub enum OutputSchemaError {
     /// A `$lash_type` object does not declare its JSON Schema type.
     #[error("Type schema missing `type` field")]
     TypeSchemaMissingType,
+    /// A `$lash_type` union does not contain an array of branch schemas.
+    #[error("Type schema `anyOf` must be an array")]
+    TypeSchemaAnyOfExpectedArray,
+    /// A `$lash_type` union does not contain any branch schemas.
+    #[error("Type schema `anyOf` must contain at least one schema")]
+    TypeSchemaAnyOfEmpty,
+    /// A `$lash_type` union contains fields outside the producer vocabulary.
+    #[error("Type schema `anyOf` cannot have sibling fields")]
+    TypeSchemaAnyOfSiblings,
     /// A `$lash_type` object declares an unsupported JSON Schema type.
     #[error("unsupported Type schema kind `{kind}`")]
     UnsupportedTypeSchema { kind: String },
@@ -66,7 +75,7 @@ pub fn parse_output_schema(value: Option<&Value>) -> Result<Option<Value>, Outpu
         required.push(Value::String(name.clone()));
     }
     Ok(Some(json!({
-        "type": "object",
+        "type": SchemaScalarKind::Object.as_schema_name(),
         "properties": properties,
         "required": required,
         "additionalProperties": false,
@@ -77,30 +86,69 @@ fn validate_lash_type_schema(schema: &Value) -> Result<(), OutputSchemaError> {
     let object = schema
         .as_object()
         .ok_or(OutputSchemaError::TypeSchemaExpectedObject)?;
-    let kind = object
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or(OutputSchemaError::TypeSchemaMissingType)?;
-    match kind {
-        "object" | "array" | "string" | "integer" | "number" | "boolean" => Ok(()),
-        other => Err(OutputSchemaError::UnsupportedTypeSchema {
-            kind: other.to_string(),
-        }),
+
+    if let Some(any_of) = object.get("anyOf") {
+        if object.len() != 1 {
+            return Err(OutputSchemaError::TypeSchemaAnyOfSiblings);
+        }
+        let variants = any_of
+            .as_array()
+            .ok_or(OutputSchemaError::TypeSchemaAnyOfExpectedArray)?;
+        if variants.is_empty() {
+            return Err(OutputSchemaError::TypeSchemaAnyOfEmpty);
+        }
+        for variant in variants {
+            validate_lash_type_schema(variant)?;
+        }
+        return Ok(());
+    }
+
+    let Some(kind) = object.get("type").and_then(Value::as_str) else {
+        // The empty schema is emitted for `any`, process, and trigger-handle
+        // types. JSON Schema deliberately has no scalar name for that shape.
+        if object.is_empty() {
+            return Ok(());
+        }
+        return Err(OutputSchemaError::TypeSchemaMissingType);
+    };
+    if SchemaScalarKind::from_schema_name(kind).is_some() {
+        Ok(())
+    } else {
+        Err(OutputSchemaError::UnsupportedTypeSchema {
+            kind: kind.to_string(),
+        })
     }
 }
 
 fn type_descriptor_to_json_schema(descriptor: &str) -> Result<Value, OutputSchemaError> {
     let scalar = |ty: &str| -> Result<Value, OutputSchemaError> {
-        match ty {
-            "str" | "string" => Ok(json!({"type": "string"})),
-            "int" | "integer" => Ok(json!({"type": "integer"})),
-            "float" | "number" => Ok(json!({"type": "number"})),
-            "bool" | "boolean" => Ok(json!({"type": "boolean"})),
-            "record" | "dict" | "object" => {
-                Ok(json!({"type": "object", "additionalProperties": true}))
+        let kind = match ty {
+            "str" => Some(SchemaScalarKind::String),
+            "int" => Some(SchemaScalarKind::Integer),
+            "float" => Some(SchemaScalarKind::Number),
+            "bool" => Some(SchemaScalarKind::Boolean),
+            "record" | "dict" => Some(SchemaScalarKind::Object),
+            other => SchemaScalarKind::from_schema_name(other).filter(|kind| {
+                matches!(
+                    kind,
+                    SchemaScalarKind::String
+                        | SchemaScalarKind::Integer
+                        | SchemaScalarKind::Number
+                        | SchemaScalarKind::Boolean
+                        | SchemaScalarKind::Object
+                )
+            }),
+        };
+        match kind {
+            Some(SchemaScalarKind::Object) if matches!(ty, "record" | "dict" | "object") => {
+                Ok(json!({
+                    "type": SchemaScalarKind::Object.as_schema_name(),
+                    "additionalProperties": true
+                }))
             }
-            other => Err(OutputSchemaError::UnknownScalar {
-                kind: other.to_string(),
+            Some(kind) => Ok(json!({"type": kind.as_schema_name()})),
+            None => Err(OutputSchemaError::UnknownScalar {
+                kind: ty.to_string(),
             }),
         }
     };
@@ -110,9 +158,88 @@ fn type_descriptor_to_json_schema(descriptor: &str) -> Result<Value, OutputSchem
         .and_then(|rest| rest.strip_suffix(']'))
     {
         return Ok(json!({
-            "type": "array",
+            "type": SchemaScalarKind::Array.as_schema_name(),
             "items": scalar(inner.trim())?,
         }));
     }
     scalar(trimmed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn object_descriptor_alias_preserves_open_object_schema() {
+        let output = serde_json::json!({"value": "object"});
+
+        assert_eq!(
+            parse_output_schema(Some(&output)),
+            Ok(Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "required": ["value"],
+                "additionalProperties": false
+            })))
+        );
+    }
+
+    #[test]
+    fn rejects_any_of_with_non_array_value() {
+        let output = serde_json::json!({
+            (LASH_TYPE_KEY): {"anyOf": 5}
+        });
+
+        assert_eq!(
+            parse_output_schema(Some(&output)),
+            Err(OutputSchemaError::TypeSchemaAnyOfExpectedArray)
+        );
+    }
+
+    #[test]
+    fn rejects_any_of_with_unsupported_branch_schema() {
+        let output = serde_json::json!({
+            (LASH_TYPE_KEY): {"anyOf": [{"type": "frobnicate"}]}
+        });
+
+        assert_eq!(
+            parse_output_schema(Some(&output)),
+            Err(OutputSchemaError::UnsupportedTypeSchema {
+                kind: "frobnicate".into()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_empty_any_of() {
+        let output = serde_json::json!({
+            (LASH_TYPE_KEY): {"anyOf": []}
+        });
+
+        assert_eq!(
+            parse_output_schema(Some(&output)),
+            Err(OutputSchemaError::TypeSchemaAnyOfEmpty)
+        );
+    }
+
+    #[test]
+    fn rejects_any_of_with_junk_siblings() {
+        let output = serde_json::json!({
+            (LASH_TYPE_KEY): {
+                "anyOf": [],
+                "type": null,
+                "x": 1
+            }
+        });
+
+        assert_eq!(
+            parse_output_schema(Some(&output)),
+            Err(OutputSchemaError::TypeSchemaAnyOfSiblings)
+        );
+    }
 }

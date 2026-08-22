@@ -15,7 +15,7 @@ pub(crate) struct ValidationPlan {
 #[derive(Clone)]
 enum ValidationPlanKind {
     Any,
-    Primitive(PrimitiveMask),
+    Primitive(SchemaScalarKind),
     Enum(Box<[Arc<str>]>),
     List(Box<ValidationPlan>),
     Object(Box<[ValidationFieldPlan]>),
@@ -30,69 +30,70 @@ struct ValidationFieldPlan {
     plan: ValidationPlan,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct PrimitiveMask(u16);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(usize)]
+/// The single home of Lashlang's JSON-Schema scalar vocabulary.
+pub(crate) enum SchemaScalarKind {
+    String,
+    Number,
+    Integer,
+    Boolean,
+    Array,
+    Object,
+    Null,
+}
 
-impl PrimitiveMask {
-    const STRING: Self = Self(1 << 0);
-    const NUMBER: Self = Self(1 << 1);
-    const INTEGER: Self = Self(1 << 2);
-    const BOOLEAN: Self = Self(1 << 3);
-    const ARRAY: Self = Self(1 << 4);
-    const OBJECT: Self = Self(1 << 5);
-    const NULL: Self = Self(1 << 6);
-
-    fn from_schema_name(name: &str) -> Option<Self> {
+impl SchemaScalarKind {
+    pub(crate) fn from_schema_name(name: &str) -> Option<Self> {
         Some(match name {
-            "string" => Self::STRING,
-            "number" => Self::NUMBER,
-            "integer" => Self::INTEGER,
-            "boolean" => Self::BOOLEAN,
-            "array" => Self::ARRAY,
-            "object" => Self::OBJECT,
-            "null" => Self::NULL,
+            "string" => Self::String,
+            "number" => Self::Number,
+            "integer" => Self::Integer,
+            "boolean" => Self::Boolean,
+            "array" => Self::Array,
+            "object" => Self::Object,
+            "null" => Self::Null,
             _ => return None,
         })
     }
 
-    fn schema_name(self) -> &'static str {
+    pub(crate) const fn as_schema_name(self) -> &'static str {
         match self {
-            Self::STRING => "string",
-            Self::NUMBER => "number",
-            Self::INTEGER => "integer",
-            Self::BOOLEAN => "boolean",
-            Self::ARRAY => "array",
-            Self::OBJECT => "object",
-            Self::NULL => "null",
-            _ => "value",
+            Self::String => "string",
+            Self::Number => "number",
+            Self::Integer => "integer",
+            Self::Boolean => "boolean",
+            Self::Array => "array",
+            Self::Object => "object",
+            Self::Null => "null",
         }
     }
 
     fn matches(self, value: &Value) -> bool {
-        let value_mask = match value {
-            Value::String(_) => Self::STRING.0,
-            Value::Number(number) if number.is_finite() && number.fract() == 0.0 => {
-                Self::NUMBER.0 | Self::INTEGER.0
+        if matches!(value, Value::Ref(_)) {
+            debug_assert_exported_value("schema validation");
+            return false;
+        }
+
+        match self {
+            Self::String => matches!(value, Value::String(_)),
+            Self::Number => matches!(value, Value::Number(number) if number.is_finite()),
+            Self::Integer => {
+                matches!(value, Value::Number(number) if number.is_finite() && number.fract() == 0.0)
             }
-            Value::Number(number) if number.is_finite() => Self::NUMBER.0,
-            Value::Bool(_) => Self::BOOLEAN.0,
-            Value::Tuple(_) | Value::List(_) => Self::ARRAY.0,
-            Value::Record(_) | Value::Image(_) | Value::Resource(_) => Self::OBJECT.0,
-            Value::Null => Self::NULL.0,
-            Value::Undefined => 0,
-            Value::Projected(value) => match value.value_type_name() {
-                "tuple" | "list" => Self::ARRAY.0,
-                _ => Self::OBJECT.0,
+            Self::Boolean => matches!(value, Value::Bool(_)),
+            Self::Array => match value {
+                Value::Tuple(_) | Value::List(_) => true,
+                Value::Projected(value) => matches!(value.value_type_name(), "tuple" | "list"),
+                _ => false,
             },
-            Value::Number(_) => 0,
-            // No type mask matches, so validation reports a type mismatch
-            // instead of accepting an opaque value.
-            Value::Ref(_) => {
-                debug_assert_exported_value("schema validation");
-                0
-            }
-        };
-        self.0 & value_mask != 0
+            Self::Object => match value {
+                Value::Record(_) | Value::Image(_) | Value::Resource(_) => true,
+                Value::Projected(value) => !matches!(value.value_type_name(), "tuple" | "list"),
+                _ => false,
+            },
+            Self::Null => matches!(value, Value::Null),
+        }
     }
 }
 
@@ -153,12 +154,12 @@ pub(crate) fn compile_schema_value(schema: &Value) -> ValidationPlan {
     }
 
     let schema_type = match schema_obj.get("type") {
-        Some(Value::String(expected)) => PrimitiveMask::from_schema_name(expected.as_str()),
+        Some(Value::String(expected)) => SchemaScalarKind::from_schema_name(expected.as_str()),
         _ => None,
     };
 
     match schema_type {
-        Some(PrimitiveMask::ARRAY) => {
+        Some(SchemaScalarKind::Array) => {
             let item_plan =
                 schema_obj
                     .get("items")
@@ -170,7 +171,7 @@ pub(crate) fn compile_schema_value(schema: &Value) -> ValidationPlan {
                 kind: ValidationPlanKind::List(Box::new(item_plan)),
             }
         }
-        Some(PrimitiveMask::OBJECT) => ValidationPlan {
+        Some(SchemaScalarKind::Object) => ValidationPlan {
             kind: ValidationPlanKind::Object(compile_object_fields(schema_obj)),
         },
         Some(kind) => ValidationPlan {
@@ -239,8 +240,8 @@ impl ValidationPlan {
                 describe_primitive_failure(value, *expected, path)
             }
             ValidationPlanKind::Enum(allowed) => {
-                if !PrimitiveMask::STRING.matches(value) {
-                    return describe_primitive_failure(value, PrimitiveMask::STRING, path);
+                if !SchemaScalarKind::String.matches(value) {
+                    return describe_primitive_failure(value, SchemaScalarKind::String, path);
                 }
                 let allowed = allowed
                     .iter()
@@ -253,12 +254,12 @@ impl ValidationPlan {
                 )
             }
             ValidationPlanKind::List(item_plan) => {
-                if !PrimitiveMask::ARRAY.matches(value) {
-                    return describe_primitive_failure(value, PrimitiveMask::ARRAY, path);
+                if !SchemaScalarKind::Array.matches(value) {
+                    return describe_primitive_failure(value, SchemaScalarKind::Array, path);
                 }
                 let items = match value {
                     Value::Tuple(items) | Value::List(items) => items,
-                    _ => return describe_primitive_failure(value, PrimitiveMask::ARRAY, path),
+                    _ => return describe_primitive_failure(value, SchemaScalarKind::Array, path),
                 };
                 for (index, item) in items.iter().enumerate() {
                     path.push(PathSegment::Index(index));
@@ -269,11 +270,11 @@ impl ValidationPlan {
                     }
                     path.pop();
                 }
-                describe_primitive_failure(value, PrimitiveMask::ARRAY, path)
+                describe_primitive_failure(value, SchemaScalarKind::Array, path)
             }
             ValidationPlanKind::Object(fields) => {
-                if !PrimitiveMask::OBJECT.matches(value) {
-                    return describe_primitive_failure(value, PrimitiveMask::OBJECT, path);
+                if !SchemaScalarKind::Object.matches(value) {
+                    return describe_primitive_failure(value, SchemaScalarKind::Object, path);
                 }
                 for field in fields.iter() {
                     let field_value = plan_field_value(value, field);
@@ -294,7 +295,7 @@ impl ValidationPlan {
                         return message;
                     }
                 }
-                describe_primitive_failure(value, PrimitiveMask::OBJECT, path)
+                describe_primitive_failure(value, SchemaScalarKind::Object, path)
             }
             ValidationPlanKind::Union(variants) => format!(
                 "{}: expected one of [{}], got {}",
@@ -312,7 +313,7 @@ impl ValidationPlan {
     fn describe(&self) -> String {
         match &self.kind {
             ValidationPlanKind::Any => "any".to_string(),
-            ValidationPlanKind::Primitive(kind) => kind.schema_name().to_string(),
+            ValidationPlanKind::Primitive(kind) => kind.as_schema_name().to_string(),
             ValidationPlanKind::Enum(values) => format!(
                 "enum[{}]",
                 values
@@ -321,8 +322,8 @@ impl ValidationPlan {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            ValidationPlanKind::List(_) => "array".to_string(),
-            ValidationPlanKind::Object(_) => "object".to_string(),
+            ValidationPlanKind::List(_) => SchemaScalarKind::Array.as_schema_name().to_string(),
+            ValidationPlanKind::Object(_) => SchemaScalarKind::Object.as_schema_name().to_string(),
             ValidationPlanKind::Union(variants) => variants
                 .iter()
                 .map(ValidationPlan::describe)
@@ -401,13 +402,13 @@ fn plan_field_value<'a>(value: &'a Value, field: &ValidationFieldPlan) -> Option
 
 fn describe_primitive_failure(
     value: &Value,
-    expected: PrimitiveMask,
+    expected: SchemaScalarKind,
     path: &[PathSegment<'_>],
 ) -> String {
     format!(
         "{}: expected {}, got {}",
         format_schema_path(path),
-        expected.schema_name(),
+        expected.as_schema_name(),
         schema_value_type_name(value)
     )
 }
@@ -436,18 +437,18 @@ fn format_schema_path(path: &[PathSegment<'_>]) -> String {
 
 fn schema_value_type_name(value: &Value) -> &'static str {
     match value {
-        Value::Null => "null",
+        Value::Null => SchemaScalarKind::Null.as_schema_name(),
         Value::Undefined => "undefined",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Image(_) => "object",
-        Value::Resource(_) => "object",
-        Value::Tuple(_) | Value::List(_) => "array",
-        Value::Record(_) => "object",
+        Value::Bool(_) => SchemaScalarKind::Boolean.as_schema_name(),
+        Value::Number(_) => SchemaScalarKind::Number.as_schema_name(),
+        Value::String(_) => SchemaScalarKind::String.as_schema_name(),
+        Value::Image(_) => SchemaScalarKind::Object.as_schema_name(),
+        Value::Resource(_) => SchemaScalarKind::Object.as_schema_name(),
+        Value::Tuple(_) | Value::List(_) => SchemaScalarKind::Array.as_schema_name(),
+        Value::Record(_) => SchemaScalarKind::Object.as_schema_name(),
         Value::Projected(value) => match value.value_type_name() {
-            "tuple" | "list" => "array",
-            _ => "object",
+            "tuple" | "list" => SchemaScalarKind::Array.as_schema_name(),
+            _ => SchemaScalarKind::Object.as_schema_name(),
         },
         Value::Ref(_) => "heap_ref",
     }

@@ -25,7 +25,7 @@ use crate::lexer::Span;
 use crate::tracking::{LashlangAstPath, LashlangExecutionContext, LashlangExecutionSite};
 
 use super::record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};
-use super::schema::{ValidationPlan, compile_schema_value};
+use super::schema::{SchemaScalarKind, ValidationPlan, compile_schema_value};
 use super::{
     Chunk, ClosureParameterModel, CompileStats, CompiledAggregateAwaitShape, CompiledAssignPath,
     CompiledAssignPathStep, CompiledFormatTemplate, CompiledFunction,
