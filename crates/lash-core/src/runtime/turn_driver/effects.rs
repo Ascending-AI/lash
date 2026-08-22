@@ -67,9 +67,14 @@ fn merge_pending_queue_claim_authority(
 /// Reconcile a checkpoint's fresh claim against the claims this turn already
 /// holds.
 ///
-/// Only claimed drives take part: a checkpoint claim exists only under a
-/// session-execution fence, and a turn that holds that fence took its own rows
-/// under a claim too. An unclaimed drive therefore never overlaps an incoming
+/// Only claimed drives take part, and the reason is the ingress class rather
+/// than the fence: a turn holding the session-execution fence can still be
+/// driving rows unclaimed (a replayed acceptance redrives its settled row
+/// unclaimed, and a re-admitted one is driven unclaimed too), so "holds the
+/// fence" does not imply "took its rows under a claim". What does hold is that
+/// every unclaimed drive here is a `NextTurn` admission, while a checkpoint
+/// claim selects `ActiveTurn` ingress only, so the two sets are disjoint by
+/// construction. An unclaimed drive therefore never overlaps an incoming
 /// checkpoint claim in this process — and if two processes ever did reach that
 /// state, the head CAS refuses one of them, because a claimed row no longer
 /// satisfies the unclaimed settlement predicate (ADR 0069 §5).

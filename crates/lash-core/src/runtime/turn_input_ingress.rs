@@ -486,7 +486,7 @@ impl std::ops::DerefMut for TurnInputCompletion {
 
 /// Turn-input rows a turn accepted itself and drives without a claim.
 ///
-/// The unclaimed half of [`TurnInputDrive`]: the rows exist durably before the
+/// The unclaimed half of a turn's drive: the rows exist durably before the
 /// turn executes, exactly as a claimed row does, but no session-execution lease
 /// fences them. Their settlement is decided by the head CAS alone
 /// ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).

@@ -386,6 +386,138 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     );
 }
 
+/// The failover interleaving: a lane-less driver that loses the head CAS to a
+/// successor yields, it does not fault (ADR 0069 §5(d)).
+///
+/// This is the shape ordinary failover takes, not a rare race. A worker accepts
+/// a turn and dies; the engine replays the invocation on a peer while the dead
+/// worker's session lease is still inside its TTL, so the peer cannot take the
+/// advisory lane and drives the row it accepted unclaimed; meanwhile a
+/// successor holding the lane claims that row. The peer's settlement then finds
+/// the row fenced by someone else's claim and loses.
+///
+/// What the loser owes is a *stand-down*: the drive attempt is retired as
+/// superseded, nothing durable is written, the row is left exactly where its
+/// holder expects it, and the failure is typed as retryable so a durable
+/// engine re-derives the turn instead of surfacing a fault to the caller. The
+/// sibling law
+/// [`unclaimed_turn_input_settlement_is_a_conditional_write`] pins the store
+/// half — that the write is refused; this one pins what the caller is supposed
+/// to do next, which is the half a store-only law cannot see.
+pub async fn unclaimed_settlement_loser_yields_to_the_successor(
+    prefix: &str,
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let turn_id = format!("{prefix}-unclaimed-loser-yields");
+    let successor_owner = crate::LeaseOwnerIdentity::opaque(
+        format!("{prefix}-successor-owner"),
+        format!("{prefix}-successor-incarnation"),
+    );
+    // The successor holds the session-execution lane, so the direct turn below
+    // never takes it and drives its acceptance unclaimed.
+    let successor_lease =
+        crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+            store.as_ref(),
+            SESSION_ID,
+            &successor_owner,
+            &format!("{prefix}-successor-executor"),
+            60_000,
+        )
+        .await
+        .expect("the successor claims the session execution lease")
+        .acquired()
+        .expect("the session execution lease is free in this law");
+
+    // Mid-turn — after the acceptance is durable, before the driver commits —
+    // the successor claims the accepted row out from under the driver.
+    let claimed = Arc::new(AtomicUsize::new(0));
+    let provider = {
+        let store = Arc::clone(&store);
+        let fence = successor_lease.fence();
+        let successor_owner = successor_owner.clone();
+        let claimed = Arc::clone(&claimed);
+        crate::testing::TestProvider::builder()
+            .kind("stub")
+            .complete(move |_| {
+                let store = Arc::clone(&store);
+                let fence = fence.clone();
+                let successor_owner = successor_owner.clone();
+                let claimed = Arc::clone(&claimed);
+                async move {
+                    let claim = crate::store::TurnInputStore::claim_next_turn_inputs(
+                        store.as_ref(),
+                        SESSION_ID,
+                        &fence,
+                        &successor_owner,
+                        10,
+                    )
+                    .await
+                    .expect("the successor claims the accepted row");
+                    claimed.store(
+                        claim.map(|claim| claim.inputs.len()).unwrap_or_default(),
+                        Ordering::SeqCst,
+                    );
+                    Ok(text_response("the loser never commits these words"))
+                }
+            })
+            .build()
+            .into_handle()
+    };
+
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::InlineEffectHost::default());
+    let mut loser = acceptance_runtime(
+        &store,
+        &effect_host,
+        provider,
+        Vec::new(),
+        crate::testing::runtime_lease_owner(),
+    )
+    .await;
+    let scope = effect_host
+        .scoped(crate::ExecutionScope::turn(SESSION_ID, &turn_id))
+        .expect("scope the lane-less direct turn");
+    let failure = loser
+        .stream_turn(
+            direct_input(&turn_id, "words the successor will settle instead"),
+            crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
+        )
+        .await
+        .expect_err("a driver whose row was claimed away cannot commit");
+    assert_eq!(
+        claimed.load(Ordering::SeqCst),
+        1,
+        "the law only proves anything if the successor really took the accepted row"
+    );
+    assert_eq!(
+        failure.code,
+        crate::RuntimeErrorCode::TurnInputSettlementSuperseded,
+        "a lost unclaimed settlement is its own typed stand-down, never a generic commit \
+         fault: {failure:?}"
+    );
+    assert!(
+        failure.code.is_retryable(),
+        "the stand-down must tell a durable engine that re-deriving the turn is safe, so \
+         failover is not user-visible-fatal"
+    );
+
+    // Nothing durable moved: the row is still the successor's to settle, and no
+    // second admission was minted for the same words.
+    let applications = store
+        .list_turn_input_applications(SESSION_ID)
+        .await
+        .expect("read settled applications after the stand-down");
+    assert!(
+        applications.is_empty(),
+        "a superseded driver settles nothing: {applications:?}"
+    );
+    crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
+        store.as_ref(),
+        &successor_lease.completion(),
+    )
+    .await
+    .expect("release the successor's session execution lease");
+}
+
 /// Unclaimed settlement is a conditional write on every backend (ADR 0069 §5).
 ///
 /// A turn that drove the acceptance it minted may settle that row without
@@ -411,7 +543,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
-    let state = crate::RuntimeSessionState {
+    let mut state = crate::RuntimeSessionState {
         session_id: SESSION_ID.to_string(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -542,5 +674,26 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
             .iter()
             .all(|pending| pending.input_id != open.input_id),
         "an unclaimed settlement retires the row it named"
+    );
+
+    // (d) A settled row is terminal in the other direction: the state the
+    // replay path meets. A replayed acceptance whose turn already committed
+    // finds its own row `Completed`, and settling it a second time must lose
+    // the same way a cancelled row does — at-most-once settlement is what stops
+    // a redrive from writing a second durable record.
+    state.head_revision += 1;
+    let err = crate::store::SessionCommitStore::commit_runtime_state(
+        store.as_ref(),
+        crate::store::RuntimeCommit::persisted_state_for_test(&state, &[])
+            .completing_turn_input_claim(unclaimed(&open)),
+    )
+    .await
+    .expect_err("an unclaimed settlement must not settle an already-settled row twice");
+    assert!(
+        matches!(
+            err,
+            crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. }
+        ),
+        "a completed row loses the unclaimed predicate with the same typed error: {err:?}"
     );
 }

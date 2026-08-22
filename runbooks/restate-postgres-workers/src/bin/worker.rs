@@ -41,6 +41,22 @@ fn terminal_error(err: impl Display) -> TerminalError {
     TerminalError::new(err.to_string())
 }
 
+/// Map a lash turn failure onto Restate's two error classes.
+///
+/// A retryable lash error is not a workflow failure: it says the identical
+/// invocation is safe to run again and will converge. Turning it into a
+/// `TerminalError` would make an ordinary failover — where the accepted turn
+/// input is momentarily held by a driver that has gone away (ADR 0069 §5) —
+/// user-visible-fatal, so retryable errors leave the invocation retryable and
+/// only genuinely terminal ones end it.
+fn turn_error(err: lash::EmbedError) -> restate_sdk::errors::HandlerError {
+    if err.is_retryable() {
+        restate_sdk::errors::HandlerError::from(anyhow::anyhow!(err.to_string()))
+    } else {
+        terminal_error(err).into()
+    }
+}
+
 #[restate_sdk::workflow]
 trait E2eTurnWorkflow {
     async fn run(request: Json<TurnRequest>) -> HandlerResult<Json<TurnResponse>>;
@@ -176,7 +192,7 @@ impl AppState {
             .effects(controller)
             .stream_to(&sink)
             .await
-            .map_err(terminal_error)?;
+            .map_err(turn_error)?;
         let turn = turn.ran();
         let final_value = turn
             .as_ref()
@@ -222,7 +238,7 @@ impl AppState {
             .effects(controller)
             .stream_to(&sink)
             .await
-            .map_err(terminal_error)?;
+            .map_err(turn_error)?;
         let final_value = if matches!(
             request.scenario,
             TurnScenario::TurnControlHold

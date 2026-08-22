@@ -2016,7 +2016,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     // is recovering the invocation; the peer owner must replay the keyed gate.
     let recovery = turn_control_request("e2e-turn-cancel-crash-recovery", true);
     submit_workflow(ingress_url, &recovery).await?;
-    let crashed_worker = wait_for_failover_marker(storage.pool(), &recovery.workflow_id).await?;
+    let _crashed_worker = wait_for_failover_marker(storage.pool(), &recovery.workflow_id).await?;
     let recovery_evidence_id = "e2e-cancel-crash-recovery";
     let recovery_outcome = driver
         .request_cancel(cancel_request(
@@ -2035,10 +2035,20 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     assert_cancelled_terminal(&recovery_terminal, recovery_evidence_id)?;
     let recovery_response = wait_for_terminal_result(storage.pool(), &recovery.workflow_id).await?;
     assert_cancelled_response(&recovery_response, recovery_evidence_id)?;
-    anyhow::ensure!(
-        recovery_response.worker_id != crashed_worker,
-        "stale owner `{crashed_worker}` completed the recovered turn"
-    );
+    // FIG-1671 cede semantics (ADR 0069 §5(d)): the witness here is convergence,
+    // not migration. This gate used to require a *different* worker to finish the
+    // recovered turn, which encoded the pre-acceptance failover model where the
+    // work had to move to a live peer. Under durable acceptance the loser of the
+    // head CAS cedes — it writes nothing durable and never re-commits under
+    // another authority — and liveness comes from the engine re-invoking against
+    // the journaled acceptance. Which worker serves that re-invocation is the
+    // engine's business, and it is routinely the restarted original one, because
+    // the dead holder's session-execution lease has to age out first: the
+    // recovered turn takes roughly one lease TTL (~38s) to settle. That latency
+    // is understood and recorded, not accidental. What must hold is stricter than
+    // the old identity check: the turn completes exactly once, against exactly one
+    // acceptance, with no duplicate or conflicting settlement anywhere.
+    assert_recovered_turn_converged(storage.pool(), &recovery.workflow_id).await?;
 
     println!(
         "turn-control gates passed: cross-process; cancel-before-start; seal-vs-cancel; owner-crash-recovery; terminal-attach-evidence"
@@ -2466,6 +2476,119 @@ async fn wait_for_failover_marker(pool: &sqlx::PgPool, workflow_id: &str) -> Res
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     anyhow::bail!("timed out waiting for owner crash in `{workflow_id}`")
+}
+
+/// Assert a turn recovered after an owner crash converged on the acceptance it
+/// was journaled under, rather than being executed a second time.
+///
+/// The evidence is read from lash's own durable tables, not the harness's
+/// mirror of them: the harness table is keyed by workflow id and would hide a
+/// second completion behind an upsert. A turn that re-executed from scratch
+/// would have to mint a fresh acceptance and commit it, which shows up here as
+/// a second commit row, a second applied `input_id`, the same `input_id`
+/// settled by another turn, or a row left unsettled in the pending queue.
+async fn assert_recovered_turn_converged(pool: &sqlx::PgPool, turn_id: &str) -> Result<()> {
+    let commits = sqlx::query_as::<_, (String, String)>(
+        "SELECT turn_id, result_json FROM lash_runtime_turn_commits WHERE session_id = $1",
+    )
+    .bind(DEFAULT_SESSION_ID)
+    .fetch_all(pool)
+    .await
+    .context("load runtime turn commits for the recovered session")?;
+
+    let mut commits_for_turn = 0usize;
+    let mut applied_here: Vec<String> = Vec::new();
+    let mut applied_elsewhere: Vec<String> = Vec::new();
+    for (committed_scope, result_json) in &commits {
+        // The commit key is the JSON execution scope, not a bare turn id.
+        let committed_turn_id = serde_json::from_str::<serde_json::Value>(committed_scope)
+            .ok()
+            .and_then(|scope| {
+                scope
+                    .get("scope")
+                    .and_then(|scope| scope.get("turn_id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| committed_scope.clone());
+        let receipt: serde_json::Value = serde_json::from_str(result_json)
+            .with_context(|| format!("decode runtime commit receipt for `{committed_turn_id}`"))?;
+        let applied = receipt
+            .get("turn_input_applications")
+            .and_then(serde_json::Value::as_array)
+            .map(|applications| {
+                applications
+                    .iter()
+                    .filter_map(|application| {
+                        application
+                            .get("input_id")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if committed_turn_id == turn_id {
+            commits_for_turn += 1;
+            applied_here.extend(applied);
+        } else {
+            applied_elsewhere.extend(applied);
+        }
+    }
+
+    anyhow::ensure!(
+        commits_for_turn == 1,
+        "recovered turn `{turn_id}` has {commits_for_turn} durable commits; ceding promises exactly one"
+    );
+
+    let mut accepted = applied_here.clone();
+    accepted.sort();
+    accepted.dedup();
+    anyhow::ensure!(
+        accepted.len() == applied_here.len(),
+        "recovered turn `{turn_id}` settled the same input twice: {applied_here:?}"
+    );
+    anyhow::ensure!(
+        accepted.len() <= 1,
+        "recovered turn `{turn_id}` settled {} acceptances; a converged redrive redeems the one it was accepted under: {accepted:?}",
+        accepted.len()
+    );
+
+    let conflicting = accepted
+        .iter()
+        .filter(|input_id| applied_elsewhere.contains(input_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        conflicting.is_empty(),
+        "input(s) {conflicting:?} were settled by `{turn_id}` and by another turn in the same session"
+    );
+
+    let Some(accepted_input_id) = accepted.first() else {
+        println!(
+            "owner-crash recovery converged: `{turn_id}` committed exactly once and settled no acceptance (cancelled before application), with no duplicate settlement"
+        );
+        return Ok(());
+    };
+    let unsettled = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM lash_pending_turn_inputs
+         WHERE session_id = $1 AND input_id = $2 AND state <> $3 AND state <> $4",
+    )
+    .bind(DEFAULT_SESSION_ID)
+    .bind(accepted_input_id)
+    .bind(lash::persistence::TurnInputState::Completed.as_str())
+    .bind(lash::persistence::TurnInputState::Cancelled.as_str())
+    .fetch_one(pool)
+    .await
+    .context("count unsettled pending turn inputs for the recovered acceptance")?;
+    anyhow::ensure!(
+        unsettled == 0,
+        "acceptance `{accepted_input_id}` is still unsettled in the pending queue after `{turn_id}` committed"
+    );
+    println!(
+        "owner-crash recovery converged: `{turn_id}` committed exactly once against acceptance `{accepted_input_id}`, settled once, with no duplicate or conflicting settlement"
+    );
+    Ok(())
 }
 
 async fn wait_for_invocation_terminal(

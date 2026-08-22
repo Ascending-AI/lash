@@ -19,6 +19,16 @@ pub enum RuntimeErrorCode {
     /// retry policy - the runtime deliberately stops waiting instead of
     /// blocking one invocation indefinitely.
     SessionExecutionLaneBusy,
+    /// A turn that drove the acceptance it minted, without a claim on it, lost
+    /// the head CAS to whoever holds or already settled that row (ADR 0069
+    /// §5). The drive attempt is retired as superseded: no durable record was
+    /// written, the settlement is never retried under a new authority, and the
+    /// row stays exactly where recovery expects to find it. Re-running the
+    /// identical turn is explicitly safe and is how the result is obtained -
+    /// the journaled acceptance re-derives the same admission, so a re-run
+    /// either drives the row or finds it settled and replays the original
+    /// commit's receipt rather than duplicating it (ADR 0069 §6).
+    TurnInputSettlementSuperseded,
     /// The store aborted a commit before publication because transactional
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
@@ -264,6 +274,7 @@ impl RuntimeErrorCode {
             Self::ManagedTurnConcurrencyLimitExceeded => "managed_turn_concurrency_limit_exceeded",
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
+            Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
             Self::StoreCommitContended => "store_commit_contended",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
@@ -458,6 +469,7 @@ impl RuntimeErrorCode {
             Self::ManagedTurnConcurrencyLimitExceeded
                 | Self::RuntimeEffectGroupDrainDeferred
                 | Self::SessionExecutionLaneBusy
+                | Self::TurnInputSettlementSuperseded
                 | Self::StoreCommitContended
                 | Self::PostgresAwaitEventStore
                 | Self::PostgresEffectJournalRetirement
@@ -618,6 +630,7 @@ impl RuntimeErrorCode {
             "managed_turn_concurrency_limit_exceeded" => Self::ManagedTurnConcurrencyLimitExceeded,
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
+            "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
             "store_commit_contended" => Self::StoreCommitContended,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
@@ -980,6 +993,7 @@ mod tests {
             | RuntimeErrorCode::RuntimeEffectGroupDrainDeferred
             | RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
             | RuntimeErrorCode::SessionExecutionLaneBusy
+            | RuntimeErrorCode::TurnInputSettlementSuperseded
             | RuntimeErrorCode::StoreCommitContended
             | RuntimeErrorCode::CancelStartGateUnavailable
             | RuntimeErrorCode::PostgresAwaitEventStore
@@ -1149,6 +1163,7 @@ mod tests {
             RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded,
             RuntimeErrorCode::SessionExecutionLeaseLost,
             RuntimeErrorCode::SessionExecutionLaneBusy,
+            RuntimeErrorCode::TurnInputSettlementSuperseded,
             RuntimeErrorCode::StoreCommitContended,
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
             RuntimeErrorCode::StoreCommitByteBudgetExceeded,

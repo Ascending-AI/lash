@@ -234,7 +234,7 @@ rendered section text as `06-docs-claims.txt`.
 | A Busy turn claimant proceeds lane-less under the head CAS rather than using the durable queued-drain wait/give-up policy | `04-commit-cas-livelock.jsonl` (`busy_advisory`, zero `busy_wait`/`busy_gave_up`) |
 | One rejection is contention; *repeated* rejections with `lease_lost = false` are livelock, and the fix is worker identity | `04-commit-cas-livelock.jsonl` (per-round records) |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
-| A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`pending_while_parked`, `drain_ran`, `recovered_application_turn_id`) |
+| A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`claimable_while_parked`, `drain_ran`, `recovered_application_turn_id`) |
 | Lease churn is trace telemetry, not durable session history | absence of any lease entry in session events; the events exist only in the captured timeline |
 
 A page that promises a reading the companion never produced, or a companion observation the

@@ -1124,6 +1124,77 @@ impl LashRuntime {
         }
     }
 
+    /// The row set a replayed acceptance must redrive to re-derive its turn.
+    ///
+    /// A replayed acceptance whose row is already settled redrives the turn so
+    /// the store recognises the commit identity and replays its receipt
+    /// (ADR 0069 §6). That only works if the redrive materializes the same
+    /// words the first execution did, and the first execution may have absorbed
+    /// every earlier claimed row into the same turn. The durable applications
+    /// name that set: every row the settled row's turn applied, in durable
+    /// commit order. Each of them is settled by construction, so the same
+    /// no-op cancel probe the drive site already uses reads them back without
+    /// withdrawing anything.
+    ///
+    /// Recovery is best effort by design: a store that cannot report
+    /// applications, or a set this call cannot read back whole, falls back to
+    /// the settled row alone rather than inventing a turn. That is the pre-
+    /// FIG-1671 shape and it is correct whenever the first execution drove one
+    /// row, which is every single-row session.
+    async fn settled_turn_input_redrive_set(
+        &self,
+        store: &dyn crate::store::RuntimePersistence,
+        settled: &crate::PendingTurnInput,
+    ) -> Vec<crate::PendingTurnInput> {
+        let alone = || vec![settled.clone()];
+        let Ok(applications) = store
+            .list_turn_input_applications(&self.state.session_id)
+            .await
+        else {
+            return alone();
+        };
+        let Some(turn_id) = applications
+            .iter()
+            .find(|application| application.input_id == settled.input_id)
+            .map(|application| application.turn_id.clone())
+        else {
+            return alone();
+        };
+        let settled_ids = applications
+            .iter()
+            .filter(|application| application.turn_id == turn_id)
+            .map(|application| application.input_id.clone())
+            .collect::<Vec<_>>();
+        if settled_ids.len() <= 1 {
+            return alone();
+        }
+        let mut inputs = Vec::with_capacity(settled_ids.len());
+        for input_id in &settled_ids {
+            if input_id == &settled.input_id {
+                inputs.push(settled.clone());
+                continue;
+            }
+            match store
+                .cancel_pending_turn_input(&self.state.session_id, input_id)
+                .await
+            {
+                Ok(crate::PendingTurnInputCancelOutcome::AlreadyCompleted(sibling)) => {
+                    inputs.push(sibling);
+                }
+                _ => return alone(),
+            }
+        }
+        tracing::debug!(
+            session_id = %self.state.session_id,
+            turn_id = %turn_id,
+            settled_input_id = %settled.input_id,
+            sibling_count = inputs.len() - 1,
+            event = "turn_input.redrive_set_recovered",
+            "replayed acceptance redrives the full row set its first execution settled"
+        );
+        inputs
+    }
+
     /// Drain-time backstop for inputs no turn can deliver (FIG-1573).
     ///
     /// Runs only when the drain holds the session-execution lane and found
@@ -2670,12 +2741,61 @@ impl LashRuntime {
                         .await
                         .map_err(super::runtime_error_from_store_commit)?;
                 }
-                let claimed_own_row = input_claim.filter(|claim| {
-                    claim
-                        .inputs
-                        .iter()
-                        .any(|pending| pending.input_id == accepted.input_id)
-                });
+                let claimed_own_row = match input_claim {
+                    Some(claim)
+                        if claim
+                            .inputs
+                            .iter()
+                            .any(|pending| pending.input_id == accepted.input_id) =>
+                    {
+                        Some(claim)
+                    }
+                    // A claim that reached rows but not this turn's own
+                    // acceptance is claim-pinning up to
+                    // `MAX_CLAIMED_TURN_INPUTS` rows this caller will never
+                    // drive. Hand it straight back instead of dropping it and
+                    // leaving those rows stalled until the lane generation
+                    // advances far enough for the FIG-1573 backstop to repair
+                    // them.
+                    Some(foreign_claim) => {
+                        crate::trace::emit_trace(
+                            &self.host.core.tracing.trace_sink,
+                            &self.host.core.tracing.trace_context,
+                            lash_trace::TraceContext::default()
+                                .for_session(self.state.session_id.clone())
+                                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                                .for_turn_index(self.state.turn_index + 1)
+                                .for_turn(trace_turn_id.clone()),
+                            lash_trace::TraceEvent::Custom {
+                                name: "turn_input.claim_abandoned".to_string(),
+                                payload: serde_json::json!({
+                                    "claim_id": &foreign_claim.claim_id,
+                                    "accepted_input_id": &accepted.input_id,
+                                    "input_ids": foreign_claim
+                                        .inputs
+                                        .iter()
+                                        .map(|input| input.input_id.clone())
+                                        .collect::<Vec<_>>(),
+                                    "reason": "claim_missed_own_acceptance",
+                                }),
+                            },
+                            self.host.core.clock.as_ref(),
+                        );
+                        if let Err(abandon_err) = store
+                            .abandon_turn_input_claims(std::slice::from_ref(&foreign_claim))
+                            .await
+                        {
+                            tracing::warn!(
+                                error = %abandon_err,
+                                claim_id = %foreign_claim.claim_id,
+                                claim_count = foreign_claim.inputs.len(),
+                                "failed to abandon a turn-input claim that missed its own acceptance"
+                            );
+                        }
+                        None
+                    }
+                    None => None,
+                };
                 match claimed_own_row {
                     Some(input_claim) => {
                         crate::trace::emit_trace(
@@ -2706,9 +2826,23 @@ impl LashRuntime {
                         // no-op on every state except an open one, so the same
                         // call both withdraws a withdrawable acceptance and
                         // reports why it could not.
-                        let outcome = store
+                        let outcome = match store
                             .cancel_pending_turn_input(&self.state.session_id, &accepted.input_id)
-                            .await;
+                            .await
+                        {
+                            Ok(outcome) => outcome,
+                            // A store fault is not a verdict on the row: it
+                            // leaves the acceptance open and undriven, so it
+                            // must surface as itself rather than as one of the
+                            // dispositions below, each of which tells the
+                            // caller something the probe never established.
+                            Err(err) => {
+                                if let Some(lease) = session_execution_lease.as_ref() {
+                                    let _ = lease.release_if_live().await;
+                                }
+                                return Err(super::runtime_error_from_store_commit(err));
+                            }
+                        };
                         // Intent-fulfilled-iff-result-exists (ADR 0069 §6): a
                         // replayed acceptance whose turn already committed is
                         // settled, not claimable. That is a redrive, not a
@@ -2717,21 +2851,30 @@ impl LashRuntime {
                         // unclaimed regime like any other driver that could not
                         // fence the row it accepted. One settlement path, two
                         // regimes.
-                        if matches!(
-                            outcome,
-                            Ok(crate::PendingTurnInputCancelOutcome::AlreadyCompleted(_))
-                        ) {
+                        if let crate::PendingTurnInputCancelOutcome::AlreadyCompleted(settled) =
+                            &outcome
+                        {
+                            // The redrive must re-derive the first execution's
+                            // *turn*, not just its own row. A first execution
+                            // that took the lane absorbed every earlier claimed
+                            // row into one turn, and a redrive naming fewer rows
+                            // materializes different words, hashes differently,
+                            // and is refused as a commit conflict instead of
+                            // replaying the receipt. So rebuild the settled row
+                            // set from the durable applications the first
+                            // execution wrote.
+                            let inputs = self
+                                .settled_turn_input_redrive_set(store.as_ref(), settled)
+                                .await;
                             super::turn_input_ingress::TurnInputDrive::Unclaimed(
                                 crate::UnclaimedTurnInputs {
                                     session_id: self.state.session_id.clone(),
-                                    inputs: vec![accepted.clone()],
+                                    inputs,
                                     applications: Vec::new(),
                                 },
                             )
-                        } else if matches!(
-                            outcome,
-                            Ok(crate::PendingTurnInputCancelOutcome::NotFound)
-                        ) {
+                        } else if matches!(outcome, crate::PendingTurnInputCancelOutcome::NotFound)
+                        {
                             // The journaled acceptance names an identity, not a
                             // write (ADR 0069 §6): a replayed acceptance hands
                             // back the identity the first execution minted
@@ -2773,8 +2916,8 @@ impl LashRuntime {
                             }
                             let withdrawn = matches!(
                                 outcome,
-                                Ok(crate::PendingTurnInputCancelOutcome::Cancelled(_)
-                                    | crate::PendingTurnInputCancelOutcome::AlreadyCancelled(_))
+                                crate::PendingTurnInputCancelOutcome::Cancelled(_)
+                                    | crate::PendingTurnInputCancelOutcome::AlreadyCancelled(_)
                             );
                             return Err(RuntimeError::new(
                                 RuntimeErrorCode::SessionExecutionLaneBusy,
@@ -2866,8 +3009,12 @@ impl LashRuntime {
         let mut run = self
             .settle_session_execution_lease(session_execution_lease.as_ref(), result)
             .await?;
-        for turn in &mut run.turns {
-            turn.turn_input_acceptance = Some(acceptance.clone());
+        // Only the physical turn this acceptance admitted carries it. An
+        // agent-frame run's follow-on turns were started by the frame switch,
+        // not by this admission, and stamping them would report an acceptance
+        // that never applied to them.
+        if let Some(admitted) = run.turns.first_mut() {
+            admitted.turn_input_acceptance = Some(acceptance.clone());
         }
         run.acceptance = Some(acceptance);
         Ok(run)

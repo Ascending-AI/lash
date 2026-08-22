@@ -1191,6 +1191,21 @@ pub(crate) async fn complete_turn_input_claims_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     completed_claims: &[lash_core::TurnInputCompletion],
 ) -> Result<(), StoreError> {
+    let unclaimed_settlement_statement = format!(
+        "UPDATE lash_pending_turn_inputs
+                     SET state = $3,
+                         claim_id = NULL,
+                         claim_owner_id = NULL,
+                         claim_owner_incarnation_id = NULL,
+                         claim_owner_liveness_json = NULL,
+                         claim_token = NULL,
+                         claim_session_lease_generation = 0
+                     WHERE session_id = $1
+                       AND input_id = $2
+                       AND claim_id IS NULL
+                       AND state NOT IN ({terminal_states})",
+        terminal_states = super::turn_input_settlement::unclaimed_turn_input_terminal_states_sql()
+    );
     for completed in completed_claims {
         for input_id in &completed.input_ids {
             // One conditional write for both settlement regimes: the claim
@@ -1216,23 +1231,10 @@ pub(crate) async fn complete_turn_input_claims_tx(
                 .bind(lash_core::TurnInputState::Completed.as_str())
                 .bind(&claim.claim_id)
                 .bind(&claim.lease_token),
-                None => sqlx::query(
-                    "UPDATE lash_pending_turn_inputs
-                     SET state = $3,
-                         claim_id = NULL,
-                         claim_owner_id = NULL,
-                         claim_owner_incarnation_id = NULL,
-                         claim_owner_liveness_json = NULL,
-                         claim_token = NULL,
-                         claim_session_lease_generation = 0
-                     WHERE session_id = $1
-                       AND input_id = $2
-                       AND claim_id IS NULL
-                       AND state NOT IN ('completed', 'cancelled')",
-                )
-                .bind(&completed.session_id)
-                .bind(input_id)
-                .bind(lash_core::TurnInputState::Completed.as_str()),
+                None => sqlx::query(&unclaimed_settlement_statement)
+                    .bind(&completed.session_id)
+                    .bind(input_id)
+                    .bind(lash_core::TurnInputState::Completed.as_str()),
             }
             .execute(&mut **tx)
             .await

@@ -94,7 +94,11 @@ pub use usage_activity::*;
 // Bumped to 43: remote turn reports reject status/outcome contradictions;
 // peers must derive status from the terminal outcome rather than trusting both
 // fields independently (FIG-1756).
-pub const REMOTE_PROTOCOL_VERSION: u32 = 43;
+// Bumped to 44: remote runtime effects carry an `accept_turn_input` kind for
+// the journaled turn-input acceptance. A version 43 peer rejects the new
+// variant outright, so the two sides must agree before it can appear on the
+// wire (FIG-1671).
+pub const REMOTE_PROTOCOL_VERSION: u32 = 44;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {
