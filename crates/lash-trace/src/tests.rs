@@ -224,114 +224,191 @@ fn event_kind_matches_serialized_type_tag() {
 
 #[test]
 fn event_is_failed_identifies_all_failure_outcomes() {
-    let ok_turn = TraceRecord::new(
-        TraceContext::default().for_session("root"),
-        TraceEvent::TurnCompleted {
-            outcome: TraceTurnOutcome::Completed {
-                done_reason: TraceTurnCompletionReason::AssistantMessage,
+    fn tool_completed(outcome: TraceToolCallOutcome) -> TraceEvent {
+        TraceEvent::ToolCallCompleted {
+            call_id: None,
+            name: "tool".to_string(),
+            args: Value::Null,
+            output: TraceToolCallOutput {
+                outcome,
+                control: None,
             },
-        },
-    );
-    let failed_turn = TraceRecord::new(
-        TraceContext::default().for_session("root"),
-        TraceEvent::TurnCompleted {
-            outcome: TraceTurnOutcome::Failed {
-                done_reason: TraceTurnFailureReason::RuntimeError,
-            },
-        },
-    );
-    assert!(!ok_turn.event.is_failed());
-    assert!(failed_turn.event.is_failed());
+            duration_ms: 1,
+            attempts: None,
+        }
+    }
 
-    let lang_started = TraceEvent::LanguageExecution {
-        language: "lashlang".to_string(),
-        event: TraceLanguageExecution {
-            event_key: "key1".to_string(),
-            identity: TraceLanguageExecutionIdentity {
-                scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: "p1".to_string(),
+    fn language_execution(payload: TraceLanguageExecutionPayload) -> TraceEvent {
+        TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: TraceLanguageExecution {
+                event_key: "event-key".to_string(),
+                identity: TraceLanguageExecutionIdentity {
+                    scope: TraceRuntimeScope::new("s1"),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: "p1".to_string(),
+                    },
+                    module_ref: "m".to_string(),
+                    entry_kind: "p".to_string(),
+                    entry_ref: None,
+                    entry_name: "main".to_string(),
                 },
-                module_ref: "m".to_string(),
-                entry_kind: "p".to_string(),
-                entry_ref: None,
-                entry_name: "main".to_string(),
+                payload,
             },
-            payload: TraceLanguageExecutionPayload::NodeStarted {
+        }
+    }
+
+    let failures = [
+        (
+            "llm call failed",
+            TraceEvent::LlmCallFailed {
+                error: TraceError {
+                    message: "failed".to_string(),
+                    retryable: false,
+                    terminal_reason: None,
+                    code: None,
+                    raw: None,
+                },
+                stream_summary: None,
+                attempts: None,
+            },
+        ),
+        (
+            "effect envelope diff",
+            TraceEvent::EffectEnvelopeDiff {
+                event: TraceEffectEnvelopeDiffEvent {
+                    recorded_envelope_hash: "recorded".to_string(),
+                    reconstructed_envelope_hash: "reconstructed".to_string(),
+                    divergent_paths: Vec::new(),
+                },
+            },
+        ),
+        (
+            "store error observed",
+            TraceEvent::StoreErrorObserved {
+                operation: "load".to_string(),
+                error_class: "corrupt".to_string(),
+                message: "failed".to_string(),
+            },
+        ),
+        (
+            "journaled effect failed",
+            TraceEvent::JournaledEffectSettled {
+                effect_name: "effect".to_string(),
+                effect_kind: "run".to_string(),
+                status: TraceJournaledEffectStatus::Failed,
+            },
+        ),
+        (
+            "durable timer failed",
+            TraceEvent::DurableTimerResolved {
+                duration_ms: 1,
+                status: TraceDurableTimerStatus::Failed,
+            },
+        ),
+        (
+            "durable wait failed",
+            TraceEvent::DurableWaitResolved {
+                wait_kind: "event".to_string(),
+                resolution: TraceDurableWaitResolution::Failed,
+            },
+        ),
+        (
+            "tool call failed",
+            tool_completed(TraceToolCallOutcome::Failure(Value::Null)),
+        ),
+        (
+            "language node failed",
+            language_execution(TraceLanguageExecutionPayload::NodeFailed {
                 node_id: "n1".to_string(),
                 node_kind: "op".to_string(),
-                label: "lbl".to_string(),
+                label: "node".to_string(),
                 occurrence: 1,
-            },
-        },
-    };
-    let lang_node_failed = TraceEvent::LanguageExecution {
-        language: "lashlang".to_string(),
-        event: TraceLanguageExecution {
-            event_key: "key2".to_string(),
-            identity: TraceLanguageExecutionIdentity {
-                scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: "p1".to_string(),
-                },
-                module_ref: "m".to_string(),
-                entry_kind: "p".to_string(),
-                entry_ref: None,
-                entry_name: "main".to_string(),
-            },
-            payload: TraceLanguageExecutionPayload::NodeFailed {
-                node_id: "n1".to_string(),
-                node_kind: "op".to_string(),
-                label: "lbl".to_string(),
-                occurrence: 1,
-                error: "err".to_string(),
-            },
-        },
-    };
-    let lang_exec_failed = TraceEvent::LanguageExecution {
-        language: "lashlang".to_string(),
-        event: TraceLanguageExecution {
-            event_key: "key3".to_string(),
-            identity: TraceLanguageExecutionIdentity {
-                scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: "p1".to_string(),
-                },
-                module_ref: "m".to_string(),
-                entry_kind: "p".to_string(),
-                entry_ref: None,
-                entry_name: "main".to_string(),
-            },
-            payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                error: "failed".to_string(),
+            }),
+        ),
+        (
+            "language execution failed",
+            language_execution(TraceLanguageExecutionPayload::ExecutionFinished {
                 status: TraceLanguageExecutionStatus::Failed,
-                error: Some("err".to_string()),
-            },
-        },
-    };
-    let lang_exec_ok = TraceEvent::LanguageExecution {
-        language: "lashlang".to_string(),
-        event: TraceLanguageExecution {
-            event_key: "key4".to_string(),
-            identity: TraceLanguageExecutionIdentity {
-                scope: TraceRuntimeScope::new("s1"),
-                subject: TraceRuntimeSubject::Process {
-                    process_id: "p1".to_string(),
+                error: Some("failed".to_string()),
+            }),
+        ),
+    ];
+    for (case, event) in failures {
+        assert!(event.is_failed(), "{case} must be classified as failed");
+    }
+
+    for done_reason in [
+        TraceTurnFailureReason::Incomplete,
+        TraceTurnFailureReason::InvalidInput,
+        TraceTurnFailureReason::MaxTurns,
+        TraceTurnFailureReason::ToolFailure,
+        TraceTurnFailureReason::ProviderError,
+        TraceTurnFailureReason::PluginAbort,
+        TraceTurnFailureReason::RuntimeError,
+        TraceTurnFailureReason::SubmittedError,
+        TraceTurnFailureReason::ToolError,
+    ] {
+        let case = done_reason.wire_tag();
+        let event = TraceEvent::TurnCompleted {
+            outcome: TraceTurnOutcome::Failed { done_reason },
+        };
+        assert!(event.is_failed(), "failed turn reason {case} was missed");
+    }
+
+    let non_failures = [
+        (
+            "completed turn",
+            TraceEvent::TurnCompleted {
+                outcome: TraceTurnOutcome::Completed {
+                    done_reason: TraceTurnCompletionReason::AssistantMessage,
                 },
-                module_ref: "m".to_string(),
-                entry_kind: "p".to_string(),
-                entry_ref: None,
-                entry_name: "main".to_string(),
             },
-            payload: TraceLanguageExecutionPayload::ExecutionFinished {
+        ),
+        (
+            "cancelled turn",
+            TraceEvent::TurnCompleted {
+                outcome: TraceTurnOutcome::Cancelled {
+                    evidence: TraceTurnCancellationEvidence {
+                        request_id: "request-1".to_string(),
+                        origin: None,
+                        reason: None,
+                    },
+                },
+            },
+        ),
+        (
+            "successful tool call",
+            tool_completed(TraceToolCallOutcome::Success(Value::Null)),
+        ),
+        (
+            "cancelled tool call",
+            tool_completed(TraceToolCallOutcome::Cancelled(Value::Null)),
+        ),
+        (
+            "started language node",
+            language_execution(TraceLanguageExecutionPayload::NodeStarted {
+                node_id: "n1".to_string(),
+                node_kind: "op".to_string(),
+                label: "node".to_string(),
+                occurrence: 1,
+            }),
+        ),
+        (
+            "completed language execution",
+            language_execution(TraceLanguageExecutionPayload::ExecutionFinished {
                 status: TraceLanguageExecutionStatus::Completed,
                 error: None,
-            },
-        },
-    };
-    assert!(!lang_started.is_failed());
-    assert!(lang_node_failed.is_failed());
-    assert!(lang_exec_failed.is_failed());
-    assert!(!lang_exec_ok.is_failed());
+            }),
+        ),
+    ];
+    for (case, event) in non_failures {
+        assert!(
+            !event.is_failed(),
+            "{case} must not be classified as failed"
+        );
+    }
 }
 
 #[test]
