@@ -1,11 +1,11 @@
 use crate::{
-    PreparedToolCall, ToolCallOutcome, ToolContext, ToolManifest, ToolOutcome, ToolRetryPolicy,
-    ToolRetryStatus,
+    PreparedToolCall, ToolCallOutcome, ToolContext, ToolOutcome, ToolRetryPolicy, ToolRetryStatus,
 };
 use futures_util::FutureExt as _;
 use lash_sansio::core_support::*;
 
 use super::context::ToolDispatchContext;
+use super::execution::AttemptAuthority;
 
 pub(crate) fn resolve_retry_policy(
     context: &ToolDispatchContext<'_>,
@@ -21,91 +21,85 @@ pub(crate) fn resolve_retry_policy(
         .unwrap_or(ToolRetryPolicy::Never)
 }
 
+/// Runs one numbered attempt of a leaf tool under its resolved authority.
+///
+/// The retry context is stamped with the authority's manifest name, so a
+/// granted attempt reports the granted tool the same way a catalog attempt
+/// reports its catalog member.
 pub(super) async fn execute_leaf_tool_attempt<'run>(
     context: &ToolDispatchContext<'run>,
-    manifest: &ToolManifest,
+    authority: &AttemptAuthority<'_>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
     attempt: u32,
     max_attempts: u32,
 ) -> crate::ToolAttemptOutcome {
-    let tool_name = manifest.name.as_str();
+    let tool_name = authority.manifest().name.as_str();
     execute_once(
         context,
         prepared,
         tool_context.with_retry_context(tool_name, attempt, max_attempts),
+        authority.grant(),
     )
     .await
 }
 
-pub(super) async fn execute_granted_leaf_tool_attempt<'run>(
-    context: &ToolDispatchContext<'run>,
-    grant: &crate::ToolExecutionGrant,
-    prepared: &PreparedToolCall,
-    tool_context: ToolContext<'run>,
-    attempt: u32,
-    max_attempts: u32,
-) -> crate::ToolAttemptOutcome {
-    let tool_name = grant.manifest.name.as_str();
-    execute_granted_once(
-        context,
-        grant,
-        prepared,
-        tool_context.with_retry_context(tool_name, attempt, max_attempts),
-    )
-    .await
-}
-
+/// Runs a leaf tool body exactly once, with no retry ladder around it.
+///
+/// The grant selects the execution seam and the attachment producer name;
+/// everything else — the attempt context, panic containment, attachment
+/// normalization — is identical on both routes.
 pub(crate) async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
+    grant: Option<&crate::ToolExecutionGrant>,
 ) -> crate::ToolAttemptOutcome {
-    let mut attempt_result = execute_with_attempt_context(context, prepared, &tool_context).await;
-    normalize_attempt_result_attachments(context, &prepared.tool_name, &mut attempt_result).await;
+    let mut attempt_result = match build_attempt_context(context, prepared, &tool_context).await {
+        Ok(attempt_context) => {
+            execute_attempt_body(context, prepared, grant, &attempt_context).await
+        }
+        Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
+    };
+    // A granted attempt is keyed on the grant name, never on whatever name the
+    // provider's prepared call carries: the grant is the authority that
+    // admitted the call, so it is the producer the attachment policy judges.
+    let producer_name = match grant {
+        Some(grant) => grant.manifest.name.as_str(),
+        None => prepared.tool_name.as_str(),
+    };
+    normalize_attempt_result_attachments(context, producer_name, &mut attempt_result).await;
     attempt_result
 }
 
-async fn execute_granted_once<'run>(
-    context: &ToolDispatchContext<'run>,
-    grant: &crate::ToolExecutionGrant,
+async fn execute_attempt_body(
+    context: &ToolDispatchContext<'_>,
     prepared: &PreparedToolCall,
-    tool_context: ToolContext<'run>,
+    grant: Option<&crate::ToolExecutionGrant>,
+    attempt_context: &crate::AttemptContext<'_>,
 ) -> crate::ToolAttemptOutcome {
-    let mut attempt_result = match build_attempt_context(context, prepared, &tool_context).await {
-        Ok(attempt_context) => std::panic::AssertUnwindSafe(context.tools.execute_granted_attempt(
-            grant,
-            &prepared.args,
-            &attempt_context,
-        ))
+    let body = async {
+        match grant {
+            Some(grant) => {
+                context
+                    .tools
+                    .execute_granted_attempt(grant, &prepared.args, attempt_context)
+                    .await
+            }
+            None => {
+                context
+                    .tools
+                    .execute_attempt_by_id(&prepared.tool_id, &prepared.args, attempt_context)
+                    .await
+            }
+        }
+    };
+    std::panic::AssertUnwindSafe(body)
         .catch_unwind()
         .await
         .unwrap_or_else(|payload| {
             crate::ToolAttemptOutcome::from_tool_result(tool_panicked(payload))
-        }),
-        Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
-    };
-    normalize_attempt_result_attachments(context, &grant.manifest.name, &mut attempt_result).await;
-    attempt_result
-}
-
-async fn execute_with_attempt_context(
-    context: &ToolDispatchContext<'_>,
-    prepared: &PreparedToolCall,
-    tool_context: &ToolContext<'_>,
-) -> crate::ToolAttemptOutcome {
-    let attempt_context = match build_attempt_context(context, prepared, tool_context).await {
-        Ok(context) => context,
-        Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
-    };
-    std::panic::AssertUnwindSafe(context.tools.execute_attempt_by_id(
-        &prepared.tool_id,
-        &prepared.args,
-        &attempt_context,
-    ))
-    .catch_unwind()
-    .await
-    .unwrap_or_else(|payload| crate::ToolAttemptOutcome::from_tool_result(tool_panicked(payload)))
+        })
 }
 
 async fn build_attempt_context<'run>(

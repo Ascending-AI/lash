@@ -2461,6 +2461,6 @@ async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
         );
     }
 }
-
+include!("tests/granted_dispatch.rs");
 include!("tests/intent_laws.rs");
 include!("tests/pending_park_laws.rs");

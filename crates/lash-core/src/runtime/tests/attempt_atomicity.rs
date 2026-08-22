@@ -505,9 +505,13 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                     .as_ref()
                     .expect("tool context carries runtime dispatch"),
             );
-            let result =
-                crate::tool_dispatch::execute_once(dispatch.as_ref(), &prepared_tool_call(), tool)
-                    .await;
+            let result = crate::tool_dispatch::execute_once(
+                dispatch.as_ref(),
+                &prepared_tool_call(),
+                tool,
+                None,
+            )
+            .await;
             // Assert the provider's sentinel value at the test level, not just
             // the Done shape. A recorded attempt body runs under
             // `catch_unwind`, so an assertion that panics *inside* the provider
