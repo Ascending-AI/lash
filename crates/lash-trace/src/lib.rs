@@ -449,6 +449,28 @@ pub struct TraceExecutionEvidence {
 }
 
 impl TraceEvent {
+    /// Returns `true` if this event represents a failure outcome.
+    pub fn is_failed(&self) -> bool {
+        match self {
+            Self::LlmCallFailed { .. }
+            | Self::EffectEnvelopeDiff { .. }
+            | Self::StoreErrorObserved { .. } => true,
+            Self::JournaledEffectSettled { status, .. }
+            | Self::DurableTimerResolved { status, .. } => status == "failed",
+            Self::DurableWaitResolved { resolution, .. } => resolution == "failed",
+            Self::ToolCallCompleted { output, .. } => !output.is_success(),
+            Self::TurnCompleted { status, .. } => status == "failed",
+            Self::LanguageExecution { event, .. } => match &event.payload {
+                TraceLanguageExecutionPayload::NodeFailed { .. } => true,
+                TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => {
+                    *status == TraceLanguageExecutionStatus::Failed
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     /// The `type` tag serde writes for this variant. This is the single source
     /// of truth for event-kind strings — typed JSONL consumers (e.g. trace sinks)
     /// match on the enum and read the kind from here rather than re-deriving
@@ -1391,6 +1413,118 @@ mod tests {
             let json = serde_json::to_value(&event).expect("serialize event");
             assert_eq!(json["type"], kind, "kind() disagrees with serde tag");
         }
+    }
+
+    #[test]
+    fn event_is_failed_identifies_all_failure_outcomes() {
+        let ok_turn = TraceRecord::new(
+            TraceContext::default().for_session("root"),
+            TraceEvent::TurnCompleted {
+                status: "completed".to_string(),
+                done_reason: "modelstop".to_string(),
+                agent_frame_switch: None,
+            },
+        );
+        let failed_turn = TraceRecord::new(
+            TraceContext::default().for_session("root"),
+            TraceEvent::TurnCompleted {
+                status: "failed".to_string(),
+                done_reason: "error".to_string(),
+                agent_frame_switch: None,
+            },
+        );
+        assert!(!ok_turn.event.is_failed());
+        assert!(failed_turn.event.is_failed());
+
+        let lang_started = TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: TraceLanguageExecution {
+                event_key: "key1".to_string(),
+                identity: TraceLanguageExecutionIdentity {
+                    scope: TraceRuntimeScope::new("s1"),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: "p1".to_string(),
+                    },
+                    module_ref: "m".to_string(),
+                    entry_kind: "p".to_string(),
+                    entry_ref: None,
+                    entry_name: "main".to_string(),
+                },
+                payload: TraceLanguageExecutionPayload::NodeStarted {
+                    node_id: "n1".to_string(),
+                    node_kind: "op".to_string(),
+                    label: "lbl".to_string(),
+                    occurrence: 1,
+                },
+            },
+        };
+        let lang_node_failed = TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: TraceLanguageExecution {
+                event_key: "key2".to_string(),
+                identity: TraceLanguageExecutionIdentity {
+                    scope: TraceRuntimeScope::new("s1"),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: "p1".to_string(),
+                    },
+                    module_ref: "m".to_string(),
+                    entry_kind: "p".to_string(),
+                    entry_ref: None,
+                    entry_name: "main".to_string(),
+                },
+                payload: TraceLanguageExecutionPayload::NodeFailed {
+                    node_id: "n1".to_string(),
+                    node_kind: "op".to_string(),
+                    label: "lbl".to_string(),
+                    occurrence: 1,
+                    error: "err".to_string(),
+                },
+            },
+        };
+        let lang_exec_failed = TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: TraceLanguageExecution {
+                event_key: "key3".to_string(),
+                identity: TraceLanguageExecutionIdentity {
+                    scope: TraceRuntimeScope::new("s1"),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: "p1".to_string(),
+                    },
+                    module_ref: "m".to_string(),
+                    entry_kind: "p".to_string(),
+                    entry_ref: None,
+                    entry_name: "main".to_string(),
+                },
+                payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                    status: TraceLanguageExecutionStatus::Failed,
+                    error: Some("err".to_string()),
+                },
+            },
+        };
+        let lang_exec_ok = TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: TraceLanguageExecution {
+                event_key: "key4".to_string(),
+                identity: TraceLanguageExecutionIdentity {
+                    scope: TraceRuntimeScope::new("s1"),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: "p1".to_string(),
+                    },
+                    module_ref: "m".to_string(),
+                    entry_kind: "p".to_string(),
+                    entry_ref: None,
+                    entry_name: "main".to_string(),
+                },
+                payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                    status: TraceLanguageExecutionStatus::Completed,
+                    error: None,
+                },
+            },
+        };
+        assert!(!lang_started.is_failed());
+        assert!(lang_node_failed.is_failed());
+        assert!(lang_exec_failed.is_failed());
+        assert!(!lang_exec_ok.is_failed());
     }
 
     #[test]
