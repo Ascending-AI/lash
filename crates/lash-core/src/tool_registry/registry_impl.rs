@@ -5,7 +5,7 @@ impl ToolRegistry {
         let registry = Self::empty();
         registry.upsert_source(Arc::new(ToolProviderSource::new(
             PLUGIN_TOOL_SOURCE_ID,
-            provider,
+            vec![provider],
         )))?;
         Ok(registry)
     }
@@ -62,7 +62,7 @@ impl ToolRegistry {
     ) -> Result<Self, ReconfigureError> {
         let registry = Self::empty_with_hidden_tools(hidden_tool_names);
         for (source_id, providers) in sources {
-            registry.upsert_source(Arc::new(ToolProviderGroupSource::new(
+            registry.upsert_source(Arc::new(ToolProviderSource::new(
                 source_id, providers,
             )))?;
         }
@@ -206,7 +206,7 @@ impl ToolRegistry {
         } else {
             Self::empty_with_hidden_tools((*self.hidden_tool_names).clone())
         };
-        registry.upsert_overlay_source(Arc::new(ToolProviderGroupSource::new(
+        registry.upsert_overlay_source(Arc::new(ToolProviderSource::new(
             "context",
             context_providers,
         )))?;
