@@ -276,6 +276,7 @@ jobs:
           python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bumps.py
+          python3 scripts/test_fast_test.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_gate_scope.py

@@ -100,6 +100,14 @@ Heavy gates are serial within a lane and capped across the box: build width come
 
 A battery may consult `python3 scripts/gate_scope.py --base origin/main` to skip gate families no touched path can reach — a prose-only change does not need the compile battery. The classifier only ever skips what it can prove is unaffected: a shared input (manifests, lockfile, toolchain, `scripts/`, `.github/`), an unrecognised path, an empty path set, or its own failure runs everything. Its decision line must be printed verbatim into the gate log next to the gate table, so a reviewer can audit every skip rather than take it on trust; a battery result reported without that line is reported as if nothing was skipped.
 
+### Iterating: change-scoped fast tests
+
+`scripts/fast-test.sh` runs the workspace suite narrowed to the crates your diff touches plus everything that depends on them (nextest `rdeps()` filtersets over the merge-base diff, crate granularity). Use it for the edit-run loop, and for the decisive re-run when you have fixed a reviewer's finding and want that finding's blast radius re-proved in minutes rather than an hour.
+
+It is fail-closed by construction: a manifest, `Cargo.lock`, the toolchain pin, `.cargo/`, `.config/`, `scripts/`, `.github/`, or any file it cannot attribute to exactly one workspace crate widens the run back to the full workspace suite and says so, and a filterset that selects zero tests exits nonzero instead of reporting a pass.
+
+**Narrowing is never the proof.** The single pre-push battery and CI stay full-suite, and "green" on a ticket or a PR means the full suite ran — a scoped run is iteration evidence, and saying so is part of the claim.
+
 ### Expect tests versus conformance assertions
 
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
