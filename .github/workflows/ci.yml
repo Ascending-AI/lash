@@ -11,6 +11,15 @@ on:
   # Manual re-validation for when GitHub drops a push event (merge commit
   # d70ce7ea got zero check suites). Recovery-only: no inputs, never invoked
   # from another workflow, and unrelated to the removed pass-2 bump chain.
+  #
+  # Don't drive this recovery by hand: `scripts/ci_ensure_run.sh <branch>
+  # <head-sha>` waits a bounded window for the run GitHub should have made,
+  # dispatches this trigger exactly once if none arrives, then polls that run
+  # to a conclusion. A dispatch run is NOT equivalent to the run it replaces —
+  # the event-conditional steps below (`Check versioned surface bumps`,
+  # `Check and preview PR release notes`) do not run, and it builds
+  # refs/heads/<branch> rather than the PR merge tree — so the script exits 3,
+  # not 0, on a green dispatch. Callers opt in with --accept-dispatch-run.
   workflow_dispatch:
   pull_request:
   # The merge queue delivers a queued PR's required checks on its own event, from
