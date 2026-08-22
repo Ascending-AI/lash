@@ -1461,8 +1461,10 @@ mod tests {
         };
         let turn_input_origin = crate::TurnInputCompletion {
             session_id: "session-1".to_string(),
-            claim_id: "turn-input-claim".to_string(),
-            lease_token: "turn-input-token".to_string(),
+            claim: Some(crate::TurnInputSettlementClaim {
+                claim_id: "turn-input-claim".to_string(),
+                lease_token: "turn-input-token".to_string(),
+            }),
             data: crate::TurnInputCompletionData {
                 input_ids: vec!["turn-input".to_string()],
                 applications: Vec::new(),

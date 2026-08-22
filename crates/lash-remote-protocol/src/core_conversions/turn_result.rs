@@ -36,8 +36,12 @@ impl RemoteTurnReport {
         activities: impl IntoIterator<Item = RemoteTurnActivity>,
     ) -> Self {
         // `state` is the local session snapshot; it never crosses the wire.
+        // `turn_input_acceptance` is durable admission identity a remote host
+        // reads from the pending-input and application surfaces, which are
+        // already versioned; the turn result does not duplicate it.
         let lash_core::facade_support::AssembledTurn {
             state: _,
+            turn_input_acceptance: _,
             outcome,
             cancellation,
             assistant_output,

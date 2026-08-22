@@ -628,6 +628,7 @@ mod tests {
     fn final_value_builder_derives_pass_and_fail_from_real_outcomes_and_events() {
         fn result(outcome: lash_core::facade_support::TurnOutcome) -> lash::TurnReport {
             lash::TurnReport {
+                acceptance: None,
                 state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                 )),

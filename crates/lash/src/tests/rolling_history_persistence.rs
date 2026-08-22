@@ -287,10 +287,20 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         .turn_id("attachment-prune-first")
         .run()
         .await?;
+    // The turn's input is admitted durably before it drives (ADR 0069), so its
+    // committed message is addressed by the acceptance it came from rather than
+    // by a turn-shaped id.
     let original_durable_message = sqlite_messages(store_factory.as_ref(), session_id)
         .into_iter()
-        .find(|message| message.id == "m_turn_attachment-prune-first_input")
+        .find(|message| {
+            matches!(
+                &message.origin,
+                Some(lash_core::MessageOrigin::TurnInput { turn_id, .. })
+                    if turn_id == "attachment-prune-first"
+            )
+        })
         .expect("first turn input is durable");
+    let first_input_message_id = original_durable_message.id.clone();
     session
         .turn(TurnInput::text("trigger ephemeral pruning"))
         .turn_id("attachment-prune-second")
@@ -299,7 +309,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
 
     let durable_message = sqlite_messages(store_factory.as_ref(), session_id)
         .into_iter()
-        .find(|message| message.id == "m_turn_attachment-prune-first_input")
+        .find(|message| message.id == first_input_message_id)
         .expect("first turn input remains durable");
     assert!(
         durable_message
@@ -327,7 +337,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     });
     assert_eq!(
         mismatch_record.expect("attachment projection mismatch diagnostic")["payload"]["id_mismatch_message_ids"],
-        serde_json::json!(["m_turn_attachment-prune-first_input"])
+        serde_json::json!([first_input_message_id])
     );
 
     Ok(())

@@ -212,7 +212,9 @@ impl RuntimeTurnDriver<'_> {
                     );
                     let applications = claim.applications.clone();
                     let accepted_turn_inputs = claim.accepted_turn_inputs();
-                    self.pending_turn_input_claims.push(claim);
+                    self.pending_turn_input_claims.push(
+                        crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim),
+                    );
                     send_turn_input_applications(event_tx, applications).await;
                     if !accepted_turn_inputs.is_empty() {
                         send_session_event(

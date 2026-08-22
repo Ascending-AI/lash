@@ -276,6 +276,10 @@ impl TurnBuilder {
         }
     }
 
+    /// Accept this turn's input durably, drive it, and collect its activity.
+    ///
+    /// Convenience over [`stream_to`](Self::stream_to), which documents what
+    /// one acceptance commit then one drive means for a host.
     pub async fn run(self) -> Result<TurnOutput> {
         let collector = RunActivityCollector::default();
         let result = self.stream_to(&collector).await?;
@@ -285,6 +289,25 @@ impl TurnBuilder {
         })
     }
 
+    /// Accept this turn's input durably, drive it, and stream its activity.
+    ///
+    /// One acceptance commit then one drive (ADR 0069). What that means for a
+    /// host:
+    ///
+    /// * **A persistent session pays one extra store commit per turn** — the
+    ///   same Pending Turn Input commit queued ingress has always paid.
+    /// * **Dropping the returned future does not stop the turn.** The caller is
+    ///   the first driver, not the owner, so a caller that goes away has handed
+    ///   the turn to whoever drains next. Abandon a turn by cancelling its
+    ///   accepted input, or by
+    ///   [`LashSession::request_turn_cancel`](crate::LashSession::request_turn_cancel)
+    ///   once it is running.
+    /// * **Input already queued for this session joins this turn**, because a
+    ///   direct turn claims the head of the same pending queue a drain does.
+    /// * **A retry after an unacknowledged crash is a new turn.** Lash mints no
+    ///   idempotency key for a direct turn; a host that needs at-most-once
+    ///   submission supplies its own with
+    ///   [`EnqueueTurnBuilder::id`](crate::EnqueueTurnBuilder::id).
     pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
         let effect_host = Arc::clone(&self.effect_host);
         reject_controller_owned_replay_host(effect_host.as_ref(), "turn")?;
@@ -1374,6 +1397,16 @@ pub struct TurnReport {
     pub tool_calls: Vec<ToolCallRecord>,
     pub execution: TurnExecutionMetrics,
     pub errors: Vec<TurnIssue>,
+    /// Durable acceptance identity of the input this turn was driven from.
+    ///
+    /// Every turn enters through one acceptance commit before anything executes
+    /// (ADR 0069), and this is the same receipt
+    /// [`EnqueueTurnBuilder::send`](crate::EnqueueTurnBuilder::send) returns:
+    /// its `input_id` addresses the pending row and matches the settled
+    /// application. Absent only for a store-less session, which has nowhere to
+    /// record an acceptance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance: Option<lash_core::runtime::TurnInputAcceptanceReceipt>,
 }
 
 impl TurnReport {
@@ -1389,6 +1422,7 @@ impl TurnReport {
             tool_calls: turn.tool_calls,
             execution: turn.execution,
             errors: turn.errors,
+            acceptance: turn.turn_input_acceptance,
         }
     }
 

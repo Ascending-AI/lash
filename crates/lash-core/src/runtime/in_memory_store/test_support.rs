@@ -560,8 +560,10 @@ mod tests {
         }];
         commit.completed_turn_input_claims = vec![TurnInputCompletion {
             session_id: "session".to_string(),
-            claim_id: "stale-input-claim".to_string(),
-            lease_token: "stale-input-token".to_string(),
+            claim: Some(crate::TurnInputSettlementClaim {
+                claim_id: "stale-input-claim".to_string(),
+                lease_token: "stale-input-token".to_string(),
+            }),
             data: crate::TurnInputCompletionData {
                 input_ids: vec!["missing-input".to_string()],
                 applications: Vec::new(),

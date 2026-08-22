@@ -27,6 +27,8 @@ use lash_sqlite_store::{
 };
 use tempfile::TempDir;
 
+#[path = "conformance/direct_turn_acceptance.rs"]
+mod direct_turn_acceptance;
 #[path = "conformance/pre_frame_key.rs"]
 mod pre_frame_key;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
