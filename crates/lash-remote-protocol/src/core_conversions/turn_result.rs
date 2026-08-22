@@ -83,20 +83,6 @@ impl RemoteTurnReport {
     }
 }
 
-impl From<&RemoteTurnOutcome> for RemoteTurnStatus {
-    fn from(value: &RemoteTurnOutcome) -> Self {
-        match value {
-            RemoteTurnOutcome::Finished { .. } | RemoteTurnOutcome::AgentFrameSwitch { .. } => {
-                Self::Completed
-            }
-            RemoteTurnOutcome::Stopped {
-                stop: RemoteTurnStop::Cancelled,
-            } => Self::Cancelled,
-            RemoteTurnOutcome::Stopped { .. } => Self::Failed,
-        }
-    }
-}
-
 impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
     fn from(value: lash_core::facade_support::TurnOutcome) -> Self {
         match value {

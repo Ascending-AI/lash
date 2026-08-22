@@ -91,7 +91,10 @@ pub use usage_activity::*;
 // Bumped to 42: session-observation events distinguish revision-stable
 // `resident_changed` replacements from durable `committed` replacements. A
 // version 41 peer has no resident signal and must never decode one as committed.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 42;
+// Bumped to 43: remote turn reports reject status/outcome contradictions;
+// peers must derive status from the terminal outcome rather than trusting both
+// fields independently (FIG-1756).
+pub const REMOTE_PROTOCOL_VERSION: u32 = 43;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {
