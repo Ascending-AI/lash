@@ -1,16 +1,8 @@
-use std::collections::BTreeSet;
-use std::sync::Arc;
-
-use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
+use lash_core::SessionError;
 use lash_lashlang_runtime::LashlangSurface;
-use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-use super::{
-    BoundVariablesPromptRender, CellTags, LashlangDialectServices, RlmDialect, RlmDialectSession,
-};
-use crate::executor::{RlmExecutionState, execute_typescript_code_with_bounds};
-use crate::projection::RlmProjectedBindings;
-use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
+use super::{CellTags, DialectSession, LashlangDialectServices, RlmDialect, RlmDialectSession};
+use crate::executor::SourceDialect;
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
 
@@ -340,14 +332,12 @@ impl RlmDialect for TypescriptDialect {
     }
 
     fn create_session(&self) -> Result<Box<dyn RlmDialectSession>, SessionError> {
-        Ok(Box::new(TypescriptDialectSession {
-            state: RlmExecutionState::for_engine(LANGUAGE_ID),
-            surface: self.surface.clone(),
-            services: self.services.clone(),
-            bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
-                BoundVariableRenderCache::default(),
-            )),
-        }))
+        Ok(Box::new(DialectSession::new(
+            SourceDialect::Typescript,
+            LANGUAGE_ID,
+            self.surface.clone(),
+            self.services.clone(),
+        )))
     }
 
     fn render_execution_section(
@@ -490,117 +480,13 @@ Classes (`TS_CLASS_UNSUPPORTED`), generators (`TS_GENERATOR_UNSUPPORTED`), names
     }
 }
 
-struct TypescriptDialectSession {
-    state: RlmExecutionState,
-    surface: LashlangSurface,
-    services: LashlangDialectServices,
-    bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
-}
-
-#[async_trait::async_trait]
-impl RlmDialectSession for TypescriptDialectSession {
-    async fn execute(
-        &mut self,
-        ctx: RuntimeExecutionContext<'_>,
-        request: ExecRequest,
-        session_projected_bindings: RlmProjectedBindings,
-    ) -> Result<ExecResponse, SessionError> {
-        // The state is borrowed, never moved out: a cell that is cancelled
-        // mid-flight leaves the session holding the same state it started
-        // with, and every other caller waits behind the session's own lock.
-        Ok(execute_typescript_code_with_bounds(
-            &mut self.state,
-            ctx,
-            request,
-            Arc::clone(&self.services.artifact_store),
-            self.surface.clone(),
-            self.services.deferred_tool_resolver.clone(),
-            session_projected_bindings,
-            Arc::clone(&self.services.projection_resolver),
-            self.services.execution_trace_config.clone(),
-            self.services.execution_bounds.into_engine(),
-        )
-        .await)
-    }
-
-    fn execution_state_dirty(&self) -> bool {
-        self.state.execution_state_dirty()
-    }
-
-    fn snapshot_execution_state(
-        &mut self,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state.snapshot_execution_state()
-    }
-
-    fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture()
-    }
-
-    fn hydrated_execution_state(
-        &self,
-    ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state.hydrated_execution_state()
-    }
-
-    fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.acknowledge_execution_state_capture();
-        Ok(())
-    }
-
-    fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.abort_execution_state_capture();
-        Ok(())
-    }
-
-    fn restore_execution_state(
-        &mut self,
-        state: &lash_core::plugin::HydratedExecutionState,
-    ) -> Result<(), SessionError> {
-        self.state
-            .restore_execution_state(state)
-            .map_err(|error| SessionError::Protocol(error.to_string()))
-    }
-
-    fn prune_protected_globals(
-        &mut self,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        self.state.prune_protected_globals(protected_names);
-        Ok(())
-    }
-
-    fn patch_globals(
-        &mut self,
-        patch: &RlmGlobalsPatchPluginBody,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        self.state.patch_globals(patch, protected_names)
-    }
-
-    fn prepare_bound_variables_prompt(
-        &self,
-        exclude: &BTreeSet<String>,
-    ) -> Result<BoundVariablesPromptRender, SessionError> {
-        let mut globals = self.state.bound_variable_values(exclude);
-        // A block-scoped binding that shadows an outer name is lowered to a
-        // generated slot. It is the author's value under a name the author
-        // never wrote, and it is dead by the time any turn boundary renders,
-        // so it is never a bound variable the model should see.
-        globals.retain(|(name, _)| !name.starts_with(lash_typescript::GENERATED_BINDING_PREFIX));
-        let cache = Arc::clone(&self.bound_variable_render_cache);
-        Ok(BoundVariablesPromptRender::new(move || {
-            let mut cache = cache
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            render_bound_variables(&mut cache, &globals, TYPESCRIPT_PROMPT_VOCABULARY)
-        }))
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::projection::RlmProjectedBindings;
+    use lash_core::ExecRequest;
     use lash_core::plugin::ToolCatalogContext;
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 

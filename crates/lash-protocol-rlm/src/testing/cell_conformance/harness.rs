@@ -13,28 +13,20 @@ use lash_core::ExecRequest;
 use lash_lashlang_runtime::LashlangSurface;
 
 use crate::executor::{
-    RlmExecutionState, RlmLashlangExecutionTraceConfig, execute_code_with_bounds,
-    execute_typescript_code_with_bounds,
+    RlmExecutionState, RlmLashlangExecutionTraceConfig, SourceDialect,
+    execute_code_with_dialect_and_bounds,
 };
 use crate::projection::{ProjectionRegistry, RlmProjectedBindings, flow_to_json_value};
 
 /// The two source dialects an RLM session can be opened in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Dialect {
-    Lashlang,
-    Typescript,
-}
+///
+/// The same value the executor runs a cell with, so the harness drives the
+/// production path for a dialect rather than choosing between two of them.
+pub(crate) type Dialect = SourceDialect;
 
 impl Dialect {
     /// Every dialect the conformance suite covers, in a stable order.
     pub(crate) const ALL: &'static [Dialect] = &[Dialect::Lashlang, Dialect::Typescript];
-
-    pub(crate) fn language_id(self) -> &'static str {
-        match self {
-            Self::Lashlang => "lashlang",
-            Self::Typescript => "typescript",
-        }
-    }
 }
 
 impl std::fmt::Display for Dialect {
@@ -119,40 +111,20 @@ impl Session {
         let dialect = self.dialect;
         let state = &mut self.state;
         let response = block_on(async move {
-            let context = lash_core::testing::code_execution_context();
-            let artifact_store = lashlang::global_in_memory_lashlang_artifact_store();
-            match dialect {
-                Dialect::Lashlang => {
-                    execute_code_with_bounds(
-                        state,
-                        context,
-                        request,
-                        artifact_store,
-                        LashlangSurface::default(),
-                        None,
-                        RlmProjectedBindings::default(),
-                        Arc::new(ProjectionRegistry::new()),
-                        RlmLashlangExecutionTraceConfig::default(),
-                        lashlang::ExecutionBounds::unbounded(),
-                    )
-                    .await
-                }
-                Dialect::Typescript => {
-                    execute_typescript_code_with_bounds(
-                        state,
-                        context,
-                        request,
-                        artifact_store,
-                        LashlangSurface::default(),
-                        None,
-                        RlmProjectedBindings::default(),
-                        Arc::new(ProjectionRegistry::new()),
-                        RlmLashlangExecutionTraceConfig::default(),
-                        lashlang::ExecutionBounds::unbounded(),
-                    )
-                    .await
-                }
-            }
+            execute_code_with_dialect_and_bounds(
+                state,
+                lash_core::testing::code_execution_context(),
+                request,
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::unbounded(),
+                dialect,
+            )
+            .await
         });
         self.history.push(code.to_string());
         if self.mode == HarnessMode::RestartBetweenCells {

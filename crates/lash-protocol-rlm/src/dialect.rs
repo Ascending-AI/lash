@@ -10,6 +10,9 @@ use lash_rlm_types::RlmGlobalsPatchPluginBody;
 pub(crate) use lashlang::{LashlangDialect, LashlangDialectServices};
 pub(crate) use typescript::TypescriptDialect;
 
+use crate::executor::{RlmExecutionState, SourceDialect, execute_code_with_dialect_and_bounds};
+use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CellTags {
     pub(crate) open: &'static str,
@@ -85,6 +88,147 @@ pub(crate) trait RlmDialectSession: Send {
         &self,
         exclude: &BTreeSet<String>,
     ) -> Result<BoundVariablesPromptRender, SessionError>;
+}
+
+/// One RLM execution session, for whichever dialect opened it.
+///
+/// Both shipped dialects run the same execution state through the same
+/// executor and answer every state question the same way; the only per-dialect
+/// facts are the source dialect the executor is handed, the vocabulary the
+/// bound-variable prompt is written in and the lowering prefix that prompt
+/// hides — all of which are data on [`SourceDialect`] rather than a second
+/// copy of this body. Which id the state is seeded from stays with the
+/// per-dialect `create_session`.
+pub(crate) struct DialectSession {
+    dialect: SourceDialect,
+    state: RlmExecutionState,
+    surface: lash_lashlang_runtime::LashlangSurface,
+    services: LashlangDialectServices,
+    bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
+}
+
+impl DialectSession {
+    /// Opens a session whose execution state is seeded from `engine_id`.
+    ///
+    /// The engine id is a parameter rather than `dialect.language_id()`
+    /// because seeding it is the caller's per-dialect decision.
+    pub(crate) fn new(
+        dialect: SourceDialect,
+        engine_id: &str,
+        surface: lash_lashlang_runtime::LashlangSurface,
+        services: LashlangDialectServices,
+    ) -> Self {
+        Self {
+            dialect,
+            state: RlmExecutionState::for_engine(engine_id),
+            surface,
+            services,
+            bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
+                BoundVariableRenderCache::default(),
+            )),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl RlmDialectSession for DialectSession {
+    async fn execute(
+        &mut self,
+        ctx: RuntimeExecutionContext<'_>,
+        request: ExecRequest,
+        session_projected_bindings: crate::projection::RlmProjectedBindings,
+    ) -> Result<ExecResponse, SessionError> {
+        // The state is borrowed, never moved out: a cell that is cancelled
+        // mid-flight leaves the session holding the same state it started
+        // with, and every other caller waits behind the session's own lock.
+        Ok(execute_code_with_dialect_and_bounds(
+            &mut self.state,
+            ctx,
+            request,
+            Arc::clone(&self.services.artifact_store),
+            self.surface.clone(),
+            self.services.deferred_tool_resolver.clone(),
+            session_projected_bindings,
+            Arc::clone(&self.services.projection_resolver),
+            self.services.execution_trace_config.clone(),
+            self.services.execution_bounds.into_engine(),
+            self.dialect,
+        )
+        .await)
+    }
+
+    fn execution_state_dirty(&self) -> bool {
+        self.state.execution_state_dirty()
+    }
+
+    fn snapshot_execution_state(
+        &mut self,
+    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
+        self.state.snapshot_execution_state()
+    }
+
+    fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state.probe_execution_state_capture()
+    }
+
+    fn hydrated_execution_state(
+        &self,
+    ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
+        self.state.hydrated_execution_state()
+    }
+
+    fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state.acknowledge_execution_state_capture();
+        Ok(())
+    }
+
+    fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state.abort_execution_state_capture();
+        Ok(())
+    }
+
+    fn restore_execution_state(
+        &mut self,
+        state: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<(), SessionError> {
+        self.state
+            .restore_execution_state(state)
+            .map_err(|error| SessionError::Protocol(error.to_string()))
+    }
+
+    fn prune_protected_globals(
+        &mut self,
+        protected_names: &BTreeSet<String>,
+    ) -> Result<(), SessionError> {
+        self.state.prune_protected_globals(protected_names);
+        Ok(())
+    }
+
+    fn patch_globals(
+        &mut self,
+        patch: &RlmGlobalsPatchPluginBody,
+        protected_names: &BTreeSet<String>,
+    ) -> Result<(), SessionError> {
+        self.state.patch_globals(patch, protected_names)
+    }
+
+    fn prepare_bound_variables_prompt(
+        &self,
+        exclude: &BTreeSet<String>,
+    ) -> Result<BoundVariablesPromptRender, SessionError> {
+        let mut globals = self.state.bound_variable_values(exclude);
+        if let Some(prefix) = self.dialect.hidden_binding_prefix() {
+            globals.retain(|(name, _)| !name.starts_with(prefix));
+        }
+        let vocabulary = self.dialect.prompt_vocabulary();
+        let cache = Arc::clone(&self.bound_variable_render_cache);
+        Ok(BoundVariablesPromptRender::new(move || {
+            let mut cache = cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            render_bound_variables(&mut cache, &globals, vocabulary)
+        }))
+    }
 }
 
 /// The dialect-specific words and call forms every shared prompt fragment
