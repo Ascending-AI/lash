@@ -411,9 +411,242 @@ pub struct TurnInputCompletionData {
     pub applications: Vec<TurnInputApplication>,
 }
 
-/// A shared work completion carrying settled turn-input identities and
-/// application evidence.
-pub type TurnInputCompletion = crate::WorkCompletion<TurnInputCompletionData>;
+/// The claim a settling driver held over the rows it is settling.
+///
+/// Present only in the claimed regime; see [`TurnInputCompletion::claim`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TurnInputSettlementClaim {
+    pub claim_id: String,
+    pub lease_token: String,
+}
+
+/// A settlement receipt carrying settled turn-input identities, application
+/// evidence, and the authority the settling driver holds over those rows.
+///
+/// Turn-input settlement has exactly two regimes and one authority. Both are a
+/// conditional write decided by the head CAS the runtime commit already
+/// performs; `claim` only *strengthens* that write's predicate:
+///
+/// * `Some(..)` — the driver holds a generation-fenced claim
+///   ([ADR 0029](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md)),
+///   and the row must still carry that claim id and lease token.
+/// * `None` — the driver accepted these rows itself and drove them without the
+///   session-execution lane
+///   ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)),
+///   and the row must still be unclaimed and unsettled.
+///
+/// Every backend verifies that the settlement affected exactly one row and
+/// reports a typed supersession error otherwise; zero rows is never silent
+/// success.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TurnInputCompletion {
+    pub session_id: String,
+    #[serde(default, flatten)]
+    pub claim: Option<TurnInputSettlementClaim>,
+    #[serde(flatten)]
+    pub data: TurnInputCompletionData,
+}
+
+impl TurnInputCompletion {
+    /// Exposes the settling claim id to store implementors, or `None` when the
+    /// settlement is unclaimed.
+    pub fn claim_id(&self) -> Option<&str> {
+        self.claim.as_ref().map(|claim| claim.claim_id.as_str())
+    }
+
+    /// Exposes the settling lease token to store implementors, or `None` when
+    /// the settlement is unclaimed.
+    pub fn lease_token(&self) -> Option<&str> {
+        self.claim.as_ref().map(|claim| claim.lease_token.as_str())
+    }
+
+    /// Names this settlement's rows for diagnostics that must report a
+    /// settlement without assuming it had a claim id.
+    pub fn settlement_identity(&self) -> String {
+        match self.claim.as_ref() {
+            Some(claim) => claim.claim_id.clone(),
+            None => format!("unclaimed:{}", self.data.input_ids.join(",")),
+        }
+    }
+}
+
+impl std::ops::Deref for TurnInputCompletion {
+    type Target = TurnInputCompletionData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl std::ops::DerefMut for TurnInputCompletion {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+/// Turn-input rows a turn accepted itself and drives without a claim.
+///
+/// The unclaimed half of [`TurnInputDrive`]: the rows exist durably before the
+/// turn executes, exactly as a claimed row does, but no session-execution lease
+/// fences them. Their settlement is decided by the head CAS alone
+/// ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct UnclaimedTurnInputs {
+    pub session_id: String,
+    pub inputs: Vec<PendingTurnInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applications: Vec<TurnInputApplication>,
+}
+
+impl UnclaimedTurnInputs {
+    /// Exposes settlement to store and durable-substrate implementors driving
+    /// rows they accepted themselves.
+    pub fn completion(&self) -> TurnInputCompletion {
+        TurnInputCompletion {
+            session_id: self.session_id.clone(),
+            claim: None,
+            data: TurnInputCompletionData {
+                input_ids: self
+                    .inputs
+                    .iter()
+                    .map(|input| input.input_id.clone())
+                    .collect(),
+                applications: self.applications.clone(),
+            },
+        }
+    }
+
+    /// Records the initial application evidence for rows driven without a
+    /// claim, matching [`TurnInputClaim::record_initial_turn_application`].
+    pub fn record_initial_turn_application(
+        &mut self,
+        turn_id: &crate::TurnId,
+        committed_message_id: &str,
+    ) {
+        self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
+    }
+}
+
+/// The turn-input rows one turn is driving, with the authority it will settle
+/// them under.
+///
+/// Exactly two regimes, one authority: a claimed drive settles under its
+/// generation-fenced claim, an unclaimed drive settles under the head CAS
+/// alone. Everything between acceptance and settlement — materialization,
+/// application evidence, the committed message's provenance — is identical, so
+/// the runtime carries both through one list rather than two.
+#[derive(Clone, Debug)]
+pub(crate) enum TurnInputDrive {
+    Claimed(TurnInputClaim),
+    Unclaimed(UnclaimedTurnInputs),
+}
+
+impl TurnInputDrive {
+    pub(crate) fn inputs(&self) -> &[PendingTurnInput] {
+        match self {
+            Self::Claimed(claim) => &claim.inputs,
+            Self::Unclaimed(unclaimed) => &unclaimed.inputs,
+        }
+    }
+
+    pub(crate) fn applications(&self) -> &[TurnInputApplication] {
+        match self {
+            Self::Claimed(claim) => &claim.applications,
+            Self::Unclaimed(unclaimed) => &unclaimed.applications,
+        }
+    }
+
+    pub(crate) fn completion(&self) -> TurnInputCompletion {
+        match self {
+            Self::Claimed(claim) => claim.completion(),
+            Self::Unclaimed(unclaimed) => unclaimed.completion(),
+        }
+    }
+
+    /// The lease generation this drive is fenced by, or `None` when it holds no
+    /// claim. Only a claimed drive can be superseded by a later generation, so
+    /// only a claimed drive can have its settlement dropped and retried.
+    pub(crate) fn claim_generation(&self) -> Option<(String, u64)> {
+        match self {
+            Self::Claimed(claim) => Some((claim.claim_id.clone(), claim.session_lease_generation)),
+            Self::Unclaimed(_) => None,
+        }
+    }
+
+    pub(crate) fn as_claim(&self) -> Option<&TurnInputClaim> {
+        match self {
+            Self::Claimed(claim) => Some(claim),
+            Self::Unclaimed(_) => None,
+        }
+    }
+
+    pub(crate) fn materialize_turn_input(&self) -> TurnInput {
+        match self {
+            Self::Claimed(claim) => claim.materialize_turn_input(),
+            Self::Unclaimed(unclaimed) => materialize_turn_input(&unclaimed.inputs),
+        }
+    }
+
+    pub(crate) fn record_initial_turn_application(
+        &mut self,
+        turn_id: &crate::TurnId,
+        committed_message_id: &str,
+    ) {
+        match self {
+            Self::Claimed(claim) => {
+                claim.record_initial_turn_application(turn_id, committed_message_id);
+            }
+            Self::Unclaimed(unclaimed) => {
+                unclaimed.record_initial_turn_application(turn_id, committed_message_id);
+            }
+        }
+    }
+}
+
+fn initial_turn_applications(
+    inputs: &[PendingTurnInput],
+    turn_id: &crate::TurnId,
+    committed_message_id: &str,
+) -> Vec<TurnInputApplication> {
+    inputs
+        .iter()
+        .filter(|input| {
+            input.input.items.iter().any(|item| match item {
+                crate::InputItem::Text { text } => !text.is_empty(),
+                crate::InputItem::Attachment { .. } => true,
+            })
+        })
+        .map(|input| TurnInputApplication {
+            input_id: input.input_id.clone(),
+            source_key: input.source_key.clone(),
+            turn_id: turn_id.clone(),
+            committed_message_id: committed_message_id.to_string(),
+            checkpoint: None,
+        })
+        .collect()
+}
+
+fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
+    let mut input_items = Vec::new();
+    let mut protocol_turn_options = None;
+    let mut trace_turn_id = None;
+    for pending in inputs {
+        input_items.extend(pending.input.items.clone());
+        if protocol_turn_options.is_none() {
+            protocol_turn_options = pending.input.protocol_turn_options.clone();
+        }
+        if trace_turn_id.is_none() {
+            trace_turn_id = pending.input.trace_turn_id.clone();
+        }
+    }
+    TurnInput {
+        items: input_items,
+        protocol_turn_options,
+        trace_turn_id,
+        protocol_extension: None,
+        turn_context: crate::TurnContext::default(),
+    }
+}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputClaimData {
@@ -432,8 +665,10 @@ impl crate::WorkClaim<TurnInputClaimData> {
     pub fn completion(&self) -> TurnInputCompletion {
         TurnInputCompletion {
             session_id: self.session_id.clone(),
-            claim_id: self.claim_id.clone(),
-            lease_token: self.lease_token.clone(),
+            claim: Some(TurnInputSettlementClaim {
+                claim_id: self.claim_id.clone(),
+                lease_token: self.lease_token.clone(),
+            }),
             data: TurnInputCompletionData {
                 input_ids: self
                     .inputs
@@ -452,23 +687,7 @@ impl crate::WorkClaim<TurnInputClaimData> {
         turn_id: &crate::TurnId,
         committed_message_id: &str,
     ) {
-        self.applications = self
-            .inputs
-            .iter()
-            .filter(|input| {
-                input.input.items.iter().any(|item| match item {
-                    crate::InputItem::Text { text } => !text.is_empty(),
-                    crate::InputItem::Attachment { .. } => true,
-                })
-            })
-            .map(|input| TurnInputApplication {
-                input_id: input.input_id.clone(),
-                source_key: input.source_key.clone(),
-                turn_id: turn_id.clone(),
-                committed_message_id: committed_message_id.to_string(),
-                checkpoint: None,
-            })
-            .collect();
+        self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
     }
 
     /// Records application evidence only for claimed inputs whose deterministic ingress message IDs
@@ -546,25 +765,7 @@ impl crate::WorkClaim<TurnInputClaimData> {
     /// Materializes for turn data for store and durable-substrate implementors while claiming and
     /// settling durable queued work.
     pub fn materialize_turn_input(&self) -> TurnInput {
-        let mut input_items = Vec::new();
-        let mut protocol_turn_options = None;
-        let mut trace_turn_id = None;
-        for pending in &self.inputs {
-            input_items.extend(pending.input.items.clone());
-            if protocol_turn_options.is_none() {
-                protocol_turn_options = pending.input.protocol_turn_options.clone();
-            }
-            if trace_turn_id.is_none() {
-                trace_turn_id = pending.input.trace_turn_id.clone();
-            }
-        }
-        TurnInput {
-            items: input_items,
-            protocol_turn_options,
-            trace_turn_id,
-            protocol_extension: None,
-            turn_context: crate::TurnContext::default(),
-        }
+        materialize_turn_input(&self.inputs)
     }
 }
 
@@ -652,6 +853,34 @@ async fn committed_message_from_pending_input(
         }),
         parts: crate::shared_parts(parts),
     }))
+}
+
+impl crate::TurnInput {
+    /// The part of this input a durable acceptance row can carry.
+    ///
+    /// `protocol_extension` and live `TurnContext` plugin inputs are
+    /// process-local handles that no store can hold, so the acceptance commit
+    /// records everything else and the caller driving the turn keeps the live
+    /// state (ADR 0069). A worker that later recovers the row drives exactly
+    /// this projection.
+    ///
+    /// `trace_turn_id` is dropped for the same reason: it labels one drive
+    /// attempt, not the input. A recovered row is driven under the recovering
+    /// worker's own execution scope, and a persisted trace id from the
+    /// abandoned attempt would collide with it
+    /// ([`RuntimeErrorCode::ExecutionScopeTurnIdMismatch`](crate::RuntimeErrorCode::ExecutionScopeTurnIdMismatch)),
+    /// making an accepted direct turn unrecoverable — exactly the property
+    /// ADR 0069 exists to guarantee.
+    #[must_use]
+    pub(crate) fn durable_projection(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+            protocol_turn_options: self.protocol_turn_options.clone(),
+            trace_turn_id: None,
+            protocol_extension: None,
+            turn_context: crate::TurnContext::default(),
+        }
+    }
 }
 
 pub(crate) fn ingress_message_id(input_id: &str) -> String {

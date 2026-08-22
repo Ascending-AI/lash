@@ -81,6 +81,13 @@ struct SnapshotStore {
     usage_delta_identities:
         std::sync::Mutex<std::collections::HashSet<lash_core::store::RuntimeUsageDeltaIdentity>>,
     session_execution_leases: std::sync::Mutex<HashMap<String, lash_core::SessionExecutionLease>>,
+    /// Accepted-but-unsettled turn inputs, in enqueue order.
+    ///
+    /// Every turn — direct or queued — is admitted here before it is driven
+    /// (ADR 0069), so this double owes the pending lifecycle even though its
+    /// tests never enqueue input of their own.
+    pending_turn_inputs: std::sync::Mutex<Vec<lash_core::PendingTurnInput>>,
+    pending_turn_input_seq: std::sync::Mutex<u64>,
     /// Highest generation ever minted per session, retained across release.
     ///
     /// `SessionExecutionLeaseStore` is a fencing trait: ADR 0029 requires every
@@ -140,6 +147,8 @@ impl SnapshotStore {
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
             usage_delta_identities: std::sync::Mutex::new(std::collections::HashSet::new()),
             session_execution_leases: std::sync::Mutex::new(HashMap::new()),
+            pending_turn_inputs: std::sync::Mutex::new(Vec::new()),
+            pending_turn_input_seq: std::sync::Mutex::new(0),
             session_execution_lease_generations: std::sync::Mutex::new(HashMap::new()),
         }
     }
@@ -662,33 +671,89 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     }
 }
 
-// SnapshotStore serves no pending turn input: idle dispatch may probe the
-// (always empty) queue, but nothing in these tests enqueues or claims input.
+// SnapshotStore serves the pending turn-input lifecycle only as far as one
+// session's own turns need it: every turn is admitted before it is driven
+// (ADR 0069), so acceptance, claim, cancel, and release have to work. Rows are
+// held in memory in enqueue order and are settled by the turn's commit, which
+// this double records without inspecting.
 #[async_trait]
 impl lash_core::TurnInputStore for SnapshotStore {
     async fn enqueue_pending_turn_input(
         &self,
-        _input: lash_core::PendingTurnInputDraft,
+        input: lash_core::PendingTurnInputDraft,
     ) -> std::result::Result<lash_core::PendingTurnInput, lash_core::store::StoreError> {
-        unreachable!("SnapshotStore does not serve pending turn input")
+        let mut seq = self.pending_turn_input_seq.lock_recover();
+        *seq += 1;
+        let state = match input.ingress {
+            lash_core::TurnInputIngress::ActiveTurn { .. } => {
+                lash_core::TurnInputState::PendingActive
+            }
+            lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
+        };
+        let stored = lash_core::PendingTurnInput {
+            input_id: input
+                .input_id
+                .unwrap_or_else(|| format!("snapshot-ti-{}", *seq)),
+            session_id: input.session_id,
+            enqueue_seq: *seq,
+            source_key: input.source_key,
+            ingress: input.ingress,
+            state,
+            enqueued_at_ms: now_epoch_ms(),
+            input: input.input,
+        };
+        self.pending_turn_inputs.lock_recover().push(stored.clone());
+        Ok(stored)
     }
 
     async fn list_pending_turn_inputs(
         &self,
-        _session_id: &str,
+        session_id: &str,
     ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
-        Ok(Vec::new())
+        Ok(self
+            .pending_turn_inputs
+            .lock_recover()
+            .iter()
+            .filter(|input| input.session_id == session_id)
+            .cloned()
+            .collect())
     }
 
     async fn cancel_pending_turn_inputs(
         &self,
-        _session_id: &str,
-        _targets: &[lash_core::PendingTurnInputCancelTarget],
+        session_id: &str,
+        targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> std::result::Result<
         Vec<lash_core::PendingTurnInputCancelReceipt>,
         lash_core::store::StoreError,
     > {
-        unreachable!("SnapshotStore does not serve pending turn input")
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        Ok(targets
+            .iter()
+            .map(|target| {
+                let found = pending.iter().position(|input| {
+                    input.session_id == session_id
+                        && match target {
+                            lash_core::PendingTurnInputCancelTarget::InputId(input_id) => {
+                                input.input_id == *input_id
+                            }
+                            lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => {
+                                input.source_key.as_deref() == Some(source_key.as_str())
+                            }
+                        }
+                });
+                let outcome = match found {
+                    Some(index) => {
+                        lash_core::PendingTurnInputCancelOutcome::Cancelled(pending.remove(index))
+                    }
+                    None => lash_core::PendingTurnInputCancelOutcome::NotFound,
+                };
+                lash_core::PendingTurnInputCancelReceipt {
+                    target: target.clone(),
+                    outcome,
+                }
+            })
+            .collect())
     }
 
     async fn cancel_pending_turn_input_suffix(
@@ -716,20 +781,64 @@ impl lash_core::TurnInputStore for SnapshotStore {
         Ok(None)
     }
 
+    // The claim takes the rows out of the pending list and hands them to the
+    // caller; the turn's commit settles them, and an abandoned claim puts them
+    // back exactly where a real backend's cleared claim columns would.
     async fn claim_next_turn_inputs(
         &self,
-        _session_id: &str,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _max_inputs: usize,
+        session_id: &str,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        owner: &lash_core::LeaseOwnerIdentity,
+        max_inputs: usize,
     ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
-        Ok(None)
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        let mut claimed = Vec::new();
+        while claimed.len() < max_inputs {
+            let Some(index) = pending.iter().position(|input| {
+                input.session_id == session_id
+                    && input.state == lash_core::TurnInputState::DeferredNextTurn
+            }) else {
+                break;
+            };
+            let mut input = pending.remove(index);
+            input.state = lash_core::TurnInputState::Accepted;
+            claimed.push(input);
+        }
+        if claimed.is_empty() {
+            return Ok(None);
+        }
+        let generation = self
+            .session_execution_lease_generations
+            .lock_recover()
+            .get(session_id)
+            .copied()
+            .unwrap_or_default();
+        Ok(Some(lash_core::TurnInputClaim {
+            session_id: session_id.to_string(),
+            claim_id: format!("snapshot-turn-input-claim-{}", claimed[0].enqueue_seq),
+            owner: owner.clone(),
+            lease_token: session_execution_lease.lease_token.clone(),
+            fencing_token: session_execution_lease.fencing_token,
+            session_lease_generation: generation,
+            data: lash_core::runtime::TurnInputClaimData {
+                mode: lash_core::TurnInputClaimMode::NextTurn,
+                inputs: claimed,
+                applications: Vec::new(),
+            },
+        }))
     }
 
     async fn abandon_turn_input_claim(
         &self,
-        _claim: &lash_core::TurnInputClaim,
+        claim: &lash_core::TurnInputClaim,
     ) -> std::result::Result<(), lash_core::store::StoreError> {
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        for input in &claim.inputs {
+            let mut restored = input.clone();
+            restored.state = lash_core::TurnInputState::DeferredNextTurn;
+            pending.push(restored);
+        }
+        pending.sort_by_key(|input| input.enqueue_seq);
         Ok(())
     }
 

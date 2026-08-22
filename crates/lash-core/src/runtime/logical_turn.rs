@@ -1,3 +1,4 @@
+use super::turn_input_ingress::TurnInputDrive;
 use super::turn_loop::{SessionExecutionLeaseReleasePolicy, TurnStopwatch};
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
@@ -12,13 +13,16 @@ pub(super) struct PhysicalTurnExecution {
 
 pub(super) struct LogicalTurnClaims {
     pub(super) queued: Vec<crate::QueuedWorkClaim>,
-    pub(super) turn_inputs: Vec<crate::TurnInputClaim>,
+    /// The turn-input rows this turn drives, each with the authority it will
+    /// settle under: a generation-fenced claim, or none at all when the turn
+    /// accepted the row itself and settles it at the head CAS (ADR 0069 §5).
+    pub(super) turn_inputs: Vec<TurnInputDrive>,
 }
 
 impl LogicalTurnClaims {
     pub(super) fn new(
         queued: Vec<crate::QueuedWorkClaim>,
-        turn_inputs: Vec<crate::TurnInputClaim>,
+        turn_inputs: Vec<TurnInputDrive>,
     ) -> Self {
         Self {
             queued,
@@ -52,10 +56,13 @@ impl LogicalTurnClaims {
             .iter()
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
+        // Only a claimed drive has a generation, so only a claimed drive can be
+        // superseded by a later one and have its settlement dropped and
+        // retried. An unclaimed settlement retires at its first lost head CAS.
         let turn_input_claim_generations = self
             .turn_inputs
             .iter()
-            .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
+            .filter_map(TurnInputDrive::claim_generation)
             .collect();
         let enqueued_queue_batches = match outcome {
             TurnOutcome::AgentFrameSwitch {
@@ -196,7 +203,10 @@ impl LashRuntime {
                                 err.code.as_str(),
                                 err.message,
                             ));
-                        return Ok(AgentFrameRun { turns });
+                        return Ok(AgentFrameRun {
+                            turns,
+                            acceptance: None,
+                        });
                     }
                 }
             };
@@ -283,7 +293,10 @@ impl LashRuntime {
                     )
                     .await;
                     self.record_follow_on_failure(&mut turns, err);
-                    return Ok(AgentFrameRun { turns });
+                    return Ok(AgentFrameRun {
+                        turns,
+                        acceptance: None,
+                    });
                 }
             };
             let PhysicalTurnExecution {
@@ -300,10 +313,16 @@ impl LashRuntime {
             };
             turns.push(turn);
             if post_commit_delivery_failed {
-                return Ok(AgentFrameRun { turns });
+                return Ok(AgentFrameRun {
+                    turns,
+                    acceptance: None,
+                });
             }
             let Some((frame_key, task)) = switched_frame else {
-                return Ok(AgentFrameRun { turns });
+                return Ok(AgentFrameRun {
+                    turns,
+                    acceptance: None,
+                });
             };
 
             let next = async {
@@ -413,7 +432,10 @@ impl LashRuntime {
                 Ok(next) => next,
                 Err(err) => {
                     self.record_follow_on_failure(&mut turns, err);
-                    return Ok(AgentFrameRun { turns });
+                    return Ok(AgentFrameRun {
+                        turns,
+                        acceptance: None,
+                    });
                 }
             };
             input.protocol_turn_options = follow_protocol_turn_options.clone();
@@ -429,7 +451,10 @@ impl LashRuntime {
                     Ok(controller) => controller,
                     Err(err) => {
                         self.record_follow_on_failure(&mut turns, err);
-                        return Ok(AgentFrameRun { turns });
+                        return Ok(AgentFrameRun {
+                            turns,
+                            acceptance: None,
+                        });
                     }
                 };
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
@@ -450,12 +475,18 @@ impl LashRuntime {
                     Ok(terminal) => terminal,
                     Err(err) => {
                         self.record_follow_on_failure(&mut turns, err);
-                        return Ok(AgentFrameRun { turns });
+                        return Ok(AgentFrameRun {
+                            turns,
+                            acceptance: None,
+                        });
                     }
                 };
                 terminal_stopwatch.stamp(&mut terminal.turn, self.host.core.clock.as_ref());
                 turns.push(terminal.turn);
-                return Ok(AgentFrameRun { turns });
+                return Ok(AgentFrameRun {
+                    turns,
+                    acceptance: None,
+                });
             }
 
             claims = next_claims;

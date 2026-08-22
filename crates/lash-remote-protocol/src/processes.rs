@@ -979,6 +979,7 @@ pub enum RemoteRuntimeEffectKind {
     Process,
     Trigger,
     ExecCode,
+    AcceptTurnInput,
     Checkpoint,
     SyncExecutionEnvironment,
     Sleep,

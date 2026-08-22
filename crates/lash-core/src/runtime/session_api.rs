@@ -2,6 +2,15 @@ use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 
+/// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResidentSessionState {
+    /// In-memory session and plugin state are valid and match durable expectations.
+    Valid,
+    /// Resident state was invalidated and requires durable reload before further execution.
+    Invalidated { decision_id: String },
+}
+
 impl LashRuntime {
     pub fn session_id(&self) -> &str {
         &self.state.session_id

@@ -58,6 +58,12 @@ pub enum RuntimeEffectKind {
     Trigger,
     Process,
     ExecCode,
+    /// Durable admission of a turn input (ADR 0069 §6).
+    ///
+    /// Acceptance happens before the turn runs, which puts it inside a durable
+    /// engine's replay window. Journaling it lets replay re-derive the
+    /// admission from the recorded result instead of admitting the turn twice.
+    AcceptTurnInput,
     Checkpoint,
     SyncExecutionEnvironment,
     Sleep,
@@ -80,6 +86,7 @@ impl RuntimeEffectKind {
             Self::Trigger => "trigger",
             Self::Process => "process",
             Self::ExecCode => "exec_code",
+            Self::AcceptTurnInput => "accept_turn_input",
             Self::Checkpoint => "checkpoint",
             Self::SyncExecutionEnvironment => "sync_execution_environment",
             Self::Sleep => "sleep",
@@ -491,6 +498,12 @@ pub enum RuntimeEffectCommand {
         language: String,
         code: String,
     },
+    /// Write the Pending Turn Input row that admits a turn (ADR 0069 §1),
+    /// through the effect journal so a replaying engine re-derives the
+    /// admission rather than re-performing it (ADR 0069 §6).
+    AcceptTurnInput {
+        draft: Box<crate::PendingTurnInputDraft>,
+    },
     Checkpoint {
         checkpoint: CheckpointKind,
     },
@@ -535,6 +548,7 @@ impl RuntimeEffectCommand {
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
+            Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
@@ -853,6 +867,11 @@ pub enum RuntimeEffectOutcome {
     ExecCode {
         result: Box<Result<ExecResponse, String>>,
     },
+    /// The admitted Pending Turn Input row, journaled so replay returns the
+    /// same acceptance identity the first execution minted.
+    AcceptTurnInput {
+        accepted: Box<crate::PendingTurnInput>,
+    },
     Checkpoint {
         result: CheckpointOutcome,
         #[serde(default)]
@@ -1096,6 +1115,18 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    pub(crate) fn into_accepted_turn_input(
+        self,
+    ) -> Result<crate::PendingTurnInput, RuntimeEffectControllerError> {
+        match self {
+            Self::AcceptTurnInput { accepted } => Ok(*accepted),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::AcceptTurnInput,
+                other.kind(),
+            )),
+        }
+    }
+
     pub(crate) fn into_exec_code(
         self,
     ) -> Result<Result<ExecResponse, String>, RuntimeEffectControllerError> {
@@ -1192,6 +1223,7 @@ impl RuntimeEffectOutcome {
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
+            Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::Sleep => RuntimeEffectKind::Sleep,

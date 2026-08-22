@@ -131,7 +131,7 @@ pub(crate) struct TurnEffectStateUpdate {
     pub(crate) llm_stream_summaries: HashMap<usize, crate::runtime::LlmStreamSummary>,
     pub(crate) next_llm_ordinal: usize,
     pub(crate) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(crate) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
+    pub(crate) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
     pub(crate) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
 }
 
@@ -205,6 +205,7 @@ enum LocalTarget {
     },
     Process(ProcessLocalExecution),
     Trigger(TriggerLocalExecution),
+    TurnAcceptance(Arc<dyn crate::TurnInputStore>),
     OwnedRunner(Box<dyn RuntimeEffectLocalRunner + Send + 'static>),
 }
 
@@ -427,6 +428,19 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     outcome_observer: None,
                 },
             )),
+            replay_trace: None,
+        }
+    }
+
+    /// Binds a turn-input store for effect-host implementors executing the
+    /// durable turn-acceptance effect (ADR 0069 §6) inline.
+    ///
+    /// The acceptance write is the one store call a replaying engine must not
+    /// repeat, so it crosses the runtime-effect envelope like every other
+    /// journaled effect rather than being issued directly against the store.
+    pub fn turn_acceptance(store: Arc<dyn crate::TurnInputStore>) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)),
             replay_trace: None,
         }
     }
@@ -682,6 +696,29 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         envelope.command.kind().as_str()
                     ),
                 ))
+            }
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)) => {
+                let RuntimeEffectCommand::AcceptTurnInput { draft } = envelope.command else {
+                    return Err(RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                        format!(
+                            "turn-acceptance executor cannot execute {} command directly",
+                            envelope.command.kind().as_str()
+                        ),
+                    ));
+                };
+                let accepted = store
+                    .enqueue_pending_turn_input(*draft)
+                    .await
+                    .map_err(|err| {
+                        RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::StoreCommitFailed,
+                            format!("turn acceptance commit failed: {err}"),
+                        )
+                    })?;
+                Ok(RuntimeEffectOutcome::AcceptTurnInput {
+                    accepted: Box::new(accepted),
+                })
             }
         }
     }

@@ -66,6 +66,33 @@ struct InMemoryPendingTurnInput {
     claim_session_lease_generation: u64,
 }
 
+/// The in-memory store's turn-input settlement predicate.
+///
+/// One predicate, two regimes: the claim fields only strengthen it. A claimed
+/// settlement requires the row to still carry that claim; an unclaimed
+/// settlement requires it to still be unclaimed and unsettled
+/// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md) §5).
+fn turn_input_settlement_matches(
+    entry: &InMemoryPendingTurnInput,
+    completed: &crate::TurnInputCompletion,
+) -> bool {
+    entry.input.session_id == completed.session_id
+        && completed.input_ids.contains(&entry.input.input_id)
+        && match completed.claim.as_ref() {
+            Some(claim) => {
+                entry.claim_id.as_deref() == Some(claim.claim_id.as_str())
+                    && entry.claim_token.as_deref() == Some(claim.lease_token.as_str())
+            }
+            None => {
+                entry.claim_id.is_none()
+                    && !matches!(
+                        entry.input.state,
+                        crate::TurnInputState::Completed | crate::TurnInputState::Cancelled
+                    )
+            }
+        }
+}
+
 impl InMemorySessionExecutionLease {
     fn is_live(&self, now: u64) -> bool {
         self.lease_token.is_some() && self.expires_at_epoch_ms > now
@@ -1196,21 +1223,13 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             for completed in &commit.completed_turn_input_claims {
                 let matches = pending
                     .iter()
-                    .filter(|entry| {
-                        entry.input.session_id == completed.session_id
-                            && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                            && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
-                            && completed.input_ids.contains(&entry.input.input_id)
-                    })
+                    .filter(|entry| turn_input_settlement_matches(entry, completed))
                     .count();
                 if matches != completed.input_ids.len() {
                     let row_id = completed.input_ids.iter().find(|input_id| {
                         !pending.iter().any(|entry| {
-                            entry.input.session_id == completed.session_id
-                                && entry.input.input_id == **input_id
-                                && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                                && entry.claim_token.as_deref()
-                                    == Some(completed.lease_token.as_str())
+                            entry.input.input_id == **input_id
+                                && turn_input_settlement_matches(entry, completed)
                         })
                     });
                     let current = row_id.and_then(|input_id| {
@@ -1219,19 +1238,33 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                                 && entry.input.input_id == *input_id
                         })
                     });
-                    return Err(crate::store::StoreError::TurnInputClaimSuperseded {
-                        session_id: completed.session_id.clone(),
-                        claim_id: completed.claim_id.clone(),
-                        row_id: row_id.cloned().map(String::into_boxed_str),
-                        superseding_claim_id: current
-                            .and_then(|entry| entry.claim_id.clone())
-                            .map(String::into_boxed_str),
-                        superseding_session_lease_generation: current.and_then(|entry| {
-                            entry
-                                .claim_token
-                                .as_ref()
-                                .map(|_| Box::new(entry.claim_session_lease_generation))
-                        }),
+                    return Err(match completed.claim.as_ref() {
+                        Some(claim) => crate::store::StoreError::TurnInputClaimSuperseded {
+                            session_id: completed.session_id.clone(),
+                            claim_id: claim.claim_id.clone(),
+                            row_id: row_id.cloned().map(String::into_boxed_str),
+                            superseding_claim_id: current
+                                .and_then(|entry| entry.claim_id.clone())
+                                .map(String::into_boxed_str),
+                            superseding_session_lease_generation: current.and_then(|entry| {
+                                entry
+                                    .claim_token
+                                    .as_ref()
+                                    .map(|_| Box::new(entry.claim_session_lease_generation))
+                            }),
+                        },
+                        None => crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded {
+                            session_id: completed.session_id.clone(),
+                            input_id: row_id
+                                .cloned()
+                                .unwrap_or_else(|| completed.input_ids.join(",")),
+                            observed_state: current.map(|entry| {
+                                entry.input.state.as_str().to_string().into_boxed_str()
+                            }),
+                            superseding_claim_id: current
+                                .and_then(|entry| entry.claim_id.clone())
+                                .map(String::into_boxed_str),
+                        },
                     });
                 }
             }
@@ -1308,11 +1341,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let mut pending = self.pending_turn_inputs.lock_recover().clone();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
-                    if entry.input.session_id == completed.session_id
-                        && entry.claim_id.as_deref() == Some(completed.claim_id.as_str())
-                        && entry.claim_token.as_deref() == Some(completed.lease_token.as_str())
-                        && completed.input_ids.contains(&entry.input.input_id)
-                    {
+                    if turn_input_settlement_matches(entry, completed) {
                         entry.input.state = crate::TurnInputState::Completed;
                         entry.clear_claim();
                     }

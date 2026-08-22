@@ -8281,15 +8281,22 @@ async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reop
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
         second_session.pending_turn_inputs().await?.len(),
-        1,
-        "the orphaned input is still reported pending after the reopen"
+        2,
+        "the hard kill leaves both the orphaned routed input and the killed turn's own \
+         acceptance pending after the reopen"
     );
 
+    // Two rows, two drains: the killed turn's own acceptance is claimable
+    // immediately, while the input routed into that dead turn only becomes
+    // claimable once a drain that finds nothing runs the FIG-1573 backstop.
     let mut claimed = None;
     for _attempt in 0..10 {
         if let Some(output) = second_session.queued_turn().run().await?.ran() {
             claimed = Some(output);
-            break;
+            if second_session.pending_turn_inputs().await?.is_empty() {
+                break;
+            }
+            continue;
         }
         clock.advance(30_000);
     }
