@@ -582,6 +582,58 @@ async fn driver_refuses_await_on_caller_departed_row_before_attach() {
     );
 }
 
+/// FIG-1744 / ADR 0019: CallerDeparted refusal must win over a recorded
+/// terminal outcome on BOTH entry points (awaiter and work driver).
+#[tokio::test]
+async fn caller_departed_refuses_before_terminal_outcome_on_both_entry_points() {
+    let raw = Arc::new(TestLocalProcessRegistry::default());
+    let (registry, hub) = watch_process_registry(Arc::clone(&raw) as Arc<dyn ProcessRegistry>);
+    let awaiter = ProcessAwaiter::new(Arc::clone(&registry), hub.clone());
+    let driver =
+        crate::ProcessWorkDriver::from_watched(Arc::clone(&registry), hub, Arc::new(NoopRunHandle));
+
+    registry
+        .register_process(registration("proc-departed"))
+        .await
+        .expect("register");
+
+    let mut record = registry
+        .get_process("proc-departed")
+        .await
+        .expect("get_process")
+        .expect("record exists");
+    record.status = crate::ProcessStatus::CallerDeparted;
+    record.outcome = Some(success(serde_json::json!("completed-value")));
+
+    // Entry point 1: ProcessAwaiter::await_terminal
+    raw.set_process_read_override(record.clone()).await;
+    let awaiter_err = awaiter
+        .await_terminal("proc-departed")
+        .await
+        .expect_err("awaiter must refuse CallerDeparted even if outcome is present");
+    assert!(
+        matches!(
+            awaiter_err,
+            PluginError::ProcessCallerDeparted { ref process_id } if process_id == "proc-departed"
+        ),
+        "awaiter expected ProcessCallerDeparted refusal, got: {awaiter_err:?}"
+    );
+
+    // Entry point 2: ProcessWorkDriver::await_terminal
+    raw.set_process_read_override(record).await;
+    let driver_err = driver
+        .await_terminal("proc-departed")
+        .await
+        .expect_err("driver must refuse CallerDeparted even if outcome is present");
+    assert!(
+        matches!(
+            driver_err,
+            PluginError::ProcessCallerDeparted { ref process_id } if process_id == "proc-departed"
+        ),
+        "driver expected ProcessCallerDeparted refusal, got: {driver_err:?}"
+    );
+}
+
 #[tokio::test]
 async fn driver_propagates_process_store_read_errors() {
     let raw = Arc::new(TestLocalProcessRegistry::default());

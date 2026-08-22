@@ -115,51 +115,13 @@ impl ProcessAwaiter {
         &self,
         process_id: &str,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        if let Some(output) = self.read_terminal(process_id).await? {
+        if let Some(output) = self.try_terminal(process_id).await? {
             return Ok(output);
         }
         crate::runtime::process_worker::release_process_execution_permit_while(
-            self.await_terminal_inner(process_id),
+            self.wait_for(process_id, || self.try_terminal(process_id)),
         )
         .await
-    }
-
-    async fn await_terminal_inner(
-        &self,
-        process_id: &str,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
-        let mut backoff = AWAIT_BACKOFF_MIN;
-        if let Some(hub) = self.hub.as_ref() {
-            let mut rx = hub.subscribe(process_id);
-            loop {
-                if let Some(output) = self.read_terminal(process_id).await? {
-                    return Ok(output);
-                }
-                tokio::select! {
-                    changed = rx.changed() => {
-                        match changed {
-                            Ok(()) => backoff = AWAIT_BACKOFF_MIN,
-                            // Sender dropped (unreachable today given the hub
-                            // GC invariant, but latent): a dead receiver would
-                            // otherwise fire immediately on every loop turn.
-                            // Stop selecting on it and degrade to the
-                            // sleep-only backoff loop below.
-                            Err(_) => break,
-                        }
-                    }
-                    _ = tokio::time::sleep(backoff) => {
-                        backoff = next_backoff(backoff);
-                    }
-                }
-            }
-        }
-        loop {
-            if let Some(output) = self.read_terminal(process_id).await? {
-                return Ok(output);
-            }
-            tokio::time::sleep(backoff).await;
-            backoff = next_backoff(backoff);
-        }
     }
 
     /// Resolve with the first `event_type` event on `process_id` past
@@ -177,26 +139,28 @@ impl ProcessAwaiter {
             return Ok(event);
         }
         crate::runtime::process_worker::release_process_execution_permit_while(
-            self.await_event_inner(process_id, event_type, after_sequence),
+            self.wait_for(process_id, || {
+                self.read_event(process_id, event_type, after_sequence)
+            }),
         )
         .await
     }
 
-    async fn await_event_inner(
+    pub(crate) async fn wait_for<T, F, Fut>(
         &self,
         process_id: &str,
-        event_type: &str,
-        after_sequence: u64,
-    ) -> Result<ProcessEvent, PluginError> {
+        mut check: F,
+    ) -> Result<T, PluginError>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<Option<T>, PluginError>>,
+    {
         let mut backoff = AWAIT_BACKOFF_MIN;
         if let Some(hub) = self.hub.as_ref() {
             let mut rx = hub.subscribe(process_id);
             loop {
-                if let Some(event) = self
-                    .read_event(process_id, event_type, after_sequence)
-                    .await?
-                {
-                    return Ok(event);
+                if let Some(item) = check().await? {
+                    return Ok(item);
                 }
                 tokio::select! {
                     changed = rx.changed() => {
@@ -217,18 +181,20 @@ impl ProcessAwaiter {
             }
         }
         loop {
-            if let Some(event) = self
-                .read_event(process_id, event_type, after_sequence)
-                .await?
-            {
-                return Ok(event);
+            if let Some(item) = check().await? {
+                return Ok(item);
             }
             tokio::time::sleep(backoff).await;
             backoff = next_backoff(backoff);
         }
     }
 
-    async fn read_terminal(
+    /// Classify `process_id` into terminal outcome, no-longer-retained, caller-departed,
+    /// or unknown/running (ADR 0019, FIG-1744).
+    ///
+    /// Refuses with [`PluginError::ProcessCallerDeparted`] if the process status is
+    /// `CallerDeparted`, even if a terminal outcome is present.
+    pub(crate) async fn try_terminal(
         &self,
         process_id: &str,
     ) -> Result<Option<ProcessAwaitOutput>, PluginError> {
@@ -252,7 +218,7 @@ impl ProcessAwaiter {
         };
         // A caller-departed row is the one non-terminal state no writer will
         // ever resolve, so parking on it is a guaranteed permanent park. Refuse
-        // with the typed error instead (FIG-1383).
+        // with the typed error instead (FIG-1383, FIG-1744).
         if record.status == crate::ProcessStatus::CallerDeparted {
             return Err(PluginError::ProcessCallerDeparted {
                 process_id: process_id.to_string(),
