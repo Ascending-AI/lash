@@ -1425,6 +1425,10 @@ pub(super) fn javascript_array_method(
         ("toString", []) => Ok(Value::String(
             javascript_join(&Value::List(items.to_vec().into()), &Value::Undefined)?.into(),
         )),
+        // The identity, as ECMA has it. Arrays were the one receiver shape not
+        // answering the `instance.valueOf` the signature table advertises —
+        // the same gap the lowerer carried (FIG-1718).
+        ("valueOf", []) => Ok(Value::List(items.to_vec().into())),
         // Pair each item with its index so a two-parameter `map` callback can
         // be driven by the VM's one-argument map. Not a guest-visible method:
         // the lowerer emits it and nothing parses it.

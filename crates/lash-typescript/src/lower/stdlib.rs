@@ -1,4 +1,5 @@
 use super::*;
+use crate::signatures::LiteralReceivers;
 
 pub(super) fn module_path(expr: &Expr) -> Option<Vec<String>> {
     match expr {
@@ -127,95 +128,39 @@ pub(super) fn is_instance_stdlib_method(method: &str) -> bool {
         .any(|signature| signature.method == method)
 }
 
-pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> bool {
+/// The literal receiver shape `expr` is written as, if it is written as one.
+///
+/// A receiver the lowerer cannot type on sight — a binding, a chained call, a
+/// constructor — has no kind here, and the instance surface is open to it.
+fn literal_receiver_kind(expr: &Expr) -> Option<LiteralReceivers> {
     match expr {
-        Expr::String(_) => matches!(
-            method,
-            "at" | "charAt"
-                | "charCodeAt"
-                | "codePointAt"
-                | "concat"
-                | "endsWith"
-                | "match"
-                | "matchAll"
-                | "includes"
-                | "indexOf"
-                | "lastIndexOf"
-                | "padEnd"
-                | "padStart"
-                | "repeat"
-                | "replace"
-                | "replaceAll"
-                | "slice"
-                | "split"
-                | "search"
-                | "startsWith"
-                | "substring"
-                | "toLowerCase"
-                | "toUpperCase"
-                | "trim"
-                | "trimStart"
-                | "trimEnd"
-                | "toString"
-                | "valueOf"
-        ),
-        Expr::Array(_) => matches!(
-            method,
-            "at" | "concat"
-                | "every"
-                | "fill"
-                | "filter"
-                | "find"
-                | "findIndex"
-                | "findLast"
-                | "findLastIndex"
-                | "flat"
-                | "flatMap"
-                | "forEach"
-                | "includes"
-                | "indexOf"
-                | "join"
-                | "lastIndexOf"
-                | "map"
-                | "reduce"
-                | "reduceRight"
-                | "reverse"
-                | "slice"
-                | "some"
-                | "sort"
-                | "splice"
-                | "push"
-                | "pop"
-                | "shift"
-                | "unshift"
-                | "toReversed"
-                | "toSorted"
-                | "toSpliced"
-                | "toString"
-                | "with"
-        ),
-        Expr::Number(_) => matches!(
-            method,
-            "toExponential" | "toFixed" | "toPrecision" | "toString" | "valueOf"
-        ),
+        Expr::String(_) => Some(LiteralReceivers::STRING),
+        Expr::Array(_) => Some(LiteralReceivers::ARRAY),
+        Expr::Number(_) => Some(LiteralReceivers::NUMBER),
         Expr::Bool(_) | Expr::Null | Expr::Undefined | Expr::Object(_) => {
-            matches!(method, "hasOwnProperty" | "toString" | "valueOf")
+            Some(LiteralReceivers::OTHER)
         }
-        _ => true,
+        _ => None,
     }
 }
 
+/// Whether a literal receiver carries `method`.
+///
+/// Projected off the receiver-kind column of
+/// [`crate::signatures::INSTANCE_STDLIB_SIGNATURES`], so the per-shape answer
+/// and the advertised signature cannot disagree the way they did before
+/// FIG-1718.
+pub(super) fn literal_supports_instance_method(expr: &Expr, method: &str) -> bool {
+    let Some(kind) = literal_receiver_kind(expr) else {
+        return true;
+    };
+    crate::signatures::INSTANCE_STDLIB_SIGNATURES
+        .iter()
+        .any(|signature| signature.method == method && signature.receivers.contains(kind))
+}
+
 pub(super) fn has_literal_stdlib_receiver(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::String(_)
-            | Expr::Number(_)
-            | Expr::Bool(_)
-            | Expr::Null
-            | Expr::Undefined
-            | Expr::Array(_)
-            | Expr::Object(_)
-    )
+    literal_receiver_kind(expr).is_some()
 }
 
 pub(super) fn journaled_runtime_call(operation: &str) -> LashExpr {

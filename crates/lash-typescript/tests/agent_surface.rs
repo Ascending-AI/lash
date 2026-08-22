@@ -565,6 +565,22 @@ fn bound_instance_stdlib_methods_still_lower_to_stdlib() {
     }
 }
 
+/// Which methods a literal receiver carries used to be a hand-written table
+/// beside the signature table, and the two disagreed: `valueOf` was listed for
+/// string, number and the remaining literals but not for arrays, so
+/// `[1].valueOf()` was refused as unavailable on this literal receiver while
+/// the same call on a bound array lowered and ran (FIG-1718). Both spellings
+/// are the same call and must answer the same.
+#[test]
+fn array_literal_value_of_matches_the_bound_array_path() {
+    let expected = Value::List(vec![Value::Number(1.0), Value::Number(2.0)].into());
+    assert_eq!(finished("finish([1, 2].valueOf());"), expected);
+    assert_eq!(
+        finished("const items = [1, 2]; finish(items.valueOf());"),
+        expected
+    );
+}
+
 #[test]
 fn instance_stdlib_collision_matrix_guard_sweeps_all_stdlib_methods() {
     let methods = lash_typescript::accepted_instance_methods();
