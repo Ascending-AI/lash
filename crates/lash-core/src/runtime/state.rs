@@ -10,6 +10,7 @@ use crate::session_model::{Message, SessionPolicy, TokenUsage, plugin_message_to
 use crate::{PersistedTurnState, SessionSnapshot};
 
 use super::usage::TokenLedgerEntry;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 enum CheckpointComponentCompleteness {
@@ -1302,6 +1303,60 @@ pub(crate) fn receipt_append_node_ids(
         .iter()
         .map(|realized| realized.node_id.clone())
         .collect())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn commit_in_lane_context(
+    held_session_execution_lease: Option<&super::session_execution_lease::BorrowedLaneAuthority>,
+    store: std::sync::Arc<dyn crate::RuntimePersistence>,
+    commit: crate::RuntimeCommit,
+    runtime_lease_owner: &crate::LeaseOwnerIdentity,
+    runtime_lease_executor_id: &str,
+    lease_timings: crate::store::LeaseTimings,
+    clock: std::sync::Arc<dyn crate::Clock>,
+    resident_graph_head_stale: &AtomicBool,
+) -> Result<crate::store::RuntimeCommitReceipt, crate::StoreError> {
+    // Dual-context sites run either under the parent turn's held lane or as
+    // lane-less host services. Select authority from the explicit context,
+    // never from scheduling or elapsed time.
+    if let Some(lease) = held_session_execution_lease {
+        let result = super::session_execution_lease::commit_runtime_state_with_borrowed_lease(
+            lease,
+            store,
+            commit,
+            runtime_lease_owner,
+        )
+        .await;
+        if result.is_ok() {
+            // The guard remains current, but this service committed from a
+            // snapshot outside the owning runtime. Force a deliberate head
+            // reload before its next physical turn; planner CAS is not the
+            // graph-freshness discovery mechanism.
+            resident_graph_head_stale.store(true, Ordering::Release);
+        }
+        result
+    } else {
+        super::session_execution_lease::commit_runtime_state_with_fresh_session_execution_lease(
+            store,
+            commit,
+            runtime_lease_owner,
+            runtime_lease_executor_id,
+            lease_timings,
+            clock,
+        )
+        .await
+    }
+}
+
+pub(crate) fn resolve_append_node_ids(
+    result: &crate::store::RuntimeCommitReceipt,
+    locally_derived_node_ids: Vec<String>,
+) -> Result<Vec<String>, crate::StoreError> {
+    if result.receipt_replayed {
+        receipt_append_node_ids(result, locally_derived_node_ids.len())
+    } else {
+        Ok(locally_derived_node_ids)
+    }
 }
 
 pub(super) fn open_agent_frame_in_state_with_clock(

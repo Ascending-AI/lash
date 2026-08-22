@@ -148,7 +148,7 @@ pub(super) enum SessionExecutionLeaseGuardAcquisition {
 /// Retaining this authority cannot renew, release, or otherwise keep the lane
 /// alive after the uniquely-owned turn-driver guard is dropped.
 #[derive(Clone)]
-pub(super) struct BorrowedLaneAuthority {
+pub(crate) struct BorrowedLaneAuthority {
     lease: Arc<StdMutex<SessionExecutionLease>>,
     loss_cause: Arc<AtomicU8>,
 }
