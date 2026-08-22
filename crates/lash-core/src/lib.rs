@@ -327,6 +327,8 @@ pub mod facade_support {
     pub use crate::runtime::ProcessStartPlan;
     pub use crate::runtime::ProcessTerminalSemantics;
     pub use crate::runtime::ProcessToolVisibilityFilter;
+    pub use crate::runtime::ProcessTransition;
+    pub use crate::runtime::ProcessTransitionPlan;
     pub use crate::runtime::ProcessTurnCancellation;
     pub use crate::runtime::ProcessWake;
     pub use crate::runtime::ProcessWakeDeliveryRequest;
@@ -1002,9 +1004,9 @@ pub(crate) use runtime::{
     QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, load_process_execution_env,
     materialize_process_event_semantics, persist_process_execution_env,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    process_event_invocation, process_registration_fingerprint, process_wake_batch_draft,
-    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
-    require_event_replay,
+    prepare_process_transition, process_event_invocation, process_registration_fingerprint,
+    process_wake_batch_draft, process_wake_input_from_event_payload, process_wake_turn_cause,
+    process_wake_turn_text, require_event_replay,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,

@@ -9,10 +9,10 @@ use super::process_references::{
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
-// The shared registry fixture performs 48 successful registrations and three
-// prunes; the cold refold fixture below adds the 49th registration.
-const REOPEN_BASELINE_SPAWNS: usize = 49;
-const REOPEN_BASELINE_PRUNED: usize = 3;
+// The shared registry fixture performs 51 successful registrations and four
+// prunes; the cold refold fixture below adds the 52nd registration.
+const REOPEN_BASELINE_SPAWNS: usize = 52;
+const REOPEN_BASELINE_PRUNED: usize = 4;
 
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
@@ -394,9 +394,131 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
+    lifecycle_transition_refusals_are_backend_invariant(Arc::clone(&registry)).await;
     caller_departure_state_machine(Arc::clone(&registry)).await;
     caller_departed_rows_are_reclaimed_by_retention(Arc::clone(&registry)).await;
     terminal_completion_atomically_retains_parent_end_plan(registry).await;
+}
+
+/// Lifecycle refusals come from the shared process-event fold, so every
+/// registry backend must return the fold's exact answer for the same record
+/// and requested transition.
+async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn ProcessRegistry>) {
+    let abandon_id = "transition-refusal-abandon";
+    registry
+        .register_process(registration(abandon_id))
+        .await
+        .expect("register abandon-refusal process");
+    registry
+        .request_process_abandon(
+            abandon_id,
+            crate::AbandonRequest {
+                requested_by: "first-requester".to_string(),
+                requested_at_ms: 1,
+                reason: Some("first request".to_string()),
+            },
+        )
+        .await
+        .expect("record first abandon request");
+    assert_session_refusal(
+        registry
+            .request_process_abandon(
+                abandon_id,
+                crate::AbandonRequest {
+                    requested_by: "second-requester".to_string(),
+                    requested_at_ms: 2,
+                    reason: Some("conflicting request".to_string()),
+                },
+            )
+            .await,
+        &format!("process `{abandon_id}` already has a different abandon request"),
+    );
+
+    let departed_id = "transition-refusal-departed-wait";
+    let departed = registry
+        .register_process(registration(departed_id))
+        .await
+        .expect("register departed-wait-refusal process");
+    registry
+        .record_caller_departure(departed_id)
+        .await
+        .expect("record caller departure before wait refusal");
+    assert_session_refusal(
+        registry
+            .set_process_wait(
+                departed_id,
+                WaitState {
+                    since_ms: departed.updated_at_ms,
+                    kind: WaitKind::Signal {
+                        name: "resume".to_string(),
+                        event_type: "signal.resume".to_string(),
+                        key: format!("{departed_id}:signal.resume:1"),
+                        ordinal: 1,
+                    },
+                },
+            )
+            .await,
+        &format!("caller-departed process `{departed_id}` cannot enter a wait state"),
+    );
+    registry
+        .complete_process(
+            departed_id,
+            ProcessAwaitOutput::Success {
+                value: serde_json::Value::Null,
+                control: None,
+            },
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("reconcile departed-wait-refusal process");
+
+    let external_ref_id = "transition-refusal-external-ref";
+    registry
+        .register_process(registration(external_ref_id))
+        .await
+        .expect("register external-ref-refusal process");
+    registry
+        .set_external_ref(
+            external_ref_id,
+            crate::ProcessExternalRef {
+                backend: "first-backend".to_string(),
+                id: "first-id".to_string(),
+                metadata: None,
+            },
+        )
+        .await
+        .expect("record first external reference");
+    assert_session_refusal(
+        registry
+            .set_external_ref(
+                external_ref_id,
+                crate::ProcessExternalRef {
+                    backend: "second-backend".to_string(),
+                    id: "second-id".to_string(),
+                    metadata: None,
+                },
+            )
+            .await,
+        &format!(
+            "process `{external_ref_id}` external ref conflict: existing first-backend / first-id, requested second-backend / second-id"
+        ),
+    );
+}
+
+fn assert_session_refusal<T>(result: Result<T, crate::PluginError>, expected: &str) {
+    match result {
+        Err(crate::PluginError::Session(message)) => assert_eq!(message, expected),
+        Err(other) => panic!("expected session refusal `{expected}`, got {other:?}"),
+        Ok(_) => panic!("expected session refusal `{expected}`, got success"),
+    }
+}
+
+#[tokio::test]
+async fn process_registry_transition_refusals_are_backend_invariant() {
+    lifecycle_transition_refusals_are_backend_invariant(Arc::new(
+        crate::TestLocalProcessRegistry::default(),
+    ))
+    .await;
 }
 
 async fn terminal_completion_atomically_retains_parent_end_plan(

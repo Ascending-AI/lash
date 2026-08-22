@@ -23,8 +23,8 @@ use super::references::ProcessLiveReferenceView;
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
 use super::registry_transitions;
 use super::validation::{
-    ProcessStartPlan, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start,
+    ProcessStartPlan, ProcessTransition, ProcessTransitionPlan, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
 };
 
 mod continuation;
@@ -39,10 +39,7 @@ mod support;
 mod types;
 mod worklist;
 pub use support::TestProcessRegistryWriteExt;
-use support::{
-    ExecutionWritePause, process_external_ref_conflict, process_lease_expired,
-    validate_in_memory_execution_authority,
-};
+use support::{ExecutionWritePause, process_lease_expired, validate_in_memory_execution_authority};
 use types::{ManagedLeaseMap, ManagedProcessRecord};
 pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
 impl TestLocalProcessRegistry {
@@ -215,18 +212,15 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
         };
-        if let Some(existing) = &record.record.external_ref {
-            if existing == &external_ref {
-                return Ok(record.record.clone());
+        match prepare_process_transition(
+            &record.record,
+            ProcessTransition::SetExternalRef(external_ref),
+        )? {
+            ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
+            ProcessTransitionPlan::Append(request) => {
+                self.append_managed_event(record, request).await?;
             }
-            return Err(process_external_ref_conflict(
-                process_id,
-                existing,
-                &external_ref,
-            ));
         }
-        let request = ProcessEventAppendRequest::external_ref_set(process_id, &external_ref);
-        self.append_managed_event(record, request).await?;
         Ok(record.record.clone())
     }
 
@@ -925,16 +919,15 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
         };
-        if record.record.is_terminal() {
-            return Err(PluginError::Session(format!(
-                "terminal process `{process_id}` cannot accept an abandon request"
-            )));
+        match prepare_process_transition(
+            &record.record,
+            ProcessTransition::RequestAbandon(request),
+        )? {
+            ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
+            ProcessTransitionPlan::Append(append) => {
+                self.append_managed_event(record, append).await?;
+            }
         }
-        if record.record.abandon_request.is_some() {
-            return Ok(record.record.clone());
-        }
-        let append = ProcessEventAppendRequest::abandon_requested(process_id, &request);
-        self.append_managed_event(record, append).await?;
         Ok(record.record.clone())
     }
 
@@ -947,11 +940,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let Some(record) = managed.get_mut(process_id) else {
             return Err(self.process_miss(process_id).await);
         };
-        if record.record.status == crate::ProcessStatus::CallerDeparted {
-            return Ok(record.record.clone());
+        match prepare_process_transition(&record.record, ProcessTransition::RecordCallerDeparture)?
+        {
+            ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
+            ProcessTransitionPlan::Append(append) => {
+                self.append_managed_event(record, append).await?;
+            }
         }
-        let append = ProcessEventAppendRequest::caller_departed(process_id);
-        self.append_managed_event(record, append).await?;
         Ok(record.record.clone())
     }
 
@@ -975,16 +970,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             None,
             self.clock.timestamp_ms(),
         )?;
-        if record.record.is_terminal() {
-            return Err(PluginError::Session(format!(
-                "terminal process `{process_id}` cannot enter a wait state"
-            )));
+        match prepare_process_transition(&record.record, ProcessTransition::EnterWait(wait))? {
+            ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
+            ProcessTransitionPlan::Append(request) => {
+                self.append_managed_event(record, request).await?;
+            }
         }
-        if record.record.wait.as_ref() == Some(&wait) {
-            return Ok(record.record.clone());
-        }
-        let request = ProcessEventAppendRequest::wait_entered(process_id, &wait);
-        self.append_managed_event(record, request).await?;
         drop(leases);
         Ok(record.record.clone())
     }
@@ -1008,11 +999,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             None,
             self.clock.timestamp_ms(),
         )?;
-        let Some(wait) = record.record.wait.clone() else {
-            return Ok(record.record.clone());
-        };
-        let request = ProcessEventAppendRequest::wait_cleared(process_id, &wait);
-        self.append_managed_event(record, request).await?;
+        match prepare_process_transition(&record.record, ProcessTransition::ClearWait)? {
+            ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
+            ProcessTransitionPlan::Append(request) => {
+                self.append_managed_event(record, request).await?;
+            }
+        }
         drop(leases);
         Ok(record.record.clone())
     }
