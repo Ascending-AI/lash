@@ -260,6 +260,14 @@ impl InlineWorkDriverSlot {
         self.phase_probe_slot.clone()
     }
 
+    #[cfg(test)]
+    pub(crate) fn process_worker_config(&self) -> Option<&DurableProcessWorkerConfig> {
+        match &self.setup.process {
+            ProcessWorkDriverSetup::LazyDefault { config } => Some(config),
+            ProcessWorkDriverSetup::None | ProcessWorkDriverSetup::External { .. } => None,
+        }
+    }
+
     fn configured_process_work_driver(&self) -> Option<ProcessWorkDriver> {
         match &self.setup.process {
             ProcessWorkDriverSetup::External { driver } => Some(driver.clone()),
@@ -878,46 +886,80 @@ impl LashCore {
         let Some(process_registry) = self.process_registry() else {
             return Err(EmbedError::MissingProcessRegistry);
         };
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingProcessWorkerStoreFactory);
-        };
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
             extra_plugin_factories.into_iter().collect(),
         )?;
-        let runtime_host = plugin_host.install_process_engine_contributions(
-            self.env.core.clone(),
+        let process_work_driver = self.work_driver.configured_process_work_driver();
+        worker_config(
+            &plugin_host,
+            &self.env,
             self.process_lifecycle_available,
-        )?;
-        let mut config = DurableProcessWorkerConfig::new(
-            Arc::new(plugin_host),
-            runtime_host,
-            Arc::clone(store_factory),
-            process_registry,
+            self.policy.clone(),
+            self.process_execution_concurrency,
+            self.worker_slot_supplier.clone(),
             self.session_execution_owner.clone(),
+            process_registry,
+            process_work_driver
+                .as_ref()
+                .map(|driver| driver.change_hub()),
+            process_work_driver,
+            self.work_driver.configured_queued_work_driver(),
+            self.process_event_sink.clone(),
         )
-        .with_session_policy(self.policy.clone())
-        .with_process_execution_concurrency(self.process_execution_concurrency)?;
-        if let Some(worker_slot_supplier) = self.worker_slot_supplier.as_ref() {
-            config = config.with_worker_slot_supplier(Arc::clone(worker_slot_supplier));
-        }
-        if let Some(trigger_store) = self.env.trigger_store.as_ref() {
-            config = config.with_trigger_store(Arc::clone(trigger_store));
-        }
-        if let Some(sink) = self.process_event_sink.as_ref() {
-            config = config.with_process_event_sink(Arc::clone(sink));
-        }
-        if let Some(driver) = self.work_driver.configured_process_work_driver() {
-            config = config
-                .with_change_hub(driver.change_hub())
-                .with_process_work_driver(driver);
-        }
-        if let Some(driver) = self.work_driver.configured_queued_work_driver() {
-            config = config.with_queued_work_driver(driver);
-        }
-        Ok(config)
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn worker_config(
+    worker_plugin_host: &PluginHost,
+    env: &RuntimeEnvironment,
+    process_lifecycle_available: bool,
+    policy: SessionPolicy,
+    process_execution_concurrency: usize,
+    worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
+    session_execution_owner: lash_core::LeaseOwnerIdentity,
+    process_registry: Arc<dyn ProcessRegistry>,
+    process_change_hub: Option<facade_support::ProcessChangeHub>,
+    process_work_driver: Option<ProcessWorkDriver>,
+    queued_work_driver: Option<QueuedWorkDriver>,
+    process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
+) -> Result<DurableProcessWorkerConfig> {
+    let Some(store_factory) = env.session_store_factory.as_ref() else {
+        return Err(EmbedError::MissingProcessWorkerStoreFactory);
+    };
+    let runtime_host = worker_plugin_host
+        .install_process_engine_contributions(env.core.clone(), process_lifecycle_available)?;
+    let mut config = DurableProcessWorkerConfig::new(
+        Arc::new(worker_plugin_host.clone()),
+        runtime_host,
+        Arc::clone(store_factory),
+        process_registry,
+        session_execution_owner,
+    )
+    .with_session_policy(policy)
+    .with_turn_phase_probe_slot(lash_core::runtime::RuntimeTurnPhaseProbeSlot::default())
+    .with_process_execution_concurrency(process_execution_concurrency)?;
+    if let Some(worker_slot_supplier) = worker_slot_supplier {
+        config = config.with_worker_slot_supplier(worker_slot_supplier);
+    }
+    if let Some(trigger_store) = env.trigger_store.as_ref() {
+        config = config.with_trigger_store(Arc::clone(trigger_store));
+    }
+    if let Some(hub) = process_change_hub {
+        config = config.with_change_hub(hub);
+    }
+    if let Some(sink) = process_event_sink {
+        config = config.with_process_event_sink(sink);
+    }
+    if let Some(driver) = process_work_driver {
+        config = config.with_process_work_driver(driver);
+    }
+    if let Some(driver) = queued_work_driver {
+        config = config.with_queued_work_driver(driver);
+    }
+    Ok(config)
 }
 
 fn default_runtime_stack() -> PluginStack {
@@ -1261,8 +1303,11 @@ impl LashCoreBuilder {
             factories.extend(self.plugin_stack.into_factories());
             factories
         };
-        let default_plugin_host =
-            build_plugin_host(protocol_factory.as_ref(), &plugin_factories, Vec::new())?;
+        let default_plugin_host = Arc::new(build_plugin_host(
+            protocol_factory.as_ref(),
+            &plugin_factories,
+            Vec::new(),
+        )?);
         // Whether process lifecycle is available (a process registry is wired).
         // Threaded to every plugin host so core installs the same
         // plugin-contributed process engines wherever it rebuilds a runtime.
@@ -1277,35 +1322,13 @@ impl LashCoreBuilder {
 
         let process_registry = process_work_source.process_registry();
 
-        // Resolve process work before the process source is moved into the
-        // environment. The default inline driver's config is built
-        // eagerly so a missing store factory fails loudly at build, not at
-        // first open. It is built from the same single-protocol plugin host the
-        // live runtime uses, so the worker can rebuild a runtime for a process.
-        let process_work_driver = Self::resolve_process_work_driver(
-            &process_work_source,
-            &default_plugin_host,
-            &core,
-            process_lifecycle_available,
-            // The worker rebuilds sessions with the same factory `build()` wires
-            // below: `child_store_factory.or(store_factory)`.
-            self.child_store_factory
-                .as_ref()
-                .or(self.store_factory.as_ref()),
-            &policy,
-            self.trigger_store.as_ref(),
-            process_execution_concurrency,
-            worker_slot_supplier.clone(),
-            session_execution_owner.clone(),
-            process_event_sink.clone(),
-        )?;
-
+        // Build the inline config eagerly so a missing factory fails at build.
         let live_replay_clock = Arc::clone(&core.clock);
         let mut env_builder = RuntimeEnvironment::builder(
             core.durability.commit_budget,
             core.durability.queued_work_batching.clone(),
         )
-        .with_plugin_host(Arc::new(default_plugin_host))
+        .with_plugin_host(Arc::clone(&default_plugin_host))
         .with_runtime_host_config(core);
         if let Some(process_registry) = process_registry.as_ref() {
             env_builder = env_builder.with_process_registry(Arc::clone(process_registry));
@@ -1327,6 +1350,17 @@ impl LashCoreBuilder {
             ))
         });
         let env = env_builder.build();
+        let process_work_driver = Self::resolve_process_work_driver(
+            &process_work_source,
+            default_plugin_host.as_ref(),
+            &env,
+            process_lifecycle_available,
+            &policy,
+            process_execution_concurrency,
+            worker_slot_supplier.clone(),
+            session_execution_owner.clone(),
+            process_event_sink.clone(),
+        )?;
         let queued_work_driver = Self::resolve_queued_work_driver(
             &self.queued_work_source,
             session_execution_owner.clone(),
@@ -1388,18 +1422,14 @@ impl LashCoreBuilder {
     /// - inline registry wired => lazily construct the default inline driver on first open. Its
     ///   [`DurableProcessWorkerConfig`] is built eagerly when a store factory is
     ///   present; without one the inline worker cannot rebuild session runtimes.
-    // Mirrors the sibling `resolve_queued_work_driver`: a builder helper whose
-    // inputs are the heterogeneous, all-required driver-resolution state and
-    // have no cohesive sub-grouping.
+    // Mirrors `resolve_queued_work_driver`; inputs are the required driver state.
     #[allow(clippy::too_many_arguments)]
     fn resolve_process_work_driver(
         process_work_source: &ProcessWorkSource,
         worker_plugin_host: &PluginHost,
-        core: &RuntimeHostConfig,
+        env: &RuntimeEnvironment,
         process_lifecycle_available: bool,
-        store_factory: Option<&Arc<dyn SessionStoreFactory>>,
         policy: &SessionPolicy,
-        trigger_store: Option<&Arc<dyn lash_core::TriggerStore>>,
         process_execution_concurrency: usize,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
@@ -1417,42 +1447,24 @@ impl LashCoreBuilder {
         // The worker rebuilds a session runtime per process, so it needs a store
         // factory; without one the default runner could not execute anything, so
         // fail loudly rather than silently leave processes unexecuted.
-        let Some(store_factory) = store_factory else {
+        if env.session_store_factory.is_none() {
             return Err(EmbedError::ProcessRegistryRequiresStoreFactory);
-        };
-        // The worker rebuilds with the same plugin host the live runtime uses,
-        // including the protocol plugin that supplies the protocol session
-        // capability. Install its plugin-contributed process engines onto a
-        // clean copy of the base host — `core` deliberately carries none.
-        let runtime_host = worker_plugin_host
-            .install_process_engine_contributions(core.clone(), process_lifecycle_available)?;
-        let phase_probe_slot = lash_core::runtime::RuntimeTurnPhaseProbeSlot::default();
-        let mut config = DurableProcessWorkerConfig::new(
-            Arc::new(worker_plugin_host.clone()),
-            runtime_host,
-            Arc::clone(store_factory),
-            process_registry,
+        }
+        let config = Box::new(worker_config(
+            worker_plugin_host,
+            env,
+            process_lifecycle_available,
+            policy.clone(),
+            process_execution_concurrency,
+            worker_slot_supplier,
             session_execution_owner,
-        )
-        .with_session_policy(policy.clone())
-        .with_trigger_store(trigger_store.cloned().unwrap_or_else(|| {
-            Arc::new(facade_support::InMemoryTriggerStore::with_clock(
-                Arc::clone(&core.clock),
-            ))
-        }))
-        .with_turn_phase_probe_slot(phase_probe_slot)
-        .with_process_execution_concurrency(process_execution_concurrency)?;
-        if let Some(worker_slot_supplier) = worker_slot_supplier {
-            config = config.with_worker_slot_supplier(worker_slot_supplier);
-        }
-        if let Some(hub) = process_change_hub {
-            config = config.with_change_hub(hub);
-        }
-        // The drive is admission-only, so worker faults have no other way home.
-        if let Some(sink) = process_event_sink {
-            config = config.with_process_event_sink(sink);
-        }
-        let config = Box::new(config);
+            process_registry,
+            process_change_hub,
+            None,
+            None,
+            // Admission-only drive faults otherwise have no path to the host.
+            process_event_sink,
+        )?);
         Ok(ProcessWorkDriverSetup::LazyDefault { config })
     }
 

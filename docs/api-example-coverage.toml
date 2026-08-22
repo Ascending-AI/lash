@@ -832,7 +832,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_turn_phase_probe_slot", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_turn_phase_probe_slot"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Internal builder seam the anchor resolver cannot tie mechanically: the durable process worker is configured through this setter, exercised in-repo at crates/lash-restate/src/tests.rs::process_parent_worker#`.with_turn_phase_probe_slot(probe_slot),` and crates/lash/src/core.rs::LashCoreBuilder::resolve_process_work_driver#`.with_turn_phase_probe_slot(phase_probe_slot)`, and no example reaches it, which is what keeps the row unused."
+reason = "Internal builder seam the anchor resolver cannot tie mechanically: the durable process worker is configured through this setter, exercised in-repo at crates/lash-restate/src/tests.rs::process_parent_worker#`.with_turn_phase_probe_slot(probe_slot),` and crates/lash/src/core.rs::worker_config#`.with_turn_phase_probe_slot(lash_core::runtime::RuntimeTurnPhaseProbeSlot::default())`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_worker_slot_supplier"
@@ -10511,7 +10511,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::process_execution_concurrency", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::process_execution_concurrency"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::process_execution_concurrency` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`.with_process_execution_concurrency(self.process_execution_concurrency)?;`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::process_execution_concurrency` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core.rs::worker_config#`.with_process_execution_concurrency(process_execution_concurrency)?;`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::process_registry"
@@ -10547,7 +10547,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::runtime_host", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::runtime_host"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::runtime_host` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself and the deterministic simulation harness -- this field is exercised in-repo at crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`runtime_host,`, crates/lash-sim/src/runtime_boundaries/process_lifecycle.rs::lifecycle_worker#`runtime_host: lash_core::facade_support::RuntimeHostConfig,`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::runtime_host` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself and the deterministic simulation harness -- this field is exercised in-repo at crates/lash/src/core.rs::worker_config#`runtime_host,`, crates/lash-sim/src/runtime_boundaries/process_lifecycle.rs::lifecycle_worker#`runtime_host: lash_core::facade_support::RuntimeHostConfig,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::session_policy"
@@ -10592,7 +10592,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_change_hub", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_change_hub"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_change_hub` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself and the Restate durable effect-host adapter -- this function is exercised in-repo at crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`.with_change_hub(driver.change_hub())`, crates/lash/src/core.rs::LashCoreBuilder::build#`process: process_work_driver,`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_change_hub` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself and the Restate durable effect-host adapter -- this function is exercised in-repo at crates/lash/src/core.rs::worker_config#`config = config.with_change_hub(hub);`, crates/lash/src/core.rs::LashCoreBuilder::build#`process: process_work_driver,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency"
@@ -10601,7 +10601,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_process_execution_concurrency", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_process_execution_concurrency"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself and core runtime internals -- this function is exercised in-repo at crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`.with_process_execution_concurrency(self.process_execution_concurrency)?;`, crates/lash/src/core.rs::LashCoreBuilder::resolve_process_work_driver#`.with_process_execution_concurrency(process_execution_concurrency)?;`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself and core runtime internals -- this function is exercised in-repo at crates/lash/src/core.rs::worker_config#`.with_process_execution_concurrency(process_execution_concurrency)?;`, fed by crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`self.process_execution_concurrency,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_process_work_driver"
@@ -10610,7 +10610,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_process_work_driver", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_process_work_driver"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_process_work_driver` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the subagent plugin crate and the `lash` facade itself -- this function is exercised in-repo at crates/lash-subagents/src/tests.rs::spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt::run_seed_probe_inner#`let host = host.with_process_work_driver(process_driver);`, crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`.with_process_work_driver(driver);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_process_work_driver` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the subagent plugin crate and the `lash` facade itself -- this function is exercised in-repo at crates/lash-subagents/src/tests.rs::spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt::run_seed_probe_inner#`let host = host.with_process_work_driver(process_driver);`, crates/lash/src/core.rs::worker_config#`config = config.with_process_work_driver(driver);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_queued_work_driver"
@@ -10619,7 +10619,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_queued_work_driver", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_queued_work_driver"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_queued_work_driver` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drivers#`} => {`, crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`config = config.with_queued_work_driver(driver);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_queued_work_driver` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drivers#`} => {`, crates/lash/src/core.rs::worker_config#`config = config.with_queued_work_driver(driver);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_session_policy"
@@ -10637,7 +10637,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_trigger_store", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_trigger_store"]
 area = "triggers"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_trigger_store` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: judged downstream-host runbooks and the `lash` facade itself -- this function is exercised in-repo at runbooks/restate-postgres-workers/src/bin/process_operator_flow.rs, crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`config = config.with_trigger_store(Arc::clone(trigger_store));`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_trigger_store` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: judged downstream-host runbooks and the `lash` facade itself -- this function is exercised in-repo at runbooks/restate-postgres-workers/src/bin/process_operator_flow.rs, crates/lash/src/core.rs::worker_config#`config = config.with_trigger_store(Arc::clone(trigger_store));`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::EffectHost"
@@ -10887,7 +10887,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::process_event_sink", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::process_event_sink"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Wiring seam, not a host-authored value: the facade sets this field for every worker it builds (crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`config = config.with_trigger_store(Arc::clone(trigger_store));`, crates/lash/src/core.rs::LashCoreBuilder::resolve_process_work_driver#`if let Some(sink) = process_event_sink {`) from the sink the host already registered through LashCore, so a host reaches the fault surface by registering a ProcessEventSink rather than by naming this field. Consumer class: alternate runtime embedders that construct DurableProcessWorkerConfig directly -- the field is exercised at crates/lash-core/src/runtime/process_worker/recovery.rs::DurableProcessWorker::emit_worker_fault#`let Some(sink) = self.config.process_event_sink.as_ref() else {` and crates/lash-core/src/runtime/process_worker/recovery_tests/worker_fixtures.rs::worker_with_engine_registry_timings_supplier_and_sink#`config = config.with_process_event_sink(sink);`, and no example reaches it, which is what keeps the row unused."
+reason = "Wiring seam, not a host-authored value: the facade sets this field for every worker it builds at crates/lash/src/core.rs::worker_config#`config = config.with_process_event_sink(sink);`, fed by crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`self.process_event_sink.clone(),`, from the sink the host already registered through LashCore, so a host reaches the fault surface by registering a ProcessEventSink rather than by naming this field. Consumer class: alternate runtime embedders that construct DurableProcessWorkerConfig directly -- the field is exercised at crates/lash-core/src/runtime/process_worker/recovery.rs::DurableProcessWorker::emit_worker_fault#`let Some(sink) = self.config.process_event_sink.as_ref() else {` and crates/lash-core/src/runtime/process_worker/recovery_tests/worker_fixtures.rs::worker_with_engine_registry_timings_supplier_and_sink#`config = config.with_process_event_sink(sink);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_process_event_sink"
@@ -10896,7 +10896,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_process_event_sink", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_process_event_sink"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Wiring seam, not a host-authored call: the facade calls it while building the worker (crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`config = config.with_process_event_sink(Arc::clone(sink));`, crates/lash/src/core.rs::LashCoreBuilder::resolve_process_work_driver#`config = config.with_process_event_sink(sink);`), so a host installs its sink on LashCore and never calls this builder itself. Consumer class: alternate runtime embedders that construct DurableProcessWorkerConfig directly -- the call is exercised at crates/lash-core/src/runtime/process_worker/recovery_tests/worker_fixtures.rs::worker_with_engine_registry_timings_supplier_and_sink#`config = config.with_process_event_sink(sink);`, and no example reaches it, which is what keeps the row unused."
+reason = "Wiring seam, not a host-authored call: the facade calls it while building the worker at crates/lash/src/core.rs::worker_config#`config = config.with_process_event_sink(sink);`, fed by crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`self.process_event_sink.clone(),`, so a host installs its sink on LashCore and never calls this builder itself. Consumer class: alternate runtime embedders that construct DurableProcessWorkerConfig directly -- the call is exercised at crates/lash-core/src/runtime/process_worker/recovery_tests/worker_fixtures.rs::worker_with_engine_registry_timings_supplier_and_sink#`config = config.with_process_event_sink(sink);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::process::ProcessAdmissionReport"
@@ -11375,7 +11375,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::RuntimeHostConfig", "lash_core::runtime::host::RuntimeHostConfig"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::durability::RuntimeHostConfig` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::runtime_impl::PluginHost::install_process_engine_contributions` because its canonical identity is the lash-core one. Consumer class: the `lash` facade itself and the subagent plugin crate -- this type is exercised in-repo at crates/lash/src/core.rs::LashCoreBuilder::resolve_process_work_driver#`core: &RuntimeHostConfig,`, crates/lash-subagents/src/tests.rs::spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt::run_seed_probe_inner#`let mut config = RuntimeHostConfig::in_memory(`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+reason = "Facade contract surface, not a closure-only discovery: `lash::durability::RuntimeHostConfig` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::runtime_impl::PluginHost::install_process_engine_contributions` because its canonical identity is the lash-core one. Consumer class: the `lash` facade itself and the subagent plugin crate -- this type is exercised in-repo at crates/lash/src/core/runtime_host_config.rs::LashCoreBuilder::resolve_runtime_host_config#`let core = RuntimeHostConfig::new(`, crates/lash-subagents/src/tests.rs::spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt::run_seed_probe_inner#`let mut config = RuntimeHostConfig::in_memory(`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
 
 [[api]]
 symbol = "lash::durability::RuntimeHostConfig::attachment_source_policy"
@@ -22019,7 +22019,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::install_process_engine_contributions", "lash_core::plugin::runtime_impl::PluginHost::install_process_engine_contributions"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginHost::install_process_engine_contributions` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineValidationContext::plugin_host`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core.rs::LashCore::resume#`env.core = plugin_host.install_process_engine_contributions(`, crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`let runtime_host = plugin_host.install_process_engine_contributions(`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginHost::install_process_engine_contributions` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineValidationContext::plugin_host`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core.rs::LashCore::resume#`env.core = plugin_host.install_process_engine_contributions(`, crates/lash/src/core.rs::worker_config#`.install_process_engine_contributions(env.core.clone(), process_lifecycle_available)?;`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginHost::isolated_registry"
@@ -29475,7 +29475,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver::change_hub", "lash_core::runtime::process_work_driver::ProcessWorkDriver::change_hub"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessWorkDriver::change_hub` directly; the gate reaches the same item a second time through `lash_core::RuntimeEffectLocalExecutor::processes`. Consumer class: the `lash` facade itself and core runtime internals -- this function is exercised in-repo at crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`.with_change_hub(driver.change_hub())`, crates/lash-core/src/runtime/process_worker/recovery_tests.rs::reentrant_worker_with_trigger_store#`.with_change_hub(driver.change_hub())`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessWorkDriver::change_hub` directly; the gate reaches the same item a second time through `lash_core::RuntimeEffectLocalExecutor::processes`. Consumer class: the `lash` facade itself and core runtime internals -- this function is exercised in-repo at crates/lash/src/core.rs::LashCore::durable_process_worker_config_with_plugins#`.map(|driver| driver.change_hub()),`, crates/lash-core/src/runtime/process_worker/recovery_tests.rs::reentrant_worker_with_trigger_store#`.with_change_hub(driver.change_hub())`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::process::ProcessWorkDriver::claim_and_run_pending"
@@ -66714,7 +66714,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:853#.retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))"
+usage = "crates/lash/src/core.rs:861#.retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))"
 
 [[api]]
 symbol = "lash_core::ExecRequest"
@@ -67104,7 +67104,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:664#lash_core::ObserverInheritance::All,"
+usage = "crates/lash/src/core.rs:672#lash_core::ObserverInheritance::All,"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::All"
@@ -67112,7 +67112,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:664#lash_core::ObserverInheritance::All,"
+usage = "crates/lash/src/core.rs:672#lash_core::ObserverInheritance::All,"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::None"
@@ -67120,7 +67120,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:689#(lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),"
+usage = "crates/lash/src/core.rs:697#(lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::Only"
@@ -67128,7 +67128,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:696#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
+usage = "crates/lash/src/core.rs:704#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::Only::0"
@@ -67136,7 +67136,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:696#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
+usage = "crates/lash/src/core.rs:704#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
 
 [[api]]
 symbol = "lash_core::Part"
@@ -70788,7 +70788,7 @@ kind = "constant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1197#.unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);"
+usage = "crates/lash/src/core.rs:1239#.unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);"
 
 [[api]]
 symbol = "lash_core::facade_support::EffectId"
@@ -72352,7 +72352,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:768#match scoped_effect_controller.execution_scope() {"
+usage = "crates/lash/src/core.rs:776#match scoped_effect_controller.execution_scope() {"
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction"
@@ -73267,7 +73267,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1247#Arc::new(facade_support::SingleProviderResolver::new(provider));"
+usage = "crates/lash/src/core.rs:1289#Arc::new(facade_support::SingleProviderResolver::new(provider));"
 
 [[api]]
 symbol = "lash_core::facade_support::SingleProviderResolver::new"
@@ -73275,7 +73275,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1247#Arc::new(facade_support::SingleProviderResolver::new(provider));"
+usage = "crates/lash/src/core.rs:1289#Arc::new(facade_support::SingleProviderResolver::new(provider));"
 
 [[api]]
 symbol = "lash_core::facade_support::SnapshotReader"
@@ -73905,7 +73905,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1276#lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;"
+usage = "crates/lash/src/core.rs:1321#lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;"
 
 [[api]]
 symbol = "lash_core::facade_support::build_tool_catalog"
