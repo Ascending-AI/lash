@@ -198,6 +198,26 @@ pub struct UnboundSessionResolutionHandles {
     pub open_unbound: Arc<dyn Fn() -> Arc<dyn RuntimePersistence> + Send + Sync>,
 }
 
+/// Prove that an unbound session-metadata lookup refuses to choose between
+/// multiple durable session candidates.
+///
+/// The backend fixture must contain more than one session before constructing
+/// `load`. SQLite reaches this seam through its unbound store handle;
+/// PostgreSQL exercises the matching backend-support lookup directly because
+/// its runtime-persistence handles are always session-bound.
+pub async fn unbound_session_meta_refuses_ambiguous_resolution(
+    backend_name: &str,
+    load: impl std::future::Future<Output = Result<Option<SessionMeta>, crate::StoreError>>,
+) {
+    assert_eq!(
+        load.await.unwrap_or_else(|error| panic!(
+            "{backend_name}: load unbound session metadata: {error}"
+        )),
+        None,
+        "{backend_name} must refuse to choose one session metadata row when multiple rows match"
+    );
+}
+
 /// Prove that an unbound handle resolves the same session for both shared
 /// session-read projections across the full durable candidate matrix:
 /// `{0, 1, 2} sessions x {admitted-only, committed}`.
