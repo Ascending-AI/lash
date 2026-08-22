@@ -778,117 +778,35 @@ pub enum TriggerCompatibilityError {
     },
 }
 
-impl From<TriggerCompatibilityValidationError> for TriggerCompatibilityError {
-    fn from(err: TriggerCompatibilityValidationError) -> Self {
-        match err {
-            TriggerCompatibilityValidationError::ModuleRefMismatch {
-                process_name,
-                target_module_ref,
-                artifact_module_ref,
-            } => Self::ModuleRefMismatch {
-                process_name,
-                target_module_ref,
-                artifact_module_ref,
-            },
-            TriggerCompatibilityValidationError::HostRequirementsMismatch {
-                process_name,
-                target_host_requirements,
-                artifact_host_requirements,
-            } => Self::HostRequirementsMismatch {
-                process_name,
-                target_host_requirements,
-                artifact_host_requirements,
-            },
-            TriggerCompatibilityValidationError::ProcessRefMismatch {
-                module_ref,
-                process_name,
-                process_ref,
-            } => Self::ProcessRefMismatch {
-                module_ref,
-                process_name,
-                process_ref,
-            },
-            TriggerCompatibilityValidationError::MissingProcess {
-                module_ref,
-                process_name,
-            } => Self::MissingProcess {
-                module_ref,
-                process_name,
-            },
-            TriggerCompatibilityValidationError::MissingInput {
-                process_name,
-                input,
-            } => Self::MissingInput {
-                process_name,
-                input,
-            },
-            TriggerCompatibilityValidationError::UnknownInput {
-                process_name,
-                input,
-            } => Self::UnknownInput {
-                process_name,
-                input,
-            },
-            TriggerCompatibilityValidationError::MissingEventInput { process_name } => {
-                Self::MissingEventInput { process_name }
-            }
-            TriggerCompatibilityValidationError::EventMismatch {
-                event,
-                process_name,
-                input_name,
-                input,
-            } => Self::EventMismatch {
-                event,
-                process_name,
-                input_name,
-                input,
-            },
-            TriggerCompatibilityValidationError::FixedInputMismatch {
-                process_name,
-                input,
-                expected,
-                actual,
-            } => Self::FixedInputMismatch {
-                process_name,
-                input,
-                expected,
-                actual,
-            },
-        }
-    }
-}
-
 fn validate_trigger_compatibility_target(
     target: &ProcessDefinitionIdentity,
     event_ty: &NamedDataType,
     inputs: &TriggerInputTemplate,
     artifact: &ModuleArtifact,
-) -> Result<TriggerCompatibilityValidation, TriggerCompatibilityValidationError> {
+) -> Result<TriggerCompatibilityValidation, TriggerCompatibilityError> {
     if artifact.module_ref != target.module_ref {
-        return Err(TriggerCompatibilityValidationError::ModuleRefMismatch {
+        return Err(TriggerCompatibilityError::ModuleRefMismatch {
             process_name: target.process_name.clone(),
             target_module_ref: target.module_ref.to_string(),
             artifact_module_ref: artifact.module_ref.to_string(),
         });
     }
     if artifact.host_requirements_ref != target.host_requirements_ref {
-        return Err(
-            TriggerCompatibilityValidationError::HostRequirementsMismatch {
-                process_name: target.process_name.clone(),
-                target_host_requirements: target.host_requirements_ref.to_string(),
-                artifact_host_requirements: artifact.host_requirements_ref.to_string(),
-            },
-        );
+        return Err(TriggerCompatibilityError::HostRequirementsMismatch {
+            process_name: target.process_name.clone(),
+            target_host_requirements: target.host_requirements_ref.to_string(),
+            artifact_host_requirements: artifact.host_requirements_ref.to_string(),
+        });
     }
     let Some(exported_process_name) = artifact.process_name_for_ref(&target.process_ref) else {
-        return Err(TriggerCompatibilityValidationError::ProcessRefMismatch {
+        return Err(TriggerCompatibilityError::ProcessRefMismatch {
             module_ref: target.module_ref.to_string(),
             process_name: target.process_name.clone(),
             process_ref: format!("{:?}", target.process_ref),
         });
     };
     if exported_process_name != target.process_name {
-        return Err(TriggerCompatibilityValidationError::ProcessRefMismatch {
+        return Err(TriggerCompatibilityError::ProcessRefMismatch {
             module_ref: target.module_ref.to_string(),
             process_name: target.process_name.clone(),
             process_ref: format!("{:?}", target.process_ref),
@@ -897,7 +815,7 @@ fn validate_trigger_compatibility_target(
     let process = artifact
         .canonical_ir
         .process(exported_process_name)
-        .ok_or_else(|| TriggerCompatibilityValidationError::MissingProcess {
+        .ok_or_else(|| TriggerCompatibilityError::MissingProcess {
             module_ref: target.module_ref.to_string(),
             process_name: target.process_name.clone(),
         })?;
@@ -907,14 +825,14 @@ fn validate_trigger_compatibility_target(
             .iter()
             .any(|param| param.name.as_str() == input_name)
         {
-            return Err(TriggerCompatibilityValidationError::UnknownInput {
+            return Err(TriggerCompatibilityError::UnknownInput {
                 process_name: target.process_name.clone(),
                 input: input_name.to_string(),
             });
         }
     }
     if !inputs.contains_event() {
-        return Err(TriggerCompatibilityValidationError::MissingEventInput {
+        return Err(TriggerCompatibilityError::MissingEventInput {
             process_name: target.process_name.clone(),
         });
     }
@@ -926,7 +844,7 @@ fn validate_trigger_compatibility_target(
     );
     for param in &process.params {
         let Some(input) = inputs.get(param.name.as_str()) else {
-            return Err(TriggerCompatibilityValidationError::MissingInput {
+            return Err(TriggerCompatibilityError::MissingInput {
                 process_name: target.process_name.clone(),
                 input: param.name.to_string(),
             });
@@ -936,7 +854,7 @@ fn validate_trigger_compatibility_target(
         match input {
             TriggerInputBinding::Event => {
                 if !is_resolved_type_assignable(&event_ty, &input_ty) {
-                    return Err(TriggerCompatibilityValidationError::EventMismatch {
+                    return Err(TriggerCompatibilityError::EventMismatch {
                         event: format_type_expr(&event_ty),
                         process_name: target.process_name.clone(),
                         input_name: param.name.to_string(),
@@ -967,7 +885,7 @@ fn validate_fixed_input_value(
     resources: &LashlangHostCatalog,
     process_name: &str,
     input_name: &str,
-) -> Result<(), TriggerCompatibilityValidationError> {
+) -> Result<(), TriggerCompatibilityError> {
     let TypeExpr::Ref(resource_type) = input_ty else {
         return Ok(());
     };
@@ -976,78 +894,19 @@ fn validate_fixed_input_value(
     }
     match crate::runtime::from_json(value.clone()) {
         crate::Value::Resource(handle) if handle.resource_type == *resource_type => Ok(()),
-        crate::Value::Resource(handle) => {
-            Err(TriggerCompatibilityValidationError::FixedInputMismatch {
-                process_name: process_name.to_string(),
-                input: input_name.to_string(),
-                expected: resource_type.to_string(),
-                actual: handle.resource_type,
-            })
-        }
-        _ => Err(TriggerCompatibilityValidationError::FixedInputMismatch {
+        crate::Value::Resource(handle) => Err(TriggerCompatibilityError::FixedInputMismatch {
+            process_name: process_name.to_string(),
+            input: input_name.to_string(),
+            expected: resource_type.to_string(),
+            actual: handle.resource_type,
+        }),
+        _ => Err(TriggerCompatibilityError::FixedInputMismatch {
             process_name: process_name.to_string(),
             input: input_name.to_string(),
             expected: resource_type.to_string(),
             actual: "value".to_string(),
         }),
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
-enum TriggerCompatibilityValidationError {
-    #[error(
-        "trigger target `{process_name}` module ref mismatch: target has {target_module_ref}, artifact has {artifact_module_ref}"
-    )]
-    ModuleRefMismatch {
-        process_name: String,
-        target_module_ref: String,
-        artifact_module_ref: String,
-    },
-    #[error(
-        "trigger target `{process_name}` host requirements mismatch: target has {target_host_requirements}, artifact has {artifact_host_requirements}"
-    )]
-    HostRequirementsMismatch {
-        process_name: String,
-        target_host_requirements: String,
-        artifact_host_requirements: String,
-    },
-    #[error(
-        "trigger target artifact `{module_ref}` does not export process `{process_name}` as requested ref {process_ref}"
-    )]
-    ProcessRefMismatch {
-        module_ref: String,
-        process_name: String,
-        process_ref: String,
-    },
-    #[error("trigger target artifact `{module_ref}` is missing process `{process_name}`")]
-    MissingProcess {
-        module_ref: String,
-        process_name: String,
-    },
-    #[error("trigger target `{process_name}` input `{input}` is not mapped")]
-    MissingInput { process_name: String, input: String },
-    #[error("trigger target `{process_name}` has no input `{input}`")]
-    UnknownInput { process_name: String, input: String },
-    #[error("trigger target `{process_name}` inputs must map at least one param to trigger.event")]
-    MissingEventInput { process_name: String },
-    #[error(
-        "trigger source emits {event}, but target `{process_name}` input `{input_name}` expects {input}"
-    )]
-    EventMismatch {
-        event: String,
-        process_name: String,
-        input_name: String,
-        input: String,
-    },
-    #[error(
-        "trigger target `{process_name}` input `{input}` has incompatible fixed authority type: expected {expected}, got {actual}"
-    )]
-    FixedInputMismatch {
-        process_name: String,
-        input: String,
-        expected: String,
-        actual: String,
-    },
 }
 
 fn resolve_type_refs(
