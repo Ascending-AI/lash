@@ -12,7 +12,7 @@ mod tests;
 pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
 
 pub(crate) use attempt_coordinator::{
-    BatchIntentDrainGate, IntentDrainSlot, ToolAttemptEffectIdentity, coordinate_tool_invocation,
+    BatchIntentDrainGate, IntentDrainGuard, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
 pub(crate) use context::{
     CheckpointMessageBuffer, PendingToolDispatchOutcome, RecordedToolIntentOutcomeBuffer,
