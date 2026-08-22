@@ -21,7 +21,9 @@ use lash_lashlang_runtime::{
 };
 use lashlang::{ExecutionOutcome, State as FlowState};
 
-use self::host_bridge::{HostBridge, HostBridgeConfig, LashlangExecutionTrace};
+use self::host_bridge::{
+    CollectedExecutionOutput, HostBridge, HostBridgeConfig, LashlangExecutionTrace,
+};
 use crate::projection::{
     ProjectionResolver, RLM_TURN_INPUT_PLUGIN_ID, RlmProjectedBindings, RlmProjectionExtension,
     flow_to_json_value, json_to_flow_value, projected_bindings, prune_projected_binding_names,
@@ -320,16 +322,7 @@ async fn execute_code_inner(
     {
         Ok(host_environment) => host_environment,
         Err(err) => {
-            return ExecResponse {
-                observations: Vec::new(),
-                observation_truncation: Vec::new(),
-                tool_calls: Vec::new(),
-                executed_calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: Some(format!("invalid Lashlang host tool surface: {err}")),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
+            return exec_setup_failure(format!("invalid Lashlang host tool surface: {err}"), start);
         }
     };
 
@@ -441,16 +434,7 @@ async fn execute_code_inner(
         Ok(program) => program,
         Err((kind, error)) => {
             let error = kind.label(error);
-            return ExecResponse {
-                observations: Vec::new(),
-                observation_truncation: Vec::new(),
-                tool_calls: Vec::new(),
-                executed_calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: Some(error),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
+            return exec_setup_failure(error, start);
         }
     };
     let linked_module = cached_program.linked_module();
@@ -466,16 +450,10 @@ async fn execute_code_inner(
                 .await
         };
         if let Err(err) = stored {
-            return ExecResponse {
-                observations: Vec::new(),
-                observation_truncation: Vec::new(),
-                tool_calls: Vec::new(),
-                executed_calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: Some(format!("failed to store lashlang module artifact: {err}")),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
+            return exec_setup_failure(
+                format!("failed to store lashlang module artifact: {err}"),
+                start,
+            );
         }
         state
             .stored_lashlang_modules
@@ -484,16 +462,10 @@ async fn execute_code_inner(
     let owner_namespace = match ctx.trigger_owner_scope() {
         Ok(owner_scope) => owner_scope.namespace(),
         Err(err) => {
-            return ExecResponse {
-                observations: Vec::new(),
-                observation_truncation: Vec::new(),
-                tool_calls: Vec::new(),
-                executed_calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: Some(format!("failed to resolve trigger owner namespace: {err}")),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
+            return exec_setup_failure(
+                format!("failed to resolve trigger owner namespace: {err}"),
+                start,
+            );
         }
     };
     let manifest_replacement = artifact_store
@@ -502,18 +474,10 @@ async fn execute_code_inner(
     let manifest_replacement = match manifest_replacement {
         Ok(replacement) => replacement,
         Err(err) => {
-            return ExecResponse {
-                observations: Vec::new(),
-                observation_truncation: Vec::new(),
-                tool_calls: Vec::new(),
-                executed_calls: Vec::new(),
-                printed_images: Vec::new(),
-                error: Some(format!(
-                    "failed to replace current trigger key manifest: {err}"
-                )),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
+            return exec_setup_failure(
+                format!("failed to replace current trigger key manifest: {err}"),
+                start,
+            );
         }
     };
     let reconcile_warnings = manifest_replacement
@@ -536,16 +500,7 @@ async fn execute_code_inner(
         rehydrate_projected_globals(&mut state.rlm, Arc::clone(&projection_resolver)).await
     };
     if let Err(err) = rehydrated {
-        return ExecResponse {
-            observations: Vec::new(),
-            observation_truncation: Vec::new(),
-            tool_calls: Vec::new(),
-            executed_calls: Vec::new(),
-            printed_images: Vec::new(),
-            error: Some(err),
-            duration_ms: start.elapsed().as_millis() as u64,
-            terminal_finish: None,
-        };
+        return exec_setup_failure(err, start);
     }
 
     let projected = {
@@ -553,16 +508,7 @@ async fn execute_code_inner(
         match projected_bindings(&ctx, session_projected_bindings, projection_resolver).await {
             Ok(projected) => projected,
             Err(err) => {
-                return ExecResponse {
-                    observations: Vec::new(),
-                    observation_truncation: Vec::new(),
-                    tool_calls: Vec::new(),
-                    executed_calls: Vec::new(),
-                    printed_images: Vec::new(),
-                    error: Some(err),
-                    duration_ms: start.elapsed().as_millis() as u64,
-                    terminal_finish: None,
-                };
+                return exec_setup_failure(err, start);
             }
         }
     };
@@ -610,20 +556,15 @@ async fn execute_code_inner(
         Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value).await),
         Ok(ExecutionOutcome::Continued) => None,
         Ok(ExecutionOutcome::Failed(value)) => {
-            let collected = host.into_collected();
-            return ExecResponse {
-                observations: collected.observations,
-                observation_truncation: collected.observation_truncation,
-                tool_calls: collected.tool_calls,
-                executed_calls: collected.executed_calls,
-                printed_images: collected.printed_images,
-                error: Some(
+            return exec_response_from(
+                host.into_collected(),
+                Some(
                     crate::feedback::RlmFeedbackKind::Error
                         .label(format!("process failed in foreground execution: {value}")),
                 ),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
+                None,
+                start,
+            );
         }
         Err(error) => {
             #[cfg(any(test, feature = "testing"))]
@@ -641,31 +582,47 @@ async fn execute_code_inner(
                 crate::feedback::RlmFeedbackKind::Error
             };
             let failure = runtime_failure.unwrap_or(lashlang::RuntimeFailure { error, span: None });
-            let collected = host.into_collected();
-            return ExecResponse {
-                observations: collected.observations,
-                observation_truncation: collected.observation_truncation,
-                tool_calls: collected.tool_calls,
-                executed_calls: collected.executed_calls,
-                printed_images: collected.printed_images,
-                error: Some(kind.label(lashlang::format_runtime_diagnostic(
+            return exec_response_from(
+                host.into_collected(),
+                Some(kind.label(lashlang::format_runtime_diagnostic(
                     code,
                     &failure.error,
                     failure.span,
                 ))),
-                duration_ms: start.elapsed().as_millis() as u64,
-                terminal_finish: None,
-            };
+                None,
+                start,
+            );
         }
     };
-    let collected = host.into_collected();
+    exec_response_from(host.into_collected(), None, terminal_finish, start)
+}
+
+fn exec_setup_failure(error: impl Into<String>, start: std::time::Instant) -> ExecResponse {
+    ExecResponse {
+        observations: Vec::new(),
+        observation_truncation: Vec::new(),
+        tool_calls: Vec::new(),
+        executed_calls: Vec::new(),
+        printed_images: Vec::new(),
+        error: Some(error.into()),
+        duration_ms: start.elapsed().as_millis() as u64,
+        terminal_finish: None,
+    }
+}
+
+fn exec_response_from(
+    collected: CollectedExecutionOutput,
+    error: Option<String>,
+    terminal_finish: Option<serde_json::Value>,
+    start: std::time::Instant,
+) -> ExecResponse {
     ExecResponse {
         observations: collected.observations,
         observation_truncation: collected.observation_truncation,
         tool_calls: collected.tool_calls,
         executed_calls: collected.executed_calls,
         printed_images: collected.printed_images,
-        error: None,
+        error,
         duration_ms: start.elapsed().as_millis() as u64,
         terminal_finish,
     }
@@ -1885,6 +1842,79 @@ mod tests {
                 state.deferred_resolutions.get("web.fetch"),
                 Some(lash_lashlang_runtime::Resolution::Resolved(_))
             ));
+        });
+    }
+
+    #[test]
+    fn runtime_failure_after_prints_and_tool_calls_retains_collected_outputs() {
+        block_on(async {
+            let resolver_calls = Arc::new(AtomicUsize::new(0));
+            let executions = Arc::new(AtomicUsize::new(0));
+            let observed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+                Arc::new(BindingDeferredResolver {
+                    calls: Arc::clone(&resolver_calls),
+                });
+            let provider: Arc<dyn lash_core::ToolProvider> =
+                Arc::new(BindingRecordingDeferredProvider {
+                    executions: Arc::clone(&executions),
+                    observed_bindings: Arc::clone(&observed_bindings),
+                });
+            let ctx = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+                provider,
+                lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            );
+
+            let (_state, response) = execute_code_unbounded_for_tests(
+                RlmExecutionState::new(),
+                ctx,
+                ExecRequest {
+                    language: "lashlang".to_string(),
+                    code: r#"
+                        print "printed before failure"
+                        _ = await web.fetch({ url: "https://example.test" })?
+                        finish to_int("invalid_int")
+                    "#
+                    .to_string(),
+                    accept_finish: true,
+                },
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                Some(resolver),
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig::default(),
+            )
+            .await
+            .expect("execute code");
+
+            assert!(
+                response.error.is_some(),
+                "execution should report runtime failure"
+            );
+            let error = response.error.as_ref().unwrap();
+            assert!(
+                error.contains("to_int") || error.contains("invalid_int"),
+                "expected runtime error diagnostic, got: {error}"
+            );
+            assert_eq!(response.observations.len(), 1);
+            assert!(
+                response.observations[0].contains("printed before failure"),
+                "observation should be retained despite runtime failure"
+            );
+            assert_eq!(
+                response.executed_calls,
+                vec![lash_core::ExecutedCallRecord {
+                    operation: "web.fetch".to_string(),
+                    outcome: lash_core::ExecutedCallOutcome::Ok,
+                }],
+                "executed tool call records should be retained despite runtime failure"
+            );
+            assert_eq!(executions.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                *observed_bindings.lock_recover(),
+                vec![serde_json::json!({ "kind": "test", "route": "deferred" })]
+            );
         });
     }
 
