@@ -74,6 +74,24 @@ pub(crate) fn plugin_runtime_session_events(
         .collect()
 }
 
+/// The precedence strength of a terminal plugin directive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum PluginTerminalStrength {
+    SuccessfulShortCircuit,
+    DeniedShortCircuit,
+    AbortTurn,
+}
+
+impl PluginTerminalStrength {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::SuccessfulShortCircuit => "successful_short_circuit",
+            Self::DeniedShortCircuit => "denied_short_circuit",
+            Self::AbortTurn => "abort_turn",
+        }
+    }
+}
+
 /// An action emitted by a plugin hook for the runtime to apply at that hook's boundary.
 ///
 /// Before-tool-call hooks compose monotonically. Argument replacements take effect immediately;
@@ -124,6 +142,25 @@ pub enum PluginDirective {
 }
 
 impl PluginDirective {
+    /// Return the terminal strength of this directive, if it is terminal.
+    pub(crate) fn terminal_strength(&self) -> Option<PluginTerminalStrength> {
+        match self {
+            Self::AbortTurn { .. } => Some(PluginTerminalStrength::AbortTurn),
+            Self::ShortCircuitTool { output } => {
+                if output.is_success() {
+                    Some(PluginTerminalStrength::SuccessfulShortCircuit)
+                } else {
+                    Some(PluginTerminalStrength::DeniedShortCircuit)
+                }
+            }
+            Self::EnqueueMessages { .. }
+            | Self::CreateSession { .. }
+            | Self::ReplaceToolArgs { .. }
+            | Self::EmitRuntimeEvents { .. }
+            | Self::EmitTrace { .. } => None,
+        }
+    }
+
     pub fn short_circuit(result: ToolOutcome) -> Self {
         Self::ShortCircuitTool {
             output: result.into_done_output().unwrap_or_else(|_| {
@@ -145,6 +182,75 @@ impl PluginDirective {
             name: name.into(),
             payload,
             context: Box::new(lash_trace::TraceContext::default()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_strength_ordering_and_variants() {
+        assert!(
+            PluginTerminalStrength::SuccessfulShortCircuit
+                < PluginTerminalStrength::DeniedShortCircuit
+        );
+        assert!(PluginTerminalStrength::DeniedShortCircuit < PluginTerminalStrength::AbortTurn);
+
+        let cases: Vec<(PluginDirective, Option<PluginTerminalStrength>)> = vec![
+            (
+                PluginDirective::AbortTurn {
+                    code: "test".into(),
+                    message: "abort".into(),
+                },
+                Some(PluginTerminalStrength::AbortTurn),
+            ),
+            (
+                PluginDirective::ShortCircuitTool {
+                    output: ToolCallOutput::success(serde_json::json!("ok")),
+                },
+                Some(PluginTerminalStrength::SuccessfulShortCircuit),
+            ),
+            (
+                PluginDirective::ShortCircuitTool {
+                    output: ToolCallOutput::failure(crate::ToolFailure::runtime(
+                        crate::ToolFailureClass::Internal,
+                        "err",
+                        "denied",
+                    )),
+                },
+                Some(PluginTerminalStrength::DeniedShortCircuit),
+            ),
+            (PluginDirective::EnqueueMessages { messages: vec![] }, None),
+            (
+                PluginDirective::CreateSession {
+                    request: Box::new(SessionCreateRequest::root(
+                        SessionStartPoint::Empty,
+                        PluginOptions::default(),
+                    )),
+                },
+                None,
+            ),
+            (
+                PluginDirective::ReplaceToolArgs {
+                    args: serde_json::json!({}),
+                },
+                None,
+            ),
+            (PluginDirective::EmitRuntimeEvents { events: vec![] }, None),
+            (
+                PluginDirective::EmitTrace {
+                    name: "trace".into(),
+                    payload: serde_json::json!({}),
+                    context: Box::default(),
+                },
+                None,
+            ),
+        ];
+
+        for (directive, expected_strength) in cases {
+            assert_eq!(directive.terminal_strength(), expected_strength);
         }
     }
 }

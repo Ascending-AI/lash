@@ -409,13 +409,10 @@ impl PluginSession {
                                     repeated_plugin_id: earlier.plugin_id.clone(),
                                 });
                             }
-                            let is_terminal_restriction = matches!(
-                                &directive,
-                                PluginDirective::AbortTurn { .. }
-                            ) || matches!(
-                                &directive,
-                                PluginDirective::ShortCircuitTool { output } if !output.is_success()
-                            );
+                            let is_terminal_restriction =
+                                directive.terminal_strength().is_some_and(|strength| {
+                                    strength >= PluginTerminalStrength::DeniedShortCircuit
+                                });
                             if is_terminal_restriction {
                                 out.push(PluginOwned {
                                     plugin_id: earlier.plugin_id.clone(),
@@ -463,13 +460,10 @@ impl PluginSession {
                                     repeated_plugin_id: earlier.plugin_id.clone(),
                                 });
                             }
-                            let is_terminal_restriction = matches!(
-                                &directive,
-                                PluginDirective::AbortTurn { .. }
-                            ) || matches!(
-                                &directive,
-                                PluginDirective::ShortCircuitTool { output } if !output.is_success()
-                            );
+                            let is_terminal_restriction =
+                                directive.terminal_strength().is_some_and(|strength| {
+                                    strength >= PluginTerminalStrength::DeniedShortCircuit
+                                });
                             if is_terminal_restriction {
                                 out.push(PluginOwned {
                                     plugin_id: earlier.plugin_id.clone(),
